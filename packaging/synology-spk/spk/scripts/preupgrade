@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# Called before package files are replaced during upgrade.
+# Stop running service cleanly and leave persistent data intact.
+
+PKG_CTL="/var/packages/${SYNOPKG_PKGNAME}/scripts/start-stop-status"
+if [ -x "${PKG_CTL}" ]; then
+  "${PKG_CTL}" stop >/dev/null 2>&1 || true
+fi
+
+exit 0

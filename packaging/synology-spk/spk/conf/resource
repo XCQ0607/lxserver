@@ -1,0 +1,15 @@
+{
+  "data-share": {
+    "shares": [
+      {
+        "name": "lxserver",
+        "permission": {
+          "rw": [
+            "lxserver"
+          ]
+        },
+        "once": true
+      }
+    ]
+  }
+}

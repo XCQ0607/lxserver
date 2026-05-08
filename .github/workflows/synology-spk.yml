@@ -1,0 +1,65 @@
+name: Build Synology SPK
+
+on:
+  workflow_dispatch:
+    inputs:
+      lxserver_repo:
+        description: "Optional lxserver Git repository URL (empty = use current workspace)"
+        required: false
+        default: ""
+      lxserver_ref:
+        description: "Optional lxserver branch/tag/commit (only used with lxserver_repo)"
+        required: false
+        default: "main"
+      spk_version_override:
+        description: "Optional SPK version override"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            platform: linux/amd64
+          - arch: aarch64
+            platform: linux/arm64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build SPK in target platform container
+        run: |
+          docker run --rm \
+            --platform "${{ matrix.platform }}" \
+            -e LXSERVER_LOCAL_DIR="${{ github.event.inputs.lxserver_repo == '' && '/work' || '' }}" \
+            -e LXSERVER_REPO="${{ github.event.inputs.lxserver_repo }}" \
+            -e LXSERVER_REF="${{ github.event.inputs.lxserver_ref }}" \
+            -e SPK_VERSION_OVERRIDE="${{ github.event.inputs.spk_version_override }}" \
+            -e TARGET_ARCH_TAG="${{ matrix.arch }}" \
+            -v "${{ github.workspace }}:/work" \
+            -w /work \
+            node:20-bookworm bash -lc '
+              apt-get update &&
+              apt-get install -y --no-install-recommends git ca-certificates tar perl &&
+              chmod +x packaging/synology-spk/build-spk.sh &&
+              packaging/synology-spk/build-spk.sh
+            '
+
+      - name: Upload SPK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: synology-spk-${{ matrix.arch }}
+          path: packaging/synology-spk/dist/spk/*.spk
+

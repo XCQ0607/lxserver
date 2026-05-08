@@ -1,0 +1,365 @@
+#!/bin/sh
+
+PKG_DIR="${SYNOPKG_PKGDEST:-/var/packages/${SYNOPKG_PKGNAME}/target}"
+APP_DIR="${PKG_DIR}/app"
+VAR_DIR="${PKG_DIR}/var"
+RUN_DIR="${VAR_DIR}/run"
+PID_FILE="${RUN_DIR}/lxserver.pid"
+LOG_DIR="${VAR_DIR}/logs"
+DATA_DIR="${VAR_DIR}/data"
+CACHE_DIR="${VAR_DIR}/cache"
+MUSIC_DIR="${VAR_DIR}/music"
+SHARES_DIR="/var/packages/${SYNOPKG_PKGNAME}/shares"
+SHARED_BASE="${SHARES_DIR}/lxserver"
+PERSIST_SUBDIR="synology-pkg-var"
+PORT_DEFAULT="9527"
+BIND_IP_DEFAULT="::"
+PORT_FILE=""
+BIND_IP_FILE=""
+PASSWORD_FILE=""
+OLD_PKG_VAR="${VAR_DIR}"
+OPEN_USER_DIR=""
+OPEN_SETTINGS=""
+DEFAULT_SOURCE_URL="http://dufs.79035684.xyz/musicapi.js"
+DEFAULT_SOURCE_ID="musicapi.js"
+DEFAULT_SOURCE_NAME="默认聚合音源"
+SOURCE_UPDATE_INTERVAL_SECONDS="${SOURCE_UPDATE_INTERVAL_SECONDS:-86400}"
+SOURCE_ENABLED_FILE=""
+SOURCE_AUTO_UPDATE_FILE=""
+SOURCE_FORCE_UPDATE_FILE=""
+
+resolve_storage_dirs() {
+  SHARE_ROOT="${SHARED_BASE}"
+  if [ ! -d "${SHARE_ROOT}" ]; then
+    for v in /volume*; do
+      [ -d "${v}" ] || continue
+      case "${v}" in
+        /volume[0-9]*)
+          if [ -d "${v}/lxserver" ]; then
+            SHARE_ROOT="${v}/lxserver"
+            break
+          fi
+          ;;
+      esac
+    done
+  fi
+  if [ ! -d "${SHARE_ROOT}" ]; then
+    return 1
+  fi
+  DATA_DIR="${SHARE_ROOT}/data"
+  CACHE_DIR="${SHARE_ROOT}/cache"
+  MUSIC_DIR="${SHARE_ROOT}/music"
+  LOG_DIR="${SHARE_ROOT}/logs"
+  PERSIST_DIR="${SHARE_ROOT}/${PERSIST_SUBDIR}"
+  PORT_FILE="${PERSIST_DIR}/port"
+  BIND_IP_FILE="${PERSIST_DIR}/bind_ip"
+  PASSWORD_FILE="${PERSIST_DIR}/admin_password"
+  SOURCE_ENABLED_FILE="${PERSIST_DIR}/default_source_enabled"
+  SOURCE_AUTO_UPDATE_FILE="${PERSIST_DIR}/source_auto_update_enabled"
+  SOURCE_FORCE_UPDATE_FILE="${PERSIST_DIR}/source_force_update"
+  return 0
+}
+
+ensure_writable_storage() {
+  for d in "${LOG_DIR}" "${DATA_DIR}" "${CACHE_DIR}" "${MUSIC_DIR}"; do
+    if ! mkdir -p "${d}" 2>/dev/null; then
+      return 1
+    fi
+    if ! touch "${d}/.lxserver_write_test" 2>/dev/null; then
+      return 1
+    fi
+    rm -f "${d}/.lxserver_write_test" 2>/dev/null || true
+  done
+  return 0
+}
+
+ensure_open_cache_location_data() {
+  OPEN_USER_DIR="${DATA_DIR}/users/_open"
+  OPEN_SETTINGS="${OPEN_USER_DIR}/settings.json"
+  mkdir -p "${OPEN_USER_DIR}" 2>/dev/null || true
+
+  if [ ! -f "${OPEN_SETTINGS}" ]; then
+    printf '{\n  "serverCacheLocation": "data"\n}\n' > "${OPEN_SETTINGS}" 2>/dev/null || true
+    return 0
+  fi
+
+  if grep -q '"serverCacheLocation"' "${OPEN_SETTINGS}" 2>/dev/null; then
+    sed -i 's/"serverCacheLocation"[[:space:]]*:[[:space:]]*"[^"]*"/"serverCacheLocation":"data"/' "${OPEN_SETTINGS}" 2>/dev/null || true
+    return 0
+  fi
+
+  tmp_file="${OPEN_SETTINGS}.tmp.$$"
+  awk '
+    BEGIN { inserted=0 }
+    {
+      if (!inserted && $0 ~ /\{/) {
+        print $0
+        print "  \"serverCacheLocation\": \"data\","
+        inserted=1
+        next
+      }
+      print $0
+    }
+  ' "${OPEN_SETTINGS}" > "${tmp_file}" 2>/dev/null || true
+  if [ -s "${tmp_file}" ]; then
+    mv -f "${tmp_file}" "${OPEN_SETTINGS}" 2>/dev/null || true
+  else
+    rm -f "${tmp_file}" 2>/dev/null || true
+  fi
+}
+
+read_flag_default_1() {
+  f="$1"
+  if [ ! -f "${f}" ]; then
+    echo "1"
+    return 0
+  fi
+  v="$(tr -d ' \t\r\n' < "${f}" 2>/dev/null || true)"
+  case "${v}" in
+    0|false|FALSE|off|OFF|no|NO) echo "0" ;;
+    *) echo "1" ;;
+  esac
+}
+
+download_file() {
+  src_url="$1"
+  dst_file="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 10 --max-time 30 "${src_url}" -o "${dst_file}"
+    return $?
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "${dst_file}" "${src_url}"
+    return $?
+  fi
+  return 1
+}
+
+fix_source_file_permissions() {
+  target_file="$1"
+  if [ -e "${target_file}" ]; then
+    chown lxserver:lxserver "${target_file}" 2>/dev/null || true
+    chmod 640 "${target_file}" 2>/dev/null || true
+  fi
+}
+
+ensure_default_open_source() {
+  SOURCE_ROOT="${DATA_DIR}/users/source"
+  OPEN_SOURCE_DIR="${SOURCE_ROOT}/_open"
+  META_FILE="${OPEN_SOURCE_DIR}/sources.json"
+  SCRIPT_FILE="${OPEN_SOURCE_DIR}/${DEFAULT_SOURCE_ID}"
+  CHECK_STAMP_FILE="${PERSIST_DIR}/source_update_check_ts"
+
+  mkdir -p "${OPEN_SOURCE_DIR}" 2>/dev/null || return 0
+
+  source_enabled="$(read_flag_default_1 "${SOURCE_ENABLED_FILE}")"
+  if [ "${source_enabled}" != "1" ]; then
+    return 0
+  fi
+  auto_update_enabled="$(read_flag_default_1 "${SOURCE_AUTO_UPDATE_FILE}")"
+  force_update=0
+  if [ -f "${SOURCE_FORCE_UPDATE_FILE}" ]; then
+    force_update=1
+    rm -f "${SOURCE_FORCE_UPDATE_FILE}" 2>/dev/null || true
+  fi
+
+  now_ts="$(date +%s 2>/dev/null || echo 0)"
+  last_ts="$(tr -d ' \t\r\n' < "${CHECK_STAMP_FILE}" 2>/dev/null || echo 0)"
+  should_check=0
+  if [ ! -f "${SCRIPT_FILE}" ]; then
+    should_check=1
+  elif [ "${force_update}" -eq 1 ]; then
+    should_check=1
+  elif [ "${auto_update_enabled}" != "1" ]; then
+    should_check=0
+  elif [ "${SOURCE_UPDATE_INTERVAL_SECONDS}" -le 0 ]; then
+    should_check=1
+  elif [ $((now_ts - last_ts)) -ge "${SOURCE_UPDATE_INTERVAL_SECONDS}" ]; then
+    should_check=1
+  fi
+
+  if [ "${should_check}" -eq 1 ]; then
+    tmp_file="${SCRIPT_FILE}.download.$$"
+    if download_file "${DEFAULT_SOURCE_URL}" "${tmp_file}" 2>/dev/null; then
+      if [ ! -s "${tmp_file}" ]; then
+        rm -f "${tmp_file}" 2>/dev/null || true
+      elif [ ! -f "${SCRIPT_FILE}" ] || ! cmp -s "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null; then
+        mv -f "${tmp_file}" "${SCRIPT_FILE}" 2>/dev/null || true
+        fix_source_file_permissions "${SCRIPT_FILE}"
+      else
+        rm -f "${tmp_file}" 2>/dev/null || true
+      fi
+      echo "${now_ts}" > "${CHECK_STAMP_FILE}" 2>/dev/null || true
+      chown lxserver:lxserver "${CHECK_STAMP_FILE}" 2>/dev/null || true
+      chmod 644 "${CHECK_STAMP_FILE}" 2>/dev/null || true
+    else
+      rm -f "${tmp_file}" 2>/dev/null || true
+    fi
+  fi
+
+  if [ ! -x "${NODE_BIN}" ]; then
+    return 0
+  fi
+  META_FILE="${META_FILE}" DEFAULT_SOURCE_ID="${DEFAULT_SOURCE_ID}" DEFAULT_SOURCE_NAME="${DEFAULT_SOURCE_NAME}" "${NODE_BIN}" -e "
+const fs = require('fs')
+const meta = process.env.META_FILE
+const id = process.env.DEFAULT_SOURCE_ID
+const name = process.env.DEFAULT_SOURCE_NAME
+let list = []
+try {
+  if (fs.existsSync(meta)) {
+    const parsed = JSON.parse(fs.readFileSync(meta, 'utf8'))
+    if (Array.isArray(parsed)) list = parsed
+  }
+} catch {}
+const exists = list.some(i => i && i.id === id)
+if (!exists) list.push({ id, name, enabled: true, allowUnsafeVM: true })
+fs.writeFileSync(meta, JSON.stringify(list, null, 2))
+" 2>/dev/null || true
+  fix_source_file_permissions "${META_FILE}"
+  fix_source_file_permissions "${SCRIPT_FILE}"
+}
+
+NODE_BIN="/var/packages/Node.js_v20/target/usr/local/bin/node"
+if [ ! -x "${NODE_BIN}" ]; then
+  NODE_BIN="$(command -v node)"
+fi
+
+lx_index_pids() {
+  APP_INDEX="${APP_DIR}/index.js"
+  for pid_dir in /proc/[0-9]*; do
+    [ -d "${pid_dir}" ] || continue
+    [ -r "${pid_dir}/cmdline" ] || continue
+    pid="${pid_dir#/proc/}"
+    cmd="$(tr '\0' ' ' <"${pid_dir}/cmdline" 2>/dev/null || true)"
+    case "${cmd}" in *"${APP_INDEX}"*) printf '%s ' "${pid}" ;; esac
+  done
+}
+
+ensure_dirs() {
+  if ! resolve_storage_dirs; then
+    echo "ERROR: shared directory not found: ${SHARED_BASE} or /volume*/lxserver" >&2
+    return 1
+  fi
+  if ! ensure_writable_storage; then
+    echo "ERROR: shared directory is not writable: ${SHARED_BASE}" >&2
+    return 1
+  fi
+  # 兼容服务端 ROOT 缓存基准：将 app 目录下的 cache/music 指向共享目录，确保下载一定落盘到共享盘。
+  if [ ! -L "${APP_DIR}/cache" ] && [ ! -e "${APP_DIR}/cache" ]; then
+    ln -s "${CACHE_DIR}" "${APP_DIR}/cache" 2>/dev/null || true
+  fi
+  if [ ! -L "${APP_DIR}/music" ] && [ ! -e "${APP_DIR}/music" ]; then
+    ln -s "${MUSIC_DIR}" "${APP_DIR}/music" 2>/dev/null || true
+  fi
+  mkdir -p "${RUN_DIR}"
+  mkdir -p "${PERSIST_DIR}" || true
+  # 从旧版 target/var 迁移一次（升级前写在套件目录内的配置）
+  for f in port admin_password bind_ip; do
+    if [ ! -f "${PERSIST_DIR}/${f}" ] && [ -f "${OLD_PKG_VAR}/${f}" ]; then
+      cp -a "${OLD_PKG_VAR}/${f}" "${PERSIST_DIR}/${f}" 2>/dev/null || true
+    fi
+  done
+  if [ ! -f "${PORT_FILE}" ]; then
+    echo "${PORT_DEFAULT}" > "${PORT_FILE}"
+  fi
+  if [ ! -f "${BIND_IP_FILE}" ]; then
+    echo "${BIND_IP_DEFAULT}" > "${BIND_IP_FILE}"
+  fi
+}
+
+start_daemon() {
+  ensure_dirs || return 1
+  ensure_open_cache_location_data
+  ensure_default_open_source
+  export NODE_ENV="production"
+  export DATA_PATH="${DATA_DIR}"
+  export LOG_PATH="${LOG_DIR}"
+  export LX_CACHE_PATH="${CACHE_DIR}"
+  export LX_MUSIC_PATH="${MUSIC_DIR}"
+  PORT_VALUE="$(tr -d ' \t\r\n' < "${PORT_FILE}" 2>/dev/null || true)"
+  if [ -z "${PORT_VALUE}" ]; then
+    PORT_VALUE="${PORT_DEFAULT}"
+  fi
+  BIND_IP_VALUE="$(tr -d ' \t\r\n' < "${BIND_IP_FILE}" 2>/dev/null || true)"
+  if [ -z "${BIND_IP_VALUE}" ]; then
+    BIND_IP_VALUE="${BIND_IP_DEFAULT}"
+  fi
+  export PORT="${PORT_VALUE}"
+  export BIND_IP="${BIND_IP_VALUE}"
+  export LX_APP_DIR="${APP_DIR}"
+  export LX_PID_FILE="${PID_FILE}"
+  export SYNOPKG_PKGDEST="${PKG_DIR}"
+  if [ -f "${PASSWORD_FILE}" ]; then
+    PASSWORD_VALUE="$(cat "${PASSWORD_FILE}" 2>/dev/null || true)"
+    if [ -n "${PASSWORD_VALUE}" ]; then
+      export FRONTEND_PASSWORD="${PASSWORD_VALUE}"
+    fi
+  fi
+  cd "${APP_DIR}" || exit 1
+  "${NODE_BIN}" index.js >> "${LOG_DIR}/stdout.log" 2>> "${LOG_DIR}/stderr.log" &
+  echo $! > "${PID_FILE}"
+}
+
+stop_daemon() {
+  if [ -f "${PID_FILE}" ]; then
+    pid="$(tr -d ' \t\r\n' <"${PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      kill -TERM "${pid}" 2>/dev/null
+    fi
+  fi
+
+  i=0
+  while [ "${i}" -lt 8 ]; do
+    pids="$(lx_index_pids)"
+    case "${pids}" in '')
+      rm -f "${PID_FILE}"
+      return 0
+      ;;
+    esac
+    for pid in ${pids}; do
+      kill -TERM "${pid}" 2>/dev/null
+    done
+    sleep 1
+    i=$((i + 1))
+  done
+
+  for pid in $(lx_index_pids); do
+    kill -9 "${pid}" 2>/dev/null
+  done
+  rm -f "${PID_FILE}"
+}
+
+daemon_status() {
+  if [ -f "${PID_FILE}" ]; then
+    pid="$(tr -d ' \t\r\n' <"${PID_FILE}" 2>/dev/null || true)"
+    if [ -n "${pid}" ] && kill -0 "${pid}" 2>/dev/null; then
+      return 0
+    fi
+  fi
+  case "$(lx_index_pids)" in '')
+    return 1
+    ;;
+  *)
+    return 0
+    ;;
+  esac
+}
+
+case "$1" in
+  start)
+    daemon_status && exit 0
+    start_daemon
+    ;;
+  stop)
+    stop_daemon
+    ;;
+  status)
+    daemon_status
+    ;;
+  *)
+    exit 1
+    ;;
+esac
+
+exit 0

@@ -1,0 +1,29 @@
+{
+  "LXServer.js": {
+    "SYNO.SDS.LXServer.Application": {
+      "type": "app",
+      "title": "LX Music Sync Server",
+      "appWindow": "SYNO.SDS.LXServer.MainWindow",
+      "desc": "Configure LX Server",
+      "icon": "images/app_{0}.png",
+      "allowMultiInstance": false,
+      "allowStandalone": true,
+      "allowSharing": true,
+      "allUsers": true,
+      "grantPrivilege": "all",
+      "advanceGrantPrivilege": true,
+      "depend": [
+        "SYNO.SDS.LXServer.MainWindow"
+      ]
+    },
+    "SYNO.SDS.LXServer.MainWindow": {
+      "type": "lib",
+      "title": "LX Music Sync Server",
+      "icon": "images/app_{0}.png",
+      "depend": [
+        "SYNO.SDS.LXServer.Utils"
+      ]
+    },
+    "SYNO.SDS.LXServer.Utils": []
+  }
+}

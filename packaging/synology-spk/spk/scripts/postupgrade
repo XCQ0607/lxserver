@@ -1,0 +1,11 @@
+#!/bin/sh
+#
+# Called after package files are replaced during upgrade.
+# Start service again; if start fails, keep script non-fatal for DSM.
+
+PKG_CTL="/var/packages/${SYNOPKG_PKGNAME}/scripts/start-stop-status"
+if [ -x "${PKG_CTL}" ]; then
+  "${PKG_CTL}" start >/dev/null 2>&1 || true
+fi
+
+exit 0

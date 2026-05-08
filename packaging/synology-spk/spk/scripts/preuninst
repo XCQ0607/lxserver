@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# Called before uninstall or upgrade-removal stage.
+# Keep logic minimal and always succeed to avoid DSM upgrade abort.
+
+exit 0

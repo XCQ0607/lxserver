@@ -1,0 +1,37 @@
+[
+  {
+    "step_title": "LX Server 安装配置",
+    "items": [
+      {
+        "type": "textfield",
+        "desc": "设置服务端口（默认：9527）",
+        "subitems": [
+          {
+            "key": "WIZARD_SERVICE_PORT",
+            "desc": "服务端口",
+            "defaultValue": "9527",
+            "validator": {
+              "allowBlank": true,
+              "regex": "^(6553[0-5]|655[0-2][0-9]|65[0-4][0-9]{2}|6[0-4][0-9]{3}|[1-5]?[0-9]{1,4})$",
+              "errorText": "请输入有效端口（1-65535）"
+            }
+          }
+        ]
+      },
+      {
+        "type": "password",
+        "desc": "设置管理密码（留空则默认：123456）",
+        "subitems": [
+          {
+            "key": "WIZARD_ADMIN_PASSWORD",
+            "desc": "管理密码",
+            "defaultValue": "",
+            "validator": {
+              "allowBlank": true
+            }
+          }
+        ]
+      }
+    ]
+  }
+]

@@ -1,0 +1,6 @@
+#!/bin/sh
+#
+# Called after uninstall or upgrade-removal stage.
+# Do not delete shared user data here.
+
+exit 0
