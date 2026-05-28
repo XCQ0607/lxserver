@@ -39,7 +39,7 @@
     "@foobar404/wave": "^2.0.5",
     "@types/formidable": "^3.5.1",
     "archiver": "^7.0.1",
-    "brace-expansion": "^5.0.5",
+    "brace-expansion": "^5.0.6",
     "bufferutil": "^4.0.8",
     "crypto-js": "^4.2.0",
     "file-type": "^22.0.1",
@@ -54,9 +54,9 @@
     "tunnel": "^0.0.6",
     "unzipper": "^0.12.3",
     "utf-8-validate": "^6.0.6",
-    "vm2": "^3.10.5",
+    "vm2": "^3.11.3",
     "webdav": "^5.9.0",
-    "ws": "8.17.1"
+    "ws": "8.20.1"
   },
   "devDependencies": {
     "@tsconfig/node16": "^16.1.1",
