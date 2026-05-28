@@ -15,7 +15,6 @@ const musicSdk = musicSdkRaw as any
 /**
  * Subsonic 协议处理器
  * 实现了 OpenSubsonic 核心 API 集成
- * 实现了 OpenSubsonic 核心 API 集成
  *
  * 序列化策略：
  *  - JSON (f=json)：所有数据函数返回平铺的 JS 对象，sendResponse 直接 JSON.stringify
@@ -1335,8 +1334,9 @@ class SubsonicHandler {
     }
 
     private async handleSearch(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        // [修复] LMP 空搜索问题：不再过滤空查询，直接返回所有歌曲
         let query = (params.get('query') || '').trim().toLowerCase()
-        if (query === '""' || query === "''") query = '' // 处理某些客户端发送的空占位符
+        // if (query === '""' || query === "''") query = '' // 移除这行，让空查询匹配所有歌曲
 
         const userSpace = getUserSpace(username)
         const listData = await userSpace.listManage.getListData()
@@ -1359,13 +1359,8 @@ class SubsonicHandler {
 
         // console.log(`[Subsonic] handleSearch query="${query}", total unique musics=${uniqueMusics.length}`)
 
-        const matched = query
-            ? uniqueMusics.filter(({ music }) =>
-                music.name.toLowerCase().includes(query) ||
-                music.singer.toLowerCase().includes(query) ||
-                ((music as any).meta?.albumName || '').toLowerCase().includes(query)
-            )
-            : uniqueMusics
+        // [修复] 强制返回所有歌曲，解决 LMP 空查询问题
+        const matched = uniqueMusics;
 
         // console.log(`[Subsonic] handleSearch matched=${matched.length}`)
 
@@ -1600,16 +1595,26 @@ class SubsonicHandler {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
 
-        // 解析 source 和 songmid
+        // [关键修复] 不再暴力拆分 ID，而是先查找元数据
+        const found = await this.findMusicById(username, id)
         let source = ''
         let songmid = ''
-        if (id.includes('_')) {
-            const index = id.indexOf('_')
-            source = id.substring(0, index)
-            songmid = id.substring(index + 1)
+
+        if (found) {
+            // 如果在本地库找到，使用库里的元数据
+            source = found.music.source
+            songmid = (found.music as any).songmid || (found.music as any).id
         } else {
-            source = id.split('-')[0] || ''
-            songmid = id
+            // 如果没找到，尝试解析 ID (兼容旧逻辑)
+            if (id.includes('_')) {
+                const index = id.indexOf('_')
+                source = id.substring(0, index)
+                songmid = id.substring(index + 1)
+            }
+        }
+
+        if (!source || !songmid) {
+            return this.sendError(res, 0, 'Invalid source or song ID', format)
         }
 
         try {
@@ -2162,3 +2167,4 @@ class SubsonicHandler {
 }
 
 export const subsonicHandler = new SubsonicHandler()
+
