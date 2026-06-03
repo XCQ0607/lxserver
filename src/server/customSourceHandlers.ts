@@ -70,7 +70,6 @@ export async function handleValidate(req: IncomingMessage, res: ServerResponse) 
             res.end(JSON.stringify({
                 valid: false,
                 error: result.error,
-                requireUnsafe: result.requireUnsafe,
                 metadata // 即使验证失败也返回元数据，方便前端展示
             }))
         }
@@ -81,18 +80,16 @@ export async function handleValidate(req: IncomingMessage, res: ServerResponse) 
 }
 
 // 辅助函数：获取脚本信息（元数据和支持的源）
-async function getScriptInfo(scriptContent: string, allowUnsafeVM: boolean = false) {
+async function getScriptInfo(scriptContent: string) {
     const metadata = extractMetadata(scriptContent)
 
     // 试运行脚本以获取支持的源
     let supportedSources: string[] = []
-    let requireUnsafe = false
     try {
         const result = await loadUserApi({
             id: 'temp_analysis_' + Date.now(),
             script: scriptContent,
             enabled: false,
-            allowUnsafeVM,
             ...metadata,
             owner: 'temp'
         } as any)
@@ -100,13 +97,12 @@ async function getScriptInfo(scriptContent: string, allowUnsafeVM: boolean = fal
         if (result.success && result.apiInstance?.info?.sources) {
             supportedSources = Object.keys(result.apiInstance.info.sources)
         } else {
-            requireUnsafe = !!result.requireUnsafe
         }
     } catch (e: any) {
         console.warn('[CustomSource] 分析脚本支持源失败:', e.message)
     }
 
-    return { metadata, supportedSources, requireUnsafe }
+    return { metadata, supportedSources }
 }
 
 // 辅助函数：获取源存储目录
@@ -147,7 +143,7 @@ function generateId(name?: string, fallbackFilename?: string): string {
 export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
-        const { filename, content, username, allowUnsafeVM } = JSON.parse(body)
+        const { filename, content, username } = JSON.parse(body)
 
         // 确定 owner 用于后续标识
         const targetOwner = (username && username !== 'default') ? username : 'open'
@@ -171,14 +167,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
         }
 
         // 获取脚本信息
-        const { metadata, supportedSources, requireUnsafe } = await getScriptInfo(content, allowUnsafeVM)
-
-        // 如果检测到需要不安全模式但未提供标志，则要求确认
-        if (requireUnsafe && !allowUnsafeVM) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
-            return
-        }
+        const { metadata, supportedSources } = await getScriptInfo(content)
 
         // 生成唯一ID（可读的文件名）
         const id = generateId(metadata.name, filename)
@@ -211,8 +200,6 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
             supportedSources, // 保存支持的源
             enabled: false, // 默认禁用
             uploadTime: new Date().toISOString(),
-            allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM,
-            requireUnsafe: !!requireUnsafe
         })
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
@@ -221,7 +208,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
         await initUserApis(targetOwner)
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: true, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
+        res.end(JSON.stringify({ success: true, id, metadata, supportedSources, owner: targetOwner }))
     } catch (err: any) {
         console.error('[CustomSource] Upload error:', err)
         res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -233,7 +220,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
 export async function handleImport(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
-        const { url, filename, username, allowUnsafeVM } = JSON.parse(body)
+        const { url, filename, username } = JSON.parse(body)
 
         if (!url) {
             throw new Error('Missing URL')
@@ -276,14 +263,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         const content = await download(url)
 
         // 获取脚本信息
-        const { metadata, supportedSources, requireUnsafe } = await getScriptInfo(content, allowUnsafeVM)
-
-        // 如果检测到需要不安全模式但未提供标志，则要求确认
-        if (requireUnsafe && !allowUnsafeVM) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
-            return
-        }
+        const { metadata, supportedSources } = await getScriptInfo(content)
 
         const targetOwner = (username && username !== 'default') ? username : 'open'
 
@@ -338,8 +318,6 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
             enabled: false,
             uploadTime: new Date().toISOString(),
             sourceUrl: url,
-            allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM,
-            requireUnsafe: !!requireUnsafe
         })
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
@@ -348,7 +326,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         await initUserApis(targetOwner)
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: true, filename: displayName, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
+        res.end(JSON.stringify({ success: true, filename: displayName, id, metadata, supportedSources, owner: targetOwner }))
     } catch (err: any) {
         console.error('[CustomSource] Import error:', err)
         res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -481,7 +459,7 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
 export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
     try {
         const body = await readBody(req)
-        const { id, sourceId, enabled, username, allowUnsafeVM } = JSON.parse(body)
+        const { id, sourceId, enabled, username } = JSON.parse(body)
         const targetId = id || sourceId
 
         let targetOwner = (username && username !== 'default') ? username : 'open'
@@ -561,10 +539,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
         }
 
         const oldEnabled = target.enabled
-        const oldAllowUnsafeVM = !!target.allowUnsafeVM
 
-        // 修改逻辑：只有当参数明确为 true 时才更新为 true，防止被默认值 false 覆盖
-        if (allowUnsafeVM === true) target.allowUnsafeVM = true
         target.enabled = enabled !== undefined ? enabled : !target.enabled
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
@@ -576,29 +551,13 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
             // 如果是尝试启用，检查启用后的实时状态
             if (target.enabled) {
                 const status = getApiStatus(targetOwner, targetId)
-                if (status && status.status === 'failed' && status.error === 'REQUIRE_UNSAFE_VM') {
-                    console.warn(`[CustomSource] Detect REQUIRE_UNSAFE_VM during toggle for ${targetId}, rolling back...`)
-                    // 回滚状态
-                    target.enabled = oldEnabled
-                    target.allowUnsafeVM = oldAllowUnsafeVM
-                    fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
-                    await initUserApis(targetOwner)
 
-                    res.writeHead(200, { 'Content-Type': 'application/json' })
-                    res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
-                    return
-                }
             }
 
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, enabled: target.enabled }))
         } catch (e: any) {
             // initUserApis 本身不应抛出这个错误（内部已捕获并记录 status），但为了健壮性保留此判断
-            if (e.message === 'REQUIRE_UNSAFE_VM') {
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ success: false, requireUnsafe: true, message: '该脚本需要原生 VM 模式运行，可能存在安全风险，是否继续？' }))
-                return
-            }
             throw e
         }
     } catch (err: any) {
