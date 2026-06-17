@@ -68,7 +68,7 @@
     "@types/unzipper": "^0.10.11",
     "@types/ws": "8.5.4",
     "@typescript-eslint/eslint-plugin": "^7.18.0",
-    "@typescript-eslint/parser": "^7.18.0",
+    "@typescript-eslint/parser": "^8.61.1",
     "chalk": "^4.1.2",
     "changelog-parser": "^3.0.1",
     "electron": "^42.0.0",
