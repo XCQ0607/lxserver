@@ -579,7 +579,21 @@ const readBody = async (req: IncomingMessage) => await new Promise<string>((reso
   req.on('error', reject)
 })
 
+const isPathInside = (child: string, parent: string): boolean => {
+  const resolvedParent = path.resolve(parent)
+  const resolvedChild = path.resolve(child)
+  if (resolvedChild === resolvedParent) return true
+  const withSep = resolvedParent.endsWith(path.sep) ? resolvedParent : resolvedParent + path.sep
+  return resolvedChild.startsWith(withSep)
+}
+
 const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: string) => {
+  // Prevent path traversal: ensure the resolved file path stays within staticPath
+  if (!isPathInside(filePath, global.lx.staticPath)) {
+    res.writeHead(403)
+    res.end('Forbidden')
+    return
+  }
   const contentType = getMime(filePath)
 
   try {
