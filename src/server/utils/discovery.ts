@@ -13,7 +13,7 @@ const PLAYLIST_DETAIL_URL = 'https://c.y.qq.com/qzone/fcg-bin/fcg_ucc_getcdinfo_
 const commonHeaders = {
     'Referer': 'https://y.qq.com/',
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Cookie': `RK=mLRriRA13K; ptcz=273c2bb24bc85618bd0a879535807143171987c59496dc7f98b933f2d48c8b51; pgv_pvid=6071629980; fqm_pvqid=73ba6d20-4755-4f67-b42b-112630e9c681; ts_uid=8621614784; music_ignore_pskey=202306271436Hn@vBj; fqm_sessionid=646002fc-0ee6-4755-a084-0c8dddbc6345; pgv_info=ssid=s4176822120; ts_last=y.qq.com/; ts_refer=ADTAGmyqq; _qpsvr_localtk=0.8864745738532814; login_type=1; qm_keyst=Q_H_L_63k3NvhdYrRrdgZjY8lw3j8O2Da7uybs72Lk1CAOPzGJIGAL3KIk2vkkry4WV8BYf31jeSZDUTvufx7QO7C7XMJk7eYoqNA; psrf_qqrefresh_token=29230BD8C6D560C4419C859E1137769A; tmeLoginType=2; wxopenid=; psrf_musickey_createtime=1776444390; psrf_qqopenid=528AB084D4E36B8B2011FD9035F3754B; euin=owvz7wvqNeSz7n**; wxunionid=; psrf_qqunionid=713D2E77AEDDB79B60EB9160532A5A54; qqmusic_key=Q_H_L_63k3NvhdYrRrdgZjY8lw3j8O2Da7uybs72Lk1CAOPzGJIGAL3KIk2vkkry4WV8BYf31jeSZDUTvufx7QO7C7XMJk7eYoqNA; psrf_qqaccess_token=837B4E69CE720B2D44B38B59B41CB637; wxrefresh_token=; psrf_access_token_expiresAt=1781628390; uin=2406498704`
+    'Cookie': process.env.QQ_MUSIC_COOKIE || ''
 }
 
 /**
