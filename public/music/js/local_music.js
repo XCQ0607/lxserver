@@ -686,6 +686,10 @@ window.LocalMusicManager = {
 
     isViewingPublicSongs: false,
 
+    getCurrentUsername() {
+        return this.isViewingPublicSongs ? '_open' : ((window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open');
+    },
+
     togglePublicSongs() {
         this.isViewingPublicSongs = !this.isViewingPublicSongs;
         this.syncPublicSongsBtn();
@@ -704,12 +708,15 @@ window.LocalMusicManager = {
         const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
         if (enablePublicFavorites && (isLoggedIn || isAdmin || enablePublicNonAdminAccess)) {
             btn.classList.remove('hidden');
+            const label = this.isViewingPublicSongs ? '公开歌曲 (已开启)' : '公开歌曲';
+            btn.title = label;
+            const baseClass = 'text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg transition-all inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit';
             if (this.isViewingPublicSongs) {
-                btn.className = 'text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-500 text-white shadow-sm transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer';
-                btn.innerHTML = '<i class="fas fa-globe text-[10px]"></i><span>公开歌曲 (已开启)</span>';
+                btn.className = `${baseClass} bg-emerald-500 text-white shadow-sm`;
+                btn.innerHTML = `<i class="fas fa-globe text-[10px]"></i><span class="hidden sm:inline md:hidden 2xl:inline">${label}</span>`;
             } else {
-                btn.className = 'text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500 transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer';
-                btn.innerHTML = '<i class="fas fa-globe text-[10px]"></i><span>公开歌曲</span>';
+                btn.className = `${baseClass} bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500`;
+                btn.innerHTML = `<i class="fas fa-globe text-[10px]"></i><span class="hidden sm:inline md:hidden 2xl:inline">${label}</span>`;
             }
         } else {
             btn.classList.add('hidden');
@@ -1233,7 +1240,7 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = this.isViewingPublicSongs ? '_open' : ((window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open');
+        const username = this.getCurrentUsername();
         const page = this.getPageSlice();
         this.updatePagination();
 
@@ -1657,7 +1664,7 @@ window.LocalMusicManager = {
         if (!item) return;
 
         // Transform into songInfo for global player
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Important: Use existing checkCache via global logic if possible, 
@@ -2028,7 +2035,7 @@ window.LocalMusicManager = {
     downloadSingle(index) {
         const item = this.displayData[index];
         if (!item) return;
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
         const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
 
@@ -2048,7 +2055,7 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Use a slight delay to prevent browser from blocking multiple downloads
@@ -2187,7 +2194,7 @@ window.LocalMusicManager = {
         }
 
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = this.getCurrentUsername();
             const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             const resp = await fetch('/api/music/identify', {
@@ -2475,7 +2482,7 @@ window.LocalMusicManager = {
         // 1. 优先：使用 AcoustID 指纹识别
         console.log('[AutoLink] Using AcoustID first for:', localItem.filename);
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = this.getCurrentUsername();
             const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             const resp = await fetch('/api/music/identify', {
@@ -2679,7 +2686,7 @@ window.LocalMusicManager = {
         if (typeof showMsg === 'function') showMsg(`正在移动 ${filenames.length} 首歌曲到 ${targetSubPath || '根目录'}...`, 'info');
 
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = this.getCurrentUsername();
             const res = await fetch(`/api/music/cache/categorize?user=${encodeURIComponent(username)}`, {
                 method: 'POST',
                 headers: {
