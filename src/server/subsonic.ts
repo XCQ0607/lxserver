@@ -1011,7 +1011,8 @@ class SubsonicHandler {
 
         if (id === 'radios') {
             // [新增] 返回官方电台列表
-            const radios = await fetchRadios()
+            // const radios = await fetchRadios()
+            const radios: any[] = []
             const dirs = radios.map(r => ({
                 id: r.id,
                 parent: 'radios',
@@ -1036,9 +1037,10 @@ class SubsonicHandler {
 
         if (id.startsWith('radio_tx_')) {
             // [新增] 返回具体电台内的歌曲
-            const radioId = id.replace('radio_tx_', '')
+            // const radioId = id.replace('radio_tx_', '')
             try {
-                const songs = await fetchRadioSongs(radioId)
+                // const songs = await fetchRadioSongs(radioId)
+                const songs: any[] = []
                 dirName = '电台列表'
                 musics = (songs || []).map((s: any) => ({
                     id: `tx_${s.songmid || s.mid}`,
@@ -1419,7 +1421,8 @@ class SubsonicHandler {
     }
 
     private async handleGetInternetRadioStations(res: http.ServerResponse, format: string) {
-        const radios = await fetchRadios()
+        // const radios = await fetchRadios()
+        const radios: any[] = []
         if (format === 'json') {
             return this.sendResponse(res, { internetRadioStations: { internetRadioStation: radios } }, format)
         }
