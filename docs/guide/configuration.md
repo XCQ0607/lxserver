@@ -55,6 +55,9 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 | `USER_ENABLE_PATH`  | `true`   | Boolean  | **账户独享存储沙箱隔离体系（关键）**。该状态启动后，底层数据系统即在 `/data` 目录依照活跃用户切分多个离散并并行的卷。确保不同分发设备、多用户的偏好文件不发生数据越权。 |
 | `USER_ENABLE_ROOT`  | `false`  | Boolean  | **根目录扁平化存取覆盖参数**。为 `true` 时，上述的多用户沙盒分卷操作将失效，数据读写降维直接击穿写入系统底册。                                                          |
 | `ENABLE_PUBLIC_USER_RESTRICTION` | `true` | Boolean | **限制公开用户权限**。开启后，非管理员公开用户将被限制上传、删除公开源、缓存到服务器等敏感操作。 |
+| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `false` | Boolean | **开启非管理员访问本地音乐**。开启后，允许未登录管理员的公开账号访问本地音乐。 |
+| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `true` | Boolean | **开启非管理员浏览器下载**。开启后，允许未登录管理员的公开/普通账号使用浏览器下载歌曲。 |
+| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `false` | Boolean | **开启非管理员服务器缓存**。开启后，允许未登录管理员的公开/普通账号将歌曲缓存或写入服务器存储。 |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `false` | Boolean | **限制登录用户缓存设置**。开启后，非管理员登录用户将被限制修改核心缓存项（缓存歌词、缓存歌曲链接、缓存歌曲文件及仅下载模式）。 |
 | `ENABLE_CACHE_SIZE_LIMIT` | `false` | Boolean | **启用自动缓存清理**。开启后，系统将监控并限制用户缓存总量，超出阈值时按 LRU 顺序自动删除最旧文件。 |
 | `CACHE_SIZE_LIMIT` | `2000` | Integer | **缓存容量阈值 (MB)**。自动清理机制生效的容量上限。 |

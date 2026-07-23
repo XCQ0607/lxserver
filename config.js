@@ -45,6 +45,14 @@ module.exports = {
   // 环境变量: ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC (true/false)
   "user.enablePublicNonAdminLocalMusic": false,
 
+  // 是否开启非管理员浏览器下载 (开启后允许未登录管理员的公开/普通账号使用浏览器下载歌曲)
+  // 环境变量: ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD (true/false)
+  "user.enablePublicNonAdminBrowserDownload": true,
+
+  // 是否开启非管理员服务器缓存 (开启后允许未登录管理员的公开/普通账号将歌曲缓存或写入服务器存储)
+  // 环境变量: ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE (true/false)
+  "user.enablePublicNonAdminServerCache": false,
+
   // 是否开启非管理员访问公开收藏和歌曲 (开启后允许未登录管理员的公开账号查看公开收藏和歌曲)
   // 环境变量: ENABLE_PUBLIC_NON_ADMIN_ACCESS (true/false)
   "user.enablePublicNonAdminAccess": false,

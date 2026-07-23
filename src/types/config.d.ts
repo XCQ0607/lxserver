@@ -78,6 +78,16 @@ declare namespace LX {
     'user.enablePublicNonAdminLocalMusic'?: boolean
 
     /**
+     * 是否开启非管理员浏览器下载
+     */
+    'user.enablePublicNonAdminBrowserDownload'?: boolean
+
+    /**
+     * 是否开启非管理员服务器缓存
+     */
+    'user.enablePublicNonAdminServerCache'?: boolean
+
+    /**
      * 是否开启公开收藏和歌曲
      */
     'user.enablePublicFavorites'?: boolean

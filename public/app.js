@@ -1715,6 +1715,12 @@ class App {
             if (form.elements['user.enablePublicNonAdminLocalMusic']) {
                 form.elements['user.enablePublicNonAdminLocalMusic'].checked = config['user.enablePublicNonAdminLocalMusic'] === true;
             }
+            if (form.elements['user.enablePublicNonAdminBrowserDownload']) {
+                form.elements['user.enablePublicNonAdminBrowserDownload'].checked = config['user.enablePublicNonAdminBrowserDownload'] !== false;
+            }
+            if (form.elements['user.enablePublicNonAdminServerCache']) {
+                form.elements['user.enablePublicNonAdminServerCache'].checked = config['user.enablePublicNonAdminServerCache'] === true;
+            }
             this.togglePublicNonAdminLocalMusicVisibility();
             if (form.elements['user.enablePublicFavorites']) {
                 form.elements['user.enablePublicFavorites'].checked = config['user.enablePublicFavorites'] === true;
@@ -1871,6 +1877,8 @@ class App {
             'user.enableRoot': formData.get('user.enableRoot') === 'on',
             'user.enablePublicRestriction': formData.get('user.enablePublicRestriction') === 'on',
             'user.enablePublicNonAdminLocalMusic': formData.get('user.enablePublicNonAdminLocalMusic') === 'on',
+            'user.enablePublicNonAdminBrowserDownload': formData.get('user.enablePublicNonAdminBrowserDownload') === 'on',
+            'user.enablePublicNonAdminServerCache': formData.get('user.enablePublicNonAdminServerCache') === 'on',
             'user.enablePublicFavorites': formData.get('user.enablePublicFavorites') === 'on',
             'user.enablePublicNonAdminAccess': formData.get('user.enablePublicNonAdminAccess') === 'on',
             'user.enableLoginCacheRestriction': formData.get('user.enableLoginCacheRestriction') === 'on',

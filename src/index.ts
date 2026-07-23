@@ -242,6 +242,12 @@ if (envParams.ENABLE_PUBLIC_USER_RESTRICTION !== undefined) {
 if (envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC !== undefined) {
   setBoolConfig('user.enablePublicNonAdminLocalMusic', envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC)
 }
+if (envParams.ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD !== undefined) {
+  setBoolConfig('user.enablePublicNonAdminBrowserDownload', envParams.ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD)
+}
+if (envParams.ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE !== undefined) {
+  setBoolConfig('user.enablePublicNonAdminServerCache', envParams.ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE)
+}
 if (envParams.ENABLE_PUBLIC_FAVORITES !== undefined) {
   setBoolConfig('user.enablePublicFavorites', envParams.ENABLE_PUBLIC_FAVORITES)
 }

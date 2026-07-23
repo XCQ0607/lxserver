@@ -1037,6 +1037,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         'user.enablePath': global.lx.config['user.enablePath'],
         'user.enableRoot': global.lx.config['user.enableRoot'],
         'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
+        'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
+        'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false,
         'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'] || false,
         'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'] || false,
         'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'] || 2000,
@@ -2763,6 +2765,17 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
           return
         }
+        const auth = req.headers['x-frontend-auth']
+        const isAdmin = auth === global.lx.config['frontend.password']
+        const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
+        const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
+
+        if (enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '权限限制：非管理员服务器缓存已被禁用' }))
+          return
+        }
+
         void readBody(req).then(body => {
           try {
             const { tasks, namingPattern, concurrency } = JSON.parse(body)
@@ -2874,6 +2887,17 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 return
               }
               username = verified
+            }
+
+            const auth = req.headers['x-frontend-auth']
+            const isAdmin = auth === global.lx.config['frontend.password']
+            const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
+            const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
+
+            if (enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限限制：非管理员服务器缓存已被禁用' }))
+              return
             }
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
@@ -4226,7 +4250,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
           'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'] || false,
           'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'] || false,
-          'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'] || false
+          'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'] || false,
+          'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
+          'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false
         }))
         return
       }
@@ -5181,6 +5207,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'user.enableRoot': global.lx.config['user.enableRoot'],
             'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'],
             'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'],
+            'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
+            'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false,
             'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'],
             'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'],
             'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
@@ -5234,6 +5262,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['user.enableRoot'] !== undefined) global.lx.config['user.enableRoot'] = newConfig['user.enableRoot']
               if (newConfig['user.enablePublicRestriction'] !== undefined) global.lx.config['user.enablePublicRestriction'] = newConfig['user.enablePublicRestriction']
               if (newConfig['user.enablePublicNonAdminLocalMusic'] !== undefined) global.lx.config['user.enablePublicNonAdminLocalMusic'] = newConfig['user.enablePublicNonAdminLocalMusic']
+              if (newConfig['user.enablePublicNonAdminBrowserDownload'] !== undefined) global.lx.config['user.enablePublicNonAdminBrowserDownload'] = newConfig['user.enablePublicNonAdminBrowserDownload']
+              if (newConfig['user.enablePublicNonAdminServerCache'] !== undefined) global.lx.config['user.enablePublicNonAdminServerCache'] = newConfig['user.enablePublicNonAdminServerCache']
               if (newConfig['user.enablePublicFavorites'] !== undefined) global.lx.config['user.enablePublicFavorites'] = newConfig['user.enablePublicFavorites']
               if (newConfig['user.enablePublicNonAdminAccess'] !== undefined) global.lx.config['user.enablePublicNonAdminAccess'] = newConfig['user.enablePublicNonAdminAccess']
               if (newConfig['user.enableLoginCacheRestriction'] !== undefined) global.lx.config['user.enableLoginCacheRestriction'] = newConfig['user.enableLoginCacheRestriction']
@@ -5352,6 +5382,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'user.enableRoot': global.lx.config['user.enableRoot'],
                 'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'],
                 'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'],
+                'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'],
+                'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'],
                 'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'],
                 'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'],
                 'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],

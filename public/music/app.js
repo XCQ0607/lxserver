@@ -10575,7 +10575,7 @@ async function renderCustomSources() {
         list.forEach((source, index) => {
             const div = document.createElement('div');
             // 设置界面使用稍紧凑的样式，模态框使用标准样式 (这里为了统一先用一样的，微调边距)
-            div.className = `t-bg-panel p-4 rounded-xl border t-border-main shadow-sm hover:shadow-md transition-all mb-3 relative group flex items-start source-item`;
+            div.className = `t-bg-panel p-3 md:p-4 rounded-xl border t-border-main shadow-sm hover:shadow-md transition-all mb-2.5 md:mb-3 relative group flex items-start source-item`;
             div.dataset.id = source.id;
             div.dataset.enabled = source.enabled;
             div.dataset.index = index;
@@ -10591,14 +10591,14 @@ async function renderCustomSources() {
                     'mg': { name: '咪咕', color: 't-badge-pink' }
                 };
 
-                supportedBadges = `<div class="flex flex-wrap gap-1.5 mt-2">
+                supportedBadges = `<div class="flex flex-wrap gap-1 md:gap-1.5 mt-1.5 md:mt-2">
                 ${source.supportedSources.map(s => {
                     const info = sourceMap[s] || { name: s, color: 't-badge-gray' };
-                    return `<span class="px-1.5 py-0.5 rounded-md text-[10px] font-medium transition-colors border border-transparent ${info.color}">${info.name}</span>`;
+                    return `<span class="px-1.5 py-0.5 rounded-md text-[9px] md:text-[10px] font-medium transition-colors border border-transparent ${info.color} whitespace-nowrap">${info.name}</span>`;
                 }).join('')}
             </div>`;
             } else {
-                supportedBadges = `<div class="mt-2 text-[10px] t-text-muted italic">未知支持源</div>`;
+                supportedBadges = `<div class="mt-1.5 md:mt-2 text-[10px] t-text-muted italic">未知支持源</div>`;
             }
 
             const size = source.size && !isNaN(source.size) ? (source.size / 1024).toFixed(1) + ' KB' : '未知大小';
@@ -10613,51 +10613,51 @@ async function renderCustomSources() {
 
             if (source.enabled) {
                 if (source.status === 'success') {
-                    statusBadge = `<span class="text-[10px] bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full border border-emerald-100 flex items-center gap-1 transition-colors"><i class="fas fa-check-circle"></i>正常</span>`;
+                    statusBadge = `<span class="text-[9px] md:text-[10px] bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full border border-emerald-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-check-circle"></i>正常</span>`;
                 } else if (source.status === 'failed') {
-                    statusBadge = `<span class="text-[10px] bg-red-50 text-red-600 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1 cursor-help transition-colors" title="${source.error || '加载失败'}"><i class="fas fa-times-circle"></i>失败</span>`;
-                    errorMsg = `<div class="text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
+                    statusBadge = `<span class="text-[9px] md:text-[10px] bg-red-50 text-red-600 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1 cursor-help transition-colors whitespace-nowrap" title="${source.error || '加载失败'}"><i class="fas fa-times-circle"></i>失败</span>`;
+                    errorMsg = `<div class="text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
                 } else {
-                    statusBadge = `<span class="text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30 px-1.5 py-0.5 rounded-full border border-blue-100 flex items-center gap-1 transition-colors"><i class="fas fa-circle-notch fa-spin"></i>加载...</span>`;
+                    statusBadge = `<span class="text-[9px] md:text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30 px-1.5 py-0.5 rounded-full border border-blue-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-circle-notch fa-spin"></i>加载...</span>`;
                 }
             }
 
             const ownerTag = (source.owner && source.owner !== 'open') ?
-                `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-purple-50 text-purple-600">${source.owner}</span>` :
-                `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 text-blue-500">公开</span>`;
+                `<span class="px-1.5 md:px-2 py-0.5 rounded-md text-[9px] md:text-[10px] font-bold bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 whitespace-nowrap">${source.owner}</span>` :
+                `<span class="px-1.5 md:px-2 py-0.5 rounded-md text-[9px] md:text-[10px] font-bold bg-blue-50 text-blue-500 whitespace-nowrap">公开</span>`;
 
             const vmTag = source.allowUnsafeVM ?
-                `<span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-red-50 text-red-500 border border-red-100 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30">VM</span>` : '';
+                `<span class="px-1.5 md:px-2 py-0.5 rounded-md text-[9px] md:text-[10px] font-bold bg-red-50 text-red-500 border border-red-100 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 whitespace-nowrap">VM</span>` : '';
 
             // 权限判断：管理员有所有权限；登录用户对公开源只有查看使用（Toggle）权限，无法刷新或删除
             const isPublic = source.owner === 'open';
             const canManageSource = isAdmin || (!isPublic && isUser);
 
             div.innerHTML = `
-            <div class="flex items-center self-stretch cursor-grab custom-source-handle t-text-muted hover:text-emerald-500 pr-4 -ml-2 transition-all active:scale-110 touch-none" title="拖拽排序">
-                <i class="fas fa-grip-vertical text-lg"></i>
+            <div class="flex items-center self-stretch cursor-grab custom-source-handle t-text-muted hover:text-emerald-500 pr-2 md:pr-4 -ml-1 md:-ml-2 transition-all active:scale-110 touch-none" title="拖拽排序">
+                <i class="fas fa-grip-vertical text-base md:text-lg"></i>
             </div>
             <div class="flex justify-between items-start flex-1 min-w-0">
-                <div class="flex-1 pr-4 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                        <i class="fas fa-file-code text-emerald-500 flex-shrink-0"></i>
-                         ${createMarqueeHtml(source.name, "font-bold t-text-main text-sm")}
+                <div class="flex-1 pr-2 md:pr-4 min-w-0">
+                    <div class="flex flex-wrap items-center gap-1.5 md:gap-2 mb-1">
+                        <i class="fas fa-file-code text-emerald-500 flex-shrink-0 text-xs md:text-sm"></i>
+                         ${createMarqueeHtml(source.name, "font-bold t-text-main text-xs md:text-sm")}
                         ${ownerTag}
                         ${vmTag}
                     </div>
                     ${errorMsg}
-                    <div class="flex flex-wrap items-center text-[10px] t-text-muted gap-x-3 gap-y-1 mt-1.5">
-                        <span class="flex items-center"><i class="fas fa-user mr-1 opacity-70"></i>${source.author || '未知'}</span>
-                        <span class="flex items-center"><i class="far fa-hdd mr-1 opacity-70"></i>${size}</span>
-                        <span class="t-bg-main t-text-muted px-1.5 py-0.5 rounded-lg shrink-0 transition-colors font-mono pointer-events-none border t-border-main">${source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : '未知'}</span>
+                    <div class="flex flex-wrap items-center text-[10px] t-text-muted gap-x-2.5 md:gap-x-3 gap-y-1 mt-1 md:mt-1.5">
+                        <span class="flex items-center whitespace-nowrap max-w-[110px] sm:max-w-[160px] md:max-w-none truncate" title="${source.author || '未知'}"><i class="fas fa-user mr-1 opacity-70 shrink-0"></i><span class="truncate">${source.author || '未知'}</span></span>
+                        <span class="flex items-center whitespace-nowrap"><i class="far fa-hdd mr-1 opacity-70 shrink-0"></i>${size}</span>
+                        <span class="t-bg-main t-text-muted px-1.5 py-0.5 rounded-lg shrink-0 transition-colors font-mono pointer-events-none border t-border-main text-[9px] md:text-[10px] whitespace-nowrap">${source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : '未知'}</span>
                         ${statusBadge}
                     </div>
                     ${supportedBadges}
                 </div>
                 
-                <div class="flex flex-col items-end gap-2 shrink-0">
+                <div class="flex flex-col items-end gap-1.5 md:gap-2 shrink-0">
                     <button onclick="toggleSource('${source.id}', ${source.enabled})" 
-                            class="px-3 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap w-20 flex justify-center items-center ${source.enabled
+                            class="px-2 md:px-3 py-1 rounded-lg text-[11px] md:text-xs font-medium transition-colors whitespace-nowrap w-16 md:w-20 flex justify-center items-center ${source.enabled
                     ? (source.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/30')
                     : 't-bg-track t-text-muted hover:t-bg-item-hover'}">
                         ${source.enabled ? '已启用' : '已禁用'}
@@ -10666,16 +10666,16 @@ async function renderCustomSources() {
                     <div class="flex items-center gap-1">
                         ${source.enabled && source.status === 'failed' && canManageSource ? `
                         <button onclick="reloadSource('${source.id}')" 
-                                class="p-1.5 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
+                                class="p-1 md:p-1.5 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
                                 title="尝试重新加载">
-                            <i class="fas fa-sync-alt text-sm"></i>
+                            <i class="fas fa-sync-alt text-xs md:text-sm"></i>
                         </button>` : ''}
                         
                         ${canManageSource ? `
                         <button onclick="deleteSource('${source.id}')" 
-                                class="p-1.5 t-text-muted hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40 rounded-lg transition-colors"
+                                class="p-1 md:p-1.5 t-text-muted hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40 rounded-lg transition-colors"
                                 title="删除">
-                            <i class="fas fa-trash-alt text-sm"></i>
+                            <i class="fas fa-trash-alt text-xs md:text-sm"></i>
                         </button>` : ''}
                     </div>
                 </div>
@@ -11922,22 +11922,6 @@ async function handleDownloadClick(event) {
         return;
     }
 
-    // 权限校验：公开受限模式下，如果管理员关闭了“缓存歌曲文件”功能，则下载/缓存歌曲需要验证管理员身份
-    const isPublic = !isUserLoggedIn() || !window.currentListData?.username || window.currentListData?.username === 'default' || window.currentListData?.username === '_open';
-    const enablePublicRestriction = window.lx_config?.['user.enablePublicRestriction'];
-    const isAdmin = !!localStorage.getItem('lx_admin_password');
-    const isServerCacheAllowed = window.settings?.enableServerCache === true;
-
-    if (isPublic && enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
-        showError('权限限制：管理员已关闭缓存歌曲功能，下载歌曲需要验证管理员身份。');
-        if (typeof window.handleAdminAuth === 'function') {
-            const authorized = await window.handleAdminAuth('管理员已关闭缓存歌曲文件功能，下载歌曲需要验证管理员身份');
-            if (!authorized) return;
-        } else {
-            return;
-        }
-    }
-
     const song = currentPlayingSong;
     
     // [优化] 检测是否已缓存
@@ -11950,14 +11934,42 @@ async function handleDownloadClick(event) {
     const options = ['浏览器下载', `${actionLabel}${cacheSuffix}`];
     const modeText = isOnlyDownload ? '仅下载模式' : '缓存模式';
     const selected = await showOptions('下载与缓存', `[${modeText}] 选择对 [${song.name}] 的操作：`, options);
+    if (!selected) return;
+
+    // 选中操作后的权限拦截校验
+    const isPublic = !isUserLoggedIn() || window.currentListData?.username === 'default' || window.currentListData?.username === '_open';
+    const enablePublicRestriction = window.lx_config?.['user.enablePublicRestriction'];
+    const isAdmin = !!localStorage.getItem('lx_admin_password');
 
     if (selected === '浏览器下载') {
+        const isBrowserDownloadAllowed = window.lx_config?.['user.enablePublicNonAdminBrowserDownload'] !== false;
+        if (isPublic && enablePublicRestriction && !isBrowserDownloadAllowed && !isAdmin) {
+            showError('权限限制：管理员已关闭非管理员浏览器下载功能，下载歌曲需要验证管理员身份。');
+            if (typeof window.handleAdminAuth === 'function') {
+                const authorized = await window.handleAdminAuth('管理员已关闭非管理员浏览器下载功能，下载歌曲需要验证管理员身份');
+                if (!authorized) return;
+            } else {
+                return;
+            }
+        }
+
         if (typeof downloadSong === 'function') {
             downloadSong(song, null, false, '浏览器下载');
         } else {
             showError('下载功能未就绪');
         }
     } else if (selected && (selected.startsWith('缓存到服务器') || selected.startsWith('下载到服务器'))) {
+        const isServerCacheAllowed = window.lx_config?.['user.enablePublicNonAdminServerCache'] !== false;
+        if (isPublic && enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
+            showError('权限限制：管理员已关闭非管理员服务器缓存功能，缓存歌曲需要验证管理员身份。');
+            if (typeof window.handleAdminAuth === 'function') {
+                const authorized = await window.handleAdminAuth('管理员已关闭非管理员服务器缓存功能，缓存歌曲需要验证管理员身份');
+                if (!authorized) return;
+            } else {
+                return;
+            }
+        }
+
         const isCached = checkResult?.exists && !checkResult?.isCollision;
         if (!isOnlyDownload && isCached) {
             showInfo('该歌曲已在服务器缓存');
