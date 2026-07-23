@@ -136,13 +136,13 @@ module.exports = {
   // 环境变量: PROXY_ALL_ADDRESS (例如: http://127.0.0.1:7890)
   "proxy.all.address": "",
 
-  // 后台管理界面访问路径（默认为空，即根路径 /）
+  // 后台管理界面访问路径（默认为 /admin）
   // 环境变量: ADMIN_PATH
-  "admin.path": "",
+  "admin.path": "/admin",
 
-  // Web播放器访问路径（默认为 /music）
+  // Web播放器访问路径（默认为空，即根路径 /）
   // 环境变量: PLAYER_PATH
-  "player.path": "/music",
+  "player.path": "",
 
   // Subsonic 协议配置
   // 是否启用 Subsonic 协议支持 (服务默认开启)
@@ -153,24 +153,24 @@ module.exports = {
   // 环境变量: SUBSONIC_PATH
   "subsonic.path": "/rest",
 
-  // 是否开启 Subsonic 调试日志模式
-  // 环境变量: 无
-  "subsonic.enableDebug": true,
+  // 是否开启 Subsonic 调试日志模式 (默认关闭)
+  // 环境变量: SUBSONIC_ENABLE_DEBUG
+  "subsonic.enableDebug": false,
 
   // 是否开启 Subsonic 在线全网搜索
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_ONLINE_SEARCH
   "subsonic.onlineSearch": true,
 
   // Subsonic 在线搜索模式 (fallback: 回退模式, merge: 合并模式, local_only: 仅本地)
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_ONLINE_SEARCH_MODE
   "subsonic.onlineSearchMode": "fallback",
 
   // Subsonic 在线搜索默认平台
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_ONLINE_SEARCH_SOURCES
   "subsonic.onlineSearchSources": "wy,tx,kw,kg,mg",
 
   // 是否在 Subsonic 歌词中包含翻译
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_LYRIC_TRANSLATION
   "subsonic.lyricTranslation": true,
 
   // 歌手信息源优先级 (多个源用逗号分隔，如 tx,wy)
@@ -181,14 +181,14 @@ module.exports = {
   ],
 
   // 歌手歌曲最大抓取页数
-  // 环境变量: 无
+  // 环境变量: ARTIST_MAX_FETCH_PAGES
   "artist.maxFetchPages": 20,
 
   // 缓存文件命名规则 (simple / custom)
-  // 环境变量: 无
+  // 环境变量: CACHE_NAMING_PATTERN
   "cache.namingPattern": "simple",
 
   // 是否允许运行 VM 模式自定义源脚本 (默认关闭)
-  // 环境变量: 无
+  // 环境变量: SYSTEM_ALLOW_UNSAFE_VM
   "system.allowUnsafeVM": false
 }

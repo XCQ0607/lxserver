@@ -186,12 +186,12 @@ declare namespace LX {
     disableTelemetry?: boolean
 
     /**
-     * 后台管理界面访问路径，默认为空字符串（表示根路径 /）
+     * 后台管理界面访问路径，默认为 /admin
      */
     'admin.path'?: string
 
     /**
-     * Web播放器访问路径，默认为 /music
+     * Web播放器访问路径，默认为空字符串（表示根路径 /）
      */
     'player.path'?: string
 
@@ -206,7 +206,7 @@ declare namespace LX {
     'subsonic.path'?: string
 
     /**
-     * 是否开启 Subsonic 调试日志模式 (默认 false/true)
+     * 是否开启 Subsonic 调试日志模式 (默认 false)
      */
     'subsonic.enableDebug'?: boolean
 

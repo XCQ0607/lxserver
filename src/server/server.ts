@@ -919,8 +919,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
     // 读取路径配置（每次请求都重新读取，保存后立刻生效）
     const normalizePath = (p: string) => (p || '').replace(/\/+$/, '')
-    const playerPath = global.lx.config['player.path'] ?? '/music'
-    const adminPath = global.lx.config['admin.path'] ?? ''
+    const playerPath = global.lx.config['player.path'] ?? ''
+    const adminPath = global.lx.config['admin.path'] ?? '/admin'
 
     // 映射播放器逻辑 (无论是自定义路径还是前端硬编码的 /music/)
     const isPlayerRequest = (playerPath === '/' || playerPath === '')
@@ -1045,8 +1045,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         'player.enableAuth': global.lx.config['player.enableAuth'] || false,
         port: global.lx.config.port,
         bindIP: global.lx.config.bindIP,
-        'admin.path': global.lx.config['admin.path'] ?? '',
-        'player.path': global.lx.config['player.path'] ?? '/music',
+        'admin.path': global.lx.config['admin.path'] ?? '/admin',
+        'player.path': global.lx.config['player.path'] ?? '',
       }
 
       const configJs = `window.CONFIG = ${JSON.stringify(frontendConfig, null, 2)};`
@@ -5199,11 +5199,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'sync.backupInterval': global.lx.config['sync.backupInterval'] || 24,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
-            'admin.path': global.lx.config['admin.path'] ?? '',
-            'player.path': global.lx.config['player.path'] ?? '/music',
+            'admin.path': global.lx.config['admin.path'] ?? '/admin',
+            'player.path': global.lx.config['player.path'] ?? '',
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
             'subsonic.path': global.lx.config['subsonic.path'] ?? '/rest',
-            'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? true,
+            'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? false,
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
@@ -5277,14 +5277,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
-                const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? ''))
-                const playerPath = (newConfig['player.path'] !== undefined ? newConfig['player.path'] : (global.lx.config['player.path'] ?? '/music'))
+                const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
+                const playerPath = (newConfig['player.path'] !== undefined ? newConfig['player.path'] : (global.lx.config['player.path'] ?? ''))
                 const normalizedAdmin = adminPath.replace(/\/+$/, '')
                 const normalizedPlayer = playerPath.replace(/\/+$/, '')
 
-                if (!playerPath || !playerPath.startsWith('/')) {
+                if (normalizedPlayer !== '' && !normalizedPlayer.startsWith('/')) {
                   res.writeHead(422, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ success: false, error: '播放器路径不能为空且必须以 / 开头' }))
+                  res.end(JSON.stringify({ success: false, error: '播放器路径必须以 / 开头或为空（代表根路径）' }))
                   return
                 }
                 if (normalizedAdmin !== '' && !normalizedAdmin.startsWith('/')) {
@@ -5373,8 +5373,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'sync.backupInterval': global.lx.config['sync.backupInterval'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
-                'admin.path': global.lx.config['admin.path'] ?? '',
-                'player.path': global.lx.config['player.path'] ?? '/music',
+                'admin.path': global.lx.config['admin.path'] ?? '/admin',
+                'player.path': global.lx.config['player.path'] ?? '',
                 'subsonic.enable': global.lx.config['subsonic.enable'],
                 'subsonic.path': global.lx.config['subsonic.path'],
                 'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'],

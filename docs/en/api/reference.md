@@ -131,8 +131,11 @@ Used by the management dashboard for real-time adjustments of server behavior. R
 
 - `GET /api/config`: Get all current global configuration items (including final values overridden by env vars).
 - `POST /api/config`: Incrementally update global configuration.
-  - **Body Example**: `{"singer.sourcePriority": ["tx", "wy"], "user.enablePublicRestriction": true}`
-  - **Validation**: Certain fields like `singer.sourcePriority` will be validated for correctness.
+  - **Supported Keys**: Includes `admin.path`, `player.path`, `subsonic.enableDebug`, `subsonic.onlineSearch`, `subsonic.onlineSearchMode`, `subsonic.onlineSearchSources`, `subsonic.lyricTranslation`, `artist.maxFetchPages`, `cache.namingPattern`, `system.allowUnsafeVM`, etc.
+  - **Body Example**: `{"admin.path": "/admin", "player.path": "", "subsonic.enableDebug": false}`
+  - **Path Validation**: `admin.path` and `player.path` must start with `/` or be empty, cannot be equal, and cannot start with `/api`.
+- `POST /api/admin/reload`: Reload server `config.js`, `users.json`, and custom user source APIs.
+- `POST /api/admin/restart`: Safely restart the server process.
 
 ---
 
@@ -141,8 +144,8 @@ Used by the management dashboard for real-time adjustments of server behavior. R
 Interfaces designed specifically for Web Player frontend logic, supporting Session-based access.
 
 ### 8.1 Basic Config & Auth
-- `GET /api/music/config`: **Public interface**, get runtime status configuration of the Web Player.
-  - **Response**: `{"player.enableAuth": boolean, "user.enablePublicRestriction": boolean}`
+- `GET /api/music/config`: **Public interface**, get runtime status and base path configuration of the Web Player.
+  - **Response Example**: `{"admin.path": "/admin", "player.path": "", "player.enableAuth": false, "user.enablePublicRestriction": true}`
 - `POST /api/music/auth`: Validate access password and issue `lx_player_session` HttpOnly Cookie upon success.
 - `POST /api/music/auth/logout`: Completely invalidate the current Session.
 - `GET /api/music/auth/verify`: Check if the current Session is still valid.

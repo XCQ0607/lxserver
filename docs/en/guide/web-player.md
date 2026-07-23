@@ -1,6 +1,6 @@
 # Web Player Usage Guide
 
-LX Music Sync Server provides a modern Web music player at the route `/music`. It can achieve remote playback, search, and multi-terminal synchronization interaction.
+LX Music Sync Server provides a modern Web music player at the root route `/` by default (can also be customized to `/music` via `PLAYER_PATH`). It can achieve remote playback, search, and multi-terminal synchronization interaction.
 
 ## Core Feature List
 
@@ -18,8 +18,8 @@ Functions currently supported by the Web player:
 
 ## Access the Player
 
-Default access address:
-**Example**: `http://IP:9527/music`
+Default access address (root path):
+**Example**: `http://IP:9527` (or `http://IP:9527/music` if configured)
 
 If the administrator has set `ENABLE_WEBPLAYER_AUTH = true` in the server environment variables, the set `WEBPLAYER_PASSWORD` must be entered every time this page is opened to enter the playback interface.
 

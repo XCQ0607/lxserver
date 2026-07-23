@@ -28,13 +28,18 @@ This module manages the Node.js listening process and the basic settings of the 
 | :-------------------- | :------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT` | `9527` | Integer | **Service listening port**. It is recommended to avoid using other high-frequency ports in the host (such as 80, 443, 3306). |
 | `BIND_IP` | `0.0.0.0` | String | **Scope of service binding IP interfaces**. Set to `127.0.0.1` to accept only local Lookback calls; set to `0.0.0.0` means listening to all internal and external available network adapters of the host simultaneously. |
-| `ADMIN_PATH` | `''` | String | **Backend management interface path**. Default is empty, i.e., root `/`. |
-| `PLAYER_PATH` | `'/music'` | String | **Web player access path**. Default is `/music`. |
+| `ADMIN_PATH` | `'/admin'` | String | **Backend management interface path**. Default is `/admin`. |
+| `PLAYER_PATH` | `''` | String | **Web player access path**. Default is empty, i.e., root `/`. |
 | `SERVER_NAME` | `My Sync Server` | String | **Sync service name**. Showed in client connections. |
 | `PROXY_HEADER` | `x-real-ip` | String | **Reverse proxy remote IP penetration identifier**. When the system runs behind reverse proxies or load balancers such as Nginx, it is used to extract the true client source IP address to ensure accurate traceability of equipment audit logs. |
 | `PROXY_ALL_ENABLED` | `false` | Boolean | **Enable global outgoing request proxy**. If enabled, network requests from the server (e.g. search, resolving) will go through the proxy. |
 | `PROXY_ALL_ADDRESS` | `''` | String | **Proxy address**. Supports `http://` or `socks5://`, e.g. `socks5://127.0.0.1:10808`. |
 | `DISABLE_TELEMETRY` | `false` | Boolean | **System telemetry feedback circuit breaker**. Set to `true` will completely block anonymous state probe packets between the system and external nodes, and disable all system-level new version updates or announcement distributions. |
+
+> 💡 **Boolean Environment Variable Format Note**:
+> All boolean environment variables support flexible case-insensitive formats:
+> - **Enabled (True)**: `true` / `1` / `yes` / `y` / `on`
+> - **Disabled (False)**: `false` / `0` / `no` / `n` / `off`
 
 ### II. Persistence and Account Sandbox Management Strategy
 
@@ -73,7 +78,7 @@ The underlying periodic polling asynchronous daemon of the service will only be 
 
 | Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
 | :------------------------ | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------ |
-| `ENABLE_WEBPLAYER_AUTH` | `false` | Boolean | Whether to establish a separate entry-blocking defense wall for the derived browser access interface (the application entity rendered under the default `/music` path) and refuse direct face-to-face from visitors. |
+| `ENABLE_WEBPLAYER_AUTH` | `false` | Boolean | Whether to establish a separate entry-blocking defense wall for the derived browser access interface (rendered under default root path `/`) and refuse direct face-to-face from visitors. |
 | `WEBPLAYER_PASSWORD` | `123456` | String | If the upper-level authentication mode takes effect, it is the separate password dictionary for verification. This gives administrators the ability to decouple keys for different levels of the audience layer and the backend control panel. |
 
 ### V. Playlist Management Strategy
@@ -88,12 +93,20 @@ The underlying periodic polling asynchronous daemon of the service will only be 
 | :--- | :--- | :--- | :--- |
 | `SUBSONIC_ENABLE` | `true` | Boolean | **Enable Subsonic protocol**. Allows connections from Subsonic-compatible clients. |
 | `SUBSONIC_PATH` | `'/rest'` | String | **Subsonic access path**. Default is `/rest`. |
+| `SUBSONIC_ENABLE_DEBUG` | `false` | Boolean | **Enable Subsonic debug log mode**. Default is `false`. |
+| `SUBSONIC_ONLINE_SEARCH` | `true` | Boolean | **Enable Subsonic online search**. Supports searching and streaming external online tracks in Subsonic clients. |
+| `SUBSONIC_ONLINE_SEARCH_MODE` | `'fallback'` | String | **Subsonic online search mode**. `fallback`, `merge`, or `local_only`. |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES` | `'wy,tx,kw,kg,mg'` | String | **Subsonic default online search sources**. Comma-separated platform codes. |
+| `SUBSONIC_LYRIC_TRANSLATION` | `true` | Boolean | **Include translations in Subsonic lyrics**. |
 
 ### VIII. Business Feature Extension Configuration
 
 | Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
 | :--- | :--- | :--- | :--- |
 | `SINGER_SOURCE_PRIORITY` | `'tx,wy'` | String | **Singer source priority**. Controls the priority order for fetching singer details, photos, and Mid. Available values are `tx` (Tencent) and `wy` (Netease), separated by commas. |
+| `ARTIST_MAX_FETCH_PAGES` | `20` | Integer | **Maximum fetch pages for artist tracks**. Upper limit when fetching full song lists for artists. |
+| `CACHE_NAMING_PATTERN` | `'simple'` | String | **Cache file naming pattern**. `simple` or `custom`. |
+| `SYSTEM_ALLOW_UNSAFE_VM` | `false` | Boolean | **Allow unsafe VM custom source scripts**. If enabled, allows running custom source scripts requiring VM sandbox features (use with caution). |
 
 ### IX. (Advanced Feature) Silent Preset Accounts in CLI Environment
 

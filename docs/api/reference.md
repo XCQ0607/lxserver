@@ -153,8 +153,11 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 
 - `GET /api/config`: 获取服务器当前的所有可配置项（含环境变量覆盖后的最终值）。
 - `POST /api/config`: 增量更新全局配置。
-  - **参数示例**: `{"singer.sourcePriority": ["tx", "wy"], "user.enablePublicRestriction": true}`
-  - **验证**: 某些字段（如 `singer.sourcePriority`）会进行合法性校验。
+  - **支持配置项**: 包括 `admin.path`, `player.path`, `subsonic.enableDebug`, `subsonic.onlineSearch`, `subsonic.onlineSearchMode`, `subsonic.onlineSearchSources`, `subsonic.lyricTranslation`, `artist.maxFetchPages`, `cache.namingPattern`, `system.allowUnsafeVM` 等。
+  - **参数示例**: `{"admin.path": "/admin", "player.path": "", "subsonic.enableDebug": false}`
+  - **路径校验规则**: `admin.path` 与 `player.path` 必须以 `/` 开头或为空字符串，两者不能冲突相同且不能以 `/api` 开头。
+- `POST /api/admin/reload`: 重新加载服务器 `config.js` 与 `users.json` 数据及用户自定义音源 API。
+- `POST /api/admin/restart`: 安全重启服务器进程。
 
 ---
 
@@ -163,8 +166,8 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 专为 Web 播放器前端逻辑设计的接口，支持基于 Session 的访问。
 
 ### 8.1 基础配置与认证
-- `GET /api/music/config`: **公开接口**，获取 Web 播放器的运行状态配置。
-  - **响应**: `{"player.enableAuth": boolean, "user.enablePublicRestriction": boolean}`
+- `GET /api/music/config`: **公开接口**，获取 Web 播放器的运行状态及基础路径配置。
+  - **响应示例**: `{"admin.path": "/admin", "player.path": "", "player.enableAuth": false, "user.enablePublicRestriction": true}`
 - `POST /api/music/auth`: 校验访问密码，成功后下发 `lx_player_session` HttpOnly Cookie。
 - `POST /api/music/auth/logout`: 彻底注销当前的 Session 会话。
 - `GET /api/music/auth/verify`: 检查当前 Session 是否依然有效。

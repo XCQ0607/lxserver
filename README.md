@@ -235,8 +235,8 @@ npm start
 
 ### 3. 访问说明
 
-- **Web 播放器**: `http://your-ip:9527/music` (默认路径，可通过 `PLAYER_PATH` 修改)
-- **同步管理后台**: `http://your-ip:9527` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+- **Web 播放器**: `http://your-ip:9527` (默认根路径，可通过 `PLAYER_PATH` 修改)
+- **同步管理后台**: `http://your-ip:9527/admin` (默认路径 `/admin`，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
 
 ---
 
@@ -245,8 +245,8 @@ npm start
 本项目基于 Node.js 采用前后端分离架构：
 
 - **Backend (Express + WebSocket)**: 核心同步逻辑与 WebDAV 备份。
-- **Console (Vanilla JS)**: 位于根目录，负责用户与数据管理。
-- **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为 `/music`。
+- **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为根路径 `/`。
+- **Console (Vanilla JS)**: 位于 `/admin` 路径，负责用户与数据管理。
 
 ---
 
@@ -258,8 +258,8 @@ npm start
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
 | `BIND_IP`                             | `bindIP`                           | 绑定 IP                                                            | `0.0.0.0`        |
-| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径 (默认为空，即根路径 `/`)                    | (空)               |
-| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为 `/music`)                             | `/music`         |
+| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径 (默认为 `/admin`)                             | `/admin`           |
+| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为空，即根路径 `/`)                        | (空)               |
 | `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持 (服务默认开启)                          | `true`           |
 | `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 访问路径 (默认为 `/rest`)                               | `/rest`          |
 | `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
@@ -293,22 +293,17 @@ npm start
 | `PROXY_ALL_ENABLED`                   | `proxy.all.enabled`                | 是否启用外发请求代理 (针对 Music SDK)                              | `false`          |
 | `PROXY_ALL_ADDRESS`                   | `proxy.all.address`                | 代理地址 (支持 http:// 或 socks5://)                               | -                  |
 | `SINGER_SOURCE_PRIORITY`              | `singer.sourcePriority`            | 歌手信息获取来源优先级 (如 `tx,wy` 或 `wy,tx`)                 | `tx,wy`          |
+| `SUBSONIC_ENABLE_DEBUG`               | `subsonic.enableDebug`             | 是否开启 Subsonic 调试日志模式                                     | `false`          |
+| `SUBSONIC_ONLINE_SEARCH`              | `subsonic.onlineSearch`            | 是否开启 Subsonic 在线全网搜索                                     | `true`           |
+| `SUBSONIC_ONLINE_SEARCH_MODE`         | `subsonic.onlineSearchMode`        | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)        | `fallback`       |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES`      | `subsonic.onlineSearchSources`     | Subsonic 在线搜索默认音源列表                                      | `wy,tx,kw,kg,mg` |
+| `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
+| `ARTIST_MAX_FETCH_PAGES`              | `artist.maxFetchPages`             | 歌手歌曲最大抓取页数                                               | `20`             |
+| `CACHE_NAMING_PATTERN`                | `cache.namingPattern`              | 缓存文件命名规则 (`simple` / `custom`)                            | `simple`         |
+| `SYSTEM_ALLOW_UNSAFE_VM`              | `system.allowUnsafeVM`             | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                  | `false`          |
 | `LX_USER_<用户名>`                    | `users` 数组                       | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)           | -                  |
 
-### 仅在 `config.js` 中生效的高级配置项
-
-部分高级选项仅可通过直接修改 `config.js` 进行配置：
-
-| 配置项 | 说明 | 默认值 |
-| --- | --- | --- |
-| `subsonic.enableDebug` | 是否开启 Subsonic 调试日志模式 | `true` |
-| `subsonic.onlineSearch` | 是否开启 Subsonic 在线全网搜索 | `true` |
-| `subsonic.onlineSearchMode` | Subsonic 在线搜索模式 (`fallback` 回退模式 / `merge` 合并模式 / `local_only` 仅本地) | `"fallback"` |
-| `subsonic.onlineSearchSources` | Subsonic 在线搜索默认音源列表 | `"wy,tx,kw,kg,mg"` |
-| `subsonic.lyricTranslation` | Subsonic 歌词中是否包含翻译 | `true` |
-| `artist.maxFetchPages` | 歌手歌曲最大抓取页数 | `20` |
-| `cache.namingPattern` | 缓存文件命名规则 (`simple` / `custom`) | `"simple"` |
-| `system.allowUnsafeVM` | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险) | `false` |
+> **布尔类型环境变量说明**：所有布尔类型的环境变量支持灵活的写法（不区分大小写），开启支持 `true` / `1` / `yes` / `y` / `on`；关闭支持 `false` / `0` / `no` / `n` / `off`。
 
 > **提示**：目前服务支持 `启用根路径` (URL配置为 `ip:port`) 和 `启用用户路径` (URL配置为 `ip:port/username`) 两种数据同步连接方式。如果没有启用用户路径，则必须保证每一个同步用户的鉴权密码不重复。
 

@@ -50,11 +50,11 @@ const config: LX.Config = {
   'proxy.all.address': '',
 
   // 访问路径配置
-  'admin.path': '', // 后台管理路径，默认为根路径 /
-  'player.path': '/music', // 播放器路径
+  'admin.path': '/admin', // 后台管理路径，默认为 /admin
+  'player.path': '', // 播放器路径，默认为根路径 /
   'subsonic.enable': true, // 是否启用 Subsonic 服务
   'subsonic.path': '/rest', // Subsonic 访问路径
-  'subsonic.enableDebug': true, // 是否开启 Subsonic 调试日志模式
+  'subsonic.enableDebug': false, // 是否开启 Subsonic 调试日志模式
   'subsonic.onlineSearch': true, // 是否开启 Subsonic 在线全网搜索
   'subsonic.onlineSearchMode': 'fallback', // 在线搜索模式: fallback | merge | local_only
   'subsonic.onlineSearchSources': 'wy,tx,kw,kg,mg', // 在线搜索默认平台
