@@ -8,6 +8,7 @@ import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
 import fs from 'fs'
 import path from 'path'
+import { tryNormalizeUsername } from '@/utils/username'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
@@ -45,10 +46,10 @@ class SubsonicHandler {
     // ─────────────────────────────────────────────
 
     private verifyAuth(params: URLSearchParams): string | null {
-        const u = params.get('u')
-        if (!u) return null
+        const username = tryNormalizeUsername(params.get('u'))
+        if (!username) return null
 
-        const user = global.lx.config.users.find((user: any) => user.name === u)
+        const user = global.lx.config.users.find((user: any) => user.name === username)
         if (!user) return null
 
         // Token & Salt 方式 (推荐)
@@ -56,7 +57,7 @@ class SubsonicHandler {
         const s = params.get('s')
         if (t && s) {
             const hash = crypto.createHash('md5').update(user.password + s).digest('hex')
-            if (hash === t.toLowerCase()) return u
+            if (hash === t.toLowerCase()) return user.name
         }
 
         // 明文密码方式 (包含 enc: 前缀处理)
@@ -66,7 +67,7 @@ class SubsonicHandler {
             if (p.startsWith('enc:')) {
                 password = Buffer.from(p.substring(4), 'hex').toString()
             }
-            if (password === user.password) return u
+            if (password === user.password) return user.name
         }
 
         return null
@@ -495,6 +496,64 @@ class SubsonicHandler {
         return { attrs: this.musicToSongFlat(music, parentId, artistIdOverride) }
     }
 
+    private collectUniqueListSongs(listData: any): Array<{ music: LX.Music.MusicInfo, listId: string }> {
+        const songs = new Map<string, { music: LX.Music.MusicInfo, listId: string }>()
+        const collect = (list: LX.Music.MusicInfo[], listId: string) => {
+            for (const music of list) {
+                if (!music?.id || songs.has(music.id)) continue
+                songs.set(music.id, { music, listId })
+            }
+        }
+
+        collect(listData.loveList || [], 'love')
+        collect(listData.defaultList || [], 'default')
+        for (const list of listData.userList || []) {
+            collect((list.list || []) as LX.Music.MusicInfo[], list.id)
+        }
+        return Array.from(songs.values())
+    }
+
+    private buildLocalAlbumGroups(entries: Array<{ music: LX.Music.MusicInfo, listId: string }>) {
+        const groups = new Map<string, { album: any, songs: LX.Music.MusicInfo[] }>()
+
+        for (const { music, listId } of entries) {
+            const meta = (music as any).meta || {}
+            const albumName = meta.albumName || (music as any).albumName || (music as any).album?.name || 'Unknown Album'
+            const rawAlbumId = (music as any).albumMid || (music as any).album?.mid || meta.albumId || (music as any).albumId || (music as any).album?.id
+            const albumId = rawAlbumId
+                ? `alb_${music.source}_${rawAlbumId}`
+                : `album_${Buffer.from(`${albumName}__${music.singer || 'Unknown Artist'}`).toString('base64url').slice(0, 24)}`
+            const song = this.musicToSongFlat(music, albumId)
+            let group = groups.get(albumId)
+            if (!group) {
+                group = {
+                    album: {
+                        id: albumId,
+                        name: song.album || 'Unknown Album',
+                        title: song.album || 'Unknown Album',
+                        album: song.album || 'Unknown Album',
+                        artist: song.artist || 'Unknown Artist',
+                        artistId: song.artistId,
+                        isDir: true,
+                        coverArt: song.coverArt || albumId,
+                        songCount: 0,
+                        duration: 0,
+                        created: new Date(0).toISOString(),
+                        playCount: 0,
+                        year: song.year || undefined,
+                    },
+                    songs: [],
+                }
+                groups.set(albumId, group)
+            }
+            group.songs.push(music)
+            group.album.songCount = group.songs.length
+            group.album.duration += Number(song.duration) || 0
+        }
+
+        return groups
+    }
+
     /** 查找某个用户下所有列表中的某首歌 */
     private async findMusicById(username: string, id: string): Promise<{ music: LX.Music.MusicInfo, listId: string } | null> {
         const userSpace = getUserSpace(username)
@@ -732,6 +791,9 @@ class SubsonicHandler {
 
         const userSpace = getUserSpace(username)
         const listData = await userSpace.listManage.getListData()
+        const localAlbumGroup = this.buildLocalAlbumGroups(
+            this.collectUniqueListSongs(listData),
+        ).get(id)
 
         let musics: LX.Music.MusicInfo[] = []
         let listName = 'Unknown'
@@ -743,6 +805,9 @@ class SubsonicHandler {
         } else if (id === 'default') {
             musics = listData.defaultList
             listName = '默认列表'
+        } else if (localAlbumGroup) {
+            musics = localAlbumGroup.songs
+            listName = localAlbumGroup.album.name
         } else if (id.startsWith('lib-alb_')) {
             // 从本地收藏专辑库获取详情，将原始歌曲字段规范化为标准格式
             const realId = id.replace('lib-alb_', '')
@@ -1132,6 +1197,11 @@ class SubsonicHandler {
         // 如果未命中推荐逻辑，或推荐获取为空，则回退到本地收藏库
         if (albums.length === 0) {
             const libAlbums = await this.getLibraryData(username, 'albums')
+            const userSpace = getUserSpace(username)
+            const listData = await userSpace.listManage.getListData()
+            const localAlbumGroups = this.buildLocalAlbumGroups(
+                this.collectUniqueListSongs(listData),
+            )
 
             const buildAlbum = (album: any) => {
                 const source = album.source || 'wy'
@@ -1154,8 +1224,31 @@ class SubsonicHandler {
                 }
             }
 
-            const page = libAlbums.slice(offset, offset + size)
-            albums = page.map(buildAlbum)
+            const albumMap = new Map<string, any>()
+            for (const album of libAlbums) {
+                const mappedAlbum = buildAlbum(album)
+                albumMap.set(mappedAlbum.id, mappedAlbum)
+            }
+            for (const [albumId, group] of localAlbumGroups) {
+                const existing = albumMap.get(albumId)
+                albumMap.set(albumId, existing
+                    ? {
+                        ...group.album,
+                        ...existing,
+                        songCount: group.album.songCount,
+                        duration: group.album.duration,
+                        coverArt: existing.coverArt || group.album.coverArt,
+                    }
+                    : group.album)
+            }
+
+            const mergedAlbums = Array.from(albumMap.values())
+            if (type === 'alphabeticalByName') {
+                mergedAlbums.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'))
+            } else if (type === 'alphabeticalByArtist') {
+                mergedAlbums.sort((a, b) => String(a.artist || '').localeCompare(String(b.artist || ''), 'zh-CN'))
+            }
+            albums = mergedAlbums.slice(offset, offset + size)
         }
 
         const wrapKey = isV2 ? 'albumList2' : 'albumList'
@@ -1643,33 +1736,17 @@ class SubsonicHandler {
                 year: alb.publishTime ? parseInt(String(alb.publishTime).split(/[/-]/)[0]) : undefined,
             })
         }
-        for (const { music } of allLocalSongs) {
-            const meta = (music as any).meta || {}
-            const albumName = meta.albumName || (music as any).albumName || (music as any).album?.name
-            const rawAlbumId = (music as any).albumMid || (music as any).album?.mid || meta.albumId || (music as any).albumId || (music as any).album?.id
-            if (albumName && albumName !== 'Unknown Album') {
-                const source = music.source
-                const albId = rawAlbumId ? `alb_${source}_${rawAlbumId}` : `album_${Buffer.from(`${albumName}__${music.singer}`).toString('base64url').slice(0, 24)}`
-                if (!allAlbumsMap.has(albId)) {
-                    const primarySinger = (music.singer || '').split('、')[0] || 'Unknown Artist'
-                    const artistId = (music as any).singerId ? `art_${source}_${(music as any).singerId}` : `artist_${primarySinger}`
-                    const picUrl = meta.picUrl || (music as any).img || (music as any).pic
-                    allAlbumsMap.set(albId, {
-                        id: albId,
-                        name: albumName,
-                        title: albumName,
-                        album: albumName,
-                        artist: music.singer || 'Unknown Artist',
-                        artistId: artistId,
-                        isDir: true,
-                        coverArt: picUrl || albId,
-                        songCount: 1,
-                        duration: this.parseDuration(music.interval),
-                        created: new Date().toISOString(),
-                        playCount: 0,
-                    })
+        for (const [albumId, group] of this.buildLocalAlbumGroups(allLocalSongs)) {
+            const existing = allAlbumsMap.get(albumId)
+            allAlbumsMap.set(albumId, existing
+                ? {
+                    ...group.album,
+                    ...existing,
+                    songCount: group.album.songCount,
+                    duration: group.album.duration,
+                    coverArt: existing.coverArt || group.album.coverArt,
                 }
-            }
+                : group.album)
         }
         const allLocalAlbums = Array.from(allAlbumsMap.values())
 

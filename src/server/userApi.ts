@@ -8,6 +8,8 @@ import * as zlib from 'zlib'
 import { promisify } from 'util'
 
 import * as tunnel from 'tunnel'
+import { tryNormalizeUsername } from '@/utils/username'
+import { isSourceSharedWithUser } from './customSourceSharing'
 const inflate = promisify(zlib.inflate)
 const deflate = promisify(zlib.deflate)
 
@@ -72,18 +74,23 @@ interface UserApiInfo {
     script: string
     sources: Record<string, any>
     enabled: boolean
-    owner: string // 'open' or username
+    owner: string
     allowUnsafeVM?: boolean
 }
 
 // 加载的 API 实例
 const loadedApis = new Map<string, any>()
+const isConfiguredOwner = (username?: string): username is string => {
+    const normalized = tryNormalizeUsername(username)
+    return normalized === username && global.lx.config.users.some(user => user.name === normalized)
+}
 
 // API 初始化状态追踪 map<id, status>
 const apiStatus = new Map<string, { status: 'success' | 'failed', error?: string }>()
 
 export function getApiStatus(owner: string, id: string) {
-    return apiStatus.get(`${owner}_${id}`)
+    const normalizedOwner = tryNormalizeUsername(owner)
+    return normalizedOwner ? apiStatus.get(`${normalizedOwner}_${id}`) : undefined
 }
 
 
@@ -188,7 +195,7 @@ function createLxRequest(isUnsafe: boolean = false) {
 }
 
 // 加载自定义源脚本
-export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
+export async function loadUserApi(apiInfo: UserApiInfo, register = true): Promise<any> {
     // 从脚本中提取元数据
     const metadata = extractMetadata(apiInfo.script)
     const fullApiInfo = { ...apiInfo, ...metadata }
@@ -376,7 +383,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
             }
         }
 
-        loadedApis.set(`${fullApiInfo.owner}_${apiInfo.id}`, apiInstance)
+        if (register) loadedApis.set(`${fullApiInfo.owner}_${apiInfo.id}`, apiInstance)
         console.log(`[UserApi] ✓ 成功加载: ${fullApiInfo.name} v${fullApiInfo.version} (Owner: ${fullApiInfo.owner})`)
         console.log(`[UserApi]   支持源: ${Object.keys(registeredSources).join(', ')}`)
         return { success: true, apiInstance, error: null }
@@ -400,6 +407,8 @@ export async function callUserApiGetMusicUrl(
     onProgress?: (attempt: any) => Promise<void> | void,
     enableAutoSwitchApiSource?: boolean
 ): Promise<{ url: string, type: string, sourceName?: string, attempts?: any[] }> {
+    clientUsername = tryNormalizeUsername(clientUsername) || undefined
+
     // 标准化 songInfo 格式：将 meta 中的字段提升到顶层
     const normalizedSongInfo = { ...songInfo }
     if (songInfo.meta) {
@@ -492,85 +501,53 @@ export async function callUserApiGetMusicUrl(
     let supportedCount = 0;
     let lastError: Error | null = null;
 
-    // 查找支持该 source 的 API
-    // 收集所有支持该 source 的 API，并根据权限过滤
+    // Collect enabled custom sources owned by the authenticated user or shared with them.
     let candidates: any[] = []
-    const userApiIds = new Set<string>()
-
-    // 读取当前用户的公开源状态覆盖（启用/禁用）以及私有源 ID 集合
-    let userStates: Record<string, any> = {}
-    if (clientUsername && clientUsername !== 'default') {
-        const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
-        const userPath = path.join(dataPath, 'users', 'source', clientUsername)
-        const statesPath = path.join(userPath, 'states.json')
-        const metaPath = path.join(userPath, 'sources.json')
-
-        if (fs.existsSync(statesPath)) {
-            try { userStates = JSON.parse(fs.readFileSync(statesPath, 'utf-8')) } catch (e) { }
-        }
-        // 预收集私有源 ID（用于屏蔽同名公开源）
-        if (fs.existsSync(metaPath)) {
-            try {
-                const userSources = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
-                for (const s of userSources) userApiIds.add(s.id)
-            } catch (e) { }
-        }
-    }
-
-    // 按 loadedApis 收集所有可用候选源（权限过滤，不强制任何顺序）
-    for (const [apiId, api] of loadedApis) {
+    for (const api of loadedApis.values()) {
         if (!api.info.sources || !api.info.sources[source]) continue
-
-        if (api.info.owner === 'open') {
-            // 计算公开源对当前用户的有效启用状态
-            let isEnabled = api.info.enabled
-            if (clientUsername && clientUsername !== 'default' && userStates[api.info.id]) {
-                if (typeof userStates[api.info.id].enabled === 'boolean') {
-                    isEnabled = userStates[api.info.id].enabled
-                }
-            }
-            if (!isEnabled) continue
-            if (userApiIds.has(api.info.id)) continue  // 被同名私有版本覆盖，跳过
-            candidates.push(api)
-        } else if (clientUsername && api.info.owner === clientUsername) {
-            if (!api.info.enabled) continue
-            candidates.push(api)
-            userApiIds.add(api.info.id) // 兜底：确保后续不重复添加公开同名源
-        }
+        if (!clientUsername || !api.info.enabled) continue
+        const isOwner = api.info.owner === clientUsername
+        const isShared = !isOwner && isSourceSharedWithUser(api.info.owner, api.info.id, clientUsername)
+        if (!isOwner && !isShared) continue
+        candidates.push(api)
     }
 
     // === 实时按 order.json 对候选列表排序 ===
     // 不依赖 loadedApis 的 Map 插入顺序（部分 reload 后顺序会乱），
     // 每次解析都直接读 order.json，无需重启服务器即可生效
     if (candidates.length > 1) {
-        const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
         let orderData: string[] = []
 
-        // 优先读用户自己的排序（admin/order.json），再回退到公开源排序（_open/order.json）
-        const orderCandidates = clientUsername && clientUsername !== 'default'
-            ? [
-                path.join(dataPath, 'users', 'source', clientUsername, 'order.json'),
-                path.join(dataPath, 'users', 'source', '_open', 'order.json')
-              ]
-            : [path.join(dataPath, 'users', 'source', '_open', 'order.json')]
-
-        for (const orderPath of orderCandidates) {
-            if (fs.existsSync(orderPath)) {
-                try {
-                    orderData = JSON.parse(fs.readFileSync(orderPath, 'utf-8'))
-                    if (orderData.length > 0) break
-                } catch (e) { }
-            }
+        const orderPath = clientUsername
+            ? path.join(global.lx.userPath, 'source', clientUsername, 'order.json')
+            : ''
+        if (orderPath && fs.existsSync(orderPath)) {
+            try { orderData = JSON.parse(fs.readFileSync(orderPath, 'utf-8')) } catch (e) { }
         }
 
         if (orderData.length > 0) {
             const idToIndex = new Map(orderData.map((id, i) => [id, i]))
             candidates.sort((a: any, b: any) => {
+                const aShared = a.info.owner !== clientUsername
+                const bShared = b.info.owner !== clientUsername
+                if (aShared !== bShared) return aShared ? 1 : -1
                 const ia = idToIndex.has(a.info.id) ? idToIndex.get(a.info.id)! : 999999
                 const ib = idToIndex.has(b.info.id) ? idToIndex.get(b.info.id)! : 999999
                 return ia - ib
             })
+        } else {
+            candidates.sort((a: any, b: any) => {
+                const aShared = a.info.owner !== clientUsername
+                const bShared = b.info.owner !== clientUsername
+                return aShared === bShared ? 0 : (aShared ? 1 : -1)
+            })
         }
+    } else {
+        candidates.sort((a: any, b: any) => {
+            const aShared = a.info.owner !== clientUsername
+            const bShared = b.info.owner !== clientUsername
+            return aShared === bShared ? 0 : (aShared ? 1 : -1)
+        })
     }
     // =========================================
 
@@ -689,7 +666,7 @@ async function loadSourcesFromDir(dirPath: string, owner: string, stats: { loade
         // =========================================================================
 
         for (const source of sources) {
-            if (!source.enabled && owner !== 'open') {
+            if (!source.enabled) {
                 console.log(`[UserApi] [${owner}] 跳过已禁用: ${source.name}`)
                 apiStatus.delete(`${owner}_${source.id}`)
                 continue
@@ -784,12 +761,8 @@ function startWatcher(sourceRoot: string) {
             // 解析用户名 (目录名)
             // filename on Windows might be "username\file.js"
             const parts = (filename as string).split(path.sep)
-            let username = parts[0]
-
-            // 如果是 _open 目录，对应 'open' 用户
-            if (username === '_open') {
-                username = 'open'
-            }
+            const username = parts[0]
+            if (!isConfiguredOwner(username)) return
 
             // 简单的防抖处理
             if (debounceMap.has(username)) {
@@ -821,11 +794,18 @@ function startWatcher(sourceRoot: string) {
     }
 }
 
-// 从文件系统加载所有已启用的自定义源
-// 路径变更：DATA_PATH/users/source/{username} 和 DATA_PATH/users/source/_open
+// Load enabled custom sources from DATA_PATH/users/source/{username}.
 export async function initUserApis(targetUser?: string) {
-    const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
-    const sourceRoot = path.join(dataPath, 'users', 'source')
+    if (targetUser !== undefined) {
+        const normalizedTargetUser = tryNormalizeUsername(targetUser)
+        if (!normalizedTargetUser) {
+            console.warn(`[UserApi] Ignoring invalid user: ${String(targetUser)}`)
+            return
+        }
+        targetUser = normalizedTargetUser
+    }
+
+    const sourceRoot = path.join(global.lx.userPath, 'source')
     const stats = { loadedCount: 0 }
 
     // 更新最后加载时间
@@ -836,6 +816,23 @@ export async function initUserApis(targetUser?: string) {
     }
 
     console.log(`[UserApi] ========================================`)
+
+    if (targetUser) {
+        for (const [key, api] of loadedApis.entries()) {
+            if (api.info.owner === targetUser) loadedApis.delete(key)
+        }
+        for (const key of apiStatus.keys()) {
+            if (key.startsWith(`${targetUser}_`)) apiStatus.delete(key)
+        }
+
+        if (!isConfiguredOwner(targetUser)) {
+            console.warn(`[UserApi] Removed loaded sources for unknown user: ${targetUser}`)
+            return
+        }
+    } else {
+        loadedApis.clear()
+        apiStatus.clear()
+    }
 
     // 如果根目录不存在，无需加载
     if (!fs.existsSync(sourceRoot)) {
@@ -851,49 +848,23 @@ export async function initUserApis(targetUser?: string) {
 
     if (targetUser) {
         console.log(`[UserApi] 重新加载用户源: ${targetUser}`)
-        // 清理该用户的旧源和状态
-        for (const [key, api] of loadedApis.entries()) {
-            if (api.info.owner === targetUser) {
-                loadedApis.delete(key)
-            }
-        }
-        for (const key of apiStatus.keys()) {
-            if (key.startsWith(`${targetUser}_`)) {
-                apiStatus.delete(key)
-            }
-        }
 
-        // 加载该用户的源
-        let dirName = targetUser
-
-        // 特殊处理：如果是 'open'，对应目录是 '_open'
-        if (targetUser === 'open') {
-            dirName = '_open'
-        }
-
-        const userSourceDir = path.join(sourceRoot, dirName)
+        const userSourceDir = path.join(sourceRoot, targetUser)
         if (fs.existsSync(userSourceDir)) {
             await loadSourcesFromDir(userSourceDir, targetUser, stats)
         }
 
     } else {
         console.log(`[UserApi] 初始化所有自定义源...`)
-        loadedApis.clear()
 
         // 扫描 sourceRoot 下的所有子目录
         try {
+            const configuredUsers = new Set(global.lx.config.users.map(user => user.name))
             const entries = fs.readdirSync(sourceRoot, { withFileTypes: true })
             for (const entry of entries) {
-                if (entry.isDirectory()) {
-                    let owner = entry.name
-                    // 如果目录是 _open，owner 为 'open'
-                    if (entry.name === '_open') {
-                        owner = 'open'
-                    }
-
-                    const dirPath = path.join(sourceRoot, entry.name)
-                    await loadSourcesFromDir(dirPath, owner, stats)
-                }
+                if (!entry.isDirectory() || !configuredUsers.has(entry.name) || !isConfiguredOwner(entry.name)) continue
+                const dirPath = path.join(sourceRoot, entry.name)
+                await loadSourcesFromDir(dirPath, entry.name, stats)
             }
         } catch (error: any) {
             console.error('[UserApi] 扫描源目录失败:', error.message)
@@ -910,16 +881,15 @@ export function getLoadedApis() {
     return Array.from(loadedApis.values()).map(api => api.info)
 }
 
-// 检查某个源是否被支持
-// clientUsername: 调用者的用户名。如果未提供，则只能检查 open 源
+// Check whether the authenticated user's custom sources support a platform.
 export function isSourceSupported(source: string, clientUsername?: string): boolean {
-    for (const [apiId, api] of loadedApis) {
+    const owner = tryNormalizeUsername(clientUsername)
+    if (!owner || !isConfiguredOwner(owner)) return false
+    for (const api of loadedApis.values()) {
         if (!api.info.enabled || !api.info.sources || !api.info.sources[source]) {
             continue
         }
-
-        // 权限检查
-        if (api.info.owner === 'open' || (clientUsername && api.info.owner === clientUsername)) {
+        if (api.info.owner === owner || isSourceSharedWithUser(api.info.owner, api.info.id, owner)) {
             return true
         }
     }

@@ -127,13 +127,6 @@ class App {
             await this.saveConfig(true);
             this.loadConfig();
         });
-        document.querySelector('input[name="user.enablePublicFavorites"]')?.addEventListener('change', () => {
-            this.togglePublicNonAdminAccessVisibility();
-        });
-        document.querySelector('input[name="user.enablePublicRestriction"]')?.addEventListener('change', () => {
-            this.togglePublicNonAdminLocalMusicVisibility();
-        });
-
         // 日志查看
         document.getElementById('refresh-logs-btn')?.addEventListener('click', () => this.loadLogs());
         document.getElementById('log-type-select')?.addEventListener('change', () => this.loadLogs());
@@ -583,6 +576,16 @@ class App {
 
 
     renderAllUserSelectors() {
+        ['data', 'snapshot'].forEach(type => {
+            const input = document.getElementById(`${type}-user-select`);
+            const title = document.querySelector(`#${type}-user-selector .selected-username`);
+            if (input && !this.allUsers.some(user => user.name === input.value)) {
+                input.value = '';
+                if (title) title.textContent = '选择用户';
+                if (type === 'data') this.currentUserData = null;
+            }
+        });
+
         this.renderUserDropdown('data');
         this.renderUserDropdown('snapshot');
 
@@ -616,15 +619,18 @@ class App {
 
         const currentSelected = document.getElementById(`${type}-user-select`).value;
 
+        if (this.allUsers.length === 0) {
+            dropdown.innerHTML = '<div class=dropdown-item style=cursor:default;color:var(--text-secondary);>\u6682\u65e0\u7528\u6237\uff0c\u8bf7\u5148\u521b\u5efa\u7528\u6237</div>';
+            return;
+        }
+
         dropdown.innerHTML = this.allUsers.map(user => {
-            const isPublic = user.name === '_open';
-            const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
-            const avatarChar = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
-            const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size:12px;' : '';
+            const displayName = this.escapeHtml(user.name);
+            const avatarChar = this.escapeHtml(user.name.charAt(0).toUpperCase());
             return `
             <div class="dropdown-item ${user.name === currentSelected ? 'active' : ''}" 
                  onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
-                <div class="dropdown-avatar" style="${avatarStyle}">${avatarChar}</div>
+                <div class="dropdown-avatar">${avatarChar}</div>
                 <span>${displayName}</span>
                 ${user.name === currentSelected ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="width:14px;height:14px;margin-left:auto;"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
             </div>
@@ -640,17 +646,20 @@ class App {
             document.getElementById('data-stats').innerHTML = '';
         }
 
+        if (this.allUsers.length === 0) {
+            container.innerHTML = '<div style=padding:2rem;text-align:center;color:var(--text-secondary);>\u6682\u65e0\u7528\u6237\uff0c\u8bf7\u5148\u521b\u5efa\u7528\u6237</div>';
+            return;
+        }
+
         container.innerHTML = `
             <div class="user-selection-grid fade-in">
                 ${this.allUsers.map(user => {
-                    const isPublic = user.name === '_open';
-                    const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
-                    const roleText = isPublic ? '公共数据与歌单' : '用户数据';
-                    const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size: 1.5rem;' : '';
-                    const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
+                    const displayName = this.escapeHtml(user.name);
+                    const roleText = '用户数据';
+                    const avatarHtml = this.escapeHtml(user.name.charAt(0).toUpperCase());
                     return `
                     <div class="user-select-card" onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
-                        <div class="avatar" style="${avatarStyle}">${avatarHtml}</div>
+                        <div class="avatar">${avatarHtml}</div>
                         <div class="name">${displayName}</div>
                         <div class="role">${roleText}</div>
                     </div>
@@ -664,7 +673,7 @@ class App {
         const title = document.querySelector(`#${type}-user-selector .selected-username`);
 
         input.value = username;
-        title.textContent = username === '_open' ? '公开用户 (_open)' : username;
+        title.textContent = username;
 
         // 关闭下拉
         document.getElementById(`${type}-user-dropdown`).classList.add('hidden');
@@ -684,8 +693,10 @@ class App {
     async loadUsers() {
         try {
             const users = await this.request('/api/users');
-            this.users = users.filter(u => u.name !== '_open');
+            this.users = users;
+            this.allUsers = this.users;
             this.renderUsers();
+            this.renderAllUserSelectors();
         } catch (err) {
             console.error('Failed to load users:', err);
         }
@@ -814,6 +825,9 @@ class App {
                         <span>${this.escapeHtml(user.name.charAt(0).toUpperCase())}</span>
                     </div>
                     <span class="user-name-text">${this.escapeHtml(user.name)}</span>
+                    <span class="user-role-badge ${user.isAdmin ? 'admin' : 'standard'}">
+                        ${user.isAdmin ? '管理员' : '普通用户'}
+                    </span>
                     <button class="btn-icon" onclick="app.showRenameUserModal(${index})" title="重命名用户" style="margin-left: 8px;">
                         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -898,6 +912,7 @@ class App {
             e.preventDefault();
             const formData = new FormData(e.target);
             const data = Object.fromEntries(formData);
+            data.name = String(data.name || '').trim().toLowerCase();
 
             try {
                 await this.request('/api/users', {
@@ -1036,7 +1051,7 @@ class App {
 
     // 保存新用户名
     async saveRenameUser() {
-        const newName = document.getElementById('rename-user-input').value.trim();
+        const newName = document.getElementById('rename-user-input').value.trim().toLowerCase();
         if (!newName) {
             showInfo('请填写新用户名');
             return;
@@ -1709,20 +1724,6 @@ class App {
             if (form.elements['user.enableRoot']) {
                 form.elements['user.enableRoot'].checked = config['user.enableRoot'] === true;
             }
-            if (form.elements['user.enablePublicRestriction']) {
-                form.elements['user.enablePublicRestriction'].checked = config['user.enablePublicRestriction'] === true;
-            }
-            if (form.elements['user.enablePublicNonAdminLocalMusic']) {
-                form.elements['user.enablePublicNonAdminLocalMusic'].checked = config['user.enablePublicNonAdminLocalMusic'] === true;
-            }
-            this.togglePublicNonAdminLocalMusicVisibility();
-            if (form.elements['user.enablePublicFavorites']) {
-                form.elements['user.enablePublicFavorites'].checked = config['user.enablePublicFavorites'] === true;
-            }
-            if (form.elements['user.enablePublicNonAdminAccess']) {
-                form.elements['user.enablePublicNonAdminAccess'].checked = config['user.enablePublicNonAdminAccess'] === true;
-            }
-            this.togglePublicNonAdminAccessVisibility();
             if (form.elements['user.enableLoginCacheRestriction']) {
                 form.elements['user.enableLoginCacheRestriction'].checked = config['user.enableLoginCacheRestriction'] === true;
             }
@@ -1814,22 +1815,6 @@ class App {
         }
     }
 
-    togglePublicNonAdminAccessVisibility() {
-        const favCb = document.querySelector('input[name="user.enablePublicFavorites"]');
-        const childWrapper = document.getElementById('public-non-admin-access-wrapper');
-        if (favCb && childWrapper) {
-            childWrapper.style.display = favCb.checked ? 'block' : 'none';
-        }
-    }
-
-    togglePublicNonAdminLocalMusicVisibility() {
-        const resCb = document.querySelector('input[name="user.enablePublicRestriction"]');
-        const childWrapper = document.getElementById('public-non-admin-local-music-wrapper');
-        if (resCb && childWrapper) {
-            childWrapper.style.display = resCb.checked ? 'block' : 'none';
-        }
-    }
-
     async saveConfig(silent = false) {
         if (!this.configLoaded) return;
         const form = document.getElementById('config-form');
@@ -1869,10 +1854,6 @@ class App {
             'proxy.all.address': formData.get('proxy.all.address'),
             'user.enablePath': formData.get('user.enablePath') === 'on',
             'user.enableRoot': formData.get('user.enableRoot') === 'on',
-            'user.enablePublicRestriction': formData.get('user.enablePublicRestriction') === 'on',
-            'user.enablePublicNonAdminLocalMusic': formData.get('user.enablePublicNonAdminLocalMusic') === 'on',
-            'user.enablePublicFavorites': formData.get('user.enablePublicFavorites') === 'on',
-            'user.enablePublicNonAdminAccess': formData.get('user.enablePublicNonAdminAccess') === 'on',
             'user.enableLoginCacheRestriction': formData.get('user.enableLoginCacheRestriction') === 'on',
             'user.enableCacheSizeLimit': formData.get('user.enableCacheSizeLimit') === 'on',
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,

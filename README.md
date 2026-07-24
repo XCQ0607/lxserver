@@ -118,14 +118,6 @@
   <img src="md/subsonic-search.png" width="400" alt="Subsonic 在线全网搜索">
 </p>
 
-### 11. 公共曲库与共享收藏
-
-在后台系统配置中开启 **“开启公共收藏和歌曲”** 之后，所有用户（无论未登录或不同账号）均可共同拥有并共享一个公共曲库与公开歌单列表。
-
-<p align="center">
-  <img src="md/_open_song.png" width="800" alt="公共曲库与共享收藏">
-</p>
-
 ## 🔒 访问控制与安全
 
 为了保护你的隐私，Web 播放器支持开启访问密码。
@@ -137,14 +129,6 @@
    - `WEBPLAYER_PASSWORD=yourpassword`: 设置访问密码
 2. **Web 界面配置**：
    登录管理后台（默认端口 9527），进入 **"系统配置"**，勾选 **"启用 Web 播放器访问密码"** 并设置密码。
-
-### 权限与公开源限制矩阵 (当 `user.enablePublicRestriction` 开启时)
-
-| 用户类型             | 查看列表 | 使用/切换(仅个人) | 修改默认音质 | 上传/导入公开源 | 删除/修改公开源 |
-| :------------------- | :------- | :---------------- | :----------- | :-------------- | :-------------- |
-| **管理员**     | ✅ 允许  | ✅ 允许           | ✅ 允许      | ✅ 允许         | ✅ 允许         |
-| **已登录用户** | ✅ 允许  | ✅ 允许           | ✅ 允许      | ❌ 禁止         | ❌ 禁止         |
-| **未登录访客** | ❌ 隐藏  | ❌ 禁止           | ❌ 禁止      | ❌ 禁止         | ❌ 禁止         |
 
 ## 📱 移动端适配
 
@@ -282,10 +266,6 @@ npm start
 | `ENABLE_WEBPLAYER_AUTH`               | `player.enableAuth`                | 是否启用 Web 播放器访问密码                                        | `false`          |
 | `WEBPLAYER_PASSWORD`                  | `player.password`                  | Web 播放器访问密码                                                 | `123456`         |
 | `DISABLE_TELEMETRY`                   | `disableTelemetry`                 | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                 | `false`          |
-| `ENABLE_PUBLIC_USER_RESTRICTION`      | `user.enablePublicRestriction`     | 是否启用公开用户权限限制 (限制上传、删除公开源、缓存到服务器等)    | `true`           |
-| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `user.enablePublicNonAdminLocalMusic` | 是否开启非管理员访问本地音乐 (允许未登录管理员的公开账号访问本地音乐) | `false`          |
-| `ENABLE_PUBLIC_FAVORITES`             | `user.enablePublicFavorites`       | 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏) | `false`          |
-| `ENABLE_PUBLIC_NON_ADMIN_ACCESS`      | `user.enablePublicNonAdminAccess`  | 是否开启非管理员访问公开收藏和歌曲 (允许未登录管理员的公开账号查看) | `false`          |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)      | `false`          |
 | `ENABLE_CACHE_SIZE_LIMIT`             | `user.enableCacheSizeLimit`        | 是否启用缓存空间限制 (开启后超出容量将按 LRU 自动清理)             | `false`          |
 | `CACHE_SIZE_LIMIT`                    | `user.cacheSizeLimit`              | 缓存空间限制大小 (单位: MB)                                        | `2000`           |

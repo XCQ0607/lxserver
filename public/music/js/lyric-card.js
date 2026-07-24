@@ -113,7 +113,8 @@
             img.onerror = () => {
                 // 如果直接加载失败（通常是 CORS 问题），尝试通过本地后端代理加载
                 console.log('[LyricCard] 图片加载失败，尝试通过代理加载:', src);
-                const proxyUrl = `/api/music/download?url=${encodeURIComponent(src)}&inline=1`;
+                const rawProxyUrl = `/api/music/download?url=${encodeURIComponent(src)}&inline=1`;
+                const proxyUrl = window.addUserTokenToUrl ? window.addUserTokenToUrl(rawProxyUrl) : rawProxyUrl;
 
                 const proxyImg = new Image();
                 proxyImg.crossOrigin = 'anonymous';

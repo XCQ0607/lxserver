@@ -42,6 +42,7 @@ window.LocalMusicManager = {
     remasterSelectionPageSize: 50,
     remasterSelectionEventsBound: false,
     remasterQualityEventsBound: false,
+    richCompositionEventsBound: false,
     remasterTaskRunning: false,
     authExpired: false,
     authExpiredNotified: false,
@@ -59,6 +60,55 @@ window.LocalMusicManager = {
 
     escapeAttr(value) {
         return this.escapeHtml(value);
+    },
+
+    normalizeSearchOperator(value) {
+        const operator = String(value || '').trim();
+        const aliases = {
+            '&': '&',
+            '＆': '&',
+            'AND': '&',
+            '与': '&',
+            '|': '|',
+            '｜': '|',
+            'OR': '|',
+            '或': '|',
+            '!': '!',
+            '！': '!',
+            'NOT': '!',
+            '非': '!',
+            '(': '(',
+            '（': '(',
+            ')': ')',
+            '）': ')',
+        };
+        return aliases[operator.toUpperCase()] || aliases[operator] || '';
+    },
+
+    matchActivatedSearchOperator(text, index) {
+        const str = String(text || '');
+        const aliases = ['AND', 'NOT', 'OR', '与', '或', '非', '&', '＆', '|', '｜', '!', '！', '（', '）', '(', ')'];
+        const previousChar = index > 0 ? str[index - 1] : '';
+
+        for (const alias of aliases) {
+            const candidate = str.slice(index, index + alias.length);
+            const matches = /^[A-Z]+$/.test(alias)
+                ? candidate.toUpperCase() === alias
+                : candidate === alias;
+            if (!matches) continue;
+
+            const isWordAlias = /^[A-Z]+$/.test(alias) || ['与', '或', '非'].includes(alias);
+            if (isWordAlias && previousChar && !/[\s\u00A0\u200B]/.test(previousChar)) continue;
+
+            const colon = str[index + alias.length];
+            if (colon !== ':' && colon !== '：') continue;
+
+            return {
+                symbol: this.normalizeSearchOperator(alias),
+                length: alias.length + 1,
+            };
+        }
+        return null;
     },
 
     tokenizeSearchExpression(expression) {
@@ -120,17 +170,13 @@ window.LocalMusicManager = {
                 }
             }
 
-            // 2. 兜底检测：符号后紧跟空格或处于串尾的运算符
-            const operatorType = operatorTypes[char];
-            if (operatorType) {
-                const nextChar = str[i + 1];
-                const isFollowedBySpaceOrEnd = !nextChar || /\s/.test(nextChar);
-                if (isFollowedBySpaceOrEnd) {
-                    flushTerm();
-                    tokens.push({ type: operatorType });
-                    i++;
-                    continue;
-                }
+            // 2. 只有输入“运算符 + 中英文冒号”才激活，避免普通空格和 R&B 被误判
+            const activatedOperator = this.matchActivatedSearchOperator(str, i);
+            if (activatedOperator?.symbol) {
+                flushTerm();
+                tokens.push({ type: operatorTypes[activatedOperator.symbol] });
+                i += activatedOperator.length;
+                continue;
             }
 
             // 普通字符（例如 R&B 中的 &）
@@ -156,7 +202,7 @@ window.LocalMusicManager = {
             } else if (node.nodeType === 1) {
                 if (node.classList.contains('lm-op-tag')) {
                     const op = node.getAttribute('data-op') || node.textContent.trim();
-                    result += `\u0001${op}\u0001 `;
+                    result += `\u0001${op}\u0001`;
                 } else if (node.tagName === 'BR') {
                     result += ' ';
                 } else {
@@ -165,7 +211,7 @@ window.LocalMusicManager = {
             }
         };
         walk(el);
-        return result.replace(/[\u200B\u00A0]/g, ' ');
+        return result.replace(/\u200B/g, '').replace(/\u00A0/g, ' ');
     },
 
     setRichInputValue(el, value) {
@@ -183,26 +229,33 @@ window.LocalMusicManager = {
         let html = '\u200B';
         let i = 0;
         const operatorSymbols = ['&', '|', '!', '(', ')'];
+        const appendOperatorTag = (symbol) => {
+            html += `<span class="lm-op-tag" data-op="${this.escapeAttr(symbol)}" contenteditable="false">${this.escapeHtml(symbol)}</span>\u200B`;
+        };
 
         while (i < str.length) {
             if (str[i] === '\u0001') {
                 const nextMarker = str.indexOf('\u0001', i + 1);
                 if (nextMarker !== -1) {
-                    const op = str.substring(i + 1, nextMarker).trim();
+                    const op = this.normalizeSearchOperator(str.substring(i + 1, nextMarker));
                     if (operatorSymbols.includes(op)) {
-                        html += `<span class="lm-op-tag" data-op="${this.escapeAttr(op)}" contenteditable="false">${this.escapeHtml(op)}</span>&nbsp;`;
+                        appendOperatorTag(op);
                         i = nextMarker + 1;
                         if (i < str.length && str[i] === ' ') i++;
                         continue;
                     }
                 }
             }
-            const char = str[i];
-            if (operatorSymbols.includes(char) && (i + 1 >= str.length || /\s/.test(str[i + 1]))) {
-                html += `<span class="lm-op-tag" data-op="${this.escapeAttr(char)}" contenteditable="false">${this.escapeHtml(char)}</span>&nbsp;`;
-                i += (str[i + 1] === ' ' ? 2 : 1);
+
+            const activatedOperator = this.matchActivatedSearchOperator(str, i);
+            if (activatedOperator?.symbol) {
+                appendOperatorTag(activatedOperator.symbol);
+                i += activatedOperator.length;
+                if (i < str.length && /[\s\u00A0]/.test(str[i])) i++;
                 continue;
             }
+
+            const char = str[i];
             html += this.escapeHtml(char);
             i++;
         }
@@ -211,6 +264,10 @@ window.LocalMusicManager = {
 
     formatRichInput(el, force = false) {
         if (!el || el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') return false;
+        // Do not replace contenteditable nodes while an IME is composing text.
+        // The browser may restore the composing text afterwards, leaving a
+        // full-width activation colon visible even though it was recognized.
+        if (el.dataset?.lmComposing === 'true') return false;
 
         const rawVal = this.getRichInputValue(el).replace(/[\u200B\u00A0]/g, '').trim();
         if (!rawVal) {
@@ -224,8 +281,11 @@ window.LocalMusicManager = {
             const walkCheck = (node) => {
                 if (node.nodeType === 3) {
                     const text = node.nodeValue || '';
-                    if (/([&|!()])(\s|\u00A0)/.test(text)) {
-                        needsFormat = true;
+                    for (let i = 0; i < text.length; i++) {
+                        if (this.matchActivatedSearchOperator(text, i)) {
+                            needsFormat = true;
+                            break;
+                        }
                     }
                 } else if (node.nodeType === 1 && !node.classList.contains('lm-op-tag')) {
                     for (let child of node.childNodes) walkCheck(child);
@@ -237,10 +297,48 @@ window.LocalMusicManager = {
         if (!needsFormat) return false;
 
         const caretOffset = this.getRichCaretOffset(el);
+        const caretMarker = this.insertRichCaretMarker(el);
         const val = this.getRichInputValue(el);
         this.setRichInputValue(el, val);
-        this.setRichCaretOffset(el, caretOffset);
+        if (!caretMarker || !this.restoreRichCaretMarker(el, caretMarker)) {
+            this.setRichCaretOffset(el, caretOffset);
+        }
         return true;
+    },
+
+    insertRichCaretMarker(el) {
+        const sel = window.getSelection();
+        if (!sel || !sel.rangeCount || !sel.isCollapsed) return '';
+        const currentRange = sel.getRangeAt(0);
+        if (!el.contains(currentRange.startContainer)) return '';
+
+        const marker = '\uE000';
+        const markerNode = document.createTextNode(marker);
+        const markerRange = currentRange.cloneRange();
+        markerRange.collapse(true);
+        markerRange.insertNode(markerNode);
+        return marker;
+    },
+
+    restoreRichCaretMarker(el, marker) {
+        if (!marker) return false;
+        const walker = document.createTreeWalker(el, 4);
+        let node;
+        while ((node = walker.nextNode())) {
+            const index = (node.nodeValue || '').indexOf(marker);
+            if (index === -1) continue;
+
+            node.nodeValue = node.nodeValue.slice(0, index) + node.nodeValue.slice(index + marker.length);
+            const range = document.createRange();
+            range.setStart(node, index);
+            range.collapse(true);
+            const sel = window.getSelection();
+            if (!sel) return false;
+            sel.removeAllRanges();
+            sel.addRange(range);
+            return true;
+        }
+        return false;
     },
 
     getRichCaretOffset(el) {
@@ -292,6 +390,25 @@ window.LocalMusicManager = {
         }
         sel.removeAllRanges();
         sel.addRange(range);
+    },
+
+    handleRichCompositionStart(event, el) {
+        const target = el || event?.target;
+        if (target?.dataset) target.dataset.lmComposing = 'true';
+    },
+
+    handleRichCompositionEnd(event, el) {
+        const target = el || event?.target;
+        if (!target?.dataset) return;
+        delete target.dataset.lmComposing;
+
+        // Wait until the browser has committed the IME's final input event,
+        // then consume either ':' or '：' and render the operator tag once.
+        setTimeout(() => {
+            if (!target.isConnected) return;
+            this.formatRichInput(target);
+            this.triggerSearchFromElement(target);
+        }, 0);
     },
 
     handleRichKeydown(event, el) {
@@ -357,7 +474,7 @@ window.LocalMusicManager = {
             } else if (node.nodeType === 1) {
                 if (node.classList.contains('lm-op-tag')) {
                     const op = node.getAttribute('data-op') || node.textContent.trim();
-                    text += `${op} `;
+                    text += `${op}: `;
                 } else {
                     for (let child of node.childNodes) walk(child);
                 }
@@ -574,6 +691,22 @@ window.LocalMusicManager = {
         });
     },
 
+    bindRichCompositionEvents() {
+        if (this.richCompositionEventsBound) return;
+        this.richCompositionEventsBound = true;
+        const selector = '#lm-quick-search, #lm-search-input, #lm-remaster-search';
+        document.addEventListener('compositionstart', (event) => {
+            if (event.target?.matches?.(selector)) {
+                this.handleRichCompositionStart(event, event.target);
+            }
+        }, true);
+        document.addEventListener('compositionend', (event) => {
+            if (event.target?.matches?.(selector)) {
+                this.handleRichCompositionEnd(event, event.target);
+            }
+        }, true);
+    },
+
     saveFilters() {
         const filters = {
             searchKeyword: this.searchKeyword,
@@ -684,45 +817,13 @@ window.LocalMusicManager = {
         }
     },
 
-    isViewingPublicSongs: false,
-
-    togglePublicSongs() {
-        this.isViewingPublicSongs = !this.isViewingPublicSongs;
-        this.syncPublicSongsBtn();
-        if (typeof showInfo === 'function') {
-            showInfo(this.isViewingPublicSongs ? '已切换至【公开歌曲】库 (_open)' : '已切换至【个人本地歌曲】');
-        }
-        this.fetchData();
-    },
-
-    syncPublicSongsBtn() {
-        const btn = document.getElementById('lm-public-songs-btn');
-        if (!btn) return;
-        const enablePublicFavorites = !!window.lx_config?.['user.enablePublicFavorites'];
-        const enablePublicNonAdminAccess = !!window.lx_config?.['user.enablePublicNonAdminAccess'];
-        const isAdmin = !!localStorage.getItem('lx_admin_password');
-        const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
-        if (enablePublicFavorites && (isLoggedIn || isAdmin || enablePublicNonAdminAccess)) {
-            btn.classList.remove('hidden');
-            if (this.isViewingPublicSongs) {
-                btn.className = 'text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-500 text-white shadow-sm transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer';
-                btn.innerHTML = '<i class="fas fa-globe text-[10px]"></i><span>公开歌曲 (已开启)</span>';
-            } else {
-                btn.className = 'text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500 transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer';
-                btn.innerHTML = '<i class="fas fa-globe text-[10px]"></i><span>公开歌曲</span>';
-            }
-        } else {
-            btn.classList.add('hidden');
-        }
-    },
-
     init() {
         // Initialization can run when the tab is clicked, or immediately.
         // Try reading global cache location to sync the selector.
         this.syncLocationSelector();
         this.resetFilters(false);
         this.bindListEvents();
-        this.syncPublicSongsBtn();
+        this.bindRichCompositionEvents();
         this.fetchData();
         this.syncRemasterVisibility();
 
@@ -733,7 +834,6 @@ window.LocalMusicManager = {
             if (tabId === 'localmusic') {
                 window.LocalMusicManager.syncLocationSelector();
                 window.LocalMusicManager.resetFilters();
-                window.LocalMusicManager.syncPublicSongsBtn();
                 window.LocalMusicManager.fetchData(true); // silent fetch
             } else {
                 // Auto exit batch mode when leaving
@@ -752,14 +852,26 @@ window.LocalMusicManager = {
     },
 
     async changeLocation() {
+        if (typeof window.isUserLoggedIn !== 'function' || !window.isUserLoggedIn()) {
+            this.showNoPermissionState();
+            if (typeof showError === 'function') showError('\u8bf7\u5148\u767b\u5f55\u540c\u6b65\u8d26\u6237');
+            return;
+        }
+
         const el = document.getElementById('lm-location-select');
         const val = el.value;
         try {
-            await fetch('/api/music/cache/config', {
+            const requestChange = () => fetch('/api/music/cache/config', {
                 method: 'POST',
                 headers: window.getUserAuthHeaders ? window.getUserAuthHeaders() : {},
                 body: JSON.stringify({ location: val })
             });
+            let response = await requestChange();
+            if (response.status === 401 && typeof window.ensureUserAuthToken === 'function') {
+                const refreshed = await window.ensureUserAuthToken({ force: true });
+                if (refreshed) response = await requestChange();
+            }
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
             // Reset subpath when changing location
             this.selectedSubPath = '';
             const subPathText = document.getElementById('lm-subpath-text');
@@ -793,16 +905,28 @@ window.LocalMusicManager = {
     },
 
     async refresh() {
+        if (typeof window.isUserLoggedIn !== 'function' || !window.isUserLoggedIn()) {
+            this.showNoPermissionState();
+            if (typeof showError === 'function') showError('\u8bf7\u5148\u767b\u5f55\u540c\u6b65\u8d26\u6237');
+            return;
+        }
+
         const btn = document.querySelector('button[title="同步并刷新"] i');
         if (btn) btn.classList.add('fa-spin');
 
         try {
             // First trigger sync on server
             if (typeof showInfo === 'function') showInfo('正在同步物理文件...');
-            const syncRes = await fetch('/api/music/cache/sync', {
+            const requestSync = () => fetch('/api/music/cache/sync', {
                 method: 'POST',
                 headers: window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}
             });
+            let syncRes = await requestSync();
+            if (syncRes.status === 401 && typeof window.ensureUserAuthToken === 'function') {
+                const refreshed = await window.ensureUserAuthToken({ force: true });
+                if (refreshed) syncRes = await requestSync();
+            }
+            if (!syncRes.ok) throw new Error(`HTTP ${syncRes.status}`);
             const syncResult = await syncRes.json();
             if (!syncResult.success) {
                 console.warn('Sync failed:', syncResult.message);
@@ -829,12 +953,16 @@ window.LocalMusicManager = {
         }
     },
 
-    handleQuickSearch(e) {
-        const el = e?.target || document.getElementById('lm-quick-search');
+    syncQuickSearchInput(el = document.getElementById('lm-quick-search')) {
         if (el) this.formatRichInput(el);
         const val = this.getRichInputValue(el);
         this.updateSearchInputErrorState(el, val);
         this.quickSearchKeyword = val.trim().toLowerCase();
+    },
+
+    handleQuickSearch(e) {
+        const el = e?.target || document.getElementById('lm-quick-search');
+        this.syncQuickSearchInput(el);
         this.applyFilters();
     },
 
@@ -901,16 +1029,15 @@ window.LocalMusicManager = {
                     <p class="font-bold tracking-wider text-base t-text-main mb-1">您没有权限查看此目录，请联系管理员设置</p>
                 </div>`;
         }
+        const permissionMessage = container?.querySelector('p');
+        if (permissionMessage) permissionMessage.textContent = '\u8bf7\u5148\u767b\u5f55\u540c\u6b65\u8d26\u6237\u540e\u67e5\u770b\u672c\u5730\u97f3\u4e50';
         const pagination = document.getElementById('lm-pagination');
         if (pagination) pagination.classList.add('hidden');
     },
 
     async fetchData(silent = false) {
         const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
-        const isAdmin = !!localStorage.getItem('lx_admin_password');
-        const enablePublicNonAdminLocalMusic = !!window.lx_config?.['user.enablePublicNonAdminLocalMusic'];
-
-        if (!isLoggedIn && !isAdmin && !enablePublicNonAdminLocalMusic) {
+        if (!isLoggedIn) {
             this.showNoPermissionState();
             return;
         }
@@ -929,11 +1056,7 @@ window.LocalMusicManager = {
         try {
             const requestList = () => {
                 const headers = window.getUserAuthHeaders ? window.getUserAuthHeaders() : {};
-                if (this.isViewingPublicSongs) {
-                    headers['x-user-name'] = '_open';
-                }
-                const url = `/api/music/cache/list${this.isViewingPublicSongs ? '?user=_open' : ''}`;
-                return fetch(url, { headers, cache: 'no-store' });
+                return fetch('/api/music/cache/list', { headers, cache: 'no-store' });
             };
 
             let res = await requestList();
@@ -1005,6 +1128,10 @@ window.LocalMusicManager = {
             this.updateSearchInputErrorState(searchInput, val);
             this.searchKeyword = val.trim().toLowerCase();
         }
+        // Treat the visible quick-search content as the source of truth. Some
+        // browsers/IMEs can leave input event state stale after editing a
+        // contenteditable operator tag.
+        this.syncQuickSearchInput();
 
         const sortBySelect = document.getElementById('lm-sort-by');
         if (sortBySelect) this.sortBy = sortBySelect.value;
@@ -1233,7 +1360,7 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = this.isViewingPublicSongs ? '_open' : ((window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open');
+        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
         const page = this.getPageSlice();
         this.updatePagination();
 
@@ -1532,6 +1659,9 @@ window.LocalMusicManager = {
     },
 
     selectAll() {
+        // Re-apply the current DOM values before selecting so a stale quick
+        // search input event can never select the unfiltered list.
+        this.applyFilters();
         this.displayData.forEach(item => this.selectedItems.add(this.getItemKey(item)));
         this.updateBatchUI();
         this.render();
@@ -1657,7 +1787,7 @@ window.LocalMusicManager = {
         if (!item) return;
 
         // Transform into songInfo for global player
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Important: Use existing checkCache via global logic if possible, 
@@ -1697,21 +1827,6 @@ window.LocalMusicManager = {
             return;
         }
 
-        // 未登录个人账号 或 查看公开库 时删除文件需要管理员权限
-        const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
-        const isAdmin = !!localStorage.getItem('lx_admin_password');
-        const requiresAdmin = this.isViewingPublicSongs || !isLoggedIn;
-
-        if (requiresAdmin && !isAdmin) {
-            if (typeof handleAdminAuth === 'function') {
-                const ok = await handleAdminAuth(this.isViewingPublicSongs ? '删除公开库中的文件需要管理员权限' : '删除本地歌曲需要验证管理员权限');
-                if (!ok) return;
-            } else {
-                if (typeof showError === 'function') showError('删除本地歌曲需要管理员权限');
-                return;
-            }
-        }
-
         if (typeof showSelect === 'function') {
             if (!(await showSelect('删除本地文件', '确定要删除此文件吗?', { danger: true }))) return;
         } else {
@@ -1725,21 +1840,6 @@ window.LocalMusicManager = {
         if (this.selectedItems.size === 0) {
             if (typeof showError === 'function') showError('请先选择要删除的文件');
             return;
-        }
-
-        // 未登录个人账号 或 查看公开库 时删除文件需要管理员权限
-        const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
-        const isAdmin = !!localStorage.getItem('lx_admin_password');
-        const requiresAdmin = this.isViewingPublicSongs || !isLoggedIn;
-
-        if (requiresAdmin && !isAdmin) {
-            if (typeof handleAdminAuth === 'function') {
-                const ok = await handleAdminAuth(this.isViewingPublicSongs ? '批量删除公开库中的文件需要管理员权限' : '批量删除本地歌曲需要验证管理员权限');
-                if (!ok) return;
-            } else {
-                if (typeof showError === 'function') showError('批量删除本地歌曲需要管理员权限');
-                return;
-            }
         }
 
         if (typeof showSelect === 'function') {
@@ -1757,12 +1857,6 @@ window.LocalMusicManager = {
                 'Content-Type': 'application/json',
                 ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {})
             };
-            const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
-            if (this.isViewingPublicSongs || !isLoggedIn) {
-                headers['x-user-name'] = '_open';
-                delete headers['x-user-token'];
-                delete headers['x-user-password'];
-            }
             const res = await fetch('/api/music/cache/remove', {
                 method: 'POST',
                 headers,
@@ -2028,7 +2122,7 @@ window.LocalMusicManager = {
     downloadSingle(index) {
         const item = this.displayData[index];
         if (!item) return;
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
         const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
 
@@ -2048,7 +2142,7 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Use a slight delay to prevent browser from blocking multiple downloads
@@ -2187,7 +2281,7 @@ window.LocalMusicManager = {
         }
 
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
             const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             const resp = await fetch('/api/music/identify', {
@@ -2475,7 +2569,7 @@ window.LocalMusicManager = {
         // 1. 优先：使用 AcoustID 指纹识别
         console.log('[AutoLink] Using AcoustID first for:', localItem.filename);
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
             const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             const resp = await fetch('/api/music/identify', {
@@ -2679,7 +2773,7 @@ window.LocalMusicManager = {
         if (typeof showMsg === 'function') showMsg(`正在移动 ${filenames.length} 首歌曲到 ${targetSubPath || '根目录'}...`, 'info');
 
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
             const res = await fetch(`/api/music/cache/categorize?user=${encodeURIComponent(username)}`, {
                 method: 'POST',
                 headers: {
@@ -2745,9 +2839,8 @@ window.LocalMusicManager = {
         const username = window.getRemasterStorageUsername?.()
             || (window.currentListData && window.currentListData.username)
             || localStorage.getItem('lx_sync_user')
-            || '_open';
-        const normalizedUsername = !username || username === 'default' ? '_open' : username;
-        return `lx_remaster_target_quality:${encodeURIComponent(normalizedUsername)}`;
+            || 'account';
+        return `lx_remaster_target_quality:${encodeURIComponent(username)}`;
     },
 
     saveRemasterTargetQuality(quality) {

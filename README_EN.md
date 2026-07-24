@@ -109,14 +109,6 @@ Fully compatible with the Subsonic protocol, allowing you to use various Subsoni
   <img src="md/subsonic-search.png" width="400" alt="Subsonic Online Search">
 </p>
 
-### 11. Public Library & Shared Favorites
-
-When **"Enable Public Favorites and Songs"** is enabled in the backend settings, all users (guests or different accounts) can share a common public music library and public playlists.
-
-<p align="center">
-  <img src="md/_open_song.png" width="800" alt="Public Library & Shared Favorites">
-</p>
-
 ## 🔒 Access Control & Security
 To protect your privacy, the Web Player supports password protection.
 ### How to Enable
@@ -126,14 +118,6 @@ To protect your privacy, the Web Player supports password protection.
    - `WEBPLAYER_PASSWORD=yourpassword`: Set access password
 2. **Web Interface**:
    Log in to the management dashboard (default port 9527), go to **"System Config"**, check **"Enable Web Player Password"** and set your password.
-
-### Permission & Custom Source Matrix (when `user.enablePublicRestriction` is enabled)
-
-| User Type | View List | Use/Toggle (Personal) | Change Default Quality | Upload/Import Public | Delete/Modify Public |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Admin** | ✅ Allowed | ✅ Allowed | ✅ Allowed | ✅ Allowed | ✅ Allowed |
-| **Logged-in** | ✅ Allowed | ✅ Allowed | ✅ Allowed | ❌ Denied | ❌ Denied |
-| **Guest** | ❌ Hidden | ❌ Denied | ❌ Denied | ❌ Denied | ❌ Denied |
 
 ## 📱 Mobile Adaptation
 The Web Player is deeply optimized for mobile devices, providing a native App-like experience in mobile browsers.
@@ -272,10 +256,6 @@ Edit `config.js` directly. Environment variables take precedence:
 | `ENABLE_WEBPLAYER_AUTH` | `player.enableAuth` | Enable Web Player password | `false` |
 | `WEBPLAYER_PASSWORD` | `player.password` | Web Player password | `123456` |
 | `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |
-| `ENABLE_PUBLIC_USER_RESTRICTION` | `user.enablePublicRestriction` | Enable public user permission restriction (restrict upload/delete public sources) | `true` |
-| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `user.enablePublicNonAdminLocalMusic` | Enable non-admin access to local music (allows non-admin public accounts to access local music) | `false` |
-| `ENABLE_PUBLIC_FAVORITES` | `user.enablePublicFavorites` | Enable public favorites and songs (allows guest/public to view and play public favorites) | `false` |
-| `ENABLE_PUBLIC_NON_ADMIN_ACCESS` | `user.enablePublicNonAdminAccess` | Enable non-admin access to public favorites & songs (allows non-admin public accounts to view) | `false` |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | Enable cache settings restriction for logged-in non-admin users | `false` |
 | `ENABLE_CACHE_SIZE_LIMIT` | `user.enableCacheSizeLimit` | Enable cache size limit (auto-cleanup via LRU) | `false` |
 | `CACHE_SIZE_LIMIT` | `user.cacheSizeLimit` | Cache size limit in MB | `2000` |

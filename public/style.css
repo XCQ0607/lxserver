@@ -2646,6 +2646,41 @@ input:-webkit-autofill:active {
     /* 防止头像被压缩 */
 }
 
+.user-role-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex-shrink: 0;
+    padding: 0.25rem 0.5rem;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+    white-space: nowrap;
+}
+
+.user-role-badge::before {
+    content: '';
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.user-role-badge.admin {
+    color: #f59e0b;
+    background: rgba(245, 158, 11, 0.12);
+    border-color: rgba(245, 158, 11, 0.28);
+}
+
+.user-role-badge.standard {
+    color: var(--text-secondary);
+    background: rgba(148, 163, 184, 0.1);
+    border-color: rgba(148, 163, 184, 0.2);
+}
+
 /* 修复操作列按钮样式 */
 .col-actions .btn-delete {
     width: 32px;

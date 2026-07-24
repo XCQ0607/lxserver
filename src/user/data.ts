@@ -4,6 +4,7 @@ import { randomBytes } from 'node:crypto'
 import { throttle } from '@/utils/common'
 import { filterFileName, toMD5 } from '@/utils'
 import { File } from '@/constants'
+import { normalizeUsername, validateUsername } from '@/utils/username'
 
 
 interface ServerInfo {
@@ -42,12 +43,30 @@ export const setVersion = (version: number) => {
 }
 
 export const getUserDirname = (userName: string) => {
-  if (userName === '_open') return '_open'
-  return `${filterFileName(userName)}_${toMD5(userName).substring(0, 6)}`
+  const normalizedName = normalizeUsername(userName)
+  return `${filterFileName(normalizedName)}_${toMD5(normalizedName).substring(0, 6)}`
 }
 
+const getLegacyUserDirname = (userName: string) => {
+  const legacyName = validateUsername(userName)
+  return filterFileName(legacyName) + '_' + toMD5(legacyName).substring(0, 6)
+}
+
+const getLegacyUserSourcePath = (userName: string) => path.join(
+  global.lx.userPath,
+  'source',
+  validateUsername(userName),
+)
+
+export const getUserSourcePath = (userName: string) => path.join(
+  global.lx.userPath,
+  'source',
+  normalizeUsername(userName),
+)
+
 export const getUserConfig = (userName: string): Required<LX.User> => {
-  const user = global.lx.config.users.find(u => u.name == userName)
+  const normalizedName = normalizeUsername(userName)
+  const user = global.lx.config.users.find(u => u.name === normalizedName)
   if (!user) throw new Error('user not found: ' + userName)
   return {
     maxSnapshotNum: global.lx.config.maxSnapshotNum,
@@ -60,10 +79,25 @@ export const getUserConfig = (userName: string): Required<LX.User> => {
 // 读取所有用户目录下的devicesInfo信息，建立clientId与用户的对应关系，用于非首次连接
 const deviceUserMap = new Map<string, string>()
 for (const deviceInfo of fs.readdirSync(global.lx.userPath).map(dirname => {
-  const devicesFilePath = path.join(global.lx.userPath, dirname, File.userDevicesJSON)
-  if (fs.existsSync(devicesFilePath)) {
-    const devicesInfo = JSON.parse(fs.readFileSync(devicesFilePath).toString()) as DevicesInfo
-    if (getUserDirname(devicesInfo.userName) == dirname) return { userName: devicesInfo.userName, devices: devicesInfo.clients }
+  try {
+    const devicesFilePath = path.join(global.lx.userPath, dirname, File.userDevicesJSON)
+    if (fs.existsSync(devicesFilePath)) {
+      const devicesInfo = JSON.parse(fs.readFileSync(devicesFilePath).toString()) as DevicesInfo
+      const originalUserName = validateUsername(devicesInfo.userName)
+      const userName = normalizeUsername(originalUserName)
+      if (
+        global.lx.config.users.some(user => user.name === userName) &&
+        getUserDirname(userName) == dirname
+      ) {
+        if (originalUserName !== userName) {
+          devicesInfo.userName = userName
+          fs.writeFileSync(devicesFilePath, JSON.stringify(devicesInfo, null, 2))
+        }
+        return { userName, devices: devicesInfo.clients }
+      }
+    }
+  } catch (err: any) {
+    console.warn(`[UserData] Ignoring invalid devices file in ${dirname}: ${err.message}`)
   }
   return { userName: '', devices: {} }
 })) {
@@ -73,10 +107,16 @@ for (const deviceInfo of fs.readdirSync(global.lx.userPath).map(dirname => {
 }
 export const getUserName = (clientId: string | null): string | null => {
   if (!clientId) return null
-  return deviceUserMap.get(clientId) ?? null
+  const userName = deviceUserMap.get(clientId)
+  if (!userName) return null
+  if (!global.lx.config.users.some(user => user.name === userName)) {
+    deviceUserMap.delete(clientId)
+    return null
+  }
+  return userName
 }
 export const setUserName = (clientId: string, dir: string) => {
-  deviceUserMap.set(clientId, dir)
+  deviceUserMap.set(clientId, normalizeUsername(dir))
 }
 export const deleteUserName = (clientId: string) => {
   deviceUserMap.delete(clientId)
@@ -89,48 +129,89 @@ export const deleteUserName = (clientId: string) => {
  * @returns 新的数据路径
  */
 export const migrateUserData = (oldName: string, newName: string) => {
-  const oldDirname = getUserDirname(oldName)
-  const newDirname = getUserDirname(newName)
+  const normalizedNewName = normalizeUsername(newName)
+  const oldDirname = getLegacyUserDirname(oldName)
+  const newDirname = getUserDirname(normalizedNewName)
   const oldDirPath = path.join(global.lx.userPath, oldDirname)
   const newDirPath = path.join(global.lx.userPath, newDirname)
-
-  if (fs.existsSync(newDirPath)) throw new Error('Target directory already exists')
-  if (!fs.existsSync(oldDirPath)) {
-    // 如果旧目录不存在，可能是还没产生过数据，直接返回新路径即可
-    return newDirPath
+  const oldSourcePath = getLegacyUserSourcePath(oldName)
+  const newSourcePath = getUserSourcePath(normalizedNewName)
+  const hasUserData = fs.existsSync(oldDirPath)
+  const hasSourceData = fs.existsSync(oldSourcePath)
+  const hasTargetSourceData = fs.existsSync(newSourcePath)
+  let sourcePathsMatch = false
+  if (hasSourceData && hasTargetSourceData) {
+    const oldRealPath = fs.realpathSync.native(oldSourcePath)
+    const newRealPath = fs.realpathSync.native(newSourcePath)
+    sourcePathsMatch = process.platform === 'win32'
+      ? oldRealPath.toLowerCase() === newRealPath.toLowerCase()
+      : oldRealPath === newRealPath
   }
 
-  // 1. 迁移文件夹数据 (Copy-then-Delete 方案，对 Windows 更友好)
+  if (hasUserData && fs.existsSync(newDirPath)) throw new Error('Target user directory already exists')
+  if (hasSourceData && hasTargetSourceData && !sourcePathsMatch) throw new Error('Target source directory already exists')
+  if (!hasUserData && !hasSourceData) return newDirPath
+
+  const copiedTargets: string[] = []
+  let sourceCaseRenamed = false
   try {
-    // 递归复制整个目录
-    fs.cpSync(oldDirPath, newDirPath, { recursive: true })
+    if (hasUserData) {
+      copiedTargets.push(newDirPath)
+      fs.cpSync(oldDirPath, newDirPath, { recursive: true })
+    }
+    if (hasSourceData && !sourcePathsMatch) {
+      copiedTargets.push(newSourcePath)
+      fs.cpSync(oldSourcePath, newSourcePath, { recursive: true })
+    } else if (hasSourceData && sourcePathsMatch && oldSourcePath !== newSourcePath) {
+      // Windows treats these paths as identical, so use an intermediate name to update casing.
+      const tempSourcePath = `${oldSourcePath}.rename-${randomBytes(4).toString('hex')}`
+      fs.renameSync(oldSourcePath, tempSourcePath)
+      try {
+        fs.renameSync(tempSourcePath, newSourcePath)
+        sourceCaseRenamed = true
+      } catch (err) {
+        fs.renameSync(tempSourcePath, oldSourcePath)
+        throw err
+      }
+    }
   } catch (err: any) {
     console.error(`[MigrateData] Copy failed: ${err.message}`)
+    if (sourceCaseRenamed) {
+      const tempSourcePath = `${newSourcePath}.rollback-${randomBytes(4).toString('hex')}`
+      try {
+        fs.renameSync(newSourcePath, tempSourcePath)
+        fs.renameSync(tempSourcePath, oldSourcePath)
+      } catch { }
+    }
+    for (const targetPath of copiedTargets.reverse()) {
+      try { fs.rmSync(targetPath, { recursive: true, force: true }) } catch { }
+    }
     throw err
   }
 
-  // 2. 更新新目录中的 devices.json 内部的 userName
+  // Update devices.json only after all user-owned directories have copied successfully.
   const devicesFilePath = path.join(newDirPath, File.userDevicesJSON)
-  if (fs.existsSync(devicesFilePath)) {
+  if (hasUserData && fs.existsSync(devicesFilePath)) {
     try {
       const devicesInfo = JSON.parse(fs.readFileSync(devicesFilePath, 'utf-8')) as DevicesInfo
-      devicesInfo.userName = newName
+      devicesInfo.userName = normalizedNewName
       fs.writeFileSync(devicesFilePath, JSON.stringify(devicesInfo, null, 2))
 
-      // 3. 更新内存中的 deviceUserMap
       for (const client of Object.values(devicesInfo.clients)) {
-        deviceUserMap.set(client.clientId, newName)
+        deviceUserMap.set(client.clientId, normalizedNewName)
       }
     } catch (err: any) {
       console.warn(`[MigrateData] Failed to update devices.json: ${err.message}`)
     }
   }
 
-  // 4. 尝试删除旧文件夹 (如果锁定则跳过，不影响新用户使用)
-  try {
-    fs.rmSync(oldDirPath, { recursive: true, force: true })
-  } catch (err: any) {
-    console.warn(`[MigrateData] Could not remove old directory ${oldDirname}: ${err.message}. It may be locked by another process.`)
+  for (const oldPath of [hasUserData ? oldDirPath : '', hasSourceData && !sourcePathsMatch ? oldSourcePath : '']) {
+    if (!oldPath) continue
+    try {
+      fs.rmSync(oldPath, { recursive: true, force: true })
+    } catch (err: any) {
+      console.warn(`[MigrateData] Could not remove old directory ${oldPath}: ${err.message}`)
+    }
   }
 
   return newDirPath
@@ -180,10 +261,11 @@ export class UserDataManage {
   }
 
   constructor(userName: string) {
-    this.userName = userName
-    this.userDir = path.join(global.lx.userPath, getUserDirname(userName))
+    this.userName = normalizeUsername(userName)
+    this.userDir = path.join(global.lx.userPath, getUserDirname(this.userName))
     this.devicesFilePath = path.join(this.userDir, File.userDevicesJSON)
-    this.devicesInfo = fs.existsSync(this.devicesFilePath) ? JSON.parse(fs.readFileSync(this.devicesFilePath).toString()) : { userName, clients: {} }
+    this.devicesInfo = fs.existsSync(this.devicesFilePath) ? JSON.parse(fs.readFileSync(this.devicesFilePath).toString()) : { userName: this.userName, clients: {} }
+    this.devicesInfo.userName = this.userName
 
     this.saveDevicesInfoThrottle = throttle(() => {
       fs.writeFile(this.devicesFilePath, JSON.stringify(this.devicesInfo), 'utf8', (err) => {

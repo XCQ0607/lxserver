@@ -131,7 +131,7 @@ Used by the management dashboard for real-time adjustments of server behavior. R
 
 - `GET /api/config`: Get all current global configuration items (including final values overridden by env vars).
 - `POST /api/config`: Incrementally update global configuration.
-  - **Body Example**: `{"singer.sourcePriority": ["tx", "wy"], "user.enablePublicRestriction": true}`
+  - **Body Example**: `{"singer.sourcePriority": ["tx", "wy"]}`
   - **Validation**: Certain fields like `singer.sourcePriority` will be validated for correctness.
 
 ---
@@ -142,7 +142,7 @@ Interfaces designed specifically for Web Player frontend logic, supporting Sessi
 
 ### 8.1 Basic Config & Auth
 - `GET /api/music/config`: **Public interface**, get runtime status configuration of the Web Player.
-  - **Response**: `{"player.enableAuth": boolean, "user.enablePublicRestriction": boolean}`
+  - **Response**: `{"player.enableAuth": boolean}`
 - `POST /api/music/auth`: Validate access password and issue `lx_player_session` HttpOnly Cookie upon success.
 - `POST /api/music/auth/logout`: Completely invalidate the current Session.
 - `GET /api/music/auth/verify`: Check if the current Session is still valid.
@@ -157,4 +157,3 @@ Interfaces designed specifically for Web Player frontend logic, supporting Sessi
 
 ### 8.3 Real-time Progress (SSE)
 - `GET /api/music/progress?reqId=xxx`: real-time subscription to external link resolution and cache progress via Server-Sent Events (SSE).
-

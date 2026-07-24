@@ -10,6 +10,7 @@ import querystring from 'node:querystring'
 import store from '@/utils/cache'
 import { getUserSpace, getUserName, setUserName, createClientKeyInfo } from '@/user'
 import { toMD5 } from '@/utils'
+import { tryNormalizeUsername } from '@/utils/username'
 
 const getAvailableIP = (req: http.IncomingMessage) => {
   let ip = getIP(req)
@@ -17,11 +18,12 @@ const getAvailableIP = (req: http.IncomingMessage) => {
 }
 
 const verifyByKey = (encryptMsg: string, userId: string, targetUserName?: string) => {
-  const userName = getUserName(userId)
+  const userName = tryNormalizeUsername(getUserName(userId))
   if (!userName) return null
 
   // 如果指定了目标用户名（通过URL路径），则必须匹配
-  if (global.lx.config['user.enablePath'] && targetUserName && userName !== targetUserName) {
+  const normalizedTargetUserName = targetUserName == null ? null : tryNormalizeUsername(targetUserName)
+  if (global.lx.config['user.enablePath'] && targetUserName && userName !== normalizedTargetUserName) {
     return null
   }
 
@@ -47,8 +49,10 @@ const verifyByKey = (encryptMsg: string, userId: string, targetUserName?: string
 }
 
 const verifyByCode = (encryptMsg: string, users: LX.Config['users'], targetUserName?: string) => {
+  const normalizedTargetUserName = targetUserName == null ? null : tryNormalizeUsername(targetUserName)
+  if (targetUserName && !normalizedTargetUserName) return null
   for (const userInfo of users) {
-    if (targetUserName && userInfo.name !== targetUserName) continue
+    if (normalizedTargetUserName && userInfo.name !== normalizedTargetUserName) continue
     let key = toMD5(userInfo.password).substring(0, 16)
     // const iv = Buffer.from(key.split('').reverse().join('')).toString('base64')
     key = Buffer.from(key).toString('base64')
@@ -138,12 +142,13 @@ export const authConnect = async (req: http.IncomingMessage) => {
         const pathParts = path.split('/').filter(p => p)
         // 假设路径格式为 /<username>
         // 解码 URL 编码的用户名
-        const urlUserName = pathParts[0] ? decodeURIComponent(pathParts[0]) : null
-        const clientUserName = getUserName(i)
+        const pathUserName = pathParts[0] ? decodeURIComponent(pathParts[0]) : null
+        const urlUserName = pathUserName === 'socket' ? null : tryNormalizeUsername(pathUserName)
+        const clientUserName = tryNormalizeUsername(getUserName(i))
 
         // console.log('Auth check path:', urlUserName, clientUserName)
 
-        if (urlUserName && urlUserName !== 'socket' && clientUserName && urlUserName !== clientUserName) {
+        if (pathUserName !== 'socket' && (!urlUserName || !clientUserName || urlUserName !== clientUserName)) {
           // 如果路径中有用户名，且与客户端所属用户不一致，则拒绝连接
           throw new Error('User mismatch')
         }
@@ -156,4 +161,3 @@ export const authConnect = async (req: http.IncomingMessage) => {
   }
   throw new Error('failed')
 }
-

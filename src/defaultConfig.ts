@@ -7,10 +7,6 @@ const config: LX.Config = {
   port: 9527, // 端口
   'user.enablePath': true, // 是否开启用户路径
   'user.enableRoot': false, // 是否开启根路径
-  'user.enablePublicRestriction': true, // 是否启用公开用户权限限制
-  'user.enablePublicNonAdminLocalMusic': false, // 是否开启非管理员访问本地音乐
-  'user.enablePublicFavorites': false, // 是否开启公开收藏和歌曲
-  'user.enablePublicNonAdminAccess': false, // 是否开启非管理员访问公开收藏和歌曲
   'user.enableLoginCacheRestriction': false, // 是否启用登录用户缓存限制
   'user.enableCacheSizeLimit': false, // 是否启用缓存空间限制
   'user.cacheSizeLimit': 2000, // 缓存空间限制大小 (MB)

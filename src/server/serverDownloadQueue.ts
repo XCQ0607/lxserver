@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import * as fileCache from './fileCache'
+import { tryNormalizeUsername } from '@/utils/username'
 
 export type ServerDownloadStatus = 'waiting' | 'downloading' | 'tagging' | 'paused' | 'finished' | 'exists' | 'error'
 
@@ -59,13 +60,27 @@ const taskMapKey = (username: string, id: string) => `${username}:${id}`
 const getQueueFile = () => path.join(global.lx.dataPath, 'server-download-queue.json')
 const validStatuses = new Set<ServerDownloadStatus>(['waiting', 'downloading', 'tagging', 'paused', 'finished', 'exists', 'error'])
 
+const getConfiguredQueueUser = (username: unknown): string | null => {
+  const normalized = tryNormalizeUsername(username)
+  return normalized && global.lx.config.users.some(user => user.name === normalized) ? normalized : null
+}
+
+const assertConfiguredQueueUser = (username: unknown): string => {
+  const normalized = getConfiguredQueueUser(username)
+  if (!normalized) throw new Error('Download task user no longer exists')
+  return normalized
+}
+
 const normalizeConcurrency = (value: unknown) => {
   const parsed = Number.parseInt(String(value), 10)
   if (!Number.isFinite(parsed)) return DEFAULT_CONCURRENT
   return Math.min(MAX_CONCURRENT_PER_USER, Math.max(1, parsed))
 }
 
-export const getConcurrency = (username: string) => concurrencyByUser.get(username) || DEFAULT_CONCURRENT
+export const getConcurrency = (username: string) => {
+  const normalized = tryNormalizeUsername(username)
+  return normalized ? concurrencyByUser.get(normalized) || DEFAULT_CONCURRENT : DEFAULT_CONCURRENT
+}
 
 const sanitizeId = (value: unknown) => {
   const id = String(value || '')
@@ -107,11 +122,14 @@ const loadTasks = () => {
     if (!Array.isArray(savedTasks)) return
     if (!Array.isArray(data) && data?.concurrencyByUser && typeof data.concurrencyByUser === 'object') {
       for (const [username, value] of Object.entries(data.concurrencyByUser)) {
-        concurrencyByUser.set(username, normalizeConcurrency(value))
+        const normalizedUsername = getConfiguredQueueUser(username)
+        if (!normalizedUsername) continue
+        concurrencyByUser.set(normalizedUsername, normalizeConcurrency(value))
       }
     }
     for (const raw of savedTasks) {
-      if (!raw || !raw.username || !raw.songInfo) continue
+      const normalizedUsername = getConfiguredQueueUser(raw?.username)
+      if (!raw || !normalizedUsername || !raw.songInfo) continue
       const id = sanitizeId(raw.id)
       const savedStatus = validStatuses.has(raw.status) ? raw.status as ServerDownloadStatus : 'waiting'
       const status: ServerDownloadStatus = savedStatus === 'downloading' || savedStatus === 'tagging' ? 'waiting' : savedStatus
@@ -120,7 +138,7 @@ const loadTasks = () => {
       const now = Date.now()
       const task: ServerDownloadTask = {
         id,
-        username: String(raw.username),
+        username: normalizedUsername,
         songKey: String(raw.songKey || `${fileCache.normalizeSongId(raw.songInfo)}_${requestedQuality}`),
         activeSongKey: status === 'waiting' ? undefined : raw.activeSongKey ? String(raw.activeSongKey) : undefined,
         songInfo: raw.songInfo,
@@ -247,6 +265,7 @@ const processQueue = async () => {
 }
 
 export const setConcurrency = (username: string, value: unknown) => {
+  username = assertConfiguredQueueUser(username)
   const concurrency = normalizeConcurrency(value)
   concurrencyByUser.set(username, concurrency)
   saveNow()
@@ -265,6 +284,7 @@ export const initialize = (downloadResolver: DownloadResolver) => {
 }
 
 export const enqueue = (username: string, inputs: QueueInput[]) => {
+  username = assertConfiguredQueueUser(username)
   const added: ServerDownloadTask[] = []
   for (const input of inputs) {
     if (!input?.songInfo) continue
@@ -316,12 +336,16 @@ export const enqueue = (username: string, inputs: QueueInput[]) => {
   return added.map(task => getPublicTask(task))
 }
 
-export const list = (username: string) => Array.from(tasks.values())
-  .filter(task => task.username === username)
-  .sort((a, b) => a.createdAt - b.createdAt)
-  .map(task => getPublicTask(task))
+export const list = (username: string) => {
+  username = assertConfiguredQueueUser(username)
+  return Array.from(tasks.values())
+    .filter(task => task.username === username)
+    .sort((a, b) => a.createdAt - b.createdAt)
+    .map(task => getPublicTask(task))
+}
 
 export const pause = (username: string, id?: string) => {
+  username = assertConfiguredQueueUser(username)
   for (const task of tasks.values()) {
     if (task.username !== username || (id && task.id !== id)) continue
     if (!['waiting', 'downloading', 'tagging'].includes(task.status)) continue
@@ -335,6 +359,7 @@ export const pause = (username: string, id?: string) => {
 }
 
 export const resume = (username: string, id?: string) => {
+  username = assertConfiguredQueueUser(username)
   for (const task of tasks.values()) {
     if (task.username !== username || (id && task.id !== id)) continue
     if (task.status !== 'paused' && task.status !== 'error') continue
@@ -353,6 +378,7 @@ export const resume = (username: string, id?: string) => {
 }
 
 export const remove = (username: string, options: { id?: string; all?: boolean; completed?: boolean }) => {
+  username = assertConfiguredQueueUser(username)
   for (const [key, task] of tasks) {
     if (task.username !== username) continue
     const shouldRemove = options.all || (options.id && task.id === options.id) || (options.completed && ['finished', 'exists'].includes(task.status))
@@ -362,4 +388,28 @@ export const remove = (username: string, options: { id?: string; all?: boolean; 
   }
   saveNow()
   void processQueue()
+}
+
+export const clearUser = (username: string) => {
+  const normalizedUsername = tryNormalizeUsername(username)
+  if (normalizedUsername) username = normalizedUsername
+  for (const [key, task] of tasks) {
+    if (task.username !== username) continue
+    controllers.get(key)?.abort()
+    tasks.delete(key)
+  }
+  concurrencyByUser.delete(username)
+  saveNow()
+  void processQueue()
+}
+
+export const pruneUsers = () => {
+  const invalidUsers = new Set(Array.from(tasks.values())
+    .filter(task => !getConfiguredQueueUser(task.username))
+    .map(task => task.username))
+  for (const username of invalidUsers) clearUser(username)
+  for (const username of Array.from(concurrencyByUser.keys())) {
+    if (!getConfiguredQueueUser(username)) concurrencyByUser.delete(username)
+  }
+  saveNow()
 }

@@ -3,6 +3,7 @@ import {
   ListManage,
   DislikeManage,
 } from '@/modules'
+import { normalizeUsername } from '@/utils/username'
 
 export interface UserSpace {
   dataManage: UserDataManage
@@ -17,12 +18,14 @@ const renamingUsers = new Set<string>()
 const delayTime = 60 * 60 * 1000 // 延长到 1 小时
 const delayReleaseTimeouts = new Map<string, NodeJS.Timeout>()
 const clearDelayReleaseTimeout = (userName: string) => {
+  userName = normalizeUsername(userName)
   if (!delayReleaseTimeouts.has(userName)) return
 
   clearTimeout(delayReleaseTimeouts.get(userName))
   delayReleaseTimeouts.delete(userName)
 }
 const seartDelayReleaseTimeout = (userName: string) => {
+  userName = normalizeUsername(userName)
   clearDelayReleaseTimeout(userName)
   delayReleaseTimeouts.set(userName, setTimeout(() => {
     users.delete(userName)
@@ -30,6 +33,7 @@ const seartDelayReleaseTimeout = (userName: string) => {
 }
 
 export const getUserSpace = (userName: string) => {
+  userName = normalizeUsername(userName)
   if (renamingUsers.has(userName)) {
     throw new Error(`User ${userName} is being renamed, access denied temporarily`)
   }
@@ -58,6 +62,7 @@ export const getUserSpace = (userName: string) => {
 }
 
 export const releaseUserSpace = (userName: string, force = false) => {
+  userName = normalizeUsername(userName)
   if (force) {
     clearDelayReleaseTimeout(userName)
     users.delete(userName)
@@ -69,6 +74,7 @@ export const releaseUserSpace = (userName: string, force = false) => {
  * @param oldName 旧用户名
  */
 export const renameUserSpace = (oldName: string) => {
+  oldName = normalizeUsername(oldName)
   clearDelayReleaseTimeout(oldName)
   users.delete(oldName)
   renamingUsers.add(oldName)
@@ -79,6 +85,7 @@ export const renameUserSpace = (oldName: string) => {
  * @param oldName 旧用户名
  */
 export const finishRenameUserSpace = (oldName: string) => {
+  oldName = normalizeUsername(oldName)
   renamingUsers.delete(oldName)
 }
 

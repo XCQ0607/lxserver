@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import * as fileCache from './fileCache'
+import { normalizeUsername } from '@/utils/username'
 
 const MAX_REMASTER_ATTEMPTS = 3
 const QUALITY_ORDER = ['128k', '192k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'] as const
@@ -233,6 +234,7 @@ const runTask = async (task: RemasterTask, items: fileCache.CacheItem[], allItem
 }
 
 export const start = async (username: string, targetQuality: string, filenames: unknown) => {
+  username = normalizeUsername(username)
   if (!resolver) throw new Error('洗版服务尚未就绪')
   if (!QUALITY_SET.has(targetQuality)) throw new Error('不支持该目标音质')
   const current = tasks.get(username)
@@ -280,6 +282,7 @@ export const start = async (username: string, targetQuality: string, filenames: 
 }
 
 export const cancel = (username: string) => {
+  username = normalizeUsername(username)
   const task = tasks.get(username)
   if (!task || task.status !== 'running') return false
   task.controller.abort()
@@ -287,7 +290,15 @@ export const cancel = (username: string) => {
   return true
 }
 
+export const clear = (username: string) => {
+  username = normalizeUsername(username)
+  const task = tasks.get(username)
+  if (task?.status === 'running') task.controller.abort()
+  return tasks.delete(username)
+}
+
 export const getStatus = (username: string, offset = 0, limit = 200) => {
+  username = normalizeUsername(username)
   const task = tasks.get(username)
   if (!task) return {
     status: 'idle',

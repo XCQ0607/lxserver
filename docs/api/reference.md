@@ -153,7 +153,7 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 
 - `GET /api/config`: 获取服务器当前的所有可配置项（含环境变量覆盖后的最终值）。
 - `POST /api/config`: 增量更新全局配置。
-  - **参数示例**: `{"singer.sourcePriority": ["tx", "wy"], "user.enablePublicRestriction": true}`
+  - **参数示例**: `{"singer.sourcePriority": ["tx", "wy"]}`
   - **验证**: 某些字段（如 `singer.sourcePriority`）会进行合法性校验。
 
 ---
@@ -164,7 +164,7 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 
 ### 8.1 基础配置与认证
 - `GET /api/music/config`: **公开接口**，获取 Web 播放器的运行状态配置。
-  - **响应**: `{"player.enableAuth": boolean, "user.enablePublicRestriction": boolean}`
+  - **响应**: `{"player.enableAuth": boolean}`
 - `POST /api/music/auth`: 校验访问密码，成功后下发 `lx_player_session` HttpOnly Cookie。
 - `POST /api/music/auth/logout`: 彻底注销当前的 Session 会话。
 - `GET /api/music/auth/verify`: 检查当前 Session 是否依然有效。
@@ -179,4 +179,3 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 
 ### 8.3 实时进度 (SSE)
 - `GET /api/music/progress?reqId=xxx`: 通过 Server-Sent Events (SSE) 实时订阅外链解析、缓存进度等流式信息。
-

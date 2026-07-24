@@ -1000,13 +1000,6 @@
                                     <span id="lm-subpath-text" class="max-w-[40px] md:max-w-[60px] truncate">全部</span>
                                 </button>
                             </div>
-                            <!-- [新增] 公开歌曲 切换按钮 -->
-                            <button id="lm-public-songs-btn" onclick="window.LocalMusicManager.togglePublicSongs()"
-                                class="hidden text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500 transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer"
-                                title="切换显示公开用户的本地歌曲">
-                                <i class="fas fa-globe text-[10px]"></i>
-                                <span>公开歌曲</span>
-                            </button>
                         </div>
 
                         <!-- Desktop Search & Actions -->
@@ -1039,10 +1032,10 @@
                             </div>
 
                             <div
-                                class="relative group flex-1 max-w-[150px] md:max-w-[200px] order-4 md:order-3 ml-auto md:ml-0">
+                                class="relative group col-span-2 md:col-span-1 w-full min-w-0 md:flex-1 md:max-w-[520px] lg:max-w-[640px] xl:max-w-[760px] order-4 md:order-3 ml-auto md:ml-0">
                                 <i
                                     class="fas fa-search absolute left-2 top-1/2 -translate-y-1/2 t-text-muted text-[10px] pointer-events-none z-10"></i>
-                                <div id="lm-quick-search" contenteditable="true" data-placeholder="快速搜索 (加空格使用 & | ! 逻辑)..."
+                                <div id="lm-quick-search" contenteditable="true" data-placeholder="快速搜索（&amp;/与、|/或、!/非、()；输入 : 或 ：激活）"
                                     oninput="window.LocalMusicManager.handleQuickSearch(event)"
                                     onkeydown="window.LocalMusicManager.handleRichKeydown(event, this)"
                                     onpaste="window.LocalMusicManager.handleRichPaste(event, this)"
@@ -1088,12 +1081,12 @@
                                 <div class="md:col-span-2 flex items-center gap-2 shrink-0">
                                     <div class="flex items-center gap-1 min-w-[35px] md:min-w-[45px] ml-1">
                                         <label class="text-[9px] md:text-[10px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-widest">搜索</label>
-                                        <span class="text-[9px] t-text-muted hover:text-emerald-500 transition-colors cursor-help shrink-0" title="布尔搜索语法提示：&#10;在符号后按空格自动激活为方框标签：&#10;&  与  |  或  !  非  ( )  括号&#10;示例：( 周杰伦 | 蔡依林 ) & ! Live"><i class="fas fa-question-circle text-emerald-500/80"></i></span>
+                                        <span class="text-[9px] t-text-muted hover:text-emerald-500 transition-colors cursor-help shrink-0" title="布尔搜索语法提示：&#10;输入运算符后加 : 或 ：激活方框标签：&#10;AND / 与 / &amp; / ＆ = 与&#10;OR / 或 / | / ｜ = 或&#10;NOT / 非 / ! / ！ = 非&#10;( ) / （ ）= 括号&#10;示例：（：周杰伦 OR: 蔡依林 ）： AND: 非：Live"><i class="fas fa-question-circle text-emerald-500/80"></i></span>
                                     </div>
                                     <div class="relative group flex-1">
                                         <i
                                             class="fas fa-search absolute left-2 top-1/2 -translate-y-1/2 text-gray-400 group-focus-within:text-emerald-500 text-[9px] md:text-[10px] pointer-events-none z-10"></i>
-                                        <div id="lm-search-input" contenteditable="true" data-placeholder="搜索歌曲/歌手/专辑... (加空格激活: & 与 | 或 ! 非 () 括号，例: ! 周杰伦 & ! Live)"
+                                        <div id="lm-search-input" contenteditable="true" data-placeholder="搜索歌曲/歌手/专辑（&amp;/与、|/或、!/非；冒号激活）"
                                             oninput="window.LocalMusicManager.applyFilters()"
                                             onkeydown="window.LocalMusicManager.handleRichKeydown(event, this)"
                                             onpaste="window.LocalMusicManager.handleRichPaste(event, this)"
@@ -1401,8 +1394,6 @@
                                         <h3 class="font-bold text-emerald-500 flex items-center gap-2">
                                             <i class="fas fa-plug text-sm"></i> 自定义源
                                         </h3>
-                                        <div id="settings-source-scope-tag" class="hidden flex items-center gap-1">
-                                        </div>
                                         <span id="settings-admin-tag"
                                             class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-500 whitespace-nowrap hidden">管理员</span>
                                         <button id="btn-admin-logout" onclick="handleAdminLogout()"
@@ -1424,28 +1415,6 @@
                                 </div>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                                    <!-- 公开源开关 -->
-                                    <div
-                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
-                                        <div class="flex items-center justify-between">
-                                            <h4 class="text-sm font-bold t-text-main flex items-center">
-                                                <i class="fas fa-globe mr-2 text-emerald-500"></i> 启用公开源
-                                                <span class="setting-tooltip-trigger ml-1">
-                                                    <i class="fas fa-question-circle"></i>
-                                                    <span
-                                                        class="setting-tooltip-content">开启后，您上传的自定义源将可以被其他用户在公共源列表中看到。</span>
-                                                </span>
-                                            </h4>
-                                            <label class="relative inline-flex items-center cursor-pointer">
-                                                <input type="checkbox" id="toggle-public-sources" class="sr-only peer"
-                                                    onchange="togglePublicSourcesSetting()">
-                                                <div
-                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
-                                                </div>
-                                            </label>
-                                        </div>
-                                    </div>
-
                                     <!-- 默认音质 -->
                                     <div
                                         class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
@@ -3687,7 +3656,6 @@
             <div class="p-6 border-b t-border-main flex justify-between items-center t-bg-main rounded-t-2xl">
                 <div>
                     <h3 class="text-xl font-bold t-text-main">自定义源管理</h3>
-                    <div id="modal-source-scope-info" class="mt-1"></div>
                     <p class="text-sm text-gray-500 mt-1">管理和配置第三方音乐源脚本</p>
                 </div>
                 <button onclick="closeCustomSourceModal()"
@@ -3717,6 +3685,41 @@
     </div>
 
     <!-- Playlist Add Modal (添加到歌单) -->
+    <!-- Custom Source Share Modal -->
+    <div id="custom-source-share-modal" onclick="if (event.target === this) closeCustomSourceShareModal()" class="fixed inset-0 bg-black/60 z-[100] hidden items-center justify-center p-4 backdrop-blur-sm">
+        <div id="custom-source-share-modal-content" class="t-bg-panel rounded-xl w-full max-w-md flex flex-col shadow-2xl border t-border-main overflow-hidden">
+            <div class="p-4 border-b t-border-main flex items-center justify-between">
+                <div class="min-w-0 pr-3">
+                    <h3 class="font-bold t-text-main flex items-center gap-2">
+                        <i class="fas fa-share-alt text-emerald-500"></i>
+                        <span>&#x5171;&#x4eab;&#x97f3;&#x6e90;</span>
+                    </h3>
+                    <p id="custom-source-share-title" class="text-xs t-text-muted mt-1 truncate"></p>
+                </div>
+                <button type="button" onclick="closeCustomSourceShareModal()" class="p-2 t-text-muted hover:text-emerald-500 transition-colors" title="&#x5173;&#x95ed;">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-4 space-y-4">
+                <label class="flex items-center gap-3 p-3 rounded-lg t-bg-main border t-border-main cursor-pointer">
+                    <input id="custom-source-share-all" type="checkbox" class="accent-emerald-500 w-4 h-4">
+                    <span class="text-sm font-medium t-text-main">&#x5171;&#x4eab;&#x7ed9;&#x6240;&#x6709;&#x7528;&#x6237;</span>
+                </label>
+                <div>
+                    <div class="text-xs font-bold t-text-muted mb-2">&#x9009;&#x62e9;&#x6307;&#x5b9a;&#x7528;&#x6237;</div>
+                    <div id="custom-source-share-users" class="max-h-56 overflow-y-auto space-y-2 custom-scrollbar pr-1"></div>
+                </div>
+                <p class="text-xs t-text-muted leading-relaxed">&#x5171;&#x4eab;&#x540e;&#xff0c;&#x5176;&#x4ed6;&#x7528;&#x6237;&#x53ef;&#x4ee5;&#x4f7f;&#x7528;&#x8be5;&#x97f3;&#x6e90;&#xff0c;&#x4f46;&#x4e0d;&#x80fd;&#x542f;&#x505c;&#x3001;&#x5220;&#x9664;&#x6216;&#x4fee;&#x6539;&#x5b83;&#x3002;</p>
+            </div>
+            <div class="p-4 border-t t-border-main flex items-center justify-between gap-2">
+                <button id="custom-source-share-remove" type="button" onclick="unshareCustomSource()" class="hidden px-3 py-2 text-xs font-bold text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">&#x53d6;&#x6d88;&#x5171;&#x4eab;</button>
+                <div class="ml-auto flex gap-2">
+                    <button type="button" onclick="closeCustomSourceShareModal()" class="px-3 py-2 text-xs font-bold t-text-muted hover:t-bg-main rounded-lg transition-colors">&#x53d6;&#x6d88;</button>
+                    <button id="custom-source-share-save" type="button" onclick="saveCustomSourceShare()" class="px-4 py-2 text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors">&#x4fdd;&#x5b58;&#x5171;&#x4eab;</button>
+                </div>
+            </div>
+        </div>
+    </div>
     <div id="playlist-add-modal"
         class="fixed inset-0 bg-black/60 z-[70] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
         <div class="t-bg-panel rounded-xl w-full max-w-2xl flex flex-col shadow-2xl transform transition-transform duration-300 scale-95 opacity-0 overflow-hidden"
@@ -4850,7 +4853,7 @@
                     <div class="p-2 border-b t-border-main">
                         <div class="relative">
                             <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[10px] t-text-muted pointer-events-none z-10"></i>
-                            <div id="lm-remaster-search" contenteditable="true" data-placeholder="搜索歌曲、歌手、专辑或音质... (加空格激活 & | ! 逻辑)"
+                            <div id="lm-remaster-search" contenteditable="true" data-placeholder="搜索歌曲、歌手、专辑或音质（&amp;/与、|/或、!/非；冒号激活）"
                                 oninput="LocalMusicManager.setRemasterSearch(this)"
                                 onkeydown="LocalMusicManager.handleRichKeydown(event, this)"
                                 onpaste="LocalMusicManager.handleRichPaste(event, this)"

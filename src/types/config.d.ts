@@ -68,26 +68,6 @@ declare namespace LX {
     'user.enableRoot'?: boolean
 
     /**
-     * 是否启用公开用户权限限制
-     */
-    'user.enablePublicRestriction'?: boolean
-
-    /**
-     * 是否开启非管理员访问本地音乐
-     */
-    'user.enablePublicNonAdminLocalMusic'?: boolean
-
-    /**
-     * 是否开启公开收藏和歌曲
-     */
-    'user.enablePublicFavorites'?: boolean
-
-    /**
-     * 是否开启非管理员访问公开收藏和歌曲
-     */
-    'user.enablePublicNonAdminAccess'?: boolean
-
-    /**
      * 是否启用登录用户缓存限制
      */
     'user.enableLoginCacheRestriction'?: boolean

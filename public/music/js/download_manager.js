@@ -102,6 +102,21 @@ class DownloadManager {
         return 'mp3';
     }
 
+    canUseServerQueue() {
+        return typeof window.isUserLoggedIn === 'function' && window.isUserLoggedIn();
+    }
+
+    clearServerQueueState() {
+        const hadServerTasks = this.tasks.some(task => task.serverManaged);
+        this.tasks = this.tasks.filter(task => !task.serverManaged);
+        this.serverQueueLoaded = false;
+        this.serverQueuePending = false;
+        if (hadServerTasks) {
+            this.renderList();
+            this.saveTasks();
+        }
+    }
+
     // Update max concurrency limit dynamically
     updateMaxConcurrent(value) {
         this.maxConcurrent = this.normalizeConcurrency(value);
@@ -111,6 +126,7 @@ class DownloadManager {
     }
 
     async syncServerConcurrency() {
+        if (!this.canUseServerQueue()) return;
         try {
             await this.requestServerQueue('/api/music/cache/queue/concurrency', { concurrency: this.maxConcurrent });
         } catch (error) {
@@ -132,10 +148,15 @@ class DownloadManager {
         return { 'Content-Type': 'application/json', ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}) };
     }
 
-    async requestServerQueue(path, body) {
+    async requestServerQueue(path, body, allowAuthRetry = true) {
+        if (!this.canUseServerQueue()) throw new Error('请先登录同步账户');
         const options = { method: body === undefined ? 'GET' : 'POST', headers: this.getServerQueueHeaders() };
         if (body !== undefined) options.body = JSON.stringify(body);
         const response = await fetch(path, options);
+        if (response.status === 401 && allowAuthRetry && typeof window.ensureUserAuthToken === 'function') {
+            const refreshed = await window.ensureUserAuthToken({ force: true });
+            if (refreshed) return this.requestServerQueue(path, body, false);
+        }
         const result = await response.json().catch(() => ({}));
         if (!response.ok || result.success === false) throw new Error(result.message || `HTTP ${response.status}`);
         return result.data;
@@ -183,6 +204,7 @@ class DownloadManager {
     }
 
     async syncServerQueue(render = false) {
+        if (!this.canUseServerQueue()) return;
         if (this.serverQueueSyncInFlight) return;
         this.serverQueueSyncInFlight = true;
         try {
@@ -359,9 +381,14 @@ class DownloadManager {
     }
 
     async pollServerProgress() {
+        if (!this.canUseServerQueue()) {
+            this.clearServerQueueState();
+            return;
+        }
         if (this.serverPollInFlight) return;
         this.serverPollInFlight = true;
         try {
+        if (!this.serverQueueLoaded) await this.syncServerConcurrency();
         await this.syncServerQueue(false);
         // [Move to top] 对已完成但还未检测过歌词的云端任务，执行检测
         // 这样即使当前没有正在下载的任务，刷新页面后也能触发一次歌词状态刷新
@@ -396,9 +423,8 @@ class DownloadManager {
 
             const batchResults = await Promise.all(batches.map(async (batch) => {
                 try {
-                    const resp = await fetch(`/api/music/cache/progress?ids=${encodeURIComponent(batch.join(','))}`);
-                    const result = await resp.json();
-                    return result.success ? (result.data || {}) : {};
+                    const data = await this.requestServerQueue(`/api/music/cache/progress?ids=${encodeURIComponent(batch.join(','))}`);
+                    return data || {};
                 } catch (e) {
                     console.warn('[DownloadManager] Batch progress poll failed:', e);
                     return {};
@@ -688,6 +714,12 @@ class DownloadManager {
     async addTasks(songs) {
         if (!songs || songs.length === 0) return;
 
+        if (songs.some(song => song?.isServer) && !this.canUseServerQueue()) {
+            if (typeof showError === 'function') showError('请先登录同步账户');
+            songs = songs.filter(song => !song?.isServer);
+            if (songs.length === 0) return;
+        }
+
         // Keep large batches responsive by limiting concurrent preflight requests.
         const results = await this.mapWithConcurrency(songs, 8, async (song) => {
             const targetPref = song.quality || window.settings?.preferredQuality || 'flac';
@@ -955,6 +987,7 @@ class DownloadManager {
                 ].filter(Boolean).join('&');
 
                 finalUrl = `/api/music/download?url=${encodeURIComponent(finalUrl)}&filename=${encodeURIComponent(filename)}&taskId=${task.id}&${metadataParams}`;
+                if (window.addUserTokenToUrl) finalUrl = window.addUserTokenToUrl(finalUrl);
                 console.log('[DownloadManager] Download with metadata proxy:', finalUrl);
             } else {
                 console.log('[DownloadManager] Simple download:', finalUrl);

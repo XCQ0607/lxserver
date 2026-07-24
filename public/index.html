@@ -850,58 +850,10 @@
                                 </div>
                                 <div>
                                     <h3 class="config-card-title">权限与缓存限制</h3>
-                                    <p class="config-card-desc">针对公开用户与普通登录用户的权限管控</p>
+                                    <p class="config-card-desc">针对普通登录用户的缓存权限管控</p>
                                 </div>
                             </div>
                             <div class="config-card-body">
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启公开用户限制</span>
-                                        <span class="config-toggle-desc">开启后，未验证的公开用户将被限制核心缓存设置与公开音源查看管理</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enablePublicRestriction" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div id="public-non-admin-local-music-wrapper" style="display: none; margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 8px;">
-                                    <div class="config-divider" style="margin: 8px 0;"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启非管理员访问本地音乐</span>
-                                            <span class="config-toggle-desc">允许未登录管理员的公开账号访问本地音乐</span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="user.enablePublicNonAdminLocalMusic" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启公开收藏和歌曲</span>
-                                        <span class="config-toggle-desc">开启后允许登陆管理员的情况下对公开用户创建公开收藏与本地音乐歌单文件（说明：只有登录管理员后才可以管理收藏歌单和本地歌单）</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enablePublicFavorites" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div id="public-non-admin-access-wrapper" style="display: none; margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 8px;">
-                                    <div class="config-divider" style="margin: 8px 0;"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启非管理员访问</span>
-                                            <span class="config-toggle-desc">允许未登录管理员的公开账号查看公开收藏和歌曲</span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="user.enablePublicNonAdminAccess" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">开启登录用户缓存限制</span>

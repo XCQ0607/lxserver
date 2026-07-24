@@ -171,11 +171,6 @@ async function batchDeleteFromList() {
         return;
     }
 
-    // 公开列表删除需要管理员权限
-    if (typeof requireAdminForOpenWrite === 'function') {
-        if (!(await requireAdminForOpenWrite('删除公开列表中的歌曲'))) return;
-    }
-
     // Get current list context
     const activeListId = getCurrentActiveListId();
     if (!activeListId || !currentListData) {

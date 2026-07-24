@@ -33,22 +33,6 @@ module.exports = {
   // 环境变量: USER_ENABLE_ROOT (true/false)
   "user.enableRoot": false,
 
-  // 是否启用公开用户权限限制 (开启后将限制公开用户的某些敏感操作，如上传、删除自定义源)
-  // 环境变量: ENABLE_PUBLIC_USER_RESTRICTION (true/false)
-  "user.enablePublicRestriction": true,
-
-  // 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏列表)
-  // 环境变量: ENABLE_PUBLIC_FAVORITES (true/false)
-  "user.enablePublicFavorites": false,
-
-  // 是否开启非管理员访问本地音乐 (开启后允许未登录管理员的公开账号访问本地音乐)
-  // 环境变量: ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC (true/false)
-  "user.enablePublicNonAdminLocalMusic": false,
-
-  // 是否开启非管理员访问公开收藏和歌曲 (开启后允许未登录管理员的公开账号查看公开收藏和歌曲)
-  // 环境变量: ENABLE_PUBLIC_NON_ADMIN_ACCESS (true/false)
-  "user.enablePublicNonAdminAccess": false,
-
   // 是否启用登录用户缓存限制 (开启后将限制非管理员登录用户的核心缓存设置)
   // 环境变量: ENABLE_LOGIN_USER_CACHE_RESTRICTION (true/false)
   "user.enableLoginCacheRestriction": false,

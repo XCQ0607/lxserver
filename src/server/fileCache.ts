@@ -10,6 +10,7 @@ import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { buildLyrics, parseLyrics } from '../utils/lrcTool'
 import { formatPlayTime } from '../common/utils/common'
+import { normalizeUsername } from '../utils/username'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
@@ -40,6 +41,14 @@ let currentCacheLocation = CACHE_ROOTS.ROOT
 const CACHE_LIST_SYNC_TTL = 30 * 1000
 const cacheListSyncState: Map<string, { lastSync: number, pending?: Promise<void> }> = new Map()
 
+const normalizeCacheUsername = (username?: string) => {
+    try {
+        return normalizeUsername(username)
+    } catch {
+        throw new Error('Authenticated username required')
+    }
+}
+
 // Helper to get actual directory path
 // [Unified Enhancement] Cache Progress Tracker
 export const cacheProgress: Map<string, { progress: number; status: string; total?: number; received?: number; speed?: number; updatedAt?: number; errorMsg?: string }> = new Map()
@@ -64,7 +73,7 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
     }
 
     // [New] Segment cache by username
-    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const userDirName = normalizeCacheUsername(username)
 
     const fullPath = path.join(baseDir, userDirName)
     if (!fs.existsSync(fullPath)) {
@@ -75,7 +84,7 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
 
 export const getCoverCacheDir = (username: string) => {
     const baseDir = path.join(process.cwd(), 'cover_cache')
-    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const userDirName = normalizeCacheUsername(username)
     const fullPath = path.join(baseDir, userDirName)
     if (!fs.existsSync(fullPath)) {
         fs.mkdirSync(fullPath, { recursive: true })
@@ -147,7 +156,7 @@ class CacheIndexManager {
             baseDir = path.join(process.cwd(), folderName)
         }
 
-        const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
+        const userDirName = normalizeCacheUsername(username)
         const userDir = path.join(baseDir, userDirName)
 
         if (!fs.existsSync(userDir)) {
@@ -269,7 +278,7 @@ const getCoverCachePaths = (filename: string, username: string, stats?: Stats) =
 
 const getLegacyCoverCachePaths = (filename: string, username: string, stats?: Stats) => {
     const hash = getCoverCacheHash(filename, stats)
-    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const userDirName = normalizeCacheUsername(username)
     const coverCacheDir = path.join(global.lx.dataPath, 'cover_cache', userDirName)
     return {
         binPath: path.join(coverCacheDir, `${hash}.bin`),
@@ -616,7 +625,7 @@ const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, 
     // Only apply suffix logic if we have a username and it's not the standard pattern (which is already unique)
     if (username && currentNamingPattern !== CACHE_NAMING_PATTERNS.STANDARD) {
         const folder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
-        const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+        const normalizedUsername = normalizeCacheUsername(username)
         const existingItems = indexManager.getAll(normalizedUsername, folder)
 
         const normalizedName = nameStr.toLowerCase()
@@ -653,7 +662,7 @@ const sanitize = (str: any) => String(str || '').replace(/[\\/:*?"<>|]/g, '_')
  * Sync disk files with index database
  */
 export const syncCacheIndex = async (username?: string, roots: Array<'cache' | 'music'> = ['cache', 'music']) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     const extensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav']
 
     for (const folder of roots) {
@@ -954,7 +963,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
  * Get detailed cache list for a user (indexed)
  */
 export const getCacheList = async (username?: string) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
 
     // Keep indexed metadata aligned with disk. This also repairs stale hasCover values
     // from older indexes where the cover endpoint may already return 404.
@@ -1006,7 +1015,7 @@ export const getCacheList = async (username?: string) => {
  * Batch rename existing files to the current naming pattern
  */
 export const batchRenameCacheFiles = async (username: string | undefined) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     const folders: Array<'cache' | 'music'> = ['cache', 'music']
 
     let successCount = 0
@@ -1093,7 +1102,7 @@ export const batchRenameCacheFiles = async (username: string | undefined) => {
  * Batch update ID3 metadata (title, artist, album, cover) from index to physical files
  */
 export const batchUpdateMetadata = async (filenames: string[], username: string | undefined) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     let successCount = 0
     let failCount = 0
 
@@ -1195,7 +1204,7 @@ export const batchUpdateMetadata = async (filenames: string[], username: string 
  * Link an unindexed local file to a specific online song identity
  */
 export const linkLocalFile = async (oldFilename: string, songInfo: any, username: string | undefined) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
 
     // Find the item in all possible folders
     const allItems = [
@@ -1337,7 +1346,7 @@ const setIndexCoverState = (filename: string, username: string, coverType: Cache
  * Get cover image for a cached file
  */
 export const getCacheCover = async (filename: string, username?: string) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
 
     const locations = [
         currentCacheLocation,
@@ -1406,7 +1415,7 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
     if (!filename || typeof filename !== 'string') throw new Error('Invalid filename')
     if (requestedFolder && requestedFolder !== 'cache' && requestedFolder !== 'music') throw new Error('Invalid folder')
 
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     const candidateFolders: CacheFolder[] = requestedFolder ? [requestedFolder] : ['cache', 'music']
     const matches = candidateFolders.map(folder => {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
@@ -1486,7 +1495,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
     try {
         const id = normalizeSongId(songInfo)
         const quality = songInfo.quality || 'unknown'
-        const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+        const normalizedUsername = normalizeCacheUsername(username)
 
         // 1. Search by exact ID and Quality (Primary Check)
         // exactQuality=true 时：精确匹配，不允许 fallback 到不同音质
@@ -1578,7 +1587,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
 
 export const checkLyricCache = (songInfo: any, username?: string) => {
     const id = normalizeSongId(songInfo)
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
 
     // Check index first
     const folderTypes: Array<'cache' | 'music'> = ['cache', 'music']
@@ -1678,7 +1687,7 @@ export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string,
         let quality = songInfo.quality || 'unknown'
         let dir: string
 
-        const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+        const normalizedUsername = normalizeCacheUsername(username)
         const id = normalizeSongId(songInfo)
         const preferredFolders: Array<'cache' | 'music'> = isOnlyDownload ? ['music', 'cache'] : ['cache', 'music']
         let audioResult: any = { exists: false }
@@ -1758,7 +1767,7 @@ const ensureCachedLyrics = async (
 ) => {
     if ((!shouldCacheLyric && !shouldEmbedLyric) || !_lyricFetcher || !fs.existsSync(audioPath)) return
 
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     const id = normalizeSongId(songInfo)
     const resolvedQuality = quality || 'unknown'
     const relativeAudioPath = path.relative(getCacheDir(normalizedUsername, folder === 'music'), audioPath).replace(/\\/g, '/')
@@ -1887,7 +1896,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
             const metadata = extractSongMetadata(songInfo)
             const id = metadata.id || String(songInfo.id || songInfo.songmid)
-            const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+            const normalizedUsername = normalizeCacheUsername(username)
             const cachedItem = getIndexItemByFilename(result.filename, normalizedUsername)
             const actualDownloadSource = cachedItem?.downloadSource || downloadSource
             const actualSourceName = cachedItem?.sourceName || sourceName
@@ -2092,7 +2101,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
                     const metadata = extractSongMetadata(songInfo)
                     const id = metadata.id || String(songInfo.id || songInfo.songmid)
-                    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+                    const normalizedUsername = normalizeCacheUsername(username)
                     const folderType: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
 
                     indexManager.update(normalizedUsername, {
@@ -2167,10 +2176,6 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
     })
 }
 
-const normalizeCacheUsername = (username?: string) => (
-    username && username !== '_open' && username !== 'default' ? username : '_open'
-)
-
 const resolveMusicPath = (root: string, relativePath: string) => {
     const resolvedRoot = path.resolve(root)
     const resolvedPath = path.resolve(root, relativePath)
@@ -2178,6 +2183,25 @@ const resolveMusicPath = (root: string, relativePath: string) => {
         throw new Error('Invalid music file path')
     }
     return resolvedPath
+}
+
+export const getCacheFilePath = (
+    username: string,
+    isOnlyDownload: boolean,
+    filename: string,
+    location?: string,
+) => resolveMusicPath(getCacheDir(username, isOnlyDownload, location), filename)
+
+const normalizeMusicSubPath = (root: string, subPath: unknown, allowRoot: boolean) => {
+    if (typeof subPath !== 'string' || subPath.includes('\0')) {
+        throw new Error('Invalid music subdirectory')
+    }
+    const target = resolveMusicPath(root, subPath || '.')
+    const normalizedRoot = path.resolve(root)
+    if (!allowRoot && target === normalizedRoot) {
+        throw new Error('Music subdirectory is required')
+    }
+    return path.relative(normalizedRoot, target).replace(/\\/g, '/')
 }
 
 const getAvailableRemasterTarget = (
@@ -2231,7 +2255,7 @@ export const replaceDownloadedMusicItem = async (
     if (!fs.existsSync(oldAudioPath)) throw new Error('原文件已不存在')
 
     const stageId = crypto.randomBytes(12).toString('hex')
-    const stageUsername = `.remaster-staging/${stageId}`
+    const stageUsername = `.remaster-staging-${stageId}`
     const stageRoot = getCacheDir(stageUsername, true)
     const stageCoverRoot = getCoverCacheDir(stageUsername)
     const backupSuffix = `.remaster-${crypto.randomBytes(6).toString('hex')}.bak`
@@ -2412,6 +2436,7 @@ export const replaceDownloadedMusicItem = async (
 }
 
 export const stopUserTasks = (username: string, songKey?: string) => {
+    username = normalizeCacheUsername(username)
     const tasks = activeTasks.get(username)
     if (!tasks) return
     if (songKey) {
@@ -2425,7 +2450,7 @@ export const stopUserTasks = (username: string, songKey?: string) => {
 
 // [新增] 根据文件名从索引中查找对应条目（跨 cache/music 两个目录）
 export const getIndexItemByFilename = (filename: string, username: string) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const folder of ['cache', 'music'] as const) {
         const items = indexManager.getAll(normalizedUsername, folder)
         const found = items.find((i: any) => i.filename === filename)
@@ -2444,7 +2469,7 @@ export const setIndexEmbedLyric = (
     value: boolean,
     metadata?: Pick<CacheItem, 'audioContainer' | 'metadataWritable' | 'metadataError' | 'embedLyricError'>,
 ) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const folder of ['cache', 'music'] as const) {
         const items = indexManager.getAll(normalizedUsername, folder)
         const found = items.find((i: any) => i.filename === filename)
@@ -2465,11 +2490,11 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     ]
     const roots = ['cache', 'music']
     let filePath = ''
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const loc of locations) {
         for (const folder of roots) {
             const dir = getCacheDir(normalizedUsername, folder === 'music', loc)
-            const checkPath = path.join(dir, filename) // [Fix] Allow subfolders
+            const checkPath = resolveMusicPath(dir, filename)
             if (fs.existsSync(checkPath)) { filePath = checkPath; break }
         }
         if (filePath) break
@@ -2501,7 +2526,7 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
 export const getCacheStats = (username?: string) => {
     const roots = ['cache', 'music']
     const result: any = { cache: { totalSize: 0, fileCount: 0 }, music: { totalSize: 0, fileCount: 0 }, totalSize: 0, fileCount: 0 }
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const folder of roots) {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         if (!fs.existsSync(dir)) continue
@@ -2526,7 +2551,7 @@ export const clearAllCache = (username?: string) => {
     const roots = ['cache', 'music']
     let deletedCount = 0
     let freedSize = 0
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const folder of roots) {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         if (!fs.existsSync(dir)) continue
@@ -2548,7 +2573,7 @@ export const clearLyricCache = (username?: string) => {
     const roots: Array<'cache' | 'music'> = ['cache', 'music']
     let deletedCount = 0
     let freedSize = 0
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const folder of roots) {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         if (!fs.existsSync(dir)) continue
@@ -2577,7 +2602,7 @@ export const checkAndCleanupCache = async (username?: string) => {
     if (totalSize <= limitBytes) return
     const roots: Array<'cache' | 'music'> = ['cache', 'music']
     const allFiles: Array<{ path: string, size: number, mtime: number }> = []
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     for (const folder of roots) {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         if (!fs.existsSync(dir)) continue
@@ -2604,7 +2629,7 @@ export const checkAndCleanupCache = async (username?: string) => {
  * Switch files between 'cache' and 'music' folders
  */
 export const switchFolder = async (filenames: string[], username: string | undefined) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     let successCount = 0
     let failCount = 0
 
@@ -2723,7 +2748,7 @@ export const switchFolder = async (filenames: string[], username: string | undef
 }
 
 export const switchBaseLocation = async (filenames: string[], username: string | undefined) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     let successCount = 0
     let failCount = 0
     const sourceLoc = currentCacheLocation
@@ -2735,7 +2760,7 @@ export const switchBaseLocation = async (filenames: string[], username: string |
     const getLocalDir = (folder: string, loc: string) => {
         const folderName = folder === 'music' ? 'music' : 'cache'
         const base = loc === CACHE_ROOTS.DATA ? global.lx.dataPath : process.cwd()
-        const userDir = (username && username !== '_open' && username !== 'default') ? username : '_open'
+        const userDir = normalizeCacheUsername(username)
         return path.join(base, folderName, userDir)
     }
 
@@ -2814,7 +2839,7 @@ export const switchBaseLocation = async (filenames: string[], username: string |
  * [New] Get all subdirectories in the music/cache folders
  */
 export const getSubDirectories = (username: string | undefined, folder: 'cache' | 'music') => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     const root = getCacheDir(normalizedUsername, folder === 'music')
     if (!fs.existsSync(root)) return []
 
@@ -2845,8 +2870,10 @@ export const getSubDirectories = (username: string | undefined, folder: 'cache' 
  * [New] Create a subdirectory
  */
 export const createSubDirectory = (username: string | undefined, folder: 'cache' | 'music', subPath: string) => {
-    const root = getCacheDir(username, folder === 'music')
-    const target = path.join(root, subPath)
+    const normalizedUsername = normalizeCacheUsername(username)
+    const root = getCacheDir(normalizedUsername, folder === 'music')
+    const normalizedSubPath = normalizeMusicSubPath(root, subPath, false)
+    const target = resolveMusicPath(root, normalizedSubPath)
     if (!fs.existsSync(target)) {
         fs.mkdirSync(target, { recursive: true })
         return true
@@ -2858,12 +2885,13 @@ export const createSubDirectory = (username: string | undefined, folder: 'cache'
  * [New] Categorize multiple files into a subdirectory
  */
 export const categorizeFiles = async (filenames: string[], targetSubPath: string, username: string | undefined) => {
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedUsername = normalizeCacheUsername(username)
     const folder = 'music' // Categorization is primarily for music folder
     const root = getCacheDir(normalizedUsername, true)
-    const targetDir = path.join(root, targetSubPath)
+    const normalizedTargetSubPath = normalizeMusicSubPath(root, targetSubPath, true)
+    const targetDir = resolveMusicPath(root, normalizedTargetSubPath || '.')
 
-    if (targetSubPath && !fs.existsSync(targetDir)) {
+    if (normalizedTargetSubPath && !fs.existsSync(targetDir)) {
         fs.mkdirSync(targetDir, { recursive: true })
     }
 
@@ -2879,9 +2907,9 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
             continue
         }
 
-        const oldPath = path.join(root, filename)
-        const newFilename = targetSubPath ? path.join(targetSubPath, path.basename(filename)).replace(/\\/g, '/') : path.basename(filename)
-        const newPath = path.join(root, newFilename)
+        const oldPath = resolveMusicPath(root, filename)
+        const newFilename = normalizedTargetSubPath ? path.join(normalizedTargetSubPath, path.basename(filename)).replace(/\\/g, '/') : path.basename(filename)
+        const newPath = resolveMusicPath(root, newFilename)
 
         if (oldPath === newPath) { successCount++; continue }
 
@@ -2900,7 +2928,7 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
 
                 // Update index
                 item.filename = newFilename
-                item.subPath = targetSubPath
+                item.subPath = normalizedTargetSubPath
                 if (item.lyricFilename) {
                     const musicExt = path.extname(newFilename)
                     const lrcExt = path.extname(item.lyricFilename) || '.lrc'

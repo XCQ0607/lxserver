@@ -19,6 +19,7 @@ import { initLogger } from '@/utils/log4js'
 import defaultConfig from './defaultConfig'
 import { ENV_PARAMS, File } from './constants'
 import { checkAndCreateDirSync } from './utils'
+import { normalizeUsername, validateUsername } from './utils/username'
 
 // Declare Env Params Type
 type ENV_PARAMS_Type = typeof ENV_PARAMS
@@ -105,7 +106,7 @@ const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string
         envParams[envKey] = value
       }
     } else if (envKey.startsWith('LX_USER_') && value) {
-      const name = k.replace('LX_USER_', '')
+      const name = envKey.slice('LX_USER_'.length)
       if (name) {
         envUsers.push({
           name,
@@ -222,18 +223,6 @@ if (envParams.WEBPLAYER_PASSWORD) {
 if (envParams.DISABLE_TELEMETRY) {
   global.lx.config.disableTelemetry = envParams.DISABLE_TELEMETRY === 'true'
 }
-if (envParams.ENABLE_PUBLIC_USER_RESTRICTION) {
-  global.lx.config['user.enablePublicRestriction'] = envParams.ENABLE_PUBLIC_USER_RESTRICTION === 'true'
-}
-if (envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC) {
-  global.lx.config['user.enablePublicNonAdminLocalMusic'] = envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC === 'true'
-}
-if (envParams.ENABLE_PUBLIC_FAVORITES) {
-  global.lx.config['user.enablePublicFavorites'] = envParams.ENABLE_PUBLIC_FAVORITES === 'true'
-}
-if (envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS) {
-  global.lx.config['user.enablePublicNonAdminAccess'] = envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS === 'true'
-}
 if (envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION) {
   global.lx.config['user.enableLoginCacheRestriction'] = envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION === 'true'
 }
@@ -298,7 +287,7 @@ if (envUsers.length) {
 
 const exit = (message: string): never => {
   console.error(message)
-  process.exit(0)
+  process.exit(1)
 }
 
 const checkAndCreateDir = (path: string) => {
@@ -311,23 +300,43 @@ const checkAndCreateDir = (path: string) => {
   }
 }
 
-const checkUserConfig = (users: LX.Config['users']) => {
-  const userNames: string[] = []
-  const passwords: string[] = []
+const validateUserConfig = (users: LX.Config['users']) => {
+  const userNames = new Set<string>()
+  const passwords = new Set<string>()
+  const normalizedUsers: LX.Config['users'] = []
+  const renames: Array<{ oldName: string; newName: string }> = []
   // 允许重复密码的条件：开启了路径模式 且 关闭了根路径模式
   const allowDuplicatePasswords = global.lx.config['user.enablePath'] && !global.lx.config['user.enableRoot']
 
   for (const user of users) {
-    if (userNames.includes(user.name)) exit('User name duplicate: ' + user.name)
-    if (!allowDuplicatePasswords && passwords.includes(user.password)) exit('User password duplicate: ' + user.password)
-    userNames.push(user.name)
-    passwords.push(user.password)
+    let oldName: string
+    let name: string
+    try {
+      oldName = validateUsername(user.name)
+      name = normalizeUsername(user.name)
+    } catch {
+      throw new Error('Invalid user name: ' + String(user.name || ''))
+    }
+    if (userNames.has(name)) throw new Error('User name duplicate: ' + name)
+    if (!allowDuplicatePasswords && passwords.has(user.password)) throw new Error('User password duplicate: ' + user.password)
+    userNames.add(name)
+    passwords.add(user.password)
+    normalizedUsers.push({ ...user, name })
+    if (oldName !== name) renames.push({ oldName, newName: name })
+  }
+  return { users: normalizedUsers, renames }
+}
+
+const checkUserConfig = (users: LX.Config['users']): ReturnType<typeof validateUserConfig> => {
+  try {
+    return validateUserConfig(users)
+  } catch (error: any) {
+    return exit(error.message as string)
   }
 }
 
 checkAndCreateDir(global.lx.logPath)
 checkAndCreateDir(global.lx.dataPath)
-checkAndCreateDir(global.lx.userPath)
 checkAndCreateDir(global.lx.userPath)
 
 // Load users from users.json if exists
@@ -342,31 +351,34 @@ if (fs.existsSync(usersJsonPath)) {
   } catch (err) {
     console.error('Failed to load users.json', err)
   }
-} else {
-  // Save initial users to users.json
-  try {
-    fs.writeFileSync(usersJsonPath, JSON.stringify(global.lx.config.users.map(u => ({
-      name: u.name,
-      password: u.password,
-      maxSnapshotNum: u.maxSnapshotNum,
-      'list.addMusicLocationType': u['list.addMusicLocationType'],
-    })), null, 2))
-  } catch (err) {
-    console.error('Failed to save users.json', err)
-  }
 }
 
-checkUserConfig(global.lx.config.users)
+const preparedUsers = checkUserConfig(global.lx.config.users)
+global.lx.config.users = preparedUsers.users
 
 console.log(`Users:
 ${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\n') || '  No User'}
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { getUserDirname } = require('@/user')
+const { getUserDirname, migrateUserData } = require('@/user')
+for (const rename of preparedUsers.renames) {
+  migrateUserData(rename.oldName, rename.newName)
+}
 for (const user of global.lx.config.users) {
   const dataPath = path.join(global.lx.userPath, getUserDirname(user.name))
   checkAndCreateDir(dataPath)
   user.dataPath = dataPath
+}
+
+try {
+  fs.writeFileSync(usersJsonPath, JSON.stringify(global.lx.config.users.map(u => ({
+    name: u.name,
+    password: u.password,
+    maxSnapshotNum: u.maxSnapshotNum,
+    'list.addMusicLocationType': u['list.addMusicLocationType'],
+  })), null, 2))
+} catch (err) {
+  console.error('Failed to save users.json', err)
 }
 
 initLogger()
@@ -401,7 +413,7 @@ createModuleEvent()
 require('@/utils/migrate').default(global.lx.dataPath, global.lx.userPath)
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { startServer } = require('@/server')
+const { startServer, reloadServerData } = require('@/server')
 
 // 初始化 WebDAV 同步
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -423,48 +435,7 @@ if (webdavSync.isConfigured()) {
   void webdavSync.restoreFromRemote().then(async (success: boolean) => {
     if (success) {
       console.log('Data restored from WebDAV successfully')
-
-      // 1. 重新从磁盘加载最新的 config.js 到内存 (解决实时生效问题)
-      const configPath = process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js')
-      if (fs.existsSync(configPath)) {
-        console.log('Reloading config.js after WebDAV restore...')
-        // 清除 node require 缓存以强制重载
-        try {
-          delete require.cache[require.resolve(configPath)]
-          margeConfig(configPath)
-        } catch (e) {
-          console.error('Failed to hot-reload config.js:', e)
-        }
-      }
-
-      // 2. 重新加载 users.json
-      const usersJsonPath = path.join(global.lx.dataPath, 'users.json')
-      if (fs.existsSync(usersJsonPath)) {
-        try {
-          const users = JSON.parse(fs.readFileSync(usersJsonPath, 'utf-8'))
-          if (Array.isArray(users)) {
-            console.log('Reload users from restored users.json')
-            global.lx.config.users = users.map(u => ({ ...u, dataPath: '' }))
-
-            // 重新初始化用户目录
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const { getUserDirname } = require('@/user')
-            for (const user of global.lx.config.users) {
-              const dataPath = path.join(global.lx.userPath, getUserDirname(user.name))
-              checkAndCreateDir(dataPath)
-              user.dataPath = dataPath
-            }
-          }
-        } catch (err) {
-          console.error('Failed to reload users.json after WebDAV restore', err)
-        }
-      }
-
-      // 3. 重新加载所有自定义源 (解决前端显示加载中/旧源问题)
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { initUserApis } = require('@/server/userApi')
-      console.log('Re-initializing user APIs after WebDAV restore...')
-      await initUserApis()
+      await reloadServerData()
     }
     // 启动自动同步
     webdavSync.startAutoSync()
@@ -475,16 +446,6 @@ if (webdavSync.isConfigured()) {
 
 // 导出 webdavSync 实例供 API 使用
 global.lx.webdavSync = webdavSync
-
-// [新增] 确保数据目录下的 _open 及 _open/library 目录存在 (用于公共受限资源 & 公开收藏)
-const openDir = path.join(global.lx.userPath, '_open')
-const openLibDir = path.join(openDir, 'library')
-if (!fs.existsSync(openDir)) {
-  fs.mkdirSync(openDir, { recursive: true })
-}
-if (!fs.existsSync(openLibDir)) {
-  fs.mkdirSync(openLibDir, { recursive: true })
-}
 
 // 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
 saveConfigToFile()
@@ -528,4 +489,3 @@ if (fs.existsSync(rootConfigPath)) {
     }
   })
 }
-

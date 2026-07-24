@@ -31,16 +31,12 @@ The Web player adopts the following mechanisms for requests and caching:
 
 ### 1. Account Isolation and Management Mechanism for Sound Source Scripts
 
-To ensure that multiple users do not interfere with each other, especially when different sound sources are configured, the server side has formulated complete isolation strategies for the storage, rendering and scheduling of third-party sound source scripts:
+To prevent users from affecting one another, custom sources are available only to the currently authenticated sync user and are isolated by account:
 
-- **Classified Storage (Physical Isolation)**: If you upload the corresponding JS script source after logging in to your account, the file will be independently saved under the `data/users/source/{username}` folder. If it is uploaded directly (or by an administrator) without logging in, the source file will be placed in the global public directory `source/_open`.
-- **List Fusion Rendering**: When the front-end fetches the source list, the system will obtain all available sources under the "public directory", plus the private sources under "your current exclusive directory", and combine them into your final visible sound source library.
-- **Same-source Private Overriding (Shielding/Deduplication)**: If sound sources with the same ID exist in the global public directory and your exclusive directory, the system will **absolutely prioritize** recognizing your private source. At this time, the corresponding public source will be completely shielded (hidden for deduplication in your list). **Special Note:** Even if you set this same-name private source uploaded by yourself to "disabled" on the panel, the system will also determine that "you explicitly rejected/closed this source" and will never downgrade to call the public same-name source that is actually enabled by default.
-- **Independent State of Public Source Switch (Preference Isolation)**: When you **enable/disable** someone else's (regular public) sound source in your own management panel, the system **will not** go to the global library to modify its real state and affect others. Instead, it will generate a `states.json` in your exclusive directory to independently record only "your preference for resisting or enabling this public source". Before the server side captures the real playback link, it will also strictly follow this private preference of yours for scheduling.
-- **Mixed Sorting and Fault Tolerance Mechanism (Grouped by State)**: When dragging the sound source list for sorting, the system will save the absolute order of the current mixed list in the `order.json` in your exclusive directory.
-  - **Top-level Group**: "Enabled" sources will always be locked and grouped before "disabled" sources.
-  - **Absolute Position within Group**: Inside respective enabled/disabled groups, even if your private sources and public sources are mixed randomly, they will strictly obey the relative dragging order you saved.
-  - **Dynamic Downward Compatibility**: Even if a certain public source is subsequently deleted globally by the administrator, by virtue of the above recording mechanism, the rest of the sources in your list will still strictly keep the relative order unchanged; if your exclusive sorting configuration is accidentally cleared or damaged, the system will also intelligently fall back to reading the public hall's default sorting data as a backup, achieving a smooth and unperceived experience to the greatest extent.
+- **Account-owned storage**: Uploaded or imported JavaScript source scripts are stored under `data/users/source/{username}`.
+- **Independent state**: Each user can only view, enable, disable, and delete their own custom sources.
+- **Independent ordering**: Drag-and-drop ordering is saved only in the current user's directory and does not affect other users.
+- **Authentication required**: Custom sources cannot be read or managed without signing in to a sync account.
 
 ### 2. Automatic Quality Downgrade
 
