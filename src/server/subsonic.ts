@@ -2897,7 +2897,27 @@ class SubsonicHandler {
             }
 
             // XML 模式逻辑
+            const structuredLyricsXml = structuredLyrics.map(item => ({
+                attrs: {
+                    lang: item.lang,
+                    synced: item.synced,
+                    displayArtist: item.displayArtist,
+                    displayTitle: item.displayTitle,
+                },
+                children: {
+                    line: item.line.map((line: { value: string, start?: number }) => ({
+                        attrs: line.start === undefined ? undefined : { start: line.start },
+                        children: line.value,
+                    })),
+                },
+            }))
+
             return this.sendResponse(res, {
+                lyricsList: {
+                    children: {
+                        structuredLyrics: structuredLyricsXml,
+                    },
+                },
                 lyrics: {
                     attrs: { artist: musicMeta.singer, title: musicMeta.name },
                     children: mergedLrc
