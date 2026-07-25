@@ -9528,7 +9528,7 @@ async function handleSharePlaylist(listId, event) {
         const response = await fetch('/api/user/playlist-sharing/send', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
-            body: JSON.stringify({ toUsername, playlistId })
+            body: JSON.stringify({ toUsername, playlistId: listId })
         });
         const data = await readPlaylistShareResponse(response);
         showSuccess(data.updated ? '已更新待处理的歌单分享' : `已分享给 ${data.toUser}`);
