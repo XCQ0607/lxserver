@@ -2686,7 +2686,8 @@ class SubsonicHandler {
             { name: 'formPost', versions: [1] },
             { name: 'coverArtScaling', versions: [1] },
             { name: 'thumbnails', versions: [1] },
-            { name: 'lyrics', versions: [1] }
+            { name: 'lyrics', versions: [1] },
+            { name: 'songLyrics', versions: [1] },
         ]
         const data = { openSubsonicExtensions: format === 'json' ? extensions : { children: { extension: extensions.map(e => ({ attrs: e })) } } }
         return this.sendResponse(res, data, format)
@@ -2699,7 +2700,7 @@ class SubsonicHandler {
 
         // [新增] 如果请求中带有 ID，优先使用 ID 通过 SDK 获取歌词
         if (id) {
-            return this.handleGetLyricsBySongId(res, username, params, format)
+            return this.handleGetLyricsBySongId(res, username, params, format, true)
         }
 
         // 尝试通过歌手和标题反查歌曲 ID
@@ -2718,7 +2719,7 @@ class SubsonicHandler {
 
         if (found) {
             params.set('id', found.id)
-            return this.handleGetLyricsBySongId(res, username, params, format)
+            return this.handleGetLyricsBySongId(res, username, params, format, true)
         }
 
         const lyricsData = {
@@ -2798,7 +2799,13 @@ class SubsonicHandler {
         return outLines.join('\n')
     }
 
-    private async handleGetLyricsBySongId(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+    private async handleGetLyricsBySongId(
+        res: http.ServerResponse,
+        username: string,
+        params: URLSearchParams,
+        format: string,
+        legacyResponse = false,
+    ) {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
 
@@ -2884,15 +2891,29 @@ class SubsonicHandler {
                 })
             }
 
+            // Keep the legacy and OpenSubsonic extension responses separate.
+            // Some clients reject a getLyrics response when lyricsList is present.
+            if (legacyResponse) {
+                if (format === 'json') {
+                    return this.sendResponse(res, {
+                        lyrics: {
+                            artist: musicMeta.singer,
+                            title: musicMeta.name,
+                            value: mergedLrc,
+                        },
+                    }, format)
+                }
+                return this.sendResponse(res, {
+                    lyrics: {
+                        attrs: { artist: musicMeta.singer, title: musicMeta.name },
+                        children: mergedLrc,
+                    },
+                }, format)
+            }
+
             if (format === 'json') {
                 return this.sendResponse(res, {
                     lyricsList: { structuredLyrics },
-                    // 兼容标准 Subsonic getLyrics (同频时间戳双行/多行歌词)
-                    lyrics: {
-                        artist: musicMeta.singer,
-                        title: musicMeta.name,
-                        value: mergedLrc
-                    }
                 }, format)
             }
 
@@ -2918,10 +2939,6 @@ class SubsonicHandler {
                         structuredLyrics: structuredLyricsXml,
                     },
                 },
-                lyrics: {
-                    attrs: { artist: musicMeta.singer, title: musicMeta.name },
-                    children: mergedLrc
-                },
             }, format)
 
         } catch (err: any) {
@@ -2934,24 +2951,29 @@ class SubsonicHandler {
         if (!lrc) return []
         const lines = lrc.split(/\r?\n/)
         const result: { value: string, start?: number }[] = []
-        const timeRegex = /\[(\d+):(\d+)\.(\d+)\]/g
+        const timeRegex = /\[(\d{1,3}):(\d{1,2})(?:\.(\d{1,3}))?\]/g
+        const timestampPresenceRegex = /\[\d{1,3}:\d{1,2}(?:\.\d{1,3})?\]/
+        const metadataRegex = /^\s*\[(?:ti|ar|al|by|offset|re|ve|length):/i
+        const hasTimestamp = lines.some(line => timestampPresenceRegex.test(line))
 
         for (const line of lines) {
-            const text = line.replace(/\[\d+:\d+\.\d+\]/g, '').trim()
-            if (!text && line.includes(']')) continue
+            if (metadataRegex.test(line)) continue
 
             timeRegex.lastIndex = 0 // 重置正则索引
             const matches = [...line.matchAll(timeRegex)]
+            const text = line.replace(timeRegex, '').trim()
+            if (!text) continue
+
             if (matches.length > 0) {
                 for (const match of matches) {
                     const minutes = parseInt(match[1])
                     const seconds = parseInt(match[2])
-                    const msStr = match[3].padEnd(3, '0')
+                    const msStr = (match[3] || '0').padEnd(3, '0')
                     const ms = parseInt(msStr)
                     const startTime = minutes * 60000 + seconds * 1000 + ms
                     result.push({ value: text, start: startTime })
                 }
-            } else if (text) {
+            } else if (!hasTimestamp) {
                 result.push({ value: text })
             }
         }
