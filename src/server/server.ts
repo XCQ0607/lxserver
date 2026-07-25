@@ -2904,7 +2904,19 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             res.end('Unauthorized')
             return
           }
-          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username)
+          const requestedFolder = urlObj.searchParams.get('folder')
+          if (requestedFolder !== null && requestedFolder !== 'cache' && requestedFolder !== 'music') {
+            res.writeHead(400)
+            res.end('Invalid cache folder')
+            return
+          }
+          fileCache.serveCacheFile(
+            req,
+            res,
+            decodeURIComponent(filename),
+            username,
+            requestedFolder as fileCache.CacheFolder | undefined,
+          )
           return
         }
         res.writeHead(400)

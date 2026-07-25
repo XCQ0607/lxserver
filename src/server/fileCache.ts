@@ -2483,12 +2483,39 @@ export const setIndexEmbedLyric = (
     return false
 }
 
-export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerResponse, filename: string, username?: string) => {
+const getAudioContentType = (filePath: string, ext: string) => {
+    const detectedContainer = detectAudioContainer(filePath)
+    const detectedMimeTypes: Record<string, string> = {
+        mp3: 'audio/mpeg',
+        flac: 'audio/flac',
+        mp4: 'audio/mp4',
+        ogg: 'audio/ogg',
+        wav: 'audio/wav',
+    }
+    if (detectedMimeTypes[detectedContainer]) return detectedMimeTypes[detectedContainer]
+
+    const extensionMimeTypes: Record<string, string> = {
+        '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg',
+        '.wav': 'audio/wav',
+    }
+    return extensionMimeTypes[ext] || 'application/octet-stream'
+}
+
+export const serveCacheFile = (
+    req: http.IncomingMessage,
+    res: http.ServerResponse,
+    filename: string,
+    username?: string,
+    requestedFolder?: CacheFolder,
+) => {
     const locations = [
         currentCacheLocation,
         currentCacheLocation === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
     ]
-    const roots = ['cache', 'music']
+    const roots: CacheFolder[] = requestedFolder ? [requestedFolder] : ['cache', 'music']
     let filePath = ''
     const normalizedUsername = normalizeCacheUsername(username)
     for (const loc of locations) {
@@ -2502,10 +2529,7 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     if (!filePath) { res.writeHead(404); res.end('Not Found'); return }
     const stat = fs.statSync(filePath)
     const ext = path.extname(filePath).toLowerCase()
-    const mimeTypes: Record<string, string> = {
-        '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav'
-    }
-    const contentType = mimeTypes[ext] || 'application/octet-stream'
+    const contentType = getAudioContentType(filePath, ext)
     const range = req.headers.range
     if (range) {
         const parts = range.replace(/bytes=/, "").split("-")
