@@ -1,6 +1,9 @@
 import http from 'http'
+import https from 'https'
 import crypto from 'crypto'
 import { URL } from 'url'
+import * as tunnel from 'tunnel'
+import { SocksProxyAgent } from 'socks-proxy-agent'
 import { getUserSpace, getUserDirname } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
@@ -2077,9 +2080,7 @@ class SubsonicHandler {
                     const result = await callUserApiGetMusicUrl('tx', musicInfo, quality, username)
 
                     if (result && result.url) {
-                        // console.log(`[Subsonic] Radio ${id} resolved URL: ${result.url.slice(0, 50)}...`)
-                        res.writeHead(302, { Location: result.url })
-                        return res.end()
+                        return this.proxyAudioStream(req, res, result.url)
                     } else {
                         console.error(`[Subsonic] Radio ${id} failed to resolve music URL`)
                     }
@@ -2122,14 +2123,186 @@ class SubsonicHandler {
             const result = await callUserApiGetMusicUrl(source as any, musicInfo as any, quality, username)
 
             if (result && result.url) {
-                res.writeHead(302, { Location: result.url })
-                res.end()
+                return this.proxyAudioStream(req, res, result.url)
             } else {
                 return this.sendError(res, 0, 'Could not resolve music URL', format)
             }
         } catch (err: any) {
             return this.sendError(res, 0, err.message || 'Stream error', format)
         }
+    }
+
+    private getAudioProxyAgent(targetUrl: string): http.Agent | undefined {
+        const configProxy = global.lx.config['proxy.all.enabled']
+            ? String(global.lx.config['proxy.all.address'] || '').trim()
+            : ''
+        const isHttpsTarget = targetUrl.startsWith('https:')
+        const envProxy = isHttpsTarget
+            ? process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY
+            : process.env.HTTP_PROXY || process.env.ALL_PROXY
+        const proxyAddress = configProxy || envProxy
+        if (!proxyAddress) return undefined
+
+        try {
+            const proxyUrl = new URL(proxyAddress)
+            if (proxyUrl.protocol.startsWith('socks')) {
+                return new SocksProxyAgent(proxyAddress) as any
+            }
+            if (proxyUrl.protocol !== 'http:' && proxyUrl.protocol !== 'https:') return undefined
+
+            const proxyOptions = {
+                proxy: {
+                    host: proxyUrl.hostname,
+                    port: Number(proxyUrl.port) || (proxyUrl.protocol === 'https:' ? 443 : 80),
+                    proxyAuth: proxyUrl.username
+                        ? `${decodeURIComponent(proxyUrl.username)}:${decodeURIComponent(proxyUrl.password)}`
+                        : undefined,
+                },
+            }
+            const isHttpsProxy = proxyUrl.protocol === 'https:'
+            if (isHttpsTarget) {
+                return (isHttpsProxy ? tunnel.httpsOverHttps : tunnel.httpsOverHttp)(proxyOptions)
+            }
+            return (isHttpsProxy ? tunnel.httpOverHttps : tunnel.httpOverHttp)(proxyOptions)
+        } catch (err: any) {
+            console.warn(`[Subsonic] Invalid audio proxy configuration: ${err.message}`)
+            return undefined
+        }
+    }
+
+    private proxyAudioStream(req: http.IncomingMessage, res: http.ServerResponse, audioUrl: string): Promise<void> {
+        return new Promise(resolve => {
+            let activeRequest: http.ClientRequest | null = null
+            let activeResponse: http.IncomingMessage | null = null
+            let finished = false
+
+            const finish = () => {
+                if (finished) return
+                finished = true
+                resolve()
+            }
+            const fail = (statusCode: number, message: string) => {
+                if (finished) return
+                if (!res.headersSent) {
+                    res.writeHead(statusCode, {
+                        'Content-Type': 'text/plain; charset=utf-8',
+                        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                    })
+                    res.end(message)
+                } else if (!res.destroyed) {
+                    res.destroy()
+                }
+                finish()
+            }
+            const abortUpstream = () => {
+                activeResponse?.destroy()
+                activeRequest?.destroy()
+            }
+
+            req.once('aborted', abortUpstream)
+            res.once('close', () => {
+                if (!res.writableEnded) abortUpstream()
+                finish()
+            })
+
+            const requestUpstream = (targetUrl: string, redirectCount: number) => {
+                if (redirectCount > 5) {
+                    fail(502, 'Too many upstream redirects')
+                    return
+                }
+
+                let parsedUrl: URL
+                try {
+                    parsedUrl = new URL(targetUrl)
+                } catch {
+                    fail(502, 'Invalid upstream audio URL')
+                    return
+                }
+                if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') {
+                    fail(502, 'Unsupported upstream audio protocol')
+                    return
+                }
+
+                const requestHeaders: http.OutgoingHttpHeaders = {
+                    'Accept': req.headers.accept || 'audio/*,*/*;q=0.8',
+                    'Accept-Encoding': 'identity',
+                    'User-Agent': req.headers['user-agent'] || 'LX Music Sync Server',
+                    'Referer': `${parsedUrl.origin}/`,
+                }
+                if (req.headers.range) requestHeaders.Range = req.headers.range
+                if (req.headers['if-range']) requestHeaders['If-Range'] = req.headers['if-range']
+
+                const requestOptions: http.RequestOptions = {
+                    protocol: parsedUrl.protocol,
+                    hostname: parsedUrl.hostname,
+                    port: parsedUrl.port || undefined,
+                    path: `${parsedUrl.pathname}${parsedUrl.search}`,
+                    method: req.method === 'HEAD' ? 'HEAD' : 'GET',
+                    headers: requestHeaders,
+                    agent: this.getAudioProxyAgent(targetUrl),
+                }
+                const transport = parsedUrl.protocol === 'https:' ? https : http
+                activeRequest = transport.request(requestOptions, upstream => {
+                    activeResponse = upstream
+                    const statusCode = upstream.statusCode || 502
+                    if ([301, 302, 303, 307, 308].includes(statusCode) && upstream.headers.location) {
+                        const nextUrl = new URL(upstream.headers.location, targetUrl).href
+                        upstream.resume()
+                        requestUpstream(nextUrl, redirectCount + 1)
+                        return
+                    }
+
+                    const responseHeaders: http.OutgoingHttpHeaders = {
+                        'Content-Type': upstream.headers['content-type'] || 'application/octet-stream',
+                        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
+                        'Pragma': 'no-cache',
+                        'Expires': '0',
+                        'Access-Control-Allow-Origin': '*',
+                    }
+                    const copiedHeaders: Array<[keyof http.IncomingHttpHeaders, string]> = [
+                        ['content-length', 'Content-Length'],
+                        ['content-range', 'Content-Range'],
+                        ['accept-ranges', 'Accept-Ranges'],
+                        ['etag', 'ETag'],
+                        ['last-modified', 'Last-Modified'],
+                    ]
+                    for (const [sourceHeader, targetHeader] of copiedHeaders) {
+                        const value = upstream.headers[sourceHeader]
+                        if (value !== undefined) responseHeaders[targetHeader] = value
+                    }
+
+                    res.writeHead(statusCode, responseHeaders)
+                    if (req.method === 'HEAD') {
+                        upstream.resume()
+                        res.end()
+                        finish()
+                        return
+                    }
+
+                    upstream.once('error', err => {
+                        if (finished) return
+                        console.error(`[Subsonic] Upstream audio response failed: ${err.message}`)
+                        fail(502, 'Upstream audio response failed')
+                    })
+                    upstream.once('end', finish)
+                    upstream.pipe(res)
+                })
+
+                activeRequest.setTimeout(30_000, () => {
+                    activeRequest?.destroy(new Error('Upstream audio request timed out'))
+                })
+                activeRequest.once('error', err => {
+                    if (finished) return
+                    console.error(`[Subsonic] Audio proxy request failed: ${err.message}`)
+                    fail(502, 'Could not proxy music stream')
+                })
+                activeRequest.end()
+            }
+
+            requestUpstream(audioUrl, 0)
+        })
     }
 
     private async handleGetCoverArt(
