@@ -85,6 +85,7 @@ export const File = {
   userDir: 'users',
   userDevicesJSON: 'devices.json',
   userSettingsJSON: 'settings.json',
+  userPlaylistSharesJSON: 'playlistShares.json',
   userSoundEffectsJSON: 'soundEffects.json',
   userTokensJSON: 'token.json',
   listDir: 'list',

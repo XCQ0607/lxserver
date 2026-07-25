@@ -24,6 +24,14 @@ import * as customSourceHandlers from './customSourceHandlers'
 import * as fileCache from './fileCache'
 import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
+import {
+  PlaylistSharingError,
+  createPlaylistShare,
+  getPendingPlaylistShares,
+  isPlaylistSharingEnabled,
+  respondToPlaylistShare,
+  setPlaylistSharingEnabled,
+} from './playlistSharing'
 import { getDownloadQualityCandidates } from './downloadQuality'
 import { normalizeUsername, tryNormalizeUsername, validateUsername } from '@/utils/username'
 import crypto from 'node:crypto'
@@ -2136,12 +2144,124 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
             const settings = JSON.parse(body)
 
+            if (typeof settings.enablePlaylistSharing !== 'boolean') {
+              settings.enablePlaylistSharing = isPlaylistSharingEnabled(resolvedUsername!)
+            }
+
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true }))
           } catch (err: any) {
             res.writeHead(400)
             res.end('Invalid JSON data')
+          }
+        })
+        return
+      }
+
+      if (pathname === '/api/user/playlist-sharing/settings') {
+        const username = verifyUserAuth(req)
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '需要用户认证' }))
+          return
+        }
+
+        if (req.method === 'GET') {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          })
+          res.end(JSON.stringify({ success: true, enabled: isPlaylistSharingEnabled(username) }))
+          return
+        }
+
+        if (req.method === 'POST') {
+          void readBody(req).then(body => {
+            try {
+              const { enabled } = JSON.parse(body)
+              if (typeof enabled !== 'boolean') throw new Error('enabled must be boolean')
+              setPlaylistSharingEnabled(username, enabled)
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: true, enabled }))
+            } catch (err: any) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message || '参数错误' }))
+            }
+          })
+          return
+        }
+      }
+
+      if (pathname === '/api/user/playlist-sharing/send' && req.method === 'POST') {
+        const username = verifyUserAuth(req)
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '需要用户认证' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { toUsername, playlistId } = JSON.parse(body)
+            const result = await createPlaylistShare(username, toUsername, playlistId)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...result }))
+          } catch (err: any) {
+            const statusCode = err instanceof PlaylistSharingError ? err.statusCode : 500
+            res.writeHead(statusCode, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+              success: false,
+              code: err instanceof PlaylistSharingError ? err.code : 'internal_error',
+              message: err.message || '分享失败',
+            }))
+          }
+        })
+        return
+      }
+
+      if (pathname === '/api/user/playlist-sharing/pending' && req.method === 'GET') {
+        const username = verifyUserAuth(req)
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '需要用户认证' }))
+          return
+        }
+
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+        })
+        res.end(JSON.stringify({
+          success: true,
+          enabled: isPlaylistSharingEnabled(username),
+          shares: getPendingPlaylistShares(username),
+        }))
+        return
+      }
+
+      if (pathname === '/api/user/playlist-sharing/respond' && req.method === 'POST') {
+        const username = verifyUserAuth(req)
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '需要用户认证' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { shareId, action } = JSON.parse(body)
+            const result = await respondToPlaylistShare(username, shareId, action)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...result }))
+          } catch (err: any) {
+            const statusCode = err instanceof PlaylistSharingError ? err.statusCode : 500
+            res.writeHead(statusCode, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({
+              success: false,
+              code: err instanceof PlaylistSharingError ? err.code : 'internal_error',
+              message: err.message || '处理失败',
+            }))
           }
         })
         return

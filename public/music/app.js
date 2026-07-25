@@ -113,6 +113,7 @@ const DEFAULT_SETTINGS = {
     enableSongUrlCache: true,
     enableLyricGlow: true, // 歌词荧光效果 (默认开启)
     enablePersistentToken: false, // 启用持久化 Token 验证
+    enablePlaylistSharing: false, // 允许用户间分享歌单
     playerBackground: 'blur', // 播放页背景: 'blur', 'solid', 'dark'
     saveAccountSettingsToFile: true, // 同步账号设置到文件 (默认开启)
     autoUpdateNetworkList: false, // 自动更新网络歌单 (默认关闭)
@@ -443,6 +444,7 @@ async function ensureUserAuthToken(options = {}) {
                     localStorage.removeItem('lx_user_token');
                     localStorage.removeItem('lx_sync_user');
                     localStorage.removeItem('lx_sync_pass');
+                    stopPlaylistSharePolling();
                     if (typeof updateUserUI === 'function') updateUserUI();
                     if (typeof updateAdminUI === 'function') updateAdminUI();
                     void reloadUserFavorites();
@@ -635,6 +637,11 @@ window.handleHeaderLogout = handleHeaderLogout;
 
         // [新增] 更新 UI 上的用户名状态
         updateUserUI();
+
+        if (userToken && isUserLoggedIn()) {
+            await loadPlaylistSharingSetting();
+            startPlaylistSharePolling();
+        }
 
     } catch (error) {
         console.error('[Auth] 初始化检查失败:', error);
@@ -6038,6 +6045,7 @@ const SETTINGS_UI_MAP = {
     autoUpdateNetworkList: { id: 'setting-auto-update-list', type: 'checkbox' },
     networkListAutoCheckInterval: { id: 'setting-network-list-auto-check-interval', type: 'value' },
     saveAccountSettingsToFile: { id: 'setting-save-settings-to-file', type: 'checkbox' },
+    enablePlaylistSharing: { id: 'setting-enable-playlist-sharing', type: 'checkbox' },
     enableLyricCache: { id: 'setting-enable-lyric-cache', type: 'checkbox' },
     enableSongUrlCache: { id: 'setting-enable-url-cache', type: 'checkbox' },
     enableServerCache: { id: 'setting-enable-server-cache', type: 'checkbox' },
@@ -8455,6 +8463,8 @@ async function handleSyncLogout(skipConfirm = false) {
     }
 
     try {
+        stopPlaylistSharePolling();
+
         // 1. 服务端注销 Token
         if (userToken) {
             try {
@@ -8634,6 +8644,9 @@ async function handleLocalLogin() {
             if (settings.saveAccountSettingsToFile) {
                 fetchSettingsFromServer();
             }
+
+            await loadPlaylistSharingSetting();
+            startPlaylistSharePolling();
 
             // [新增] 客户端模式：登录本地服务器后自动触发远程同步
             if (settings.enableClientModeSync && settings.remoteSyncUrl && settings.remoteSyncCode) {
@@ -9169,6 +9182,7 @@ function renderMyLists(data) {
             <i class="fas ${icon} w-5 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0"></i>
             ${displayName.length > 8 ? `<div class="ml-2 flex-1 overflow-hidden">${nameHtml}</div>` : nameHtml}
             <span class="text-xs text-gray-300 group-hover:t-text-muted mr-2 flex-shrink-0">${count}</span>
+            ${typeof listObj !== 'string' ? `<button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="分享歌单" aria-label="分享歌单" onclick="handleSharePlaylist('${id}', event)"><i class="fas fa-share-alt text-[10px]"></i></button>` : ''}
             ${typeof listObj !== 'string' ? `<button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="重命名歌单" aria-label="重命名歌单" onclick="handleRenameList('${id}', event)"><i class="fas fa-pen text-[10px]"></i></button>` : ''}
             ${id !== 'default' && id !== 'love' ? `<i class="fas fa-trash text-gray-300 hover:text-red-500 hidden group-hover:block flex-shrink-0" onclick="handleRemoveList('${id}', event)"></i>` : ''}
         `;
@@ -9415,6 +9429,262 @@ async function handleRenameList(listId, event) {
         showError('重命名失败，请重试');
     }
 }
+
+let playlistSharePollTimer = null;
+let playlistShareModalOpen = false;
+let lastAutoPromptedShareId = null;
+
+function updatePlaylistSharePendingCount(count) {
+    const badge = document.getElementById('playlist-share-pending-count');
+    if (!badge) return;
+    badge.textContent = String(count || 0);
+    badge.classList.toggle('hidden', !count);
+    badge.classList.toggle('flex', !!count);
+}
+
+async function readPlaylistShareResponse(response) {
+    let data = null;
+    try {
+        data = await response.json();
+    } catch (e) {
+        data = { message: await response.text().catch(() => '') };
+    }
+    if (!response.ok) throw new Error(data?.message || '请求失败');
+    return data;
+}
+
+async function loadPlaylistSharingSetting() {
+    if (!isUserLoggedIn()) return false;
+    try {
+        const response = await fetch('/api/user/playlist-sharing/settings', {
+            headers: getUserAuthHeaders(),
+            cache: 'no-store'
+        });
+        const data = await readPlaylistShareResponse(response);
+        settings.enablePlaylistSharing = data.enabled === true;
+        window.settings = settings;
+        localStorage.setItem('lx_settings', JSON.stringify(settings));
+        syncSettingsUI('enablePlaylistSharing', settings.enablePlaylistSharing);
+        return settings.enablePlaylistSharing;
+    } catch (e) {
+        console.error('[PlaylistShare] 加载开关失败:', e);
+        return false;
+    }
+}
+
+async function togglePlaylistSharingSetting(enabled) {
+    const toggle = document.getElementById('setting-enable-playlist-sharing');
+    if (!isUserLoggedIn()) {
+        if (toggle) toggle.checked = false;
+        showError('请先登录同步账户');
+        return;
+    }
+
+    if (toggle) toggle.disabled = true;
+    try {
+        const response = await fetch('/api/user/playlist-sharing/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+            body: JSON.stringify({ enabled: !!enabled })
+        });
+        const data = await readPlaylistShareResponse(response);
+        settings.enablePlaylistSharing = data.enabled === true;
+        window.settings = settings;
+        localStorage.setItem('lx_settings', JSON.stringify(settings));
+        syncSettingsUI('enablePlaylistSharing', settings.enablePlaylistSharing);
+        showSuccess(`歌单分享已${settings.enablePlaylistSharing ? '开启' : '关闭'}`);
+        startPlaylistSharePolling();
+    } catch (e) {
+        if (toggle) toggle.checked = !enabled;
+        showError(e.message || '更新歌单分享设置失败');
+    } finally {
+        if (toggle) toggle.disabled = false;
+    }
+}
+
+async function handleSharePlaylist(listId, event) {
+    if (event) event.stopPropagation();
+    if (!isUserLoggedIn()) {
+        showError('请先登录同步账户');
+        return;
+    }
+    if (!settings.enablePlaylistSharing) {
+        showError('请先在设置中开启歌单分享');
+        return;
+    }
+
+    const playlist = currentListData?.userList?.find(list => list.id === listId);
+    if (!playlist) {
+        showError('未找到要分享的歌单');
+        return;
+    }
+    const toUsername = await showInput('分享歌单', `将“${escapeHtmlText(playlist.name)}”分享给：`, {
+        placeholder: '请输入对方用户名',
+        confirmText: '发送分享'
+    });
+    if (!toUsername) return;
+
+    try {
+        const response = await fetch('/api/user/playlist-sharing/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+            body: JSON.stringify({ toUsername, playlistId })
+        });
+        const data = await readPlaylistShareResponse(response);
+        showSuccess(data.updated ? '已更新待处理的歌单分享' : `已分享给 ${data.toUser}`);
+    } catch (e) {
+        showError(e.message || '歌单分享失败');
+    }
+}
+
+async function fetchPendingPlaylistShares() {
+    if (!isUserLoggedIn()) return { enabled: false, shares: [] };
+    const response = await fetch('/api/user/playlist-sharing/pending', {
+        headers: getUserAuthHeaders(),
+        cache: 'no-store'
+    });
+    const data = await readPlaylistShareResponse(response);
+    const shares = Array.isArray(data.shares) ? data.shares : [];
+    updatePlaylistSharePendingCount(shares.length);
+    if (settings.enablePlaylistSharing !== (data.enabled === true)) {
+        settings.enablePlaylistSharing = data.enabled === true;
+        window.settings = settings;
+        localStorage.setItem('lx_settings', JSON.stringify(settings));
+        syncSettingsUI('enablePlaylistSharing', settings.enablePlaylistSharing);
+    }
+    return { enabled: data.enabled === true, shares };
+}
+
+async function respondToPlaylistShare(shareId, action, row, modal) {
+    const buttons = row.querySelectorAll('button');
+    buttons.forEach(button => { button.disabled = true; });
+    try {
+        const response = await fetch('/api/user/playlist-sharing/respond', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+            body: JSON.stringify({ shareId, action })
+        });
+        await readPlaylistShareResponse(response);
+        row.remove();
+        const remaining = modal.querySelectorAll('[data-playlist-share-row]').length;
+        updatePlaylistSharePendingCount(remaining);
+        if (action === 'accept') {
+            await reloadUserFavorites();
+            showSuccess('歌单已添加到收藏歌单');
+        } else {
+            showSuccess('已拒绝该歌单分享');
+        }
+        if (!remaining) {
+            modal.querySelector('[data-share-close]')?.click();
+        }
+    } catch (e) {
+        showError(e.message || '处理歌单分享失败');
+        buttons.forEach(button => { button.disabled = false; });
+    }
+}
+
+function renderPlaylistShareInbox(shares) {
+    if (playlistShareModalOpen || !shares.length) return;
+    playlistShareModalOpen = true;
+
+    const modal = document.createElement('div');
+    modal.className = 'fixed inset-0 z-[220] flex items-center justify-center p-4 animate-fade-in';
+    modal.innerHTML = `
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" data-share-close></div>
+        <div class="t-bg-panel rounded-xl shadow-2xl w-full max-w-lg max-h-[80vh] overflow-hidden relative z-10 border t-border-main">
+            <div class="px-5 py-4 border-b t-border-main flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                    <i class="fas fa-inbox text-emerald-500"></i>
+                    <h3 class="text-sm font-bold t-text-main">待处理歌单分享</h3>
+                </div>
+                <button type="button" data-share-close class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-emerald-500" title="稍后处理">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="overflow-y-auto max-h-[60vh] divide-y t-border-main">
+                ${shares.map(share => `
+                    <div class="p-5 flex flex-col sm:flex-row sm:items-center gap-4" data-playlist-share-row data-share-id="${escapeHtmlText(share.id)}">
+                        <div class="w-10 h-10 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center flex-shrink-0">
+                            <i class="fas fa-music"></i>
+                        </div>
+                        <div class="flex-1 min-w-0">
+                            <div class="font-bold text-sm t-text-main truncate">${escapeHtmlText(share.playlistName)}</div>
+                            <div class="text-xs t-text-muted mt-1">${escapeHtmlText(share.fromUser)} · ${Number(share.songCount) || 0} 首歌曲</div>
+                            <div class="text-[10px] t-text-muted mt-1">${new Date(share.createdAt).toLocaleString()}</div>
+                        </div>
+                        <div class="flex items-center gap-2 flex-shrink-0">
+                            <button type="button" data-share-action="reject" class="px-3 py-2 text-xs font-bold t-text-muted hover:text-red-500 t-bg-main rounded-lg transition-colors">拒绝</button>
+                            <button type="button" data-share-action="accept" class="px-3 py-2 text-xs font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-lg transition-colors">接受</button>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = () => {
+        if (!modal.isConnected) return;
+        modal.classList.add('opacity-0');
+        setTimeout(() => modal.remove(), 180);
+        playlistShareModalOpen = false;
+    };
+    modal.querySelectorAll('[data-share-close]').forEach(element => {
+        element.addEventListener('click', close);
+    });
+    modal.querySelectorAll('[data-share-action]').forEach(button => {
+        button.addEventListener('click', () => {
+            const row = button.closest('[data-playlist-share-row]');
+            respondToPlaylistShare(row.dataset.shareId, button.dataset.shareAction, row, modal);
+        });
+    });
+}
+
+async function openPlaylistShareInbox(manual = true) {
+    if (!isUserLoggedIn()) {
+        if (manual) showError('请先登录同步账户');
+        return;
+    }
+    try {
+        const { enabled, shares } = await fetchPendingPlaylistShares();
+        if (!enabled) {
+            if (manual) showError('请先在设置中开启歌单分享');
+            return;
+        }
+        if (!shares.length) {
+            if (manual) showSuccess('暂无待处理的歌单分享');
+            return;
+        }
+        if (!manual && lastAutoPromptedShareId === shares[0].id) return;
+        if (!manual) lastAutoPromptedShareId = shares[0].id;
+        renderPlaylistShareInbox(shares);
+    } catch (e) {
+        if (manual) showError(e.message || '读取歌单分享失败');
+        else console.error('[PlaylistShare] 轮询失败:', e);
+    }
+}
+
+function startPlaylistSharePolling() {
+    stopPlaylistSharePolling();
+    if (!isUserLoggedIn() || !settings.enablePlaylistSharing) return;
+    openPlaylistShareInbox(false);
+    playlistSharePollTimer = setInterval(() => {
+        if (document.visibilityState === 'visible') openPlaylistShareInbox(false);
+    }, 20000);
+}
+
+function stopPlaylistSharePolling() {
+    if (playlistSharePollTimer) {
+        clearInterval(playlistSharePollTimer);
+        playlistSharePollTimer = null;
+    }
+    updatePlaylistSharePendingCount(0);
+    lastAutoPromptedShareId = null;
+}
+
+window.handleSharePlaylist = handleSharePlaylist;
+window.togglePlaylistSharingSetting = togglePlaylistSharingSetting;
+window.openPlaylistShareInbox = openPlaylistShareInbox;
 
 function formatSongToLxMusicStandard(item) {
     if (!item) return item;

@@ -1692,6 +1692,36 @@
                                 </div>
                             </div>
 
+                            <!-- Playlist Sharing -->
+                            <div class="pt-6 border-t t-border-main">
+                                <h3 class="font-medium text-emerald-600 mb-4">歌单分享</h3>
+                                <div class="space-y-4">
+                                    <div class="flex items-center justify-between gap-4">
+                                        <div>
+                                            <div class="text-sm font-bold t-text-main flex items-center gap-2">
+                                                <i class="fas fa-share-alt text-emerald-500"></i>
+                                                允许用户间分享歌单
+                                            </div>
+                                        </div>
+                                        <label class="relative inline-flex items-center cursor-pointer flex-shrink-0">
+                                            <input type="checkbox" id="setting-enable-playlist-sharing"
+                                                class="sr-only peer"
+                                                onchange="togglePlaylistSharingSetting(this.checked)">
+                                            <div
+                                                class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                            </div>
+                                        </label>
+                                    </div>
+                                    <button type="button" onclick="openPlaylistShareInbox()"
+                                        class="w-full py-2.5 t-bg-main border t-border-main rounded-xl text-sm font-medium t-text-main hover:text-emerald-500 hover:border-emerald-400 transition-all flex items-center justify-center gap-2">
+                                        <i class="fas fa-inbox"></i>
+                                        待处理分享
+                                        <span id="playlist-share-pending-count"
+                                            class="hidden min-w-5 h-5 px-1.5 rounded-full bg-rose-500 text-white text-[10px] items-center justify-center">0</span>
+                                    </button>
+                                </div>
+                            </div>
+
                             <!-- Auto Update Settings -->
                             <div class="pt-6 border-t t-border-main">
                                 <h3 class="font-medium text-emerald-600 mb-4">自动更新</h3>
