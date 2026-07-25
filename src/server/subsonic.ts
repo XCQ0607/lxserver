@@ -149,6 +149,7 @@ class SubsonicHandler {
         if (!attrs) return ''
         let str = ''
         for (const k in attrs) {
+            if (attrs[k] === undefined || attrs[k] === null) continue
             const v = String(attrs[k])
                 .replace(/&/g, '&amp;')
                 .replace(/"/g, '&quot;')
@@ -451,45 +452,114 @@ class SubsonicHandler {
     /**
      * 从歌曲元数据中检测并提取最佳音质配置
      */
+    private parseByteSize(value: unknown): number | undefined {
+        if (typeof value === 'number') return Number.isFinite(value) && value > 0 ? Math.round(value) : undefined
+        if (typeof value !== 'string') return undefined
+
+        const normalized = value.trim().replace(/,/g, '')
+        const match = normalized.match(/^(\d+(?:\.\d+)?)\s*(B|K|KB|KIB|M|MB|MIB|G|GB|GIB)?$/i)
+        if (!match) return undefined
+
+        const amount = Number(match[1])
+        if (!Number.isFinite(amount) || amount <= 0) return undefined
+        const unit = (match[2] || 'B').toUpperCase()
+        const multipliers: Record<string, number> = {
+            B: 1,
+            K: 1024,
+            KB: 1024,
+            KIB: 1024,
+            M: 1024 ** 2,
+            MB: 1024 ** 2,
+            MIB: 1024 ** 2,
+            G: 1024 ** 3,
+            GB: 1024 ** 3,
+            GIB: 1024 ** 3,
+        }
+        return Math.round(amount * multipliers[unit])
+    }
+
+    private normalizeBitRate(value: unknown, rejectLosslessPlaceholder = false): number | undefined {
+        const numeric = Number(value)
+        if (!Number.isFinite(numeric) || numeric <= 0) return undefined
+        const kbps = numeric > 10_000 ? numeric / 1000 : numeric
+        const rounded = Math.round(kbps)
+        if (rejectLosslessPlaceholder && rounded === 999) return undefined
+        return rounded >= 8 && rounded <= 20_000 ? rounded : undefined
+    }
+
     private getBestQualityMeta(music: LX.Music.MusicInfo) {
         const meta = (music as any).meta || {}
-        const qualitys = (music as any).types || (music as any)._types || meta.qualitys || meta.types || meta._types || (music as any)._qualitys || meta._qualitys || []
-
-        const qMap: Record<string, { bitRate: number, suffix: string, contentType: string }> = {
-            'master': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
-            'atmos_plus': { bitRate: 1500, suffix: 'm4a', contentType: 'audio/mp4' },
-            'atmos': { bitRate: 1000, suffix: 'm4a', contentType: 'audio/mp4' },
-            'hires': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
-            'flac24bit': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
-            'flac': { bitRate: 999, suffix: 'flac', contentType: 'audio/flac' },
+        const qualitySources = [
+            (music as any).types,
+            (music as any)._types,
+            meta.qualitys,
+            meta.types,
+            meta._types,
+            (music as any)._qualitys,
+            meta._qualitys,
+        ]
+        const qMap: Record<string, { bitRate?: number, suffix: string, contentType: string }> = {
+            'master': { suffix: 'flac', contentType: 'audio/flac' },
+            'atmos_plus': { suffix: 'm4a', contentType: 'audio/mp4' },
+            'atmos': { suffix: 'm4a', contentType: 'audio/mp4' },
+            'hires': { suffix: 'flac', contentType: 'audio/flac' },
+            'flac24bit': { suffix: 'flac', contentType: 'audio/flac' },
+            'flac': { suffix: 'flac', contentType: 'audio/flac' },
             '320k': { bitRate: 320, suffix: 'mp3', contentType: 'audio/mpeg' },
             '192k': { bitRate: 192, suffix: 'mp3', contentType: 'audio/mpeg' },
             '128k': { bitRate: 128, suffix: 'mp3', contentType: 'audio/mpeg' },
         }
 
-        const hasQuality = (q: string) => {
-            if (Array.isArray(qualitys)) {
-                return qualitys.some((item: any) => item === q || item?.type === q || item?.name === q)
-            } else if (qualitys && typeof qualitys === 'object') {
-                return Boolean((qualitys as any)[q])
+        const getQualityInfo = (q: string): any | null => {
+            const matches: any[] = []
+            for (const source of qualitySources) {
+                if (Array.isArray(source)) {
+                    const item = source.find((value: any) => value === q || value?.type === q || value?.name === q)
+                    if (item != null) matches.push(typeof item === 'object' ? item : {})
+                } else if (source && typeof source === 'object') {
+                    const item = (source as any)[q]
+                    if (item != null && item !== false) matches.push(typeof item === 'object' ? item : {})
+                }
             }
-            return false
+            return matches.length > 0 ? Object.assign({}, ...matches) : null
         }
 
         // 尝试按优先级匹配最佳音质
         for (const q of ['master', 'atmos_plus', 'atmos', 'hires', 'flac24bit', 'flac', '320k', '192k', '128k']) {
-            if (hasQuality(q)) {
-                return { ...qMap[q], size: 0 }
+            const qualityInfo = getQualityInfo(q)
+            if (qualityInfo == null) continue
+
+            const size = this.parseByteSize(qualityInfo.size ?? qualityInfo.fileSize ?? qualityInfo.filesize)
+            const duration = this.parseDuration(music.interval)
+            const isLossless = ['master', 'hires', 'flac24bit', 'flac'].includes(q)
+            const explicitBitRate = this.normalizeBitRate(
+                qualityInfo.bitRate ?? qualityInfo.bitrate,
+                isLossless,
+            )
+            const calculatedBitRate = size && duration > 0
+                ? Math.round(size * 8 / duration / 1000)
+                : undefined
+            const musicBitRate = this.normalizeBitRate(
+                (music as any).bitRate ?? (music as any).bitrate ?? meta.bitRate ?? meta.bitrate,
+                isLossless,
+            )
+            const bitRate = explicitBitRate ?? calculatedBitRate ?? musicBitRate ?? qMap[q].bitRate
+
+            return {
+                suffix: qMap[q].suffix,
+                contentType: qMap[q].contentType,
+                ...(bitRate ? { bitRate } : {}),
+                ...(size ? { size } : {}),
             }
         }
 
         // 若是在线全网检索歌曲，没抓到 types 信息的兜底返回 320k
         if (music.id && music.id.includes('_')) {
-            return { bitRate: 320, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
+            return { bitRate: 320, suffix: 'mp3', contentType: 'audio/mpeg' }
         }
 
         // 兜底返回 128k
-        return { bitRate: 128, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
+        return { bitRate: 128, suffix: 'mp3', contentType: 'audio/mpeg' }
     }
 
     /**
