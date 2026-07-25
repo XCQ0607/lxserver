@@ -479,6 +479,44 @@ async function ensureOnlineSourceAuth(options = {}) {
 }
 window.ensureOnlineSourceAuth = ensureOnlineSourceAuth;
 
+async function ensureLocalPlaybackAuth() {
+    if (!isUserLoggedIn()) return false;
+
+    const headers = typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {};
+    try {
+        const response = await fetch('/api/user/auth/verify', {
+            headers,
+            cache: 'no-store',
+        });
+        if (response.ok) {
+            const result = await response.json();
+            if (result.valid) return true;
+        }
+    } catch (error) {
+        console.warn('[Auth] Local playback token verification failed:', error);
+    }
+
+    return ensureUserAuthToken({ force: true });
+}
+
+function updateLocalPlaybackToken(url) {
+    const token = typeof getUserAuthHeaders === 'function'
+        ? getUserAuthHeaders()['x-user-token']
+        : localStorage.getItem('lx_user_token');
+    if (!url || !token) return url;
+
+    try {
+        const parsedUrl = new URL(url, window.location.origin);
+        parsedUrl.searchParams.set('token', token);
+        return url.startsWith('/')
+            ? `${parsedUrl.pathname}${parsedUrl.search}${parsedUrl.hash}`
+            : parsedUrl.toString();
+    } catch (error) {
+        console.warn('[Auth] Failed to update local playback token:', error);
+        return url;
+    }
+}
+
 /**
  * 更新顶部栏的用户状态显示 (登录按钮/用户名)
  */
@@ -3561,8 +3599,13 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
 
     // 0. 本地文件/带有本地播放 URL 的歌曲：直接播放本地文件，无需走在线 API 解析
     if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url && !isRetry) {
+        if (!(await ensureLocalPlaybackAuth())) {
+            const authError = new Error('\u8bf7\u5148\u91cd\u65b0\u767b\u5f55\u540c\u6b65\u8d26\u6237');
+            authError.code = 'AUTH_REQUIRED';
+            throw authError;
+        }
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
-        let localUrl = await applyAutoProxy(song.url, song);
+        let localUrl = await applyAutoProxy(updateLocalPlaybackToken(song.url), song);
         return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
     }
 
