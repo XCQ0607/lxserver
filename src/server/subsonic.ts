@@ -456,15 +456,15 @@ class SubsonicHandler {
         const qualitys = (music as any).types || (music as any)._types || meta.qualitys || meta.types || meta._types || (music as any)._qualitys || meta._qualitys || []
 
         const qMap: Record<string, { bitRate: number, suffix: string, contentType: string }> = {
-            'master': { bitRate: 2304, suffix: 'Master', contentType: 'audio/flac' },
-            'atmos_plus': { bitRate: 1500, suffix: 'Atmos+', contentType: 'audio/mp4' },
-            'atmos': { bitRate: 1000, suffix: 'Atmos', contentType: 'audio/mp4' },
-            'hires': { bitRate: 2304, suffix: 'Hi-Res', contentType: 'audio/flac' },
-            'flac24bit': { bitRate: 2304, suffix: 'Hi-Res', contentType: 'audio/flac' },
-            'flac': { bitRate: 999, suffix: '无损', contentType: 'audio/flac' },
-            '320k': { bitRate: 320, suffix: '320k', contentType: 'audio/mpeg' },
-            '192k': { bitRate: 192, suffix: '192k', contentType: 'audio/mpeg' },
-            '128k': { bitRate: 128, suffix: '128k', contentType: 'audio/mpeg' },
+            'master': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'atmos_plus': { bitRate: 1500, suffix: 'm4a', contentType: 'audio/mp4' },
+            'atmos': { bitRate: 1000, suffix: 'm4a', contentType: 'audio/mp4' },
+            'hires': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'flac24bit': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'flac': { bitRate: 999, suffix: 'flac', contentType: 'audio/flac' },
+            '320k': { bitRate: 320, suffix: 'mp3', contentType: 'audio/mpeg' },
+            '192k': { bitRate: 192, suffix: 'mp3', contentType: 'audio/mpeg' },
+            '128k': { bitRate: 128, suffix: 'mp3', contentType: 'audio/mpeg' },
         }
 
         const hasQuality = (q: string) => {
@@ -485,11 +485,11 @@ class SubsonicHandler {
 
         // 若是在线全网检索歌曲，没抓到 types 信息的兜底返回 320k
         if (music.id && music.id.includes('_')) {
-            return { bitRate: 320, size: 0, suffix: '320k', contentType: 'audio/mpeg' }
+            return { bitRate: 320, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
         }
 
         // 兜底返回 128k
-        return { bitRate: 128, size: 0, suffix: '128k', contentType: 'audio/mpeg' }
+        return { bitRate: 128, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
     }
 
     /**
@@ -555,6 +555,83 @@ class SubsonicHandler {
         }
 
         return groups
+    }
+
+    private mapLibraryAlbum(album: any) {
+        const source = album.source || 'wy'
+        const primarySinger = (album.artistName || '').split('\u3001')[0] || 'LX Music'
+        const artistId = album.singerId ? `art_${source}_${album.singerId}` : `artist_${primarySinger}`
+        return {
+            id: `alb_${source}_${album.id}`,
+            name: album.name,
+            title: album.name,
+            album: album.name,
+            artist: album.artistName || 'LX Music',
+            artistId,
+            isDir: true,
+            coverArt: album.picUrl || album.meta?.picUrl || `alb_${source}_${album.id}`,
+            songCount: (album.list || []).length,
+            duration: (album.list || []).reduce((sum: number, music: any) => sum + this.parseDuration(music.interval), 0),
+            created: new Date().toISOString(),
+            playCount: 0,
+            year: album.publishTime ? parseInt(String(album.publishTime).split(/[/-]/)[0]) : undefined,
+        }
+    }
+
+    private getAlbumIdentity(album: any) {
+        const source = String(album.source || String(album.id || '').match(/^alb_([^_]+)_/)?.[1] || '').toLowerCase()
+        const name = String(album.name || album.title || album.album || '').trim().toLowerCase()
+        const artist = String(album.artist || album.artistName || '').trim().toLowerCase()
+        const primaryArtist = artist.split(/\u3001|,|\uFF0C|\/|&/)[0].trim()
+        return `${source}\0${name}\0${primaryArtist}`
+    }
+
+    private mergeAlbumCatalog(
+        libraryAlbums: any[],
+        localAlbumGroups: Map<string, { album: any, songs: LX.Music.MusicInfo[] }>,
+    ) {
+        const albumsById = new Map<string, any>()
+        const identityToId = new Map<string, string>()
+        const localAlbumIds = new Set<string>()
+
+        for (const [albumId, group] of localAlbumGroups) {
+            const album = group.album
+            albumsById.set(albumId, album)
+            identityToId.set(this.getAlbumIdentity(album), albumId)
+            localAlbumIds.add(albumId)
+        }
+
+        for (const libraryAlbum of libraryAlbums) {
+            const album = this.mapLibraryAlbum(libraryAlbum)
+            const identity = this.getAlbumIdentity(album)
+            const existingId = albumsById.has(album.id) ? album.id : identityToId.get(identity)
+
+            if (!existingId) {
+                albumsById.set(album.id, album)
+                identityToId.set(identity, album.id)
+                continue
+            }
+
+            const existing = albumsById.get(existingId)
+            if (localAlbumIds.has(existingId)) {
+                albumsById.set(existingId, {
+                    ...album,
+                    ...existing,
+                    id: existingId,
+                    coverArt: existing.coverArt || album.coverArt,
+                    year: album.year || existing.year,
+                })
+                continue
+            }
+
+            if ((album.songCount || 0) > (existing.songCount || 0)) {
+                albumsById.delete(existingId)
+                albumsById.set(album.id, album)
+                identityToId.set(identity, album.id)
+            }
+        }
+
+        return Array.from(albumsById.values())
     }
 
     /** 查找某个用户下所有列表中的某首歌 */
@@ -1206,46 +1283,7 @@ class SubsonicHandler {
                 this.collectUniqueListSongs(listData),
             )
 
-            const buildAlbum = (album: any) => {
-                const source = album.source || 'wy'
-                const primarySinger = (album.artistName || '').split('、')[0] || 'LX Music'
-                const artistId = album.singerId ? `art_${source}_${album.singerId}` : `artist_${primarySinger}`
-                return {
-                    id: `alb_${source}_${album.id}`,
-                    name: album.name,
-                    title: album.name,
-                    album: album.name,
-                    artist: album.artistName || 'LX Music',
-                    artistId: artistId,
-                    isDir: true,
-                    coverArt: album.picUrl || album.meta?.picUrl || `alb_${source}_${album.id}`,
-                    songCount: (album.list || []).length,
-                    duration: (album.list || []).reduce((s: number, m: any) => s + this.parseDuration(m.interval), 0),
-                    created: new Date().toISOString(),
-                    playCount: 0,
-                    year: album.publishTime ? parseInt(String(album.publishTime).split(/[/-]/)[0]) : undefined,
-                }
-            }
-
-            const albumMap = new Map<string, any>()
-            for (const album of libAlbums) {
-                const mappedAlbum = buildAlbum(album)
-                albumMap.set(mappedAlbum.id, mappedAlbum)
-            }
-            for (const [albumId, group] of localAlbumGroups) {
-                const existing = albumMap.get(albumId)
-                albumMap.set(albumId, existing
-                    ? {
-                        ...group.album,
-                        ...existing,
-                        songCount: group.album.songCount,
-                        duration: group.album.duration,
-                        coverArt: existing.coverArt || group.album.coverArt,
-                    }
-                    : group.album)
-            }
-
-            const mergedAlbums = Array.from(albumMap.values())
+            const mergedAlbums = this.mergeAlbumCatalog(libAlbums, localAlbumGroups)
             if (type === 'alphabeticalByName') {
                 mergedAlbums.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh-CN'))
             } else if (type === 'alphabeticalByArtist') {
@@ -1717,41 +1755,10 @@ class SubsonicHandler {
         const allLocalArtists = Array.from(allArtistsMap.values())
 
         // 3. 汇总所有专辑 (去重)
-        const allAlbumsMap = new Map<string, any>()
-        for (const alb of libAlbums) {
-            const source = alb.source || 'wy'
-            const primarySinger = (alb.artistName || '').split('、')[0] || 'LX Music'
-            const artistId = alb.singerId ? `art_${source}_${alb.singerId}` : `artist_${primarySinger}`
-            const albId = `alb_${source}_${alb.id}`
-            allAlbumsMap.set(albId, {
-                id: albId,
-                name: alb.name,
-                title: alb.name,
-                album: alb.name,
-                artist: alb.artistName || 'LX Music',
-                artistId: artistId,
-                isDir: true,
-                coverArt: alb.picUrl || alb.meta?.picUrl || albId,
-                songCount: (alb.list || []).length,
-                duration: (alb.list || []).reduce((s: number, m: any) => s + this.parseDuration(m.interval), 0),
-                created: new Date().toISOString(),
-                playCount: 0,
-                year: alb.publishTime ? parseInt(String(alb.publishTime).split(/[/-]/)[0]) : undefined,
-            })
-        }
-        for (const [albumId, group] of this.buildLocalAlbumGroups(allLocalSongs)) {
-            const existing = allAlbumsMap.get(albumId)
-            allAlbumsMap.set(albumId, existing
-                ? {
-                    ...group.album,
-                    ...existing,
-                    songCount: group.album.songCount,
-                    duration: group.album.duration,
-                    coverArt: existing.coverArt || group.album.coverArt,
-                }
-                : group.album)
-        }
-        const allLocalAlbums = Array.from(allAlbumsMap.values())
+        const allLocalAlbums = this.mergeAlbumCatalog(
+            libAlbums,
+            this.buildLocalAlbumGroups(allLocalSongs),
+        )
 
         // 4. 执行本地检索过滤
         let matchedSongs = queryForFilter
@@ -2032,6 +2039,21 @@ class SubsonicHandler {
         }, format)
     }
 
+    private getStreamFormat(params: URLSearchParams) {
+        const maxBitRateParam = params.get('maxBitRate') ?? params.get('maxBitrate')
+        const maxBitRate = parseInt(maxBitRateParam || '0')
+        let quality = 'flac'
+        if (maxBitRate > 0 && maxBitRate < 320) {
+            quality = '128k'
+        } else if (maxBitRate >= 320 && maxBitRate < 1000) {
+            quality = '320k'
+        }
+        return {
+            quality,
+            contentType: quality === 'flac' ? 'audio/flac' : 'audio/mpeg',
+        }
+    }
+
     private async handleStream(
         req: http.IncomingMessage,
         res: http.ServerResponse,
@@ -2055,13 +2077,7 @@ class SubsonicHandler {
         }
 
         try {
-            const maxBitrate = parseInt(params.get('maxBitrate') || '0')
-            let quality = '128k'
-            if (maxBitrate === 0 || maxBitrate >= 320) {
-                quality = 'flac' // 优先请求最高音质，SDK 会自动降级
-            } else if (maxBitrate > 128) {
-                quality = '320k'
-            }
+            const { quality, contentType } = this.getStreamFormat(params)
 
             // [新增] 处理电台流: 随机取一首歌播放
             if (id.startsWith('radio_tx_')) {
@@ -2080,7 +2096,7 @@ class SubsonicHandler {
                     const result = await callUserApiGetMusicUrl('tx', musicInfo, quality, username)
 
                     if (result && result.url) {
-                        return this.proxyAudioStream(req, res, result.url)
+                        return this.proxyAudioStream(req, res, result.url, contentType)
                     } else {
                         console.error(`[Subsonic] Radio ${id} failed to resolve music URL`)
                     }
@@ -2123,7 +2139,7 @@ class SubsonicHandler {
             const result = await callUserApiGetMusicUrl(source as any, musicInfo as any, quality, username)
 
             if (result && result.url) {
-                return this.proxyAudioStream(req, res, result.url)
+                return this.proxyAudioStream(req, res, result.url, contentType)
             } else {
                 return this.sendError(res, 0, 'Could not resolve music URL', format)
             }
@@ -2170,7 +2186,12 @@ class SubsonicHandler {
         }
     }
 
-    private proxyAudioStream(req: http.IncomingMessage, res: http.ServerResponse, audioUrl: string): Promise<void> {
+    private proxyAudioStream(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        audioUrl: string,
+        contentType: string,
+    ): Promise<void> {
         return new Promise(resolve => {
             let activeRequest: http.ClientRequest | null = null
             let activeResponse: http.IncomingMessage | null = null
@@ -2255,7 +2276,7 @@ class SubsonicHandler {
                     }
 
                     const responseHeaders: http.OutgoingHttpHeaders = {
-                        'Content-Type': upstream.headers['content-type'] || 'application/octet-stream',
+                        'Content-Type': contentType,
                         'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
                         'Pragma': 'no-cache',
                         'Expires': '0',
