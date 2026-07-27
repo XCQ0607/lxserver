@@ -2530,19 +2530,50 @@ export const serveCacheFile = (
     const stat = fs.statSync(filePath)
     const ext = path.extname(filePath).toLowerCase()
     const contentType = getAudioContentType(filePath, ext)
+    const commonHeaders = {
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'private, max-age=300, no-transform',
+        'Content-Type': contentType,
+        'ETag': `"${stat.size.toString(16)}-${Math.floor(stat.mtimeMs).toString(16)}"`,
+        'Last-Modified': stat.mtime.toUTCString(),
+    }
+
+    if (req.method === 'HEAD') {
+        res.writeHead(200, { ...commonHeaders, 'Content-Length': stat.size })
+        res.end()
+        return
+    }
+
     const range = req.headers.range
     if (range) {
-        const parts = range.replace(/bytes=/, "").split("-")
-        const start = parseInt(parts[0], 10)
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        const match = range.match(/^bytes=(\d*)-(\d*)$/)
+        if (!match || (!match[1] && !match[2])) {
+            res.writeHead(416, { ...commonHeaders, 'Content-Range': `bytes */${stat.size}` })
+            res.end()
+            return
+        }
+
+        const suffixLength = match[1] ? 0 : parseInt(match[2], 10)
+        const start = match[1]
+            ? parseInt(match[1], 10)
+            : Math.max(0, stat.size - suffixLength)
+        const requestedEnd = match[2] && match[1] ? parseInt(match[2], 10) : stat.size - 1
+        const end = Math.min(requestedEnd, stat.size - 1)
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= stat.size) {
+            res.writeHead(416, { ...commonHeaders, 'Content-Range': `bytes */${stat.size}` })
+            res.end()
+            return
+        }
+
         const chunksize = (end - start) + 1
         res.writeHead(206, {
+            ...commonHeaders,
             'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-            'Accept-Ranges': 'bytes', 'Content-Length': chunksize, 'Content-Type': contentType,
+            'Content-Length': chunksize,
         })
         fs.createReadStream(filePath, { start, end }).pipe(res)
     } else {
-        res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
+        res.writeHead(200, { ...commonHeaders, 'Content-Length': stat.size })
         fs.createReadStream(filePath).pipe(res)
     }
 }

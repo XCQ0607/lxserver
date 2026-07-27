@@ -9,6 +9,7 @@ import { callUserApiGetMusicUrl } from '@/server/userApi'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
+import { checkCache, serveCacheFile, type CacheFolder } from '@/server/fileCache'
 import fs from 'fs'
 import path from 'path'
 import { tryNormalizeUsername } from '@/utils/username'
@@ -2181,6 +2182,45 @@ class SubsonicHandler {
 
             const found = await this.findMusicById(username, id)
             let musicInfo: any = found?.music || { source, songmid, id, meta: { songId: songmid } }
+            musicInfo = {
+                ...musicInfo,
+                source,
+                songmid,
+                id,
+                meta: {
+                    ...(musicInfo.meta || {}),
+                    songId: songmid,
+                },
+            }
+
+            const localQualities = quality === 'flac'
+                ? ['flac', 'flac24bit', 'hires', 'master']
+                : [quality]
+            let localFile: ReturnType<typeof checkCache> | undefined
+            for (const localQuality of localQualities) {
+                const candidate = checkCache({
+                    ...musicInfo,
+                    quality: localQuality,
+                    exactQuality: true,
+                }, username)
+                if (candidate.exists && !candidate.isCollision) {
+                    localFile = candidate
+                    break
+                }
+            }
+            if (
+                localFile?.exists &&
+                localFile.filename &&
+                (localFile.folder === 'cache' || localFile.folder === 'music')
+            ) {
+                return serveCacheFile(
+                    req,
+                    res,
+                    localFile.filename,
+                    username,
+                    localFile.folder as CacheFolder,
+                )
+            }
 
             let hash = musicInfo.hash || musicInfo.meta?.hash || ''
             if (source === 'kg' && !hash) {
@@ -2198,13 +2238,9 @@ class SubsonicHandler {
 
             musicInfo = {
                 ...musicInfo,
-                source,
-                songmid,
-                id,
                 ...(hash ? { hash } : {}),
                 meta: {
                     ...(musicInfo.meta || {}),
-                    songId: songmid,
                     ...(hash ? { hash } : {}),
                 }
             }
@@ -2350,9 +2386,7 @@ class SubsonicHandler {
 
                     const responseHeaders: http.OutgoingHttpHeaders = {
                         'Content-Type': contentType,
-                        'Cache-Control': 'no-store, no-cache, must-revalidate, max-age=0',
-                        'Pragma': 'no-cache',
-                        'Expires': '0',
+                        'Cache-Control': 'private, max-age=300, no-transform',
                         'Access-Control-Allow-Origin': '*',
                     }
                     const copiedHeaders: Array<[keyof http.IncomingHttpHeaders, string]> = [
