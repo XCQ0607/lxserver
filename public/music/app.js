@@ -8611,6 +8611,21 @@ async function handleLocalLogin() {
                 }
             }
 
+            // Persist the authenticated account before loading account-scoped UI.
+            // Custom sources and the library read these values from localStorage.
+            localStorage.setItem('lx_sync_mode', 'local');
+            localStorage.setItem('lx_sync_user', user);
+            localStorage.setItem('lx_sync_pass', pass);
+            if (!userToken) await ensureUserAuthToken();
+            if (typeof updateUserUI === 'function') updateUserUI();
+            if (typeof renderCustomSources === 'function') {
+                try {
+                    await renderCustomSources();
+                } catch (error) {
+                    console.warn('[CustomSource] 登录后刷新失败:', error);
+                }
+            }
+
             // [新增] 显示并加载 Token 管理面板
             const tokenSection = document.getElementById('token-management-section');
             if (tokenSection) {
@@ -8632,13 +8647,6 @@ async function handleLocalLogin() {
             await window.ListStore.set(listData).catch(e => console.error('[IDBStore] 保存失败:', e));
 
             updateSyncStatus(`<i class="fas fa-check-circle text-emerald-500"></i> 已同步 (用户: ${user})`);
-            // Save credentials to localStorage (Simple version)
-            localStorage.setItem('lx_sync_mode', 'local'); // [Fix] Save mode
-            localStorage.setItem('lx_sync_user', user);
-            localStorage.setItem('lx_sync_pass', pass);
-
-            // [新增] 成功登录后立即更新顶部栏 UI
-            if (typeof updateUserUI === 'function') updateUserUI();
 
             // [New] Fetch settings from server if enabled
             if (settings.saveAccountSettingsToFile) {
