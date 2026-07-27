@@ -253,7 +253,7 @@ npm start
 | `DATA_PATH`                           | -                                    | 指定数据存储目录的绝对路径                                         | `./data`         |
 | `LOG_PATH`                            | -                                    | 指定日志输出目录的绝对路径                                         | `./logs`         |
 | `PROXY_HEADER`                        | `proxy.header`                     | 代理转发 IP 头 (如 `x-real-ip`)                                  | -                  |
-| `USER_ENABLE_ROOT`                    | `user.enableRoot`                  | 启用根路径 (开启后连接URL即为 `ip:port`，不允许不同用户密码相同) | `false`          |
+| `USER_ENABLE_ROOT`                    | `user.enableRoot`                  | 启用根路径 (开启后连接URL即为 `ip:port`，不允许不同用户密码相同) | `true`           |
 | `USER_ENABLE_PATH`                    | `user.enablePath`                  | 启用用户路径 (开启后连接URL需为 `ip:port/用户名`，允许密码相同)  | `true`           |
 | `WEBDAV_ENABLE`                       | `webdav.enable`                    | 是否启用 WebDAV 同步与备份                                         | `false`          |
 | `WEBDAV_URL`                          | `webdav.url`                       | WebDAV 地址                                                        | -                  |

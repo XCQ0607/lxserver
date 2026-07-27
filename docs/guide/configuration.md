@@ -48,7 +48,7 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 | `LOG_PATH` | `./logs` | String | **日志目录路径**。指定系统运行日志的存储位置。 |
 | `CONFIG_PATH` | `''` | String | **外部配置路径**。手动指定一个额外的 `config.js` 文件路径。 |
 | `USER_ENABLE_PATH`  | `true`   | Boolean  | **账户独享存储沙箱隔离体系（关键）**。该状态启动后，底层数据系统即在 `/data` 目录依照活跃用户切分多个离散并并行的卷。确保不同分发设备、多用户的偏好文件不发生数据越权。 |
-| `USER_ENABLE_ROOT`  | `false`  | Boolean  | **根目录扁平化存取覆盖参数**。为 `true` 时，上述的多用户沙盒分卷操作将失效，数据读写降维直接击穿写入系统底册。                                                          |
+| `USER_ENABLE_ROOT`  | `true`   | Boolean  | **根目录扁平化存取覆盖参数**。为 `true` 时，上述的多用户沙盒分卷操作将失效，数据读写降维直接击穿写入系统底册。                                                          |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `false` | Boolean | **限制登录用户缓存设置**。开启后，非管理员登录用户将被限制修改核心缓存项（缓存歌词、缓存歌曲链接、缓存歌曲文件及仅下载模式）。 |
 | `ENABLE_CACHE_SIZE_LIMIT` | `false` | Boolean | **启用自动缓存清理**。开启后，系统将监控并限制用户缓存总量，超出阈值时按 LRU 顺序自动删除最旧文件。 |
 | `CACHE_SIZE_LIMIT` | `2000` | Integer | **缓存容量阈值 (MB)**。自动清理机制生效的容量上限。 |

@@ -243,7 +243,7 @@ Edit `config.js` directly. Environment variables take precedence:
 | `DATA_PATH` | - | Absolute path to data storage directory | `./data` |
 | `LOG_PATH` | - | Absolute path to log output directory | `./logs` |
 | `PROXY_HEADER` | `proxy.header` | Proxy IP header (e.g., `x-real-ip`) | - |
-| `USER_ENABLE_ROOT` | `user.enableRoot` | Enable root path (use `ip:port`, password must be unique) | `false` |
+| `USER_ENABLE_ROOT` | `user.enableRoot` | Enable root path (use `ip:port`, password must be unique) | `true` |
 | `USER_ENABLE_PATH` | `user.enablePath` | Enable user path (use `ip:port/username`, passwords can repeat) | `true` |
 | `WEBDAV_ENABLE` | `webdav.enable` | Enable WebDAV sync and backup | `false` |
 | `WEBDAV_URL` | `webdav.url` | WebDAV URL | - |

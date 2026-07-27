@@ -31,7 +31,7 @@ module.exports = {
   // 是否开启根路径 (baseurl)
   // 开启后连接URL即为根路径，不允许不同用户使用相同密码。
   // 环境变量: USER_ENABLE_ROOT (true/false)
-  "user.enableRoot": false,
+  "user.enableRoot": true,
 
   // 是否启用登录用户缓存限制 (开启后将限制非管理员登录用户的核心缓存设置)
   // 环境变量: ENABLE_LOGIN_USER_CACHE_RESTRICTION (true/false)
