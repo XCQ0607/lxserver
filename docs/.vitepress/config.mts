@@ -32,7 +32,8 @@ export default defineConfig({
           {
             text: '用户指南',
             items: [
-              { text: '快速开始', link: '/guide/getting-started' }
+              { text: '快速开始', link: '/guide/getting-started' },
+              { text: 'V1 与 V2 版本选择', link: '/guide/version-selection' }
             ]
           },
           {
@@ -79,7 +80,8 @@ export default defineConfig({
           {
             text: 'Usage Guide',
             items: [
-              { text: 'Getting Started', link: '/en/guide/getting-started' }
+              { text: 'Getting Started', link: '/en/guide/getting-started' },
+              { text: 'Choosing V1 or V2', link: '/en/guide/version-selection' }
             ]
           },
           {

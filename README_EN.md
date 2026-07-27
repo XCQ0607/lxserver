@@ -24,6 +24,21 @@
 ---
 This project features a powerful built-in **Web Player**, allowing you to enjoy music anywhere in your browser. It also serves as an enhanced [LX Music Data Sync Server](md/lxserver_EN.md).
 
+## Choosing Between V1 and V2
+
+The `dev` branch of this repository is **V1**. Both V1 and V2 support music playback and downloads; their main differences are file management and multi-user support.
+
+| Item | V1 (this repository) | [V2](https://github.com/bobcc4/lxserver-v2) |
+| --- | --- | --- |
+| Recommended for | Personal NAS, one user, or a small number of users | Family NAS, multiple accounts, and shared deployments |
+| Music downloads | Supported | Supported |
+| Source-file visibility | Downloaded and cached tracks have readable filenames and can be browsed, copied, backed up, or processed with external tools | Files are managed by the media repository and stored under content-hash names; direct manipulation is not recommended |
+| Storage model | File-oriented `/music` and `/cache` directories | SQLite index plus a content-addressed `DATA_PATH/media` repository |
+| Multi-user use | Separate per-user directories for straightforward deployments | Stronger user isolation, source sharing, playlist sharing, and cross-user deduplication |
+| Best reason to choose it | **Choose V1 when you want to download tracks and directly access the source files** | **Choose V2 for a family or other multi-user environment** |
+
+The V1 and V2 persistent-data layouts are incompatible and must not share a data directory. V2 is not an in-place upgrade from V1. Read the [full version comparison and migration notes](docs/en/guide/version-selection.md) before deployment.
+
 ## ✨ Web Player Key Features
 
 ### 1. Modern Interface
