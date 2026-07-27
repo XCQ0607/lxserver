@@ -2100,6 +2100,8 @@
                                         <i class="fas fa-tasks flex-shrink-0"></i>
                                         <span class="leading-tight">后台管理</span>
                                     </button>
+                                    <!-- Mobile bottom spacer: ensures the last button clears the browser nav bar -->
+                                    <div class="pb-36 md:pb-4"></div>
                                 </div>
                             </div>
                         </div>
@@ -2415,11 +2417,11 @@
                                     <!-- Global Opacity -->
                                     <div
                                         class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow col-span-full">
-                                        <div class="flex items-center justify-between gap-4">
-                                            <h4 class="text-sm font-bold t-text-main flex items-center mb-0">
+                                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                                            <h4 class="text-sm font-bold t-text-main flex items-center mb-0 shrink-0">
                                                 <i class="fas fa-adjust mr-2 text-emerald-500"></i> 全局透明度
                                             </h4>
-                                            <div class="flex items-center gap-3 flex-1 max-w-xs md:max-w-md">
+                                            <div class="flex items-center gap-3 flex-1">
                                                 <input type="range" id="setting-visualizer-opacity"
                                                     class="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                                                     min="0.1" max="1.0" step="0.1" value="0.5"
@@ -2442,8 +2444,8 @@
                                     <!-- Lyric Font Size -->
                                     <div
                                         class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow col-span-full">
-                                        <div class="flex items-center justify-between gap-4">
-                                            <h4 class="text-sm font-bold t-text-main flex items-center mb-0">
+                                        <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                                            <h4 class="text-sm font-bold t-text-main flex items-center mb-0 shrink-0">
                                                 <i class="fas fa-font mr-2 text-emerald-500"></i> 歌词字体大小
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
@@ -2451,7 +2453,7 @@
                                                         rem)</span>
                                                 </span>
                                             </h4>
-                                            <div class="flex items-center gap-3 flex-1 max-w-xs">
+                                            <div class="flex items-center gap-3 flex-1">
                                                 <input type="range" id="lyric-font-size-slider"
                                                     class="flex-1 h-1.5 bg-gray-200 dark:bg-gray-700 rounded-lg appearance-none cursor-pointer accent-emerald-500"
                                                     min="0.8" max="3.0" step="0.1" value="1.2"
@@ -2570,8 +2572,8 @@
                                                 'Microsoft YaHei')</span>
                                         </span>
                                     </h3>
-                                    <div class="flex flex-wrap items-center gap-3">
-                                        <div class="relative w-64">
+                                    <div class="flex items-center justify-between gap-4">
+                                        <div class="relative flex-1">
                                             <select id="lyric-font-family-select" class="lm-select !w-full !py-1.5"
                                                 onchange="changeLyricFontFamily(this.value)">
                                                 <option value="">默认字体</option>
@@ -2591,7 +2593,7 @@
                                             </select>
                                         </div>
                                         <button onclick="loadLocalFonts()"
-                                            class="px-3 py-1.5 t-bg-track hover:bg-gray-200 t-text-muted rounded-lg text-xs transition-colors whitespace-nowrap"
+                                            class="px-3 py-1.5 t-bg-track hover:bg-gray-200 t-text-muted rounded-lg text-xs transition-colors whitespace-nowrap shrink-0"
                                             title="尝试读取系统安装的所有字体 (需要浏览器支持)">
                                             <i class="fas fa-sync-alt mr-1"></i>读取
                                         </button>
@@ -2615,6 +2617,8 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Mobile bottom spacer -->
+                            <div class="pb-36 md:pb-4"></div>
                         </div>
 
                         <!-- Logic Settings Panel -->
@@ -2952,8 +2956,8 @@
                                             <!-- Failure Strategy Priority -->
                                             <div
                                                 class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow col-span-full">
-                                                <div class="flex items-center justify-between">
-                                                    <div>
+                                                <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 sm:gap-4">
+                                                    <div class="shrink-0">
                                                         <h4 class="text-sm font-bold t-text-main flex items-center">
                                                             播放失败策略优先级
                                                             <span class="setting-tooltip-trigger ml-1">
@@ -2967,7 +2971,7 @@
                                                             </span>
                                                         </h4>
                                                     </div>
-                                                    <div class="relative w-64">
+                                                    <div class="relative w-full sm:w-64 shrink-0">
                                                         <select id="setting-playback-error-priority"
                                                             onchange="updateSetting('playbackErrorPriority', this.value)"
                                                             class="lm-select !w-full !py-1.5">
@@ -3099,6 +3103,8 @@
                                     </div>
                                 </div>
                             </div>
+                            <!-- Mobile bottom spacer -->
+                            <div class="pb-36 md:pb-4"></div>
                         </div>
 
                         <!-- Logs Settings Panel -->

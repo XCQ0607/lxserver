@@ -4,6 +4,27 @@
 
 (function () {
     // --- Setting Tooltips Mobile Support ---
+
+    function clampTooltipPosition(trigger) {
+        const tooltip = trigger.querySelector('.setting-tooltip-content');
+        if (!tooltip) return;
+
+        tooltip.style.marginLeft = '';
+        requestAnimationFrame(() => {
+            const rect = tooltip.getBoundingClientRect();
+            const padding = 8;
+            let correction = 0;
+
+            if (rect.left < padding) {
+                correction = padding - rect.left;
+            } else if (rect.right > window.innerWidth - padding) {
+                correction = (window.innerWidth - padding) - rect.right;
+            }
+
+            if (correction !== 0) tooltip.style.marginLeft = correction + 'px';
+        });
+    }
+
     document.addEventListener('click', function (e) {
         const trigger = e.target.closest('.setting-tooltip-trigger');
 
@@ -11,6 +32,8 @@
         document.querySelectorAll('.setting-tooltip-trigger.is-active').forEach(activeTrigger => {
             if (activeTrigger !== trigger) {
                 activeTrigger.classList.remove('is-active');
+                const tooltip = activeTrigger.querySelector('.setting-tooltip-content');
+                if (tooltip) tooltip.style.marginLeft = '';
             }
         });
 
@@ -18,6 +41,12 @@
             // If it's a mobile device (or doesn't support hover)
             if (window.matchMedia('(hover: none)').matches) {
                 trigger.classList.toggle('is-active');
+                if (trigger.classList.contains('is-active')) {
+                    clampTooltipPosition(trigger);
+                } else {
+                    const tooltip = trigger.querySelector('.setting-tooltip-content');
+                    if (tooltip) tooltip.style.marginLeft = '';
+                }
                 e.stopPropagation();
             }
         }
@@ -28,6 +57,8 @@
         if (!e.target.closest('.setting-tooltip-trigger')) {
             document.querySelectorAll('.setting-tooltip-trigger.is-active').forEach(trigger => {
                 trigger.classList.remove('is-active');
+                const tooltip = trigger.querySelector('.setting-tooltip-content');
+                if (tooltip) tooltip.style.marginLeft = '';
             });
         }
     }, { passive: true });

@@ -104,6 +104,7 @@
     left: 50%;
     transform: translateX(-50%) translateY(10px);
     width: 16rem;
+    max-width: calc(100vw - 2rem);
     padding: 0.75rem;
     background: rgba(255, 255, 255, 0.95);
     backdrop-filter: blur(8px);
@@ -1029,5 +1030,4 @@ aside {
     border-color: #f87171 !important;
     box-shadow: 0 0 0 2px rgba(248, 113, 113, 0.4) !important;
 }
-
 
