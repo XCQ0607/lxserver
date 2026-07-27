@@ -9689,6 +9689,20 @@ window.openPlaylistShareInbox = openPlaylistShareInbox;
 function formatSongToLxMusicStandard(item) {
     if (!item) return item;
     const s = JSON.parse(JSON.stringify(item));
+    const source = s.source || '';
+    const sourcePrefix = source ? `${source}_` : '';
+    const stripSourcePrefix = value => (
+        typeof value === 'string' && sourcePrefix && value.startsWith(sourcePrefix)
+            ? value.slice(sourcePrefix.length)
+            : value
+    );
+
+    // Keep root IDs canonical, but resolver fields must use the raw platform ID.
+    const resolverFields = ['songId', 'songmid', 'mid', 'hash', 'copyrightId', 'strMediaMid'];
+    resolverFields.forEach(field => {
+        if (s[field] != null) s[field] = stripSourcePrefix(s[field]);
+        if (s.meta && s.meta[field] != null) s.meta[field] = stripSourcePrefix(s.meta[field]);
+    });
 
     // 获取封面地址 (兼容各种 SDK 原始字段和 meta 字段)
     const picUrl = s.img || s.pic || s.picUrl ||
@@ -9703,7 +9717,6 @@ function formatSongToLxMusicStandard(item) {
         return s;
     }
 
-    const source = s.source || '';
     const songmid = s.songmid || s.id || '';
 
     // 1. 提取核心元数据
@@ -11181,10 +11194,16 @@ function cleanSongData(song) {
     // 1. Resolve Song ID (songId or songmid or id)
     // Different sources/APIs place the ID in different spots
     let songId = sourceMeta.songId || song.songId || song.songmid || song.id;
+    const sourcePrefix = song.source ? `${song.source}_` : '';
+    if (typeof songId === 'string' && sourcePrefix && songId.startsWith(sourcePrefix)) {
+        songId = songId.slice(sourcePrefix.length);
+    }
 
     // [Fix] 针对 QQ 音乐 (tx)，强制使用 songmid 作为主 ID，避免使用数字 ID
     if (song.source === 'tx' && song.songmid) {
-        songId = song.songmid;
+        songId = typeof song.songmid === 'string' && song.songmid.startsWith(sourcePrefix)
+            ? song.songmid.slice(sourcePrefix.length)
+            : song.songmid;
     }
 
     // 2. Resolve Album Name

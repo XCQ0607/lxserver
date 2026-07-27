@@ -377,6 +377,12 @@ const normalizeSongInfo = (songInfo: any) => {
   if (!songInfo) return songInfo
   const meta = songInfo.meta || {}
 
+  const stripSourcePrefix = (value: unknown) => {
+    if (typeof value !== 'string' || !songInfo.source) return value
+    const prefix = `${songInfo.source}_`
+    return value.startsWith(prefix) ? value.slice(prefix.length) : value
+  }
+
   // 1. 处理音质信息 (types / _types)
   if (!songInfo.types && meta) {
     songInfo.types = meta.qualitys || meta.types
@@ -397,15 +403,12 @@ const normalizeSongInfo = (songInfo: any) => {
   // 3. 处理通用 ID 转换 (id -> songmid)
   if (!songInfo.songmid) {
     if (meta.songId) {
-      songInfo.songmid = meta.songId
+      songInfo.songmid = stripSourcePrefix(meta.songId)
     } else if (songInfo.id) {
-      const sourcePrefix = `${songInfo.source}_`
-      if (typeof songInfo.id === 'string' && songInfo.id.startsWith(sourcePrefix)) {
-        songInfo.songmid = songInfo.id.slice(sourcePrefix.length)
-      } else {
-        songInfo.songmid = songInfo.id
-      }
+      songInfo.songmid = stripSourcePrefix(songInfo.id)
     }
+  } else {
+    songInfo.songmid = stripSourcePrefix(songInfo.songmid)
   }
 
   // 4. 针对各平台 SDK 所需的特定字段进行补全

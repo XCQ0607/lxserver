@@ -498,6 +498,24 @@ export async function callUserApiGetMusicUrl(
         delete normalizedSongInfo.hash
     }
 
+    // Synced and favorited songs use canonical IDs such as tx_001abc or
+    // wy_12345, while source scripts expect the platform's raw resolver ID.
+    // Keep persisted IDs intact and normalize only the custom-source payload.
+    const sourcePrefix = `${source}_`
+    const stripSourcePrefix = (value: unknown) => {
+        if (typeof value !== 'string' || !value.startsWith(sourcePrefix)) return value
+        return value.slice(sourcePrefix.length)
+    }
+    const resolverFields = ['id', 'songId', 'songmid', 'mid', 'hash', 'copyrightId', 'strMediaMid'] as const
+    for (const field of resolverFields) {
+        if (normalizedSongInfo[field] != null) {
+            normalizedSongInfo[field] = stripSourcePrefix(normalizedSongInfo[field])
+        }
+        if (normalizedSongInfo.meta?.[field] != null) {
+            normalizedSongInfo.meta[field] = stripSourcePrefix(normalizedSongInfo.meta[field])
+        }
+    }
+
     let supportedCount = 0;
     let lastError: Error | null = null;
 
