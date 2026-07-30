@@ -408,6 +408,47 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     }
 }
 
+// 音乐 URL 有效性预检：通过 GET + Range 请求验证 URL 是否可播放
+async function validateMusicUrl(
+    url: string,
+    timeout: number = 5000
+): Promise<{ valid: boolean; reason?: string }> {
+    try {
+        const resp = await needle('get', url, null, {
+            headers: {
+                'Range': 'bytes=0-1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': new URL(url).origin,
+            },
+            follow_max: 5,
+            response_timeout: timeout,
+            read_timeout: timeout,
+            open_timeout: timeout,
+        })
+
+        // HTTP 状态码为 2xx 或 3xx（部分音源返回 302 但有 body）均视为可达
+        if (resp.statusCode && resp.statusCode >= 200 && resp.statusCode < 400) {
+            // 排除常见错误页 MIME：音源不可能返回 HTML / JSON / 纯文本
+            const contentType = (resp.headers?.['content-type'] || '').toLowerCase()
+            if (/text\/html|application\/json|text\/plain/.test(contentType)) {
+                return { valid: false, reason: `URL 返回非音频内容 (${contentType}, HTTP ${resp.statusCode})` }
+            }
+            // 检查是否有 body 数据或声明了 content-length
+            const contentLength = parseInt(String(resp.headers?.['content-length'] || '0'), 10)
+            const hasBody = Buffer.isBuffer(resp.body) ? (resp.body as Buffer).length > 0 : resp.body && String(resp.body).length > 0
+            if (hasBody || contentLength > 0) {
+                return { valid: true }
+            }
+            return { valid: false, reason: '响应体为空，URL 可能不可用' }
+        }
+
+        return { valid: false, reason: `HTTP ${resp.statusCode || '无状态码'}` }
+    } catch (e: any) {
+        // 连接超时、DNS 解析失败、连接被拒等均视为无效
+        return { valid: false, reason: e.message || '网络请求失败' }
+    }
+}
+
 // 调用自定义源的 getMusicUrl
 export async function callUserApiGetMusicUrl(
     source: string,
@@ -568,7 +609,7 @@ export async function callUserApiGetMusicUrl(
             ? [
                 path.join(dataPath, 'users', 'source', clientUsername, 'order.json'),
                 path.join(dataPath, 'users', 'source', '_open', 'order.json')
-              ]
+            ]
             : [path.join(dataPath, 'users', 'source', '_open', 'order.json')]
 
         for (const orderPath of orderCandidates) {
@@ -623,7 +664,14 @@ export async function callUserApiGetMusicUrl(
                     type: quality
                 })
 
-                console.log(`[UserApi] ✓ ${api.info.name} 成功返回链接 (Owner: ${api.info.owner})`)
+                // [Fix] URL 有效性预检：验证音源返回的链接是否真实可播放
+                console.log(`[UserApi] 验证 ${api.info.name} 返回的 URL 有效性...`)
+                const validation = await validateMusicUrl(url)
+                if (!validation.valid) {
+                    throw new Error(`URL 有效性预检失败: ${validation.reason}`)
+                }
+                console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner})`)
+
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
@@ -641,7 +689,7 @@ export async function callUserApiGetMusicUrl(
             }
         }
     } else {
-        // 多个源，轮流尝试
+        // 多个源，轮流尝试（带 URL 有效性预检，自动切换到下一个可用源）
         for (const api of candidates) {
             try {
                 console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
@@ -652,7 +700,14 @@ export async function callUserApiGetMusicUrl(
                     type: quality
                 })
 
-                console.log(`[UserApi] ✓ ${api.info.name} 成功返回链接 (Owner: ${api.info.owner})`)
+                // [Fix] URL 有效性预检：验证音源返回的链接是否真实可播放
+                console.log(`[UserApi] 验证 ${api.info.name} 返回的 URL 有效性...`)
+                const validation = await validateMusicUrl(url)
+                if (!validation.valid) {
+                    throw new Error(`URL 有效性预检失败: ${validation.reason}`)
+                }
+                console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner})`)
+
                 const att = { name: api.info.name, status: 'success' }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
@@ -669,8 +724,8 @@ export async function callUserApiGetMusicUrl(
     }
 
     const detailMsg = supportedCount === 1
-        ? `自定义源 [${candidates[0].info.name}] 解析失败`
-        : `已尝试了 ${supportedCount} 个支持 ${source} 平台的源，但全部解析失败`
+        ? `自定义源 [${candidates[0].info.name}] 解析失败（URL 无效或不可达）`
+        : `已尝试了 ${supportedCount} 个支持 ${source} 平台的源，但全部返回无效或不可达的 URL`
 
     const finalError: any = new Error(`${detailMsg} (音源日志: ${lastError?.message})`)
     finalError.attempts = attempts
