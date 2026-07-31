@@ -606,7 +606,8 @@ window.SongListManager = (function () {
                 const listWithSource = detailState.list.map(s => ({ ...s, source: detailState.source }));
                 // 播放全部：不加入默认列表 (shouldAddToDefault = false)
                 window.updatePlaylist(listWithSource, 0, 'songlist', false);
-                this.closeDetail();
+                // 只是加载播放当前歌单，并不应该关闭当前歌曲单详情页，用户可能还想继续浏览歌单
+                // this.closeDetail();
             }
         },
         search: async function () {
