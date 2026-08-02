@@ -1100,10 +1100,12 @@ function switchTab(tabId) {
 
     if (tabId === 'alidrive') {
         document.getElementById('page-title').innerText = "阿里云盘";
+        if (window.AliyunManager) window.AliyunManager.refresh();
     }
 
     if (tabId === 'openlist') {
         document.getElementById('page-title').innerText = "OpenList";
+        if (window.OpenListManager) window.OpenListManager.init();
     }
 
     // Collapse Favorites if leaving

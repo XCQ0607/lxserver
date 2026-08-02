@@ -417,13 +417,3 @@ window.OpenListManager = {
     },
 };
 
-// 切换 Tab 到 OpenList 时加载
-(function () {
-    const origSwitchTab = window.switchTab;
-    window.switchTab = function (tabId) {
-        if (typeof origSwitchTab === 'function') origSwitchTab(tabId);
-        if (tabId === 'openlist') {
-            window.OpenListManager.init();
-        }
-    };
-})();

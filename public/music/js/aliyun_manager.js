@@ -389,14 +389,3 @@ window.AliyunManager = {
         }
     },
 };
-
-// 切换 Tab 到阿里云盘时刷新
-(function () {
-    const origSwitchTab = window.switchTab;
-    window.switchTab = function (tabId) {
-        if (typeof origSwitchTab === 'function') origSwitchTab(tabId);
-        if (tabId === 'alidrive') {
-            window.AliyunManager.refresh();
-        }
-    };
-})();

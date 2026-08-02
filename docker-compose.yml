@@ -1,4 +1,13 @@
-version: '3.8'
+# lxserver 同步服务器 - Docker Compose 配置（适用于飞牛 NAS / 群晖 / 任意 Docker 主机）
+# 使用步骤:
+#   1. 将本项目代码放到 NAS 固定目录, 如 /vol1/docker/lxserver
+#   2. 将迁移生成的 config.js 与 data/ 目录放至同一目录(可省略, 首次启动会自动生成默认配置)
+#   3. docker compose up -d --build
+#   4. 浏览器访问 http://<NAS-IP>:9527/ (后台) 与 http://<NAS-IP>:9527/music/ (播放器)
+#
+# 注意:
+#   - 构建耗时较长(需编译 TS 并下载 fpcalc), 首次启动约 5-15 分钟
+#   - 所有数据(用户/OpenList/卡密/云盘配置/缓存)持久化在 ./data 目录, 备份只需复制该目录
 
 services:
   lx-sync-server:
@@ -6,12 +15,41 @@ services:
     container_name: lx-sync-server
     restart: always
     ports:
+      # 端口映射: 宿主机端口:容器端口. 若 9527 被占用, 改左侧为其他端口即可, 例如 "9000:9527"
       - "9527:9527"
     volumes:
-      # 数据持久化
+      # 数据持久化: 映射到容器内 /server/data (Dockerfile 已设置 DATA_PATH=/server/data)
       - ./data:/server/data
     environment:
-      # 环境变量配置，优先级高于 config.js
+      # 环境变量配置, 优先级高于 config.js
       - NODE_ENV=production
-      # 示例：通过环境变量设置用户
+
+      # ===== 可选配置(按需取消注释) =====
+
+      # 服务名称(显示在客户端)
+      # - SERVER_NAME=My Sync Server
+
+      # 监听端口(默认 9527, 一般无需修改)
+      # - PORT=9527
+
+      # 管理员后台访问密码(默认见 config.js 的 frontend.password)
+      # - FRONTEND_PASSWORD=你的后台密码
+
+      # 播放器访问密码与是否强制登录
+      # - ENABLE_WEBPLAYER_AUTH=true
+      # - WEBPLAYER_PASSWORD=123456
+
+      # 用户管理: 追加/覆盖用户账号, 格式 LX_USER_<用户名>=密码
+      # 复杂配置可使用 JSON: LX_USER_user1='{ "password": "123.456", "maxSnapshotNum": 10 }'
       # - LX_USER_myuser=mypassword
+
+      # 同步与备份间隔(分钟)
+      # - SYNC_INTERVAL=60
+
+      # 是否启用 WEBDAV 同步(留空则关闭)
+      # - WEBDAV_URL=
+      # - WEBDAV_USERNAME=
+      # - WEBDAV_PASSWORD=
+
+      # 自定义配置文件路径(默认读取镜像内 /server/config.js)
+      # - CONFIG_PATH=/server/config.js
