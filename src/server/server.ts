@@ -28,11 +28,15 @@ import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
+import * as alidrive from './alidrive'
+import * as cards from './cards'
+import * as openlist from './openlist'
 
 // ===== Player Session Store =====
 const playerSessions = new Map<string, { createdAt: number }>()
 const SESSION_TTL = 24 * 60 * 60 * 1000 // 24小时
 const SESSION_COOKIE_NAME = 'lx_player_session'
+const USER_TOKEN_COOKIE_NAME = 'lx_player_user_token'
 
 /** 生成随机 sessionId */
 const generateSessionId = () => crypto.randomBytes(32).toString('hex')
@@ -50,17 +54,27 @@ const parseCookies = (cookieHeader: string | undefined): Record<string, string> 
 
 /** 检查请求是否携带有效的 Player Session Cookie */
 const checkPlayerAuth = (req: IncomingMessage): boolean => {
-  if (!global.lx.config['player.enableAuth']) return true // 未开启认证，直接放行
+  if (!global.lx.config['player.enableAuth'] && !global.lx.config['player.forceLogin']) return true // 未开启认证，直接放行
   const cookies = parseCookies(req.headers['cookie'])
   const sessionId = cookies[SESSION_COOKIE_NAME]
-  if (!sessionId) return false
-  const session = playerSessions.get(sessionId)
-  if (!session) return false
-  if (Date.now() - session.createdAt > SESSION_TTL) {
-    playerSessions.delete(sessionId)
-    return false
+  if (sessionId) {
+    const session = playerSessions.get(sessionId)
+    if (session) {
+      if (Date.now() - session.createdAt > SESSION_TTL) {
+        playerSessions.delete(sessionId)
+      } else {
+        return true
+      }
+    }
   }
-  return true
+  // 兼容：播放器账号登录后同时校验 user token cookie
+  const userTokenCookie = cookies[USER_TOKEN_COOKIE_NAME]
+  if (userTokenCookie) {
+    const session = userSessions.get(userTokenCookie)
+    if (session && Date.now() - session.createdAt <= USER_SESSION_TTL) return true
+    if (persistentTokens.get(userTokenCookie)) return true
+  }
+  return false
 }
 
 /** 定期清理过期 Session（每小时） */
@@ -974,8 +988,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         pathname === `${normalizedPrefix}/sw.js` ||
         isLegacyPlayerAsset
 
-      // 认证检查
-      if (!isLoginPage && !isPublicAsset && global.lx.config['player.enableAuth']) {
+      // 认证检查（密码认证 或 强制登录）
+      if (!isLoginPage && !isPublicAsset && (global.lx.config['player.enableAuth'] || global.lx.config['player.forceLogin'])) {
         if (!checkPlayerAuth(req)) {
           res.writeHead(302, { 'Location': `${normalizedPrefix}/login` })
           res.end()
@@ -1846,7 +1860,16 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               const token = generateSessionId()
               userSessions.set(token, { username, createdAt: Date.now() })
               loginLog.info(`User token issued: ${username} from ${ip}`)
-              res.writeHead(200, { 'Content-Type': 'application/json' })
+            const loginHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+            if (global.lx.config['player.forceLogin']) {
+              const sessionId = generateSessionId()
+              playerSessions.set(sessionId, { createdAt: Date.now() })
+              const cookies: string[] = []
+              cookies.push(`${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${SESSION_TTL / 1000}`)
+              cookies.push(`${USER_TOKEN_COOKIE_NAME}=${token}; Path=/; SameSite=Lax; Max-Age=${USER_SESSION_TTL / 1000}`)
+              loginHeaders['Set-Cookie'] = cookies.join(', ')
+            }
+              res.writeHead(200, loginHeaders)
               res.end(JSON.stringify({ success: true, token, username }))
             } else {
               loginLog.warn(`User login failed: ${username} from ${ip}`)
@@ -4223,6 +4246,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         })
         res.end(JSON.stringify({
           'player.enableAuth': global.lx.config['player.enableAuth'] || false,
+          'player.forceLogin': global.lx.config['player.forceLogin'] ?? true,
+          'player.enableRegister': global.lx.config['player.enableRegister'] ?? true,
+          'player.enableAlidrive': global.lx.config['player.enableAlidrive'] ?? true,
           'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
           'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'] || false,
           'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'] || false,
@@ -4277,6 +4303,893 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
       if (pathname === '/api/music/auth/verify' && req.method === 'GET') {
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ valid: checkPlayerAuth(req) }))
+        return
+      }
+
+      // ================= 卡密注册 =================
+      // [新增] 用户注册（需卡密）
+      if (pathname === '/api/auth/register' && req.method === 'POST') {
+        void readBody(req).then(async body => {
+          try {
+            const { username, password, cardCode } = JSON.parse(body)
+            if (!username || !password || !cardCode) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少用户名、密码或卡密' }))
+              return
+            }
+            if (typeof username !== 'string' || !/^[a-zA-Z0-9_\-]{2,32}$/.test(username)) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '用户名仅支持字母/数字/下划线/短横线，长度2-32' }))
+              return
+            }
+            if (typeof password !== 'string' || password.length < 6) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '密码长度至少6位' }))
+              return
+            }
+            if (global.lx.config.users.some(u => u.name === username)) {
+              res.writeHead(409, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '用户名已存在' }))
+              return
+            }
+            if (global.lx.config['player.enableRegister'] === false) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '注册功能已关闭' }))
+              return
+            }
+            try {
+              cards.consumeCard(cardCode, username)
+            } catch (err: any) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+              return
+            }
+
+            // eslint-disable-next-line @typescript-eslint/no-var-requires
+            const { getUserDirname } = require('@/user')
+            const dataPath = path.join(global.lx.userPath, getUserDirname(username))
+            checkAndCreateDir(dataPath)
+
+            global.lx.config.users.push({ name: username, password, dataPath })
+            saveUsers()
+
+            const token = generateSessionId()
+            userSessions.set(token, { username, createdAt: Date.now() })
+            loginLog.info(`New user registered: ${username} from ${ip}`)
+            const regHeaders: Record<string, string> = { 'Content-Type': 'application/json' }
+            if (global.lx.config['player.forceLogin']) {
+              const sessionId = generateSessionId()
+              playerSessions.set(sessionId, { createdAt: Date.now() })
+              const cookies: string[] = []
+              cookies.push(`${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${SESSION_TTL / 1000}`)
+              cookies.push(`${USER_TOKEN_COOKIE_NAME}=${token}; Path=/; SameSite=Lax; Max-Age=${USER_SESSION_TTL / 1000}`)
+              regHeaders['Set-Cookie'] = cookies.join(', ')
+            }
+            res.writeHead(200, regHeaders)
+            res.end(JSON.stringify({ success: true, token, username }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // ================= 卡密管理（管理员） =================
+      const requireAdminAuth = () => (req.headers['x-frontend-auth'] as string) === global.lx.config['frontend.password']
+
+      if (pathname === '/api/card/list' && req.method === 'GET') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, cards: cards.listCards() }))
+        return
+      }
+
+      if (pathname === '/api/card/generate' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { count, expireDays, remark } = JSON.parse(body)
+            const num = Math.min(Math.max(parseInt(count) || 1, 1), 500)
+            const created = cards.generateCards(num, expireDays ? parseInt(expireDays) : null, remark || null)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, cards: created }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      if (pathname === '/api/card/delete' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { ids } = JSON.parse(body)
+            const deleted = cards.deleteCards(Array.isArray(ids) ? ids : [])
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, deleted }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // ================= 阿里云盘 =================
+      // [新增] 查询阿里云盘绑定状态（无需管理员）
+      if (pathname === '/api/alidrive/status' && req.method === 'GET') {
+        const cfg = alidrive.getConfig()
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          linked: alidrive.isLinked(),
+          userName: cfg.userName || '',
+          hasClient: !!(cfg.clientId && cfg.clientSecret),
+        }))
+        return
+      }
+
+      // [新增] 获取/保存阿里云盘 ClientID/ClientSecret（管理员）
+      if (pathname === '/api/alidrive/config' && req.method === 'GET') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const cfg = alidrive.getConfig()
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          clientId: cfg.clientId,
+          clientSecret: cfg.clientSecret,
+          linked: alidrive.isLinked(),
+          userName: cfg.userName || '',
+        }))
+        return
+      }
+
+      if (pathname === '/api/alidrive/config' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { clientId, clientSecret } = JSON.parse(body)
+            if (!clientId || !clientSecret) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少 ClientID 或 ClientSecret' }))
+              return
+            }
+            alidrive.updateClient(clientId, clientSecret)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // [新增] 创建阿里云盘扫码登录二维码（管理员）
+      if (pathname === '/api/alidrive/qrcode' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        alidrive.createQrCode().then(({ qr_content, sid }) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, qr_content, sid }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 轮询扫码状态（管理员）
+      if (pathname === '/api/alidrive/qrcode/status' && req.method === 'GET') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const sid = urlObj.searchParams.get('sid')
+        if (!sid) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 sid' }))
+          return
+        }
+        alidrive.checkQrStatus(sid).then(async (statusObj) => {
+          if (statusObj.status === 'LoginSuccess' && statusObj.auth_code) {
+            const ok = await alidrive.exchangeToken(statusObj.auth_code)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...statusObj, bound: ok ? 'Bound' : 'TokenExchangeFailed' }))
+          } else {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...statusObj }))
+          }
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 解除阿里云盘绑定（管理员）
+      if (pathname === '/api/alidrive/unlink' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        alidrive.unlink()
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true }))
+        return
+      }
+
+      // [新增] 阿里云盘文件列表（登录用户/管理员）
+      const requirePlayerOrAdmin = (): string | null => {
+        if (requireAdminAuth()) return 'admin'
+        const user = verifyUserAuth(req)
+        if (user) return user
+        if (checkPlayerAuth(req)) return 'player'
+        return null
+      }
+
+      if (pathname === '/api/alidrive/list' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const parentFileId = urlObj.searchParams.get('parentFileId') || 'root'
+        const marker = urlObj.searchParams.get('marker') || ''
+        alidrive.listFiles(parentFileId, marker).then(({ items, next_marker }) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, items, next_marker }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 阿里云盘文件搜索（登录用户/管理员）
+      if (pathname === '/api/alidrive/search' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const keyword = urlObj.searchParams.get('keyword') || ''
+        const marker = urlObj.searchParams.get('marker') || ''
+        if (!keyword) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少关键词' }))
+          return
+        }
+        const escaped = keyword.replace(/["\\]/g, '\\$&')
+        alidrive.searchFiles(`name match "${escaped}"`, marker).then(({ items, next_marker }) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, items, next_marker }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 阿里云盘音频流式播放（代理，支持 Range，登录用户/管理员）
+      if (pathname === '/api/alidrive/stream' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const fileId = urlObj.searchParams.get('fileId')
+        if (!fileId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 fileId' }))
+          return
+        }
+        alidrive.getDownloadUrl(fileId).then((downloadUrl) => {
+          const headers: Record<string, string> = {}
+          if (req.headers.range) headers['Range'] = req.headers.range as string
+          const proxyReq: any = needle.get(downloadUrl, { headers, follow_max: 5 })
+          proxyReq.on('error', (err: any) => {
+            if (!res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            } else {
+              res.end()
+            }
+          })
+          proxyReq.on('response', (resp: any) => {
+            const statusCode = resp.statusCode || 200
+            const outHeaders: Record<string, string | number> = {}
+            if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
+            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
+            if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
+            if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
+            outHeaders['Cache-Control'] = 'no-cache'
+            res.writeHead(statusCode, outHeaders)
+            resp.pipe(res)
+          })
+          req.on('close', () => {
+            if (!proxyReq.destroyed) proxyReq.destroy()
+          })
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 阿里云盘文件下载（登录用户/管理员）
+      if (pathname === '/api/alidrive/download' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const fileId = urlObj.searchParams.get('fileId')
+        if (!fileId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 fileId' }))
+          return
+        }
+        alidrive.getDownloadUrl(fileId).then((downloadUrl) => {
+          const headers: Record<string, string> = {}
+          if (req.headers.range) headers['Range'] = req.headers.range as string
+          needle.get(downloadUrl, { headers, follow_max: 5 }, (err: any, resp: any) => {
+            if (err) {
+              if (!res.headersSent) {
+                res.writeHead(502, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: err.message }))
+              } else {
+                res.end()
+              }
+              return
+            }
+            const outHeaders: Record<string, string | number> = {
+              'Content-Type': String(resp.headers['content-type'] || 'application/octet-stream').split(';')[0],
+            }
+            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
+            res.writeHead(resp.statusCode || 200, outHeaders)
+            resp.pipe(res)
+          })
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 获取阿里云盘音频同目录歌词（登录用户/管理员）
+      if (pathname === '/api/alidrive/lyric' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const fileId = urlObj.searchParams.get('fileId')
+        if (!fileId) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 fileId' }))
+          return
+        }
+        alidrive.getFileInfo(fileId).then(async (fileInfo) => {
+          const lyricName = (fileInfo.name || '').replace(/\.[^.]+$/, '') + '.lrc'
+          const parentId = fileInfo.parent_file_id || 'root'
+          const { items } = await alidrive.listFiles(parentId)
+          const lyricFile = items.find((it: any) => it.type === 'file' && it.name.toLowerCase() === lyricName.toLowerCase())
+          if (!lyricFile) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, lyric: '' }))
+            return
+          }
+          const url = await alidrive.getDownloadUrl(lyricFile.file_id)
+          needle.get(url, { timeout: 20000 }, (err: any, resp: any) => {
+            if (err) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: true, lyric: '' }))
+              return
+            }
+            const text = resp.body && typeof resp.body === 'string' ? resp.body : (resp.body ? JSON.stringify(resp.body) : '')
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, lyric: text || '' }))
+          })
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] 下载歌曲到阿里云盘（登录用户/管理员）
+      if (pathname === '/api/alidrive/upload-song' && req.method === 'POST') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async body => {
+          let sourceUrl = ''
+          let fileName = ''
+          let dirPath = ''
+          try {
+            const parsed = JSON.parse(body)
+            sourceUrl = parsed.url
+            fileName = parsed.filename || 'song.mp3'
+            dirPath = parsed.dirPath || '/music/lxserver'
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Bad Request' }))
+            return
+          }
+          if (!sourceUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '缺少音频 URL' }))
+            return
+          }
+          const tmpDir = path.join(global.lx.dataPath, 'tmp')
+          checkAndCreateDir(tmpDir)
+          const tmpFile = path.join(tmpDir, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${fileName.replace(/[\\/:*?"<>|]/g, '_')}`)
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const fileStream = fs.createWriteStream(tmpFile)
+              const downloadReq = needle.get(sourceUrl, { timeout: 0, follow_max: 5 })
+              downloadReq.on('error', (e: any) => reject(e))
+              downloadReq.pipe(fileStream)
+              fileStream.on('finish', () => resolve())
+              fileStream.on('error', (e: any) => reject(e))
+            })
+            const dirId = await alidrive.ensureDirPath(dirPath)
+            const fileId = await alidrive.uploadFile(dirId, fileName, tmpFile)
+            try { fs.unlinkSync(tmpFile) } catch (e) { /* ignore */ }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, fileId }))
+          } catch (e: any) {
+            try { fs.unlinkSync(tmpFile) } catch (e2) { /* ignore */ }
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message }))
+          }
+        })
+        return
+      }
+
+      // ================= OpenList 存储 =================
+      // [新增] OpenList 服务器列表（管理员）
+      if (pathname === '/api/openlist/servers' && req.method === 'GET') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const servers = openlist.listServers().map((s: any) => ({
+          id: s.id,
+          name: s.name,
+          baseUrl: s.baseUrl,
+          username: s.username,
+          hasPassword: !!s.password,
+          token: s.token,
+          rootPath: s.rootPath,
+          enabled: s.enabled,
+          createdAt: s.createdAt,
+        }))
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, servers }))
+        return
+      }
+
+      // [新增] 添加 OpenList 服务器（管理员）
+      if (pathname === '/api/openlist/servers' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const data = JSON.parse(body)
+            if (!data.baseUrl) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少 OpenList 地址' }))
+              return
+            }
+            const server = openlist.addServer(data)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, server }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // [新增] 更新 OpenList 服务器（管理员）
+      if (pathname === '/api/openlist/servers' && req.method === 'PUT') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const data = JSON.parse(body)
+            if (!data.id) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少服务器 ID' }))
+              return
+            }
+            const server = openlist.updateServer(data.id, data)
+            if (!server) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+              return
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, server }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // [新增] 删除 OpenList 服务器（管理员）
+      if (pathname === '/api/openlist/servers' && req.method === 'DELETE') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { id } = JSON.parse(body)
+            if (!id) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少服务器 ID' }))
+              return
+            }
+            const ok = openlist.deleteServer(id)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, deleted: ok }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // [新增] 测试 OpenList 连接（管理员）
+      if (pathname === '/api/openlist/test' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { id } = JSON.parse(body)
+            if (!id) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少服务器 ID' }))
+              return
+            }
+            openlist.testConnection(id).then(result => {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: result.ok, message: result.message }))
+            }).catch((err: any) => {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            })
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // [新增] OpenList 可用的服务器列表（登录用户/管理员，用于播放器选择）
+      if (pathname === '/api/openlist/available' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const servers = openlist.listServers()
+          .filter((s: any) => s.enabled)
+          .map((s: any) => ({
+            id: s.id,
+            name: s.name,
+            baseUrl: s.baseUrl,
+            rootPath: s.rootPath,
+            hasAuth: !!s.token || !!(s.username && s.password),
+          }))
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, servers }))
+        return
+      }
+
+      // [新增] OpenList 文件列表（登录用户/管理员）
+      if (pathname === '/api/openlist/list' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const dirPath = urlObj.searchParams.get('path') || '/'
+        const page = parseInt(urlObj.searchParams.get('page') || '1')
+        const perPage = parseInt(urlObj.searchParams.get('perPage') || '0')
+        const server = openlist.getServer(serverId)
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+          return
+        }
+        openlist.listFiles(server, dirPath, page, perPage).then((data) => {
+          const items = (data && data.content) || []
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: true,
+            items,
+            total: data && data.total !== undefined ? data.total : items.length,
+            write: !!(data && data.write),
+            provider: data && data.provider || '',
+          }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] OpenList 文件搜索（登录用户/管理员）
+      if (pathname === '/api/openlist/search' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const keyword = urlObj.searchParams.get('keyword') || ''
+        const page = parseInt(urlObj.searchParams.get('page') || '1')
+        if (!keyword) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少关键词' }))
+          return
+        }
+        const server = openlist.getServer(serverId)
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+          return
+        }
+        openlist.searchFiles(server, keyword, page).then((data) => {
+          const items = (data && data.content) || []
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({
+            success: true,
+            items,
+            total: data && data.total !== undefined ? data.total : items.length,
+          }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] OpenList 音频流式播放（代理，支持 Range，登录用户/管理员）
+      if (pathname === '/api/openlist/stream' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        const sign = urlObj.searchParams.get('sign') || undefined
+        if (!serverId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 server 或 path 参数' }))
+          return
+        }
+        const server = openlist.getServer(serverId)
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+          return
+        }
+        openlist.stream(server, filePath, sign, req.headers.range as string | undefined).then((proxyReq: any) => {
+          proxyReq.on('error', (err: any) => {
+            if (!res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            } else {
+              res.end()
+            }
+          })
+          proxyReq.on('response', (resp: any) => {
+            const statusCode = resp.statusCode || 200
+            const outHeaders: Record<string, string | number> = {}
+            if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
+            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
+            if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
+            if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
+            outHeaders['Cache-Control'] = 'no-cache'
+            res.writeHead(statusCode, outHeaders)
+            resp.pipe(res)
+          })
+          req.on('close', () => {
+            if (!proxyReq.destroyed) proxyReq.destroy()
+          })
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] OpenList 文件下载（登录用户/管理员）
+      if (pathname === '/api/openlist/download' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        const sign = urlObj.searchParams.get('sign') || undefined
+        if (!serverId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 server 或 path 参数' }))
+          return
+        }
+        const server = openlist.getServer(serverId)
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+          return
+        }
+        openlist.stream(server, filePath, sign).then((proxyReq: any) => {
+          proxyReq.on('error', (err: any) => {
+            if (!res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            } else {
+              res.end()
+            }
+          })
+          proxyReq.on('response', (resp: any) => {
+            const outHeaders: Record<string, string | number> = {
+              'Content-Type': String(resp.headers['content-type'] || 'application/octet-stream').split(';')[0],
+            }
+            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
+            res.writeHead(resp.statusCode || 200, outHeaders)
+            resp.pipe(res)
+          })
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // [新增] OpenList 获取同目录歌词（登录用户/管理员）
+      if (pathname === '/api/openlist/lyric' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        const sign = urlObj.searchParams.get('sign') || undefined
+        if (!serverId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 server 或 path 参数' }))
+          return
+        }
+        const server = openlist.getServer(serverId)
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+          return
+        }
+        openlist.getLyric(server, filePath, sign).then((lyric) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lyric: lyric || '' }))
+        }).catch((err: any) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lyric: '' }))
+        })
+        return
+      }
+
+      // [新增] 下载歌曲到 OpenList（登录用户/管理员）
+      if (pathname === '/api/openlist/upload-song' && req.method === 'POST') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          let serverId = ''
+          let sourceUrl = ''
+          let fileName = ''
+          let dirPath = ''
+          try {
+            const parsed = JSON.parse(body)
+            serverId = parsed.server
+            sourceUrl = parsed.url
+            fileName = parsed.filename || 'song.mp3'
+            dirPath = parsed.dirPath || ''
+          } catch (e) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Bad Request' }))
+            return
+          }
+          if (!serverId || !sourceUrl) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '缺少 server 或音频 URL' }))
+            return
+          }
+          const server = openlist.getServer(serverId)
+          if (!server) {
+            res.writeHead(404, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+            return
+          }
+          const tmpDir = path.join(global.lx.dataPath, 'tmp')
+          checkAndCreateDir(tmpDir)
+          openlist.uploadFromUrl(server, sourceUrl, fileName, dirPath, tmpDir).then((result) => {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, result }))
+          }).catch((err: any) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: err.message }))
+          })
+        })
         return
       }
 
@@ -6305,6 +7218,15 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 // }
 
 export const startServer = async (port: number, ip: string) => {
+  // 初始化卡密与阿里云盘
+  try {
+    cards.initCards()
+    alidrive.loadConfig()
+    openlist.loadConfig()
+    console.log('[Server] Cards, Alidrive & OpenList modules initialized')
+  } catch (err: any) {
+    console.error('[Server] Failed to init cards/alidrive:', err.message)
+  }
   // Initialize file cache settings from global config
   if (global.lx.config) {
     if (global.lx.config.serverCacheLocation) fileCache.setCacheLocation(global.lx.config.serverCacheLocation)

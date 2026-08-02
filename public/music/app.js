@@ -1098,6 +1098,14 @@ function switchTab(tabId) {
         document.getElementById('page-title').innerText = "本地音乐";
     }
 
+    if (tabId === 'alidrive') {
+        document.getElementById('page-title').innerText = "阿里云盘";
+    }
+
+    if (tabId === 'openlist') {
+        document.getElementById('page-title').innerText = "OpenList";
+    }
+
     // Collapse Favorites if leaving
     if (tabId !== 'favorites') {
         const favList = document.getElementById('favorites-children');
@@ -3639,7 +3647,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
 
     // 0. 本地文件/带有本地播放 URL 的歌曲：直接播放本地文件，无需走在线 API 解析
-    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url && !isRetry) {
+    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/alidrive/stream') || song.url?.startsWith('/api/openlist/stream')) && song.url && !isRetry) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
         return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
@@ -7073,6 +7081,66 @@ async function fetchLyric(song, quality = null) {
         } catch (e) {
             console.warn('[Lyric] 读取服务器端缓存失败:', e);
         }
+    }
+
+    // ===== 2.5 阿里云盘歌曲：从云盘同目录读取 .lrc 歌词 =====
+    if (source === 'alipan' && song.fileId) {
+        try {
+            const lyricRes = await fetch(`/api/alidrive/lyric?fileId=${encodeURIComponent(song.fileId)}`, { headers });
+            if (lyricRes.ok) {
+                const lyricData = await lyricRes.json();
+                const lrcText = (lyricData && lyricData.lyric) || '';
+                if (lrcText) {
+                    currentRawLrc = lrcText;
+                    currentRawTlrc = '';
+                    currentRawRlrc = '';
+                    currentRawKlrc = '';
+                    if (settings.enableLyricCache !== false) {
+                        try {
+                            localStorage.setItem(cacheKey, JSON.stringify({ lrc: lrcText, tlyric: '', rlyric: '', klyric: '' }));
+                        } catch (e) { }
+                    }
+                    initLyricPlayer();
+                    applyLyricUpdate();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('[Lyric] 阿里云盘歌词获取失败:', e);
+        }
+        renderLyric([], '暂无歌词');
+        return;
+    }
+
+    // ===== 2.6 OpenList 歌曲：从同目录读取 .lrc 歌词 =====
+    if (source === 'openlist' && song.path) {
+        try {
+            let lyricUrl = `/api/openlist/lyric?server=${encodeURIComponent(song.serverId || '')}&path=${encodeURIComponent(song.path)}`;
+            if (song.sign) lyricUrl += `&sign=${encodeURIComponent(song.sign)}`;
+            const lyricRes = await fetch(lyricUrl, { headers });
+            if (lyricRes.ok) {
+                const lyricData = await lyricRes.json();
+                const lrcText = (lyricData && lyricData.lyric) || '';
+                if (lrcText) {
+                    currentRawLrc = lrcText;
+                    currentRawTlrc = '';
+                    currentRawRlrc = '';
+                    currentRawKlrc = '';
+                    if (settings.enableLyricCache !== false) {
+                        try {
+                            localStorage.setItem(cacheKey, JSON.stringify({ lrc: lrcText, tlyric: '', rlyric: '', klyric: '' }));
+                        } catch (e) { }
+                    }
+                    initLyricPlayer();
+                    applyLyricUpdate();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('[Lyric] OpenList 歌词获取失败:', e);
+        }
+        renderLyric([], '暂无歌词');
+        return;
     }
 
     // ===== 3. 从网络抓取最新歌词 =====
@@ -11853,6 +11921,76 @@ function showSelect(title, message, options = {}) {
         modal.querySelector('div:first-child').onclick = () => close(false);
     });
 }
+
+/**
+ * 通用表单输入弹窗
+ */
+function showInputModal({ title, message = '', fields = [], onConfirm = null, onCancel = null }) {
+    const modal = document.createElement('div');
+    modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+    const fieldsHtml = fields.map((f, idx) => `
+        <div class="mb-3">
+            <label class="block text-xs t-text-muted mb-1">${f.label || ''}</label>
+            <input type="${f.type || 'text'}" id="input-field-${idx}" class="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-lg px-3 py-2 text-sm t-text-main focus:ring-1 focus:ring-emerald-500/40 outline-none"
+                placeholder="${f.placeholder || ''}" ${f.required ? 'required' : ''} value="${f.value || ''}">
+        </div>
+    `).join('');
+    modal.innerHTML = `
+        <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
+        <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
+            <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <h3 class="text-sm font-bold t-text-main">${title}</h3>
+                <button id="input-modal-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6">
+                ${message ? `<p class="text-sm t-text-muted leading-relaxed mb-4">${message}</p>` : ''}
+                ${fieldsHtml}
+            </div>
+            <div class="p-4 t-bg-main/50 border-t t-border-main/50 flex gap-3 flex-row-reverse">
+                <button id="input-modal-ok" class="flex-1 py-2.5 text-sm font-bold text-white bg-emerald-500 hover:opacity-90 shadow-emerald-100 rounded-xl shadow-lg transition-all active:scale-95">确定</button>
+                <button id="input-modal-cancel" class="flex-1 py-2.5 text-sm font-bold t-text-muted hover:t-text-main hover:bg-gray-100 dark:hover:bg-gray-700 rounded-xl transition-all">取消</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    const close = (result, values = null) => {
+        const content = modal.querySelector('.max-w-sm');
+        if (content) content.classList.add('scale-95', 'opacity-0');
+        modal.classList.add('opacity-0');
+        setTimeout(() => {
+            modal.remove();
+            if (result) {
+                if (onConfirm && values) onConfirm(values);
+            } else {
+                if (onCancel) onCancel();
+            }
+        }, 200);
+    };
+
+    modal.querySelector('#input-modal-ok').onclick = () => {
+        const values = {};
+        let valid = true;
+        fields.forEach((f, idx) => {
+            const el = modal.querySelector(`#input-field-${idx}`);
+            const val = (el && el.value || '').trim();
+            if (f.required && !val) valid = false;
+            values[f.id || idx] = val;
+        });
+        if (!valid) {
+            if (typeof showError === 'function') showError('请填写所有必填项');
+            return;
+        }
+        close(true, values);
+    };
+    modal.querySelector('#input-modal-cancel').onclick = () => close(false);
+    modal.querySelector('#input-modal-close-x').onclick = () => close(false);
+    modal.querySelector('div:first-child').onclick = () => close(false);
+}
+window.showInputModal = showInputModal;
+
 
 /**
  * 通用多选选择列表

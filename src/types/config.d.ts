@@ -171,6 +171,21 @@ declare namespace LX {
     'player.password'?: string
 
     /**
+     * 是否强制登录（未注册/未登录用户无法进入播放器）
+     */
+    'player.forceLogin'?: boolean
+
+    /**
+     * 是否开放注册（允许使用卡密注册新账号）
+     */
+    'player.enableRegister'?: boolean
+
+    /**
+     * 是否启用阿里云盘功能
+     */
+    'player.enableAlidrive'?: boolean
+
+    /**
      * 是否启用针对所有外发请求的代理 (目前主要用于 Music SDK)
      */
     'proxy.all.enabled'?: boolean

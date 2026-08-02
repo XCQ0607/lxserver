@@ -276,6 +276,8 @@ class App {
             webdav: 'WebDAV同步',
             files: '文件管理',
             snapshots: '快照管理',
+            cards: '卡密管理',
+            alidrive: '阿里云盘',
             about: '关于'
         };
         document.getElementById('page-title').textContent = titles[viewName] || viewName;
@@ -310,6 +312,15 @@ class App {
                 break;
             case 'snapshots':
                 this.loadSnapshots();
+                break;
+            case 'cards':
+                this.loadCards();
+                break;
+            case 'alidrive':
+                this.loadAlidrive();
+                break;
+            case 'openlist':
+                this.loadOpenList();
                 break;
             case 'about':
                 this.loadAbout();
@@ -1954,6 +1965,348 @@ class App {
 
     closeModal() {
         document.getElementById('modal').classList.add('hidden');
+    }
+
+    // ========== 卡密管理 ==========
+    async loadCards() {
+        try {
+            const res = await this.request('/api/card/list');
+            const cards = res.cards || [];
+            const tbody = document.getElementById('cards-table-body');
+            if (!tbody) return;
+
+            const total = cards.length;
+            const unused = cards.filter(c => c.status === 'unused').length;
+            const used = total - unused;
+            document.getElementById('cards-total-count').textContent = total;
+            document.getElementById('cards-unused-count').textContent = unused;
+            document.getElementById('cards-used-count').textContent = used;
+
+            if (!cards.length) {
+                tbody.innerHTML = '<tr><td colspan="8" class="empty-tip">暂无卡密，点击右上角"生成卡密"</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = cards.map(card => `
+                <tr>
+                    <td><input type="checkbox" class="card-checkbox" value="${this.escapeHtml(card.id)}"></td>
+                    <td><code style="font-size: 13px; letter-spacing: 1px;">${this.escapeHtml(card.code)}</code></td>
+                    <td>${card.status === 'used'
+                        ? '<span style="color: var(--accent-warning, #f59e0b);">已使用</span>'
+                        : '<span style="color: var(--accent-success, #10b981);">未使用</span>'}</td>
+                    <td>${this.escapeHtml(card.boundUser || '-')}</td>
+                    <td>${this.escapeHtml(card.remark || '-')}</td>
+                    <td>${card.expireDays ? card.expireDays + ' 天' : '永久'}</td>
+                    <td>${new Date(card.createdAt).toLocaleString()}</td>
+                    <td>${card.usedAt ? new Date(card.usedAt).toLocaleString() : '-'}</td>
+                </tr>
+            `).join('');
+
+            document.getElementById('cards-select-all').checked = false;
+        } catch (err) {
+            showError('加载卡密失败: ' + err.message);
+        }
+    }
+
+    toggleSelectAllCards(checked) {
+        document.querySelectorAll('.card-checkbox').forEach(cb => {
+            cb.checked = checked;
+        });
+    }
+
+    deleteSelectedCards() {
+        const ids = Array.from(document.querySelectorAll('.card-checkbox:checked')).map(cb => cb.value);
+        if (!ids.length) {
+            showError('请先勾选要删除的卡密');
+            return;
+        }
+        if (!confirm(`确定删除选中的 ${ids.length} 张卡密吗？`)) return;
+        this.request('/api/card/delete', {
+            method: 'POST',
+            body: JSON.stringify({ ids })
+        }).then(() => {
+            showSuccess('删除成功');
+            this.loadCards();
+        }).catch(err => showError('删除失败: ' + err.message));
+    }
+
+    showGenerateCardsModal() {
+        const modal = document.getElementById('modal');
+        document.getElementById('modal-title').textContent = '生成卡密';
+        document.getElementById('modal-body').innerHTML = `
+            <div style="display: grid; gap: 14px; padding: 4px 0;">
+                <div>
+                    <label style="font-size: 13px; color: var(--text-secondary);">生成数量</label>
+                    <input type="number" id="generate-cards-count" class="form-input" value="10" min="1" max="500">
+                </div>
+                <div>
+                    <label style="font-size: 13px; color: var(--text-secondary);">有效期（天，留空为永久）</label>
+                    <input type="number" id="generate-cards-expire" class="form-input" placeholder="例如 30">
+                </div>
+                <div>
+                    <label style="font-size: 13px; color: var(--text-secondary);">备注</label>
+                    <input type="text" id="generate-cards-remark" class="form-input" placeholder="可选备注">
+                </div>
+            </div>
+            <div class="form-actions" style="margin-top: 1.5rem;">
+                <button type="button" class="btn-primary" id="confirm-generate-cards">确认生成</button>
+                <button type="button" class="btn-secondary" onclick="app.closeModal()">取消</button>
+            </div>
+        `;
+        modal.classList.remove('hidden');
+
+        document.getElementById('confirm-generate-cards').addEventListener('click', () => {
+            const count = parseInt(document.getElementById('generate-cards-count').value || '1', 10);
+            const expireDays = document.getElementById('generate-cards-expire').value;
+            const remark = document.getElementById('generate-cards-remark').value.trim();
+            this.request('/api/card/generate', {
+                method: 'POST',
+                body: JSON.stringify({ count, expireDays: expireDays ? parseInt(expireDays, 10) : null, remark })
+            }).then(res => {
+                modal.classList.add('hidden');
+                showSuccess(`成功生成 ${res.cards.length} 张卡密`);
+                this.loadCards();
+            }).catch(err => showError('生成失败: ' + err.message));
+        });
+    }
+
+    // ========== 阿里云盘 ==========
+    async loadAlidrive() {
+        try {
+            const res = await this.request('/api/alidrive/config');
+            document.getElementById('alidrive-client-id').value = res.clientId || '';
+            document.getElementById('alidrive-client-secret').value = res.clientSecret || '';
+            this.updateAlidriveStatus(res);
+        } catch (err) {
+            showError('加载阿里云盘配置失败: ' + err.message);
+        }
+    }
+
+    updateAlidriveStatus(res) {
+        const statusEl = document.getElementById('alidrive-status');
+        if (!statusEl) return;
+        const linked = res && res.linked;
+        const userName = (res && res.userName) || '';
+        if (linked) {
+            statusEl.innerHTML = `<span style="color: var(--accent-success, #10b981); font-weight: 600;">
+                <i class="fas fa-check-circle"></i> 已绑定</span>
+                <span style="margin-left: 8px;">账号：${this.escapeHtml(userName || '未知')}</span>`;
+            document.getElementById('alidrive-unlink-btn').style.display = 'inline-block';
+        } else {
+            const hasClient = !!(document.getElementById('alidrive-client-id').value && document.getElementById('alidrive-client-secret').value);
+            statusEl.innerHTML = hasClient
+                ? '<span style="color: var(--accent-warning, #f59e0b);">尚未绑定，请点击"获取二维码"扫码登录</span>'
+                : '<span style="color: var(--text-secondary);">尚未配置应用凭据，请先填写 ClientID 与 ClientSecret 并保存</span>';
+            document.getElementById('alidrive-unlink-btn').style.display = 'none';
+        }
+    }
+
+    async saveAlidriveClient() {
+        const clientId = document.getElementById('alidrive-client-id').value.trim();
+        const clientSecret = document.getElementById('alidrive-client-secret').value.trim();
+        if (!clientId || !clientSecret) {
+            showError('请填写 ClientID 与 ClientSecret');
+            return;
+        }
+        try {
+            await this.request('/api/alidrive/config', {
+                method: 'POST',
+                body: JSON.stringify({ clientId, clientSecret })
+            });
+            showSuccess('凭据已保存');
+            this.updateAlidriveStatus({ linked: false });
+        } catch (err) {
+            showError('保存失败: ' + err.message);
+        }
+    }
+
+    async startAlidriveQrLogin() {
+        const qrImg = document.getElementById('alidrive-qrcode-img');
+        const placeholder = document.getElementById('alidrive-qrcode-placeholder');
+        placeholder.style.display = 'flex';
+        placeholder.textContent = '正在获取二维码...';
+        qrImg.style.display = 'none';
+        qrImg.innerHTML = '';
+
+        let sid = '';
+        try {
+            const res = await this.request('/api/alidrive/qrcode', { method: 'POST' });
+            sid = res.sid;
+            if (!res.qr_content) throw new Error('未获取到二维码内容');
+
+            placeholder.style.display = 'none';
+            qrImg.style.display = 'block';
+            qrImg.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(res.qr_content)}" alt="扫码登录二维码" style="width:220px; height:220px; border-radius:12px; background:#fff;">`;
+            this.pollAlidriveQr(sid);
+        } catch (err) {
+            placeholder.style.display = 'flex';
+            placeholder.textContent = '获取二维码失败: ' + err.message;
+        }
+    }
+
+    async pollAlidriveQr(sid) {
+        let qrImg = document.getElementById('alidrive-qrcode-img');
+        let placeholder = document.getElementById('alidrive-qrcode-placeholder');
+        for (let i = 0; i < 60; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+                const res = await this.request(`/api/alidrive/qrcode/status?sid=${encodeURIComponent(sid)}`);
+                if (res.status === 'LoginSuccess') {
+                    placeholder.style.display = 'flex';
+                    placeholder.textContent = '扫码成功，绑定完成！';
+                    qrImg.style.display = 'none';
+                    showSuccess('阿里云盘绑定成功');
+                    this.loadAlidrive();
+                    return;
+                }
+                if (res.status === 'Expired' || res.status === 'Cancel') {
+                    placeholder.style.display = 'flex';
+                    placeholder.textContent = '二维码已失效，请重新获取';
+                    qrImg.style.display = 'none';
+                    return;
+                }
+            } catch (err) {
+                // 继续轮询
+            }
+        }
+        placeholder.style.display = 'flex';
+        placeholder.textContent = '等待扫码超时，请重新获取二维码';
+        qrImg.style.display = 'none';
+    }
+
+    async unlinkAlidrive() {
+        if (!confirm('确定解除阿里云盘绑定吗？')) return;
+        try {
+            await this.request('/api/alidrive/unlink', { method: 'POST' });
+            showSuccess('已解除绑定');
+            this.loadAlidrive();
+        } catch (err) {
+            showError('解除绑定失败: ' + err.message);
+        }
+    }
+
+    // ========== OpenList ==========
+    async loadOpenList() {
+        try {
+            const res = await this.request('/api/openlist/servers');
+            this.renderOpenListServers(res.servers || []);
+        } catch (err) {
+            showError('加载 OpenList 服务器失败: ' + err.message);
+        }
+    }
+
+    renderOpenListServers(servers) {
+        const container = document.getElementById('openlist-server-list');
+        if (!container) return;
+        if (!servers.length) {
+            container.innerHTML = '<div class="text-secondary" style="text-align: center; padding: 40px 0;">尚未添加任何 OpenList 服务器，点击右上角"添加服务器"开始配置。</div>';
+            return;
+        }
+        const rows = servers.map(s => `
+            <div class="openlist-server-item" style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <strong style="font-size: 14px;">${this.escapeHtml(s.name)}</strong>
+                        ${s.enabled ? '<span style="font-size: 11px; color: var(--accent-success, #10b981);">已启用</span>' : '<span style="font-size: 11px; color: var(--text-secondary);">已停用</span>'}
+                        <span style="font-size: 11px; color: var(--text-secondary);">${s.hasAuth ? '已配置认证' : '公开访问'}</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">${this.escapeHtml(s.baseUrl)}${s.rootPath && s.rootPath !== '/' ? ' · 根: ' + this.escapeHtml(s.rootPath) : ''}</div>
+                </div>
+                <div style="display: flex; gap: 8px; flex-shrink: 0;">
+                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="app.testOpenList('${s.id}')">测试连接</button>
+                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="app.editOpenList('${s.id}')">编辑</button>
+                    <button class="btn-danger" style="padding: 4px 10px; font-size: 12px;" onclick="app.deleteOpenList('${s.id}')">删除</button>
+                </div>
+            </div>`).join('');
+        container.innerHTML = rows;
+    }
+
+    openListModalData = null;
+
+    showOpenListModal(server) {
+        this.openListModalData = server || null;
+        document.getElementById('openlist-modal-title').textContent = server ? '编辑 OpenList 服务器' : '添加 OpenList 服务器';
+        document.getElementById('ol-name').value = server ? server.name : '';
+        document.getElementById('ol-base-url').value = server ? server.baseUrl : '';
+        document.getElementById('ol-root-path').value = server ? (server.rootPath || '/') : '/';
+        document.getElementById('ol-username').value = server ? server.username : '';
+        document.getElementById('ol-password').value = '';
+        document.getElementById('ol-token').value = server ? server.token : '';
+        document.getElementById('openlist-modal').classList.remove('hidden');
+    }
+
+    closeOpenListModal() {
+        document.getElementById('openlist-modal').classList.add('hidden');
+        this.openListModalData = null;
+    }
+
+    async saveOpenListServer() {
+        const data = {
+            name: document.getElementById('ol-name').value.trim(),
+            baseUrl: document.getElementById('ol-base-url').value.trim(),
+            rootPath: document.getElementById('ol-root-path').value.trim() || '/',
+            username: document.getElementById('ol-username').value.trim(),
+            password: document.getElementById('ol-password').value,
+            token: document.getElementById('ol-token').value.trim(),
+            enabled: true,
+        };
+        if (!data.baseUrl) {
+            showError('请填写 OpenList 地址');
+            return;
+        }
+        try {
+            if (this.openListModalData && this.openListModalData.id) {
+                await this.request('/api/openlist/servers', {
+                    method: 'PUT',
+                    body: JSON.stringify({ id: this.openListModalData.id, ...data })
+                });
+                showSuccess('服务器已更新');
+            } else {
+                await this.request('/api/openlist/servers', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                showSuccess('服务器已添加');
+            }
+            this.closeOpenListModal();
+            this.loadOpenList();
+        } catch (err) {
+            showError('保存失败: ' + err.message);
+        }
+    }
+
+    editOpenList(id) {
+        this.request('/api/openlist/servers').then(res => {
+            const server = (res.servers || []).find(s => s.id === id);
+            if (server) this.showOpenListModal(server);
+        }).catch(err => showError('加载失败: ' + err.message));
+    }
+
+    async deleteOpenList(id) {
+        if (!confirm('确定删除该 OpenList 服务器吗？')) return;
+        try {
+            await this.request('/api/openlist/servers', {
+                method: 'DELETE',
+                body: JSON.stringify({ id })
+            });
+            showSuccess('已删除');
+            this.loadOpenList();
+        } catch (err) {
+            showError('删除失败: ' + err.message);
+        }
+    }
+
+    async testOpenList(id) {
+        try {
+            const res = await this.request('/api/openlist/test', {
+                method: 'POST',
+                body: JSON.stringify({ id })
+            });
+            if (res.success) showSuccess('测试成功: ' + res.message);
+            else showError('测试失败: ' + res.message);
+        } catch (err) {
+            showError('测试失败: ' + err.message);
+        }
     }
 
     async request(url, options = {}) {

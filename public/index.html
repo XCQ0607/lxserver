@@ -139,6 +139,34 @@
                 </a>
 
 
+                <a href="#" class="nav-item" data-view="cards">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <rect x="3" y="5" width="18" height="14" rx="2" />
+                        <line x1="3" y1="10" x2="21" y2="10" />
+                        <line x1="7" y1="15" x2="11" y2="15" />
+                    </svg>
+                    <span>卡密管理</span>
+                </a>
+                <a href="#" class="nav-item" data-view="alidrive">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M4 19.5A2.5 2.5 0 0 1 1.5 17A2.5 2.5 0 0 1 4 14.5H7" />
+                        <path d="M17 4.5A2.5 2.5 0 0 1 19.5 7A2.5 2.5 0 0 1 17 9.5H4" />
+                        <path d="M20 14.5A2.5 2.5 0 0 1 22.5 17A2.5 2.5 0 0 1 20 19.5H17" />
+                        <path d="M7 9.5H20" />
+                        <path d="M17 4.5H7" />
+                    </svg>
+                    <span>阿里云盘</span>
+                </a>
+
+                <a href="#" class="nav-item" data-view="openlist">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <ellipse cx="12" cy="5" rx="9" ry="3" />
+                        <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+                        <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+                    </svg>
+                    <span>OpenList</span>
+                </a>
+
                 <a href="#" class="nav-item" data-view="snapshots">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2v20M2 12h20" />
@@ -1213,6 +1241,199 @@
                             </div>
                             <div id="sync-logs-content" class="sync-logs-list">
                                 <p class="sync-empty-tip">暂无日志</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 卡密管理视图 -->
+                <div id="view-cards" class="view">
+                    <div class="view-header">
+                        <div class="header-left">
+                            <h3>卡密管理</h3>
+                            <p class="text-secondary">生成卡密供用户注册账号使用，每个卡密只能使用一次。</p>
+                        </div>
+                        <div class="header-side-actions" style="flex-wrap: wrap;">
+                            <button id="generate-cards-btn" class="btn-primary" onclick="app.showGenerateCardsModal()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    style="width:14px;height:14px;">
+                                    <line x1="12" y1="5" x2="12" y2="19" />
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                <span>生成卡密</span>
+                            </button>
+                            <button id="refresh-cards-btn" class="btn-secondary" onclick="app.loadCards()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    style="width:14px;height:14px;">
+                                    <polyline points="23 4 23 10 17 10" />
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                </svg>
+                                <span>刷新</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="cards-summary" style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:16px;">
+                        <div class="stat-card glass" style="flex:1; min-width:150px;">
+                            <div class="stat-value" id="cards-total-count">0</div>
+                            <div class="stat-label">卡密总数</div>
+                        </div>
+                        <div class="stat-card glass" style="flex:1; min-width:150px;">
+                            <div class="stat-value" style="color: var(--accent-success, #10b981);" id="cards-unused-count">0</div>
+                            <div class="stat-label">未使用</div>
+                        </div>
+                        <div class="stat-card glass" style="flex:1; min-width:150px;">
+                            <div class="stat-value" style="color: var(--accent-warning, #f59e0b);" id="cards-used-count">0</div>
+                            <div class="stat-label">已使用</div>
+                        </div>
+                    </div>
+
+                    <div class="glass" style="border-radius: 12px; overflow: hidden;">
+                        <table class="data-table" style="width: 100%;">
+                            <thead>
+                                <tr>
+                                    <th style="width: 40px;"><input type="checkbox" id="cards-select-all"
+                                            onchange="app.toggleSelectAllCards(this.checked)"></th>
+                                    <th>卡密</th>
+                                    <th>状态</th>
+                                    <th>绑定用户</th>
+                                    <th>备注</th>
+                                    <th>有效期</th>
+                                    <th>生成时间</th>
+                                    <th>使用时间</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cards-table-body">
+                                <tr><td colspan="8" class="empty-tip">暂无卡密，点击右上角"生成卡密"</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <div style="margin-top: 12px; display: flex; gap: 8px;">
+                        <button id="delete-selected-cards-btn" class="btn-danger" onclick="app.deleteSelectedCards()">
+                            <span>删除选中</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 阿里云盘视图 -->
+                <div id="view-alidrive" class="view">
+                    <div class="view-header">
+                        <div class="header-left">
+                            <h3>阿里云盘</h3>
+                            <p class="text-secondary">配置阿里云盘开放平台凭据并扫码登录，支持云端音乐播放、自动下载与歌词识别。</p>
+                        </div>
+                    </div>
+
+                    <!-- 配置凭据 -->
+                    <div class="glass" style="border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+                        <h3 style="margin-bottom: 12px;">1. 应用凭据配置</h3>
+                        <p class="text-secondary" style="margin-bottom: 12px; font-size: 13px;">阿里云盘开放平台为申请制，请先填写 <a
+                                href="https://yida.alibaba-inc.com/o/aliyundrive_developer" target="_blank" style="color: var(--accent-primary);">对接申请表</a>
+                            并通过审核（审核结果将通知到你的阿里云盘客户端）。审核通过后，在阿里云盘客户端中进入"开放平台"即可创建应用，获取 ClientID 与 ClientSecret，授权范围需包含 file:all:read 与 file:all:write。</p>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; max-width: 640px;">
+                            <div>
+                                <label style="font-size: 13px; color: var(--text-secondary);">ClientID</label>
+                                <input type="text" id="alidrive-client-id" class="form-input" placeholder="请输入 ClientID">
+                            </div>
+                            <div>
+                                <label style="font-size: 13px; color: var(--text-secondary);">ClientSecret</label>
+                                <input type="text" id="alidrive-client-secret" class="form-input" placeholder="请输入 ClientSecret">
+                            </div>
+                        </div>
+                        <div style="margin-top: 12px;">
+                            <button class="btn-primary" onclick="app.saveAlidriveClient()">保存凭据</button>
+                        </div>
+                    </div>
+
+                    <!-- 扫码登录 -->
+                    <div class="glass" style="border-radius: 12px; padding: 20px; margin-bottom: 16px;">
+                        <h3 style="margin-bottom: 12px;">2. 扫码登录绑定</h3>
+                        <div id="alidrive-status" class="text-secondary" style="margin-bottom: 12px;">未绑定</div>
+                        <div style="display: flex; align-items: flex-start; gap: 20px; flex-wrap: wrap;">
+                            <div id="alidrive-qrcode-area" style="text-align: center;">
+                                <div id="alidrive-qrcode-placeholder"
+                                    style="width: 220px; height: 220px; background: #f8fafc; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: var(--text-secondary); font-size: 13px;">
+                                    点击"获取二维码"开始绑定
+                                </div>
+                                <div id="alidrive-qrcode-img" style="display: none;"></div>
+                                <div style="margin-top: 12px; display: flex; gap: 8px; justify-content: center;">
+                                    <button class="btn-primary" onclick="app.startAlidriveQrLogin()">获取二维码</button>
+                                    <button class="btn-secondary" id="alidrive-unlink-btn"
+                                        onclick="app.unlinkAlidrive()">解除绑定</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 使用说明 -->
+                    <div class="glass" style="border-radius: 12px; padding: 20px;">
+                        <h3 style="margin-bottom: 12px;">使用说明</h3>
+                        <ul class="text-secondary" style="font-size: 13px; line-height: 2; padding-left: 20px; list-style: disc;">
+                            <li>绑定成功后，播放器侧边栏将出现"阿里云盘"入口，可浏览并播放云端音频。</li>
+                            <li>在播放器下载歌曲时，可选择"下载到阿里云盘"将音乐上传至云端目录（默认 /music/lxserver）。</li>
+                            <li>播放云端音频时，若同目录存在同名 .lrc 文件，将自动识别并加载歌词。</li>
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- OpenList 存储视图 -->
+                <div id="view-openlist" class="view">
+                    <div class="view-header">
+                        <div class="header-left">
+                            <h3>OpenList 存储</h3>
+                            <p class="text-secondary">添加自己的 OpenList 实例作为存储与读取目录，支持云端音乐播放、自动上传与歌词识别。</p>
+                        </div>
+                        <div class="header-side-actions">
+                            <button class="btn-primary" onclick="app.showOpenListModal()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                    <line x1="12" y1="5" x2="12" y2="19" />
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                <span>添加服务器</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="openlist-server-list" class="glass" style="border-radius: 12px; padding: 20px;">
+                        <div class="text-secondary" style="text-align: center; padding: 40px 0;">正在加载服务器列表...</div>
+                    </div>
+
+                    <!-- 添加/编辑服务器弹窗 -->
+                    <div id="openlist-modal" class="modal hidden">
+                        <div class="modal-content" style="max-width: 560px;">
+                            <div class="modal-header">
+                                <h3 id="openlist-modal-title">添加 OpenList 服务器</h3>
+                                <button class="modal-close" onclick="app.closeOpenListModal()">&times;</button>
+                            </div>
+                            <div class="modal-body" style="display: grid; gap: 14px;">
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">服务器名称</label>
+                                    <input type="text" id="ol-name" class="form-input" placeholder="例如: 我的OpenList">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">OpenList 地址 (BaseUrl)</label>
+                                    <input type="text" id="ol-base-url" class="form-input" placeholder="http://127.0.0.1:5244">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">根路径</label>
+                                    <input type="text" id="ol-root-path" class="form-input" placeholder="/ (默认根目录)">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">用户名（可选，用于上传/权限操作）</label>
+                                    <input type="text" id="ol-username" class="form-input" placeholder="OpenList 管理员用户名">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">密码（可选）</label>
+                                    <input type="password" id="ol-password" class="form-input" placeholder="密码">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">Token（可选，优先于用户名密码）</label>
+                                    <input type="text" id="ol-token" class="form-input" placeholder="OpenList 站点 Token">
+                                </div>
+                            </div>
+                            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+                                <button class="btn-secondary" onclick="app.closeOpenListModal()">取消</button>
+                                <button class="btn-primary" onclick="app.saveOpenListServer()">保存</button>
                             </div>
                         </div>
                     </div>

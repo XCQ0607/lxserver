@@ -55,16 +55,36 @@
                 <i class="fas fa-music text-white text-3xl"></i>
             </div>
             <h1 class="text-3xl font-black t-text-main mb-2">LX Music Web</h1>
-            <p class="text-gray-500 text-sm">输入密码以访问播放器</p>
+            <p class="text-gray-500 text-sm" id="auth-subtitle">登录账号以访问播放器</p>
         </div>
 
-        <!-- Password Input -->
-        <form onsubmit="handleLogin(event)" class="space-y-6">
+        <!-- Tab Switch -->
+        <div class="flex t-bg-main rounded-xl p-1 mb-6 border-2 t-border-main">
+            <button id="tab-login" onclick="switchTab('login')"
+                class="flex-1 py-2 rounded-lg text-sm font-bold transition-all t-text-main theme-gradient-btn text-white">
+                <i class="fas fa-sign-in-alt mr-1"></i>登录
+            </button>
+            <button id="tab-register" onclick="switchTab('register')"
+                class="flex-1 py-2 rounded-lg text-sm font-bold transition-all t-text-muted">
+                <i class="fas fa-user-plus mr-1"></i>注册
+            </button>
+        </div>
+
+        <!-- Login Form -->
+        <form id="login-form" onsubmit="handleLogin(event)" class="space-y-5">
+            <div class="relative">
+                <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
+                    <i class="fas fa-user"></i>
+                </div>
+                <input type="text" id="auth-username" placeholder="请输入用户名"
+                    class="w-full pl-12 pr-4 py-4 t-bg-main border-2 t-border-main rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 transition-all t-text-main placeholder-gray-400"
+                    autocomplete="username">
+            </div>
             <div class="relative">
                 <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
                     <i class="fas fa-lock"></i>
                 </div>
-                <input type="password" id="auth-password-input" placeholder="请输入访问密码"
+                <input type="password" id="auth-password" placeholder="请输入密码"
                     class="w-full pl-12 pr-4 py-4 t-bg-main border-2 t-border-main rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 transition-all t-text-main placeholder-gray-400"
                     autocomplete="current-password">
             </div>
@@ -72,95 +92,224 @@
             <!-- Error Message -->
             <div id="auth-error" class="hidden text-red-500 text-sm text-center bg-red-50 py-2 px-4 rounded-lg">
                 <i class="fas fa-exclamation-circle mr-1"></i>
-                <span>密码错误，请重试</span>
+                <span>登录失败，请重试</span>
             </div>
 
             <!-- Submit Button -->
             <button type="submit" id="submit-btn"
                 class="w-full py-4 theme-gradient-btn text-white font-bold rounded-xl shadow-lg shadow-emerald-200 hover:shadow-xl hover:shadow-emerald-300 transform hover:scale-[1.02] active:scale-[0.98] transition-all">
                 <i class="fas fa-sign-in-alt mr-2"></i>
-                进入播放器
+                登录并进入播放器
+            </button>
+        </form>
+
+        <!-- Register Form -->
+        <form id="register-form" onsubmit="handleRegister(event)" class="space-y-5 hidden">
+            <div class="relative">
+                <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
+                    <i class="fas fa-user"></i>
+                </div>
+                <input type="text" id="reg-username" placeholder="请输入用户名（2-32位字母/数字/下划线）"
+                    class="w-full pl-12 pr-4 py-4 t-bg-main border-2 t-border-main rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 transition-all t-text-main placeholder-gray-400"
+                    autocomplete="username">
+            </div>
+            <div class="relative">
+                <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
+                    <i class="fas fa-lock"></i>
+                </div>
+                <input type="password" id="reg-password" placeholder="请输入密码（至少6位）"
+                    class="w-full pl-12 pr-4 py-4 t-bg-main border-2 t-border-main rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 transition-all t-text-main placeholder-gray-400"
+                    autocomplete="new-password">
+            </div>
+            <div class="relative">
+                <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
+                    <i class="fas fa-ticket-alt"></i>
+                </div>
+                <input type="text" id="reg-card-code" placeholder="请输入卡密"
+                    class="w-full pl-12 pr-4 py-4 t-bg-main border-2 t-border-main rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 transition-all t-text-main placeholder-gray-400 uppercase"
+                    autocomplete="off">
+            </div>
+
+            <!-- Register Error Message -->
+            <div id="reg-error" class="hidden text-red-500 text-sm text-center bg-red-50 py-2 px-4 rounded-lg">
+                <i class="fas fa-exclamation-circle mr-1"></i>
+                <span>注册失败</span>
+            </div>
+
+            <button type="submit" id="reg-submit-btn"
+                class="w-full py-4 theme-gradient-btn text-white font-bold rounded-xl shadow-lg shadow-emerald-200 hover:shadow-xl hover:shadow-emerald-300 transform hover:scale-[1.02] active:scale-[0.98] transition-all">
+                <i class="fas fa-user-plus mr-2"></i>
+                注册并进入播放器
             </button>
         </form>
 
         <!-- Footer -->
         <div class="mt-8 text-center text-xs t-text-muted">
-            <p>请联系管理员获取访问密码</p>
+            <p id="footer-hint">请使用管理员发放的账号登录，或使用卡密注册新账号</p>
         </div>
     </div>
 
     <script>
+        let config = null;
+
         // 如果未开启认证或已有有效 Session，直接跳转到播放器
         (async () => {
             try {
                 const res = await fetch('/api/music/config')
-                const cfg = await res.json()
-                if (!cfg['player.enableAuth']) {
+                config = await res.json()
+                if (!config['player.forceLogin'] && !config['player.enableAuth']) {
                     window.location.replace('./')
                     return
+                }
+                if (config['player.enableRegister'] === false) {
+                    document.getElementById('tab-register').style.display = 'none'
                 }
                 const verifyRes = await fetch('/api/music/auth/verify')
                 const verifyData = await verifyRes.json()
                 if (verifyData.valid) {
                     window.location.replace('./')
+                    return
                 }
             } catch (e) {
                 console.error('[Login] 初始化检查失败:', e)
             }
         })()
 
+        function switchTab(tab) {
+            const isLogin = tab === 'login'
+            document.getElementById('login-form').classList.toggle('hidden', !isLogin)
+            document.getElementById('register-form').classList.toggle('hidden', isLogin)
+            const loginBtn = document.getElementById('tab-login')
+            const regBtn = document.getElementById('tab-register')
+            if (isLogin) {
+                loginBtn.classList.add('theme-gradient-btn', 'text-white')
+                loginBtn.classList.remove('t-text-muted')
+                regBtn.classList.remove('theme-gradient-btn', 'text-white')
+                regBtn.classList.add('t-text-muted')
+                document.getElementById('auth-subtitle').textContent = '登录账号以访问播放器'
+                document.getElementById('footer-hint').textContent = '请使用管理员发放的账号登录，或使用卡密注册新账号'
+            } else {
+                regBtn.classList.add('theme-gradient-btn', 'text-white')
+                regBtn.classList.remove('t-text-muted')
+                loginBtn.classList.remove('theme-gradient-btn', 'text-white')
+                loginBtn.classList.add('t-text-muted')
+                document.getElementById('auth-subtitle').textContent = '使用卡密注册新账号'
+                document.getElementById('footer-hint').textContent = '需要卡密才能注册，请联系管理员获取'
+            }
+            document.getElementById('auth-error').classList.add('hidden')
+            document.getElementById('reg-error').classList.add('hidden')
+        }
+
         async function handleLogin(event) {
             event.preventDefault()
-            const password = document.getElementById('auth-password-input').value
+            const username = document.getElementById('auth-username').value.trim()
+            const password = document.getElementById('auth-password').value
             const errorDiv = document.getElementById('auth-error')
             const submitBtn = document.getElementById('submit-btn')
-            const card = document.getElementById('auth-card')
 
-            if (!password) return
+            if (!username || !password) {
+                showError(errorDiv, '请输入用户名和密码')
+                return
+            }
 
             submitBtn.disabled = true
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>验证中...'
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>登录中...'
             errorDiv.classList.add('hidden')
 
             try {
-                const res = await fetch('/api/music/auth', {
+                const res = await fetch('/api/user/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
+                    body: JSON.stringify({ username, password })
                 })
                 const data = await res.json()
 
-                if (data.success) {
-                    submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>验证成功，跳转中...'
+                if (data.success && data.token) {
+                    localStorage.setItem('lx_sync_user', username)
+                    localStorage.setItem('lx_user_token', data.token)
+                    localStorage.setItem('lx_sync_pass', password)
+                    localStorage.setItem('lx_sync_mode', 'local')
+                    submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>登录成功，跳转中...'
                     setTimeout(() => window.location.replace('./'), 300)
                 } else {
-                    errorDiv.classList.remove('hidden')
-                    // 抖动效果
-                    card.style.transform = 'translateX(-8px)'
-                    setTimeout(() => card.style.transform = 'translateX(8px)', 80)
-                    setTimeout(() => card.style.transform = 'translateX(-5px)', 160)
-                    setTimeout(() => card.style.transform = 'translateX(0)', 240)
-
-                    const input = document.getElementById('auth-password-input')
-                    input.value = ''
-                    input.classList.add('border-red-500')
-                    setTimeout(() => input.classList.remove('border-red-500'), 500)
-                    input.focus()
-
-                    submitBtn.disabled = false
-                    submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>进入播放器'
+                    showError(errorDiv, data.message || '用户名或密码错误')
+                    resetBtn(submitBtn, '<i class="fas fa-sign-in-alt mr-2"></i>登录并进入播放器')
                 }
             } catch (e) {
                 console.error('[Login] 请求失败:', e)
-                errorDiv.querySelector('span').textContent = '网络错误，请稍后重试'
-                errorDiv.classList.remove('hidden')
-                submitBtn.disabled = false
-                submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>进入播放器'
+                showError(errorDiv, '网络错误，请稍后重试')
+                resetBtn(submitBtn, '<i class="fas fa-sign-in-alt mr-2"></i>登录并进入播放器')
             }
         }
 
+        async function handleRegister(event) {
+            event.preventDefault()
+            const username = document.getElementById('reg-username').value.trim()
+            const password = document.getElementById('reg-password').value
+            const cardCode = document.getElementById('reg-card-code').value.trim()
+            const errorDiv = document.getElementById('reg-error')
+            const submitBtn = document.getElementById('reg-submit-btn')
+
+            if (!username || !password || !cardCode) {
+                showError(errorDiv, '请填写用户名、密码和卡密')
+                return
+            }
+            if (!/^[a-zA-Z0-9_\-]{2,32}$/.test(username)) {
+                showError(errorDiv, '用户名仅支持字母/数字/下划线/短横线，长度2-32')
+                return
+            }
+            if (password.length < 6) {
+                showError(errorDiv, '密码长度至少6位')
+                return
+            }
+
+            submitBtn.disabled = true
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>注册中...'
+            errorDiv.classList.add('hidden')
+
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, cardCode })
+                })
+                const data = await res.json()
+
+                if (data.success && data.token) {
+                    localStorage.setItem('lx_sync_user', username)
+                    localStorage.setItem('lx_user_token', data.token)
+                    localStorage.setItem('lx_sync_pass', password)
+                    localStorage.setItem('lx_sync_mode', 'local')
+                    submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>注册成功，跳转中...'
+                    setTimeout(() => window.location.replace('./'), 300)
+                } else {
+                    showError(errorDiv, data.message || '注册失败，请检查卡密是否正确')
+                    resetBtn(submitBtn, '<i class="fas fa-user-plus mr-2"></i>注册并进入播放器')
+                }
+            } catch (e) {
+                console.error('[Register] 请求失败:', e)
+                showError(errorDiv, '网络错误，请稍后重试')
+                resetBtn(submitBtn, '<i class="fas fa-user-plus mr-2"></i>注册并进入播放器')
+            }
+        }
+
+        function showError(el, msg) {
+            el.querySelector('span').textContent = msg
+            el.classList.remove('hidden')
+            const card = document.getElementById('auth-card')
+            card.style.transform = 'translateX(-8px)'
+            setTimeout(() => card.style.transform = 'translateX(8px)', 80)
+            setTimeout(() => card.style.transform = 'translateX(-5px)', 160)
+            setTimeout(() => card.style.transform = 'translateX(0)', 240)
+        }
+
+        function resetBtn(btn, html) {
+            btn.disabled = false
+            btn.innerHTML = html
+        }
+
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('auth-password-input').focus()
+            document.getElementById('auth-username').focus()
         })
     </script>
 </body>
