@@ -5037,6 +5037,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
           return
         }
+        // [缓存播放] 本地缓存文件优先：完整缓存存在时直接服务本地文件（秒开 + 支持拖拽）
+        const cacheFilePath = openlist.getCacheFilePath(server, filePath)
+        if (openlist.serveCacheFile(cacheFilePath, req.headers.range as string | undefined, res)) {
+          console.log(`[OpenList] Cache hit: ${filePath}`)
+          return
+        }
         openlist.stream(server, filePath, sign, req.headers.range as string | undefined).then((proxyReq: any) => {
           proxyReq.on('error', (err: any) => {
             if (!res.headersSent) {
@@ -5055,6 +5061,49 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
             outHeaders['Cache-Control'] = 'no-cache'
             res.writeHead(statusCode, outHeaders)
+
+            // [边播边缓存] 仅当请求从头开始（无 Range 或 bytes=0-）时缓存，避免缓存部分分片
+            const rangeHeader = String(req.headers.range || '')
+            const isFullRange = !rangeHeader || rangeHeader === 'bytes=0-' || rangeHeader === 'bytes=0'
+            if (isFullRange) {
+              const tmpPath = cacheFilePath + '.tmp'
+              const cacheWs = fs.createWriteStream(tmpPath, { flags: 'w' })
+              let cacheReceived = 0
+              const total = parseInt(resp.headers['content-length'] || '0', 10)
+              openlist.trackCacheProgress(server.id, filePath, total, 0)
+              resp.on('data', (chunk: any) => {
+                cacheReceived += chunk.length
+                cacheWs.write(chunk)
+                openlist.trackCacheProgress(server.id, filePath, total, cacheReceived)
+              })
+              resp.on('end', () => {
+                cacheWs.end(() => {
+                  // 下载完整则正式落盘，否则丢弃临时文件
+                  if (total === 0 || cacheReceived >= total) {
+                    fs.rename(tmpPath, cacheFilePath, (err: any) => {
+                      if (err) fs.unlink(tmpPath, () => { })
+                      openlist.markCacheDone(server.id, filePath)
+                    })
+                  } else {
+                    fs.unlink(tmpPath, () => { })
+                    openlist.clearCacheProgress(server.id, filePath)
+                  }
+                })
+              })
+              resp.on('error', () => {
+                cacheWs.destroy()
+                fs.unlink(tmpPath, () => { })
+                openlist.clearCacheProgress(server.id, filePath)
+              })
+              res.on('close', () => {
+                // 客户端中断：停止缓存写入并清理临时文件（下次播放重新缓存）
+                if (!resp.complete) {
+                  cacheWs.destroy()
+                  fs.unlink(tmpPath, () => { })
+                  openlist.clearCacheProgress(server.id, filePath)
+                }
+              })
+            }
             resp.pipe(res)
           })
           req.on('close', () => {
@@ -5064,6 +5113,106 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: err.message }))
         })
+        return
+      }
+
+      // [新增] OpenList 单个文件缓存状态查询（登录用户/管理员，供前端播放器显示"已缓存"标识）
+      if (pathname === '/api/openlist/cache/check' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        if (!serverId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 server 或 path 参数' }))
+          return
+        }
+        const server = openlist.getServer(serverId)
+        if (!server) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '服务器不存在' }))
+          return
+        }
+        const cached = openlist.isFileCached(server, filePath)
+        const progress = openlist.getCacheProgress(serverId, filePath)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, cached, progress }))
+        return
+      }
+
+      // [新增] OpenList 本地缓存状态查询（登录用户/管理员）
+      if (pathname === '/api/openlist/cache/status' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          const cacheDir = path.join(global.lx.dataPath, 'openlist-cache')
+          let totalSize = 0
+          let fileCount = 0
+          const byServer: Record<string, { size: number; count: number }> = {}
+          if (fs.existsSync(cacheDir)) {
+            for (const serverDir of fs.readdirSync(cacheDir)) {
+              const full = path.join(cacheDir, serverDir)
+              if (!fs.statSync(full).isDirectory()) continue
+              let size = 0
+              let count = 0
+              for (const f of fs.readdirSync(full)) {
+                const fp = path.join(full, f)
+                try {
+                  size += fs.statSync(fp).size
+                  count++
+                } catch (e) { /* ignore */ }
+              }
+              totalSize += size
+              fileCount += count
+              byServer[serverDir] = { size, count }
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, totalSize, fileCount, byServer }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message }))
+        }
+        return
+      }
+
+      // [新增] OpenList 清空本地缓存（管理员）
+      if (pathname === '/api/openlist/cache/clear' && req.method === 'POST') {
+        const username = requirePlayerOrAdmin()
+        if (!username || username !== 'admin') {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '需要管理员权限' }))
+          return
+        }
+        try {
+          const cacheDir = path.join(global.lx.dataPath, 'openlist-cache')
+          let removed = 0
+          if (fs.existsSync(cacheDir)) {
+            for (const serverDir of fs.readdirSync(cacheDir)) {
+              const full = path.join(cacheDir, serverDir)
+              if (!fs.statSync(full).isDirectory()) continue
+              for (const f of fs.readdirSync(full)) {
+                try {
+                  fs.unlinkSync(path.join(full, f))
+                  removed++
+                } catch (e) { /* ignore */ }
+              }
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, removed }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message }))
+        }
         return
       }
 

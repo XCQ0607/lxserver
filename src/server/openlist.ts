@@ -1,6 +1,8 @@
 import * as fs from 'fs'
 import * as path from 'path'
 import * as crypto from 'crypto'
+import * as http from 'http'
+import * as https from 'https'
 import needle from 'needle'
 
 const CONFIG_FILE = 'openlist.json'
@@ -247,17 +249,119 @@ export const getDownloadUrl = async (server: OpenListServer, filePath: string, s
 }
 
 /**
- * 代理下载/流式播放（支持 Range），返回 needle 请求
+ * 代理下载/流式播放（支持 Range）。
+ * 注意：不使用 needle（其 3.x 在流式响应约 130KB 后会卡死），改用原生 http/https。
+ * 返回的 ClientRequest 通过 'response'/'error' 事件暴露上游响应流。
  */
-export const stream = async (server: OpenListServer, filePath: string, sign: string | undefined, range?: string): Promise<any> => {
+export const stream = async (server: OpenListServer, filePath: string, sign: string | undefined, range?: string): Promise<http.ClientRequest> => {
   const url = await getDownloadUrl(server, filePath, sign)
+  const targetUrl = new URL(url)
   const headers: Record<string, string> = {
     'User-Agent': 'lxserver/1.0',
   }
   const token = await ensureToken(server)
   if (token) headers['Authorization'] = token
   if (range) headers['Range'] = range
-  return needle.get(url, { headers, follow_max: 10, timeout: 0 })
+  const lib = targetUrl.protocol === 'https:' ? https : http
+  const req = lib.request(targetUrl, { method: 'GET', headers } as any)
+  req.on('error', () => { /* 错误由调用方处理 */ })
+  req.end()
+  return req
+}
+
+/**
+ * 本地缓存目录：<dataPath>/openlist-cache/<serverId>/
+ */
+export const getCacheDir = (server: OpenListServer): string => {
+  const dir = path.join(global.lx.dataPath, 'openlist-cache', server.id)
+  try { fs.mkdirSync(dir, { recursive: true }) } catch (e) { /* ignore */ }
+  return dir
+}
+
+/**
+ * 计算文件在本地缓存中的路径（hash 命名，保留扩展名）
+ */
+export const getCacheFilePath = (server: OpenListServer, filePath: string): string => {
+  const hash = crypto.createHash('md5').update(server.id + ':' + filePath).digest('hex')
+  const ext = path.extname(filePath || '').toLowerCase() || '.mp3'
+  return path.join(getCacheDir(server), hash + ext)
+}
+
+/**
+ * 播放缓存进度：serverId:path -> { total, received, done }
+ */
+const cacheProgress = new Map<string, { total: number; received: number; done: boolean }>()
+
+const cacheProgressKey = (serverId: string, filePath: string) => serverId + ':' + filePath
+
+export const getCacheProgress = (serverId: string, filePath: string) => {
+  return cacheProgress.get(cacheProgressKey(serverId, filePath)) || null
+}
+
+/**
+ * 服务本地缓存文件（支持 Range），返回是否已完整缓存
+ */
+export const serveCacheFile = (filePath: string, range: string | undefined, res: any): boolean => {
+  if (!fs.existsSync(filePath)) return false
+  const stat = fs.statSync(filePath)
+  const ext = path.extname(filePath).toLowerCase()
+  const mimeTypes: Record<string, string> = {
+    '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
+    '.ape': 'audio/x-ape', '.opus': 'audio/ogg', '.aac': 'audio/aac', '.wma': 'audio/x-ms-wma',
+  }
+  const contentType = mimeTypes[ext] || 'application/octet-stream'
+  if (range) {
+    const parts = range.replace(/bytes=/, '').split('-')
+    const start = parseInt(parts[0], 10)
+    const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+    if (!Number.isFinite(start) || start < 0 || start >= stat.size || (parts[1] && end < start)) {
+      res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
+      res.end()
+      return true
+    }
+    const chunksize = (end - start) + 1
+    res.writeHead(206, {
+      'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+      'Accept-Ranges': 'bytes',
+      'Content-Length': chunksize,
+      'Content-Type': contentType,
+      'Cache-Control': 'no-cache',
+    })
+    fs.createReadStream(filePath, { start, end }).pipe(res)
+    return true
+  }
+  res.writeHead(200, {
+    'Content-Length': stat.size,
+    'Content-Type': contentType,
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-cache',
+  })
+  fs.createReadStream(filePath).pipe(res)
+  return true
+}
+
+/**
+ * 更新缓存进度（写入 .tmp 时调用）
+ */
+export const trackCacheProgress = (serverId: string, filePath: string, total: number, received: number) => {
+  cacheProgress.set(cacheProgressKey(serverId, filePath), { total, received, done: false })
+}
+
+export const markCacheDone = (serverId: string, filePath: string) => {
+  const key = cacheProgressKey(serverId, filePath)
+  const prev = cacheProgress.get(key)
+  cacheProgress.set(key, { total: prev?.total || 0, received: prev?.received || 0, done: true })
+}
+
+export const clearCacheProgress = (serverId: string, filePath: string) => {
+  cacheProgress.delete(cacheProgressKey(serverId, filePath))
+}
+
+/**
+ * 判断指定文件是否已完整缓存到本地
+ */
+export const isFileCached = (server: OpenListServer, filePath: string): boolean => {
+  return fs.existsSync(getCacheFilePath(server, filePath))
 }
 
 /**

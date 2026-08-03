@@ -13,6 +13,7 @@ window.OpenListManager = {
     searchMode: false,
     searchKeyword: '',
     loading: false,
+    _cacheBadges: {},
 
     escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -141,6 +142,7 @@ window.OpenListManager = {
     async loadList(reset = true) {
         if (this.loading) return;
         this.loading = true;
+        if (reset) this._cacheBadges = {};
         const statusEl = document.getElementById('ol-status');
         const listEl = document.getElementById('ol-file-list');
         if (!statusEl || !listEl || !this.currentServer) {
@@ -226,11 +228,13 @@ window.OpenListManager = {
 
         audios.forEach((it, i) => {
             const globalIndex = i;
+            const cacheBadge = this._cacheBadges[this._fullPath(it.name)] || '';
             html += `
                 <div class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer hover:t-bg-main transition-colors group"
                     onclick="window.OpenListManager.playAudio('${this.escapeHtml(it.name)}', ${globalIndex})">
                     <i class="fas fa-music text-emerald-500 text-sm w-5 text-center"></i>
                     <span class="text-xs t-text-main truncate flex-1">${this.escapeHtml(it.name)}</span>
+                    ${cacheBadge}
                     <span class="text-[10px] t-text-muted shrink-0">${this.formatSize(it.size)}</span>
                     <span class="hidden group-hover:flex items-center gap-1 shrink-0">
                         <button class="w-6 h-6 flex items-center justify-center rounded hover:bg-emerald-500 hover:text-white transition-all"
@@ -257,6 +261,38 @@ window.OpenListManager = {
             listEl.innerHTML = html;
         } else {
             listEl.insertAdjacentHTML('beforeend', html);
+        }
+
+        this.refreshCacheBadges(audios);
+    },
+
+    // 异步查询当前音频列表的本地缓存状态，更新"已缓存/缓存中"徽标
+    async refreshCacheBadges(audios) {
+        if (!this.currentServerId || !audios.length) return;
+        const headers = {};
+        if (window.getUserAuthHeaders) Object.assign(headers, window.getUserAuthHeaders());
+        const changed = {};
+        for (const it of audios) {
+            const fullPath = this._fullPath(it.name);
+            try {
+                const res = await fetch(`/api/openlist/cache/check?server=${encodeURIComponent(this.currentServerId)}&path=${encodeURIComponent(fullPath)}`, { headers });
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (!data.success) continue;
+                let badge = '';
+                if (data.cached) {
+                    badge = `<span class="text-[9px] px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500 shrink-0" title="已缓存到服务器本地">已缓存</span>`;
+                } else if (data.progress && data.progress.done === false && data.progress.total > 0) {
+                    const pct = Math.round((data.progress.received / data.progress.total) * 100);
+                    badge = `<span class="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500 shrink-0" title="正在缓存到服务器本地 ${pct}%">缓存中 ${pct}%</span>`;
+                }
+                changed[fullPath] = badge;
+            } catch (e) { /* 网络错误忽略 */ }
+        }
+        if (JSON.stringify(changed) !== JSON.stringify(this._cacheBadges)) {
+            this._cacheBadges = changed;
+            const listEl = document.getElementById('ol-file-list');
+            if (listEl && !this.loading) this.renderList(false);
         }
     },
 
