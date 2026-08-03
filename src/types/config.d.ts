@@ -99,6 +99,10 @@ declare namespace LX {
      * 缓存空间限制大小 (MB)
      */
     'user.cacheSizeLimit'?: number
+    /**
+     * 是否将 OpenList 目录整合到本地音乐列表
+     */
+    'user.enableOpenListInLocalMusic'?: boolean
 
     /**
      * 公共最大备份快照数

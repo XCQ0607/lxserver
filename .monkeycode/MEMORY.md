@@ -52,3 +52,6 @@ Entries discovered by the Agent during task execution should follow this format:
   - OpenList 播放已支持"边播边缓存"：首次播放把数据同时写入 `<dataPath>/openlist-cache/<serverId>/<hash>.ext`，完整后 rename 落盘，之后播放/拖拽直接读本地（秒开）。缓存状态接口：`/api/openlist/cache/check`（单文件）、`/api/openlist/cache/status`（汇总）、`/api/openlist/cache/clear`（管理员）。前端 openlist_manager 会显示"已缓存/缓存中"徽标。
   - 真实 OpenList 上游速度实测约 360KB/s-1.3MB/s（此前 needle 卡死误判为上游限速 4KB/s），足够流畅播放。
   - config.js 含真实凭据，不进入 git 提交；NAS 部署用 `scripts/migrate-to-nas.sh` 生成清洗后的部署包。
+  - OpenList `/d/` 直链会 302 到对象存储/CDN（如阿里云盘 OSS 签名 URL），代理必须服务端跟随重定向（最多 5 跳），否则播放器拿到无 Location 的 302 无法播放。OSS 签名 URL 可直接访问，无需转发 Authorization。
+  - 远程目录树扫描必须加防护：单目录 listFiles 加 20s 超时（needle 对超大目录可能永久挂起）、整体 60s 截止、目录数上限 800、子目录并发 6，否则真实 OpenList（含大量网盘挂载）递归扫描会把进程拖死。
+  - 本地音乐整合 OpenList：`/api/openlist/local-list?server=&refresh=` 递归扫描生成索引（TTL 120s）；`/api/music/cache/list` 后端合并 folder='openlist' 条目；前端 local_music.js 过滤 tab 加 openlist 选项，内嵌目录树面板（`lm-ol-*` 元素 + LocalMusicManager.ol* 方法），收藏走 openlist 字段（url/serverId/path/sign）恢复播放。

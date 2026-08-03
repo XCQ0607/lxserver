@@ -1021,6 +1021,14 @@
                                 <i class="fas fa-globe text-[10px]"></i>
                                 <span>公开歌曲</span>
                             </button>
+                            <!-- [新增] 将当前目录保存为歌单 -->
+                            <button id="lm-add-dir-playlist-btn"
+                                onclick="window.LocalMusicManager.addCurrentDirToPlaylist()"
+                                class="hidden text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-violet-500/10 text-violet-500 border t-border-main hover:bg-violet-500 hover:text-white transition-all flex items-center gap-1 order-5 md:order-4 cursor-pointer"
+                                title="将当前筛选目录下的歌曲一键保存为歌单">
+                                <i class="fas fa-folder-plus text-[10px]"></i>
+                                <span>目录加歌单</span>
+                            </button>
                         </div>
 
                         <!-- Desktop Search & Actions -->
@@ -1197,6 +1205,7 @@
                                             <option value="all">所有</option>
                                             <option value="music">下载</option>
                                             <option value="cache">缓存</option>
+                                            <option value="openlist">OpenList</option>
                                         </select>
                                     </div>
                                     <div class="flex items-center gap-1">
@@ -1327,6 +1336,40 @@
                                     </button>
                                 </div>
                             </div>
+                        </div>
+                    </div>
+
+                    <!-- [新增] 内嵌 OpenList 目录树浏览面板 -->
+                    <div class="shrink-0 mt-2 border t-border-main rounded-xl overflow-hidden">
+                        <button id="lm-ol-panel-toggle" onclick="window.LocalMusicManager.toggleOpenListPanel()"
+                            class="w-full flex items-center justify-between px-3 py-2 text-[10px] md:text-xs font-bold t-text-main hover:t-bg-main transition-colors">
+                            <span class="flex items-center gap-1.5">
+                                <i class="fas fa-cloud text-violet-500 text-xs"></i>
+                                <span>OpenList 目录</span>
+                                <span id="lm-ol-panel-hint" class="hidden t-text-muted font-normal">浏览目录树并一键加入歌单</span>
+                            </span>
+                            <i id="lm-ol-panel-arrow" class="fas fa-chevron-down text-[10px] t-text-muted"></i>
+                        </button>
+                        <div id="lm-ol-panel-body" class="hidden border-t t-border-main bg-white/40 dark:bg-gray-800/40">
+                            <div class="flex items-center gap-1.5 px-3 py-2 flex-wrap">
+                                <select id="lm-ol-server-select"
+                                    class="text-[10px] md:text-xs bg-gray-100 dark:bg-gray-800 border-none rounded-lg px-2 py-1.5 outline-none max-w-[140px] md:max-w-[200px]"
+                                    onchange="window.LocalMusicManager.selectOlServer(this.value)">
+                                    <option value="">选择服务器</option>
+                                </select>
+                                <div id="lm-ol-breadcrumb" class="flex items-center gap-1 flex-wrap text-xs flex-1 min-w-[100px]"></div>
+                                <button onclick="window.LocalMusicManager.refreshOpenList()"
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
+                                    title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
+                                <button onclick="window.LocalMusicManager.olAddCurrentDirToPlaylist()"
+                                    class="text-[10px] md:text-xs flex items-center gap-1 px-2 py-1 rounded-lg bg-violet-500/10 text-violet-500 hover:bg-violet-500 hover:text-white transition-all"
+                                    title="将当前浏览目录下歌曲保存为歌单">
+                                    <i class="fas fa-folder-plus text-[10px]"></i>
+                                    <span class="hidden sm:inline">目录加歌单</span>
+                                </button>
+                            </div>
+                            <div id="lm-ol-status" class="px-3 py-1 text-[10px] t-text-muted"></div>
+                            <div id="lm-ol-file-list" class="flex-1 overflow-y-auto custom-scrollbar max-h-[300px] p-1 space-y-0.5"></div>
                         </div>
                     </div>
 

@@ -364,6 +364,136 @@ export const isFileCached = (server: OpenListServer, filePath: string): boolean 
   return fs.existsSync(getCacheFilePath(server, filePath))
 }
 
+// ===== OpenList 本地音乐整合：递归扫描目录树收集音频文件 =====
+
+const AUDIO_EXT_RE = /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i
+
+// 本地音乐索引缓存：serverId -> { files, at }，避免每次请求都全量递归扫描远程目录树
+const localIndexCache: Record<string, { files: any[]; at: number; pending?: Promise<any[]> }> = {}
+const LOCAL_INDEX_TTL = 120 * 1000 // 2 分钟
+const MAX_SCAN_DEPTH = 20 // 防止深层目录爆炸
+const MAX_SCAN_FILES = 5000 // 单服务器最多收集文件数，防止超大目录
+const MAX_SCAN_DIRS = 800 // 单服务器最多访问目录数，防止远程挂载网盘爆炸
+const MAX_SCAN_MS = 60 * 1000 // 单次扫描总时长上限
+const SCAN_CONCURRENCY = 6 // 目录列表并发数，控制远程压力
+
+/**
+ * 带超时的 listFiles：避免 needle 对超大目录/远程网盘永久挂起
+ */
+const listFilesWithTimeout = async (server: OpenListServer, dirPath: string, timeoutMs = 20000): Promise<any> => {
+  return Promise.race([
+    listFiles(server, dirPath, 1, 0),
+    new Promise<any>((resolve) => setTimeout(() => resolve({ content: [], total: 0 }), timeoutMs)),
+  ])
+}
+
+/**
+ * 递归收集目录树下的所有音频文件（映射为本地音乐 CacheItem 兼容结构）
+ */
+const collectAudioFiles = async (server: OpenListServer, dirPath: string, depth = 0, result: any[] = [], ctx: { dirCount: number; deadline: number } = { dirCount: 0, deadline: Date.now() + MAX_SCAN_MS }): Promise<any[]> => {
+  if (depth > MAX_SCAN_DEPTH || result.length >= MAX_SCAN_FILES || ctx.dirCount >= MAX_SCAN_DIRS || Date.now() > ctx.deadline) return result
+  let list: any
+  try {
+    list = await listFilesWithTimeout(server, dirPath)
+  } catch (e: any) {
+    return result
+  }
+  ctx.dirCount++
+  const content: any[] = (list && list.content) || []
+  const subDirs: string[] = []
+  for (const it of content) {
+    if (result.length >= MAX_SCAN_FILES || ctx.dirCount >= MAX_SCAN_DIRS || Date.now() > ctx.deadline) break
+    if (it.is_dir) {
+      const childPath = (dirPath === '/' ? '' : dirPath) + '/' + it.name
+      subDirs.push(childPath)
+      continue
+    }
+    if (!it.name || !AUDIO_EXT_RE.test(it.name)) continue
+    const ext = (path.extname(it.name) || '.mp3').toLowerCase().slice(1)
+    const fullPath = (dirPath === '/' ? '' : dirPath) + '/' + it.name
+    const id = `openlist_${encodeURIComponent(fullPath)}`
+    const subPath = (dirPath === '/' ? '' : dirPath)
+    const modified = typeof it.modified === 'number' ? it.modified : Date.parse(String(it.modified || '')) || 0
+    result.push({
+      id,
+      songmid: id,
+      songId: id,
+      name: it.name.replace(/\.[^.]+$/, ''),
+      singer: '',
+      album: '',
+      albumId: '',
+      source: 'openlist',
+      downloadSource: 'openlist',
+      sourceName: server.name,
+      quality: ext === 'flac' ? 'flac' : ext,
+      filename: fullPath,
+      folder: 'openlist',
+      subPath,
+      mtime: modified || Date.now(),
+      size: it.size || 0,
+      ext,
+      hasCover: false,
+      coverType: 'none',
+      hasLyric: false,
+      serverId: server.id,
+      path: fullPath,
+      sign: it.sign || '',
+      isLocal: true,
+      openlist: true,
+      interval: 0,
+      url: `/api/openlist/stream?server=${encodeURIComponent(server.id)}&path=${encodeURIComponent(fullPath)}${it.sign ? `&sign=${encodeURIComponent(it.sign)}` : ''}`,
+    })
+  }
+  // 并发遍历子目录（限流），避免远程挂载网盘造成的串行长耗时
+  let idx = 0
+  while (idx < subDirs.length) {
+    const batch = subDirs.slice(idx, idx + SCAN_CONCURRENCY)
+    idx += SCAN_CONCURRENCY
+    await Promise.all(batch.map(dir => collectAudioFiles(server, dir, depth + 1, result, ctx)))
+    if (Date.now() > ctx.deadline || ctx.dirCount >= MAX_SCAN_DIRS || result.length >= MAX_SCAN_FILES) break
+  }
+  return result
+}
+
+/**
+ * 获取某服务器的本地音乐索引（带缓存，forceRefresh 强制重新扫描）
+ */
+export const getLocalIndex = (serverId: string, forceRefresh = false): Promise<any[]> => {
+  const server = getServer(serverId)
+  if (!server || !server.enabled || !server.baseUrl) return Promise.resolve([])
+  const cached = localIndexCache[serverId]
+  if (!forceRefresh && cached && cached.files && Date.now() - cached.at < LOCAL_INDEX_TTL) {
+    return Promise.resolve(cached.files)
+  }
+  if (!forceRefresh && cached && cached.pending) {
+    return cached.pending
+  }
+  const pending = collectAudioFiles(server, server.rootPath || '/').then(files => {
+    localIndexCache[serverId] = { files, at: Date.now() }
+    return files
+  })
+  if (!cached) localIndexCache[serverId] = { files: [], at: 0, pending }
+  else localIndexCache[serverId] = { ...cached, pending }
+  return pending
+}
+
+/**
+ * 获取所有启用 OpenList 服务器的本地音乐索引（合并）
+ */
+export const getAllLocalIndex = (forceRefresh = false): Promise<any[]> => {
+  const servers = listServers().filter(s => s.enabled && s.baseUrl)
+  return Promise.all(servers.map(s => getLocalIndex(s.id, forceRefresh))).then(groups => {
+    const merged: any[] = []
+    groups.forEach(group => merged.push(...group))
+    return merged
+  })
+}
+
+export const clearLocalIndex = (serverId?: string): void => {
+  if (serverId) delete localIndexCache[serverId]
+  else Object.keys(localIndexCache).forEach(k => delete localIndexCache[k])
+}
+
 /**
  * 获取同目录歌词（path 形如 /dir/song.mp3，找 /dir/song.lrc）
  */

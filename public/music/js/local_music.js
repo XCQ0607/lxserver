@@ -46,6 +46,14 @@ window.LocalMusicManager = {
     authExpired: false,
     authExpiredNotified: false,
     coverRenderTimer: null,
+    // [新增] 内嵌 OpenList 目录树浏览面板
+    olServers: [],
+    olCurrentServerId: '',
+    olCurrentPath: '/',
+    olBreadcrumb: [],
+    olItems: [],
+    olSearchMode: false,
+    olPanelInitialized: false,
 
     escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -614,6 +622,7 @@ window.LocalMusicManager = {
                 if (document.getElementById('lm-folder-select')) {
                     document.getElementById('lm-folder-select').value = this.filterFolder;
                     this._syncSelectActive('lm-folder-select');
+                    this.syncDirPlaylistBtn();
                 }
                 // 标签按钮 UI 更新
                 this._syncTagUI('lm-quality-tags', this.filterQuality);
@@ -723,6 +732,7 @@ window.LocalMusicManager = {
         this.resetFilters(false);
         this.bindListEvents();
         this.syncPublicSongsBtn();
+        this.syncDirPlaylistBtn();
         this.fetchData();
         this.syncRemasterVisibility();
 
@@ -774,7 +784,303 @@ window.LocalMusicManager = {
     changeFolder() {
         const el = document.getElementById('lm-folder-select');
         this.filterFolder = el.value;
+        this.syncDirPlaylistBtn();
         this.applyFilters();
+    },
+
+    // 控制"目录加歌单"按钮显示：仅 OpenList / 下载 目录下可用
+    syncDirPlaylistBtn() {
+        const btn = document.getElementById('lm-add-dir-playlist-btn');
+        if (!btn) return;
+        const show = this.filterFolder === 'openlist' || this.filterFolder === 'music';
+        btn.classList.toggle('hidden', !show);
+    },
+
+    // ===== 内嵌 OpenList 目录树浏览面板 =====
+    toggleOpenListPanel() {
+        const body = document.getElementById('lm-ol-panel-body');
+        const arrow = document.getElementById('lm-ol-panel-arrow');
+        if (!body) return;
+        const open = body.classList.contains('hidden');
+        body.classList.toggle('hidden', !open);
+        if (arrow) arrow.className = open ? 'fas fa-chevron-up text-[10px] t-text-muted' : 'fas fa-chevron-down text-[10px] t-text-muted';
+        if (open && !this.olPanelInitialized) {
+            this.olPanelInitialized = true;
+            this.loadOlServers();
+        }
+    },
+
+    async loadOlServers() {
+        const headers = {};
+        if (window.getUserAuthHeaders) Object.assign(headers, window.getUserAuthHeaders());
+        try {
+            const res = await fetch('/api/openlist/available', { headers });
+            if (!res.ok) throw new Error('加载失败');
+            const data = await res.json();
+            this.olServers = (data.servers || []).filter(s => s.baseUrl);
+            const select = document.getElementById('lm-ol-server-select');
+            if (!select) return;
+            const saved = localStorage.getItem('lx_openlist_server');
+            let options = '<option value="">选择服务器</option>';
+            this.olServers.forEach(s => {
+                options += `<option value="${this.escapeHtml(s.id)}">${this.escapeHtml(s.name)}</option>`;
+            });
+            select.innerHTML = options;
+            if (saved && this.olServers.some(s => s.id === saved)) {
+                select.value = saved;
+                this.selectOlServer(saved);
+            }
+        } catch (err) {
+            const statusEl = document.getElementById('lm-ol-status');
+            if (statusEl) statusEl.textContent = '加载服务器失败: ' + err.message;
+        }
+    },
+
+    async selectOlServer(serverId) {
+        this.olCurrentServerId = serverId;
+        const server = this.olServers.find(s => s.id === serverId) || null;
+        if (serverId) localStorage.setItem('lx_openlist_server', serverId);
+        if (!server) {
+            const statusEl = document.getElementById('lm-ol-status');
+            if (statusEl) statusEl.textContent = '请先选择 OpenList 服务器';
+            const listEl = document.getElementById('lm-ol-file-list');
+            if (listEl) listEl.innerHTML = '';
+            const crumbEl = document.getElementById('lm-ol-breadcrumb');
+            if (crumbEl) crumbEl.innerHTML = '';
+            return;
+        }
+        await this.refreshOpenList();
+    },
+
+    async refreshOpenList() {
+        this.olSearchMode = false;
+        const server = this.olServers.find(s => s.id === this.olCurrentServerId) || null;
+        this.olCurrentPath = server ? (server.rootPath || '/') : '/';
+        this.olBreadcrumb = [{ path: this.olCurrentPath, name: '根目录' }];
+        this.renderOlBreadcrumb();
+        await this.loadOlList(true);
+    },
+
+    async loadOlList(reset = true) {
+        if (!this.olCurrentServerId) return;
+        const statusEl = document.getElementById('lm-ol-status');
+        const listEl = document.getElementById('lm-ol-file-list');
+        if (!statusEl || !listEl) return;
+        if (reset) listEl.innerHTML = '<div class="text-xs t-text-muted py-3 text-center">正在加载...</div>';
+
+        const headers = {};
+        if (window.getUserAuthHeaders) Object.assign(headers, window.getUserAuthHeaders());
+
+        let url;
+        if (this.olSearchMode) {
+            url = `/api/openlist/search?server=${encodeURIComponent(this.olCurrentServerId)}&keyword=${encodeURIComponent(this.olSearchKeyword || '')}`;
+        } else {
+            url = `/api/openlist/list?server=${encodeURIComponent(this.olCurrentServerId)}&path=${encodeURIComponent(this.olCurrentPath)}`;
+        }
+
+        try {
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || '加载失败');
+            }
+            const data = await res.json();
+            if (!data.success) throw new Error(data.message || '加载失败');
+            this.olItems = data.items || [];
+            this.renderOlList(reset);
+        } catch (err) {
+            statusEl.textContent = '加载失败: ' + err.message;
+            if (reset) listEl.innerHTML = '';
+        }
+    },
+
+    renderOlBreadcrumb() {
+        const crumbEl = document.getElementById('lm-ol-breadcrumb');
+        if (!crumbEl) return;
+        let html = '<button onclick="window.LocalMusicManager.refreshOpenList()" class="text-violet-500 hover:underline flex items-center gap-1 mr-1"><i class="fas fa-home text-[10px]"></i></button>';
+        this.olBreadcrumb.forEach((item, i) => {
+            if (i === this.olBreadcrumb.length - 1) {
+                html += `<span class="t-text-muted truncate max-w-[120px]">${this.escapeHtml(item.name)}</span>`;
+            } else {
+                html += `<span class="flex items-center gap-1">
+                    <button onclick="window.LocalMusicManager.olGoTo(${i})" class="t-text-muted hover:text-violet-500 hover:underline truncate max-w-[80px]">${this.escapeHtml(item.name)}</button>
+                    <i class="fas fa-chevron-right text-[8px] t-text-muted"></i>
+                </span>`;
+            }
+        });
+        crumbEl.innerHTML = html;
+    },
+
+    olGoTo(index) {
+        this.olBreadcrumb = this.olBreadcrumb.slice(0, index + 1);
+        const target = this.olBreadcrumb[this.olBreadcrumb.length - 1];
+        this.olSearchMode = false;
+        this.olCurrentPath = target.path;
+        this.renderOlBreadcrumb();
+        this.loadOlList(true);
+    },
+
+    olNavigateTo(dirPath, name) {
+        this.olSearchMode = false;
+        this.olCurrentPath = dirPath;
+        this.olBreadcrumb.push({ path: dirPath, name });
+        this.renderOlBreadcrumb();
+        this.loadOlList(true);
+    },
+
+    olGoBack() {
+        if (this.olBreadcrumb.length > 1) {
+            this.olBreadcrumb.pop();
+            const prev = this.olBreadcrumb[this.olBreadcrumb.length - 1];
+            this.olSearchMode = false;
+            this.olCurrentPath = prev.path;
+            this.renderOlBreadcrumb();
+            this.loadOlList(true);
+        }
+    },
+
+    renderOlList(reset) {
+        const statusEl = document.getElementById('lm-ol-status');
+        const listEl = document.getElementById('lm-ol-file-list');
+        if (!statusEl || !listEl) return;
+
+        const folders = this.olItems.filter(it => it.is_dir);
+        const audios = this.olItems.filter(it => !it.is_dir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        const lyricFiles = this.olItems.filter(it => !it.is_dir && /\.(lrc|lrcx)$/i.test(it.name));
+        const otherCount = this.olItems.length - folders.length - audios.length - lyricFiles.length;
+
+        if (!this.olItems.length) {
+            statusEl.textContent = '此目录为空';
+            if (reset) listEl.innerHTML = '<div class="text-xs t-text-muted py-4 text-center">此目录为空</div>';
+            return;
+        }
+        statusEl.textContent = `共 ${this.olItems.length} 项（音频 ${audios.length}）`;
+
+        let html = '';
+        if (reset && this.olBreadcrumb.length > 1) {
+            html += `
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer hover:t-bg-main transition-colors"
+                    onclick="window.LocalMusicManager.olGoBack()">
+                    <i class="fas fa-level-up-alt text-[10px] t-text-muted w-4 text-center"></i>
+                    <span class="text-[10px] md:text-xs t-text-main">返回上级</span>
+                </div>`;
+        }
+
+        folders.forEach(it => {
+            const childPath = (this.olCurrentPath === '/' ? '' : this.olCurrentPath) + '/' + it.name;
+            html += `
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer hover:t-bg-main transition-colors"
+                    onclick="window.LocalMusicManager.olNavigateTo('${this.escapeHtml(childPath)}', '${this.escapeHtml(it.name)}')">
+                    <i class="fas fa-folder text-[var(--c-500)] text-xs w-4 text-center"></i>
+                    <span class="text-[10px] md:text-xs t-text-main truncate flex-1">${this.escapeHtml(it.name)}</span>
+                </div>`;
+        });
+
+        audios.forEach((it, i) => {
+            const fullPath = (this.olCurrentPath === '/' ? '' : this.olCurrentPath) + '/' + it.name;
+            const sign = it.sign || '';
+            html += `
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer hover:t-bg-main transition-colors group"
+                    onclick="window.LocalMusicManager.olPlayAudio('${this.escapeHtml(it.name)}', ${i})">
+                    <i class="fas fa-music text-emerald-500 text-xs w-4 text-center"></i>
+                    <span class="text-[10px] md:text-xs t-text-main truncate flex-1">${this.escapeHtml(it.name)}</span>
+                    <span class="text-[10px] t-text-muted shrink-0">${this.escapeHtml(this.formatOlSize(it.size))}</span>
+                    <span class="hidden group-hover:flex items-center gap-1 shrink-0">
+                        <button class="w-6 h-6 flex items-center justify-center rounded hover:bg-violet-500 hover:text-white transition-all"
+                            title="加入歌单" onclick="event.stopPropagation(); window.LocalMusicManager.olAddSongToPlaylist('${this.escapeHtml(it.name)}')">
+                            <i class="fas fa-folder-plus text-xs"></i>
+                        </button>
+                    </span>
+                </div>`;
+        });
+
+        if (lyricFiles.length) {
+            html += `<div class="text-[10px] t-text-muted px-3 py-0.5">歌词文件（随歌曲自动识别）</div>`;
+        }
+        if (otherCount > 0) {
+            html += `<div class="text-[10px] t-text-muted px-3 py-0.5">其他文件 ${otherCount} 个（已隐藏）</div>`;
+        }
+
+        if (reset) {
+            listEl.innerHTML = html;
+        } else {
+            listEl.insertAdjacentHTML('beforeend', html);
+        }
+    },
+
+    formatOlSize(size) {
+        if (!size) return '';
+        if (size < 1024) return size + ' B';
+        if (size < 1024 * 1024) return (size / 1024).toFixed(1) + ' KB';
+        if (size < 1024 * 1024 * 1024) return (size / 1024 / 1024).toFixed(1) + ' MB';
+        return (size / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+    },
+
+    olBuildSong(file) {
+        const name = file.name.replace(/\.[^.]+$/, '');
+        const fullPath = (this.olCurrentPath === '/' ? '' : this.olCurrentPath) + '/' + file.name;
+        const sign = file.sign || '';
+        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
+        const tokenSuffix = authToken ? `&token=${encodeURIComponent(authToken)}` : '';
+        return {
+            id: `openlist_${encodeURIComponent(fullPath)}`,
+            songmid: `openlist_${encodeURIComponent(fullPath)}`,
+            songId: `openlist_${encodeURIComponent(fullPath)}`,
+            source: 'openlist',
+            name,
+            singer: '',
+            path: fullPath,
+            serverId: this.olCurrentServerId,
+            sign,
+            url: `/api/openlist/stream?server=${encodeURIComponent(this.olCurrentServerId)}&path=${encodeURIComponent(fullPath)}${sign ? `&sign=${encodeURIComponent(sign)}` : ''}${tokenSuffix}`,
+            isLocal: true,
+            openlist: true,
+            folder: 'openlist',
+            quality: 'flac',
+            type: 'flac',
+            interval: 0
+        };
+    },
+
+    olPlayAudio(fileName, audioIndex = 0) {
+        const audios = this.olItems.filter(it => !it.is_dir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        if (!audios.length) return;
+        const playlist = audios.map(f => this.olBuildSong(f));
+        const idx = Math.max(audios.findIndex(a => a.name === fileName), 0);
+        if (typeof window.updatePlaylist === 'function') {
+            window.updatePlaylist(playlist, idx, 'openlist');
+        } else if (typeof window.playSong === 'function') {
+            window.playSong(playlist[idx], idx);
+        }
+    },
+
+    olAddSongToPlaylist(fileName) {
+        const audios = this.olItems.filter(it => !it.is_dir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        const target = audios.find(a => a.name === fileName);
+        if (!target) return;
+        const song = this.olBuildSong(target);
+        if (typeof window.openPlaylistAddModal !== 'function') {
+            if (typeof showError === 'function') showError('歌单组件尚未加载完成');
+            return;
+        }
+        window.openPlaylistAddModal([song]);
+    },
+
+    // 将内嵌面板当前浏览目录下的所有音频保存为歌单
+    async olAddCurrentDirToPlaylist() {
+        const audios = this.olItems.filter(it => !it.is_dir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        if (!audios.length) {
+            if (typeof showError === 'function') showError('当前目录没有音频文件');
+            return;
+        }
+        if (typeof window.openPlaylistAddModal !== 'function') {
+            if (typeof showError === 'function') showError('歌单组件尚未加载完成');
+            return;
+        }
+        const dirLabel = this.olCurrentPath || '/';
+        if (typeof showInfo === 'function') showInfo(`正在将目录「${dirLabel}」下的 ${audios.length} 首歌曲加入歌单...`);
+        window.openPlaylistAddModal(audios.map(file => this.olBuildSong(file)).filter(Boolean));
     },
 
     toggleUnindexed() {
@@ -1067,7 +1373,7 @@ window.LocalMusicManager = {
         // 3.0.1 Update SubPath Button State
         const subPathBtn = document.getElementById('lm-subpath-btn');
         if (subPathBtn) {
-            if (this.filterFolder !== 'music') {
+            if (this.filterFolder !== 'music' && this.filterFolder !== 'openlist') {
                 if (this.selectedSubPath !== '') {
                     this.selectedSubPath = '';
                     const subPathText = document.getElementById('lm-subpath-text');
@@ -1299,7 +1605,11 @@ window.LocalMusicManager = {
                 return d.toLocaleDateString() + ' ' + d.toLocaleTimeString().slice(0, 5);
             };
 
-            const folderIcon = item.folder === 'music' ? '<i class="fas fa-download text-blue-500 mr-1" title="下载目录"></i>' : '<i class="fas fa-hdd text-emerald-500 mr-1" title="缓存目录"></i>';
+            const folderIcon = item.folder === 'music'
+                ? '<i class="fas fa-download text-blue-500 mr-1" title="下载目录"></i>'
+                : (item.folder === 'openlist' || item.openlist)
+                    ? '<i class="fas fa-cloud text-violet-500 mr-1" title="OpenList 目录"></i>'
+                    : '<i class="fas fa-hdd text-emerald-500 mr-1" title="缓存目录"></i>';
 
             html += `
             <div class="grid grid-cols-12 gap-2 md:gap-4 p-3 md:p-2 items-center rounded-xl hover:t-bg-item-hover transition-all t-border-main border-b last:border-b-0 group relative ${isSelected ? 't-bg-item-hover ring-1 ring-emerald-500/30' : ''}" data-lm-row-index="${index}">
@@ -1585,12 +1895,16 @@ window.LocalMusicManager = {
     },
 
     isPlaylistCollectable(item) {
+        if (item.folder === 'openlist' || item.openlist || (item.songInfo && item.songInfo.source === 'openlist')) return true;
         return !!this.getPlaylistPlatformIdentity(item);
     },
 
     buildPlaylistSong(item) {
         const songInfo = item?.songInfo || {};
-        const identity = this.getPlaylistPlatformIdentity(item);
+        const isOpenList = item.folder === 'openlist' || item.openlist || songInfo.source === 'openlist';
+        const identity = isOpenList
+            ? { source: 'openlist', platformId: String(item?.path || item?.filename || ''), id: `openlist_${encodeURIComponent(item?.path || item?.filename || '')}` }
+            : this.getPlaylistPlatformIdentity(item);
         if (!identity) return null;
         const quality = item?.quality || songInfo.quality || songInfo.type || '128k';
         let types = songInfo.types;
@@ -1605,7 +1919,7 @@ window.LocalMusicManager = {
             if (!types[quality]) types[quality] = { size: item?.size || 0 };
         }
 
-        return {
+        const result = {
             ...songInfo,
             id: identity.id,
             songmid: identity.platformId,
@@ -1622,6 +1936,17 @@ window.LocalMusicManager = {
             types,
             _localLibraryItem: true
         };
+        // 保留 OpenList 播放所需字段（收藏到歌单后仍可恢复播放）
+        if (isOpenList) {
+            result.url = item?.url || songInfo.url || '';
+            result.serverId = item?.serverId || songInfo.serverId || '';
+            result.path = item?.path || item?.filename || '';
+            result.sign = item?.sign || songInfo.sign || '';
+            result.openlist = true;
+            result.isLocal = true;
+            result.folder = 'openlist';
+        }
+        return result;
     },
 
     batchAddToPlaylist() {
@@ -1652,6 +1977,52 @@ window.LocalMusicManager = {
         window.openPlaylistAddModal(collectableTargets.map(item => this.buildPlaylistSong(item)).filter(Boolean));
     },
 
+    // 将当前目录（OpenList 目录或下载目录子路径）下的歌曲一键保存为歌单
+    async addCurrentDirToPlaylist() {
+        const folder = this.filterFolder;
+        if (folder !== 'openlist' && folder !== 'music') {
+            if (typeof showInfo === 'function') showInfo('请先在筛选中选择“OpenList”或“下载”目录');
+            return;
+        }
+        const targetSubPath = this.selectedSubPath;
+        const dirLabel = targetSubPath === '' ? (folder === 'openlist' ? 'OpenList 全部' : '下载根目录')
+            : targetSubPath === '__ROOT__' ? '根目录'
+                : targetSubPath;
+
+        // 收集当前目录下的所有歌曲（含子目录？仅当前目录，与界面 subPath 筛选一致）
+        const targets = this.originalData.filter(item => {
+            if (folder === 'openlist') {
+                if (item.folder !== 'openlist' && !item.openlist) return false;
+            } else {
+                if (item.folder !== 'music') return false;
+            }
+            if (targetSubPath !== '') {
+                const target = targetSubPath === '__ROOT__' ? '' : targetSubPath;
+                if ((item.subPath || '') !== target) return false;
+            }
+            return true;
+        });
+
+        if (targets.length === 0) {
+            if (typeof showError === 'function') showError('当前目录没有歌曲');
+            return;
+        }
+
+        const collectable = targets.filter(item => this.isPlaylistCollectable(item));
+        if (collectable.length === 0) {
+            if (typeof showError === 'function') showError('当前目录的歌曲无法收藏到歌单');
+            return;
+        }
+
+        if (typeof window.openPlaylistAddModal !== 'function') {
+            if (typeof showError === 'function') showError('歌单组件尚未加载完成');
+            return;
+        }
+
+        if (typeof showInfo === 'function') showInfo(`正在将目录「${dirLabel}」下的 ${collectable.length} 首歌曲加入歌单...`);
+        window.openPlaylistAddModal(collectable.map(item => this.buildPlaylistSong(item)).filter(Boolean));
+    },
+
     playItem(index) {
         const item = this.displayData[index];
         if (!item) return;
@@ -1660,23 +2031,38 @@ window.LocalMusicManager = {
         const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
-        // Important: Use existing checkCache via global logic if possible, 
-        // or directly supply local URL
+        // OpenList 条目使用其 stream URL（含 server/path/sign），本地缓存条目使用 cache/file URL
+        const isOpenList = item.folder === 'openlist' || item.openlist;
+        const buildLocalUrl = (d) => {
+            if (isOpenList && d.openlist) {
+                return d.url + (authToken && d.url && !d.url.includes('token=') ? `${d.url.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : '');
+            }
+            return `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+        };
+
         const songInfo = {
             ...item.songInfo,
             // Reconstruct full URL locally
-            url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+            url: buildLocalUrl(item),
+            pic: isOpenList ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true,
             folder: item.folder
         };
+        // 保留 OpenList 播放所需的 serverId/path/sign 字段
+        if (isOpenList) {
+            songInfo.serverId = item.serverId;
+            songInfo.path = item.path;
+            songInfo.sign = item.sign;
+            songInfo.openlist = true;
+            songInfo.source = 'openlist';
+        }
 
         // If 'app.js' exposes playSong(song), we use it.
         // We might want to construct a playlist of local tracks.
         const playlist = this.displayData.map(d => ({
             ...d.songInfo,
-            url: `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+            url: buildLocalUrl(d),
+            pic: (d.folder === 'openlist' || d.openlist) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true
         }));
 
@@ -2030,7 +2416,17 @@ window.LocalMusicManager = {
         if (!item) return;
         const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
-        const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+
+        // OpenList 条目走 openlist/download 接口
+        const isOpenList = item.folder === 'openlist' || item.openlist;
+        let url;
+        if (isOpenList) {
+            url = `/api/openlist/download?server=${encodeURIComponent(item.serverId || '')}&path=${encodeURIComponent(item.path || item.filename)}`;
+            if (item.sign) url += `&sign=${encodeURIComponent(item.sign)}`;
+            if (authToken) url += `&token=${encodeURIComponent(authToken)}`;
+        } else {
+            url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+        }
 
         const a = document.createElement('a');
         a.href = url;
@@ -2567,8 +2963,8 @@ window.LocalMusicManager = {
     },
 
     async openSubPathModal(mode = 'filter') {
-        if (this.filterFolder !== 'music') {
-            if (typeof showInfo === 'function') showInfo('请先在筛选中选择“下载”目录');
+        if (this.filterFolder !== 'music' && this.filterFolder !== 'openlist') {
+            if (typeof showInfo === 'function') showInfo('请先在筛选中选择“下载”或“OpenList”目录');
             return;
         }
         this.subPathModalMode = mode;
@@ -2588,11 +2984,28 @@ window.LocalMusicManager = {
         }, 10);
 
         try {
-            const res = await fetch(`/api/music/cache/subdirs?folder=music`, {
-                headers: window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}
-            });
-            const { data } = await res.json();
-            this.renderSubPathList(data || []);
+            let dirs = [];
+            if (this.filterFolder === 'openlist') {
+                // OpenList 目录从已加载的本地音乐索引中提取 subPath（服务器目录树）
+                const seen = new Set();
+                this.originalData.forEach(item => {
+                    if (item.folder !== 'openlist' && !item.openlist) return;
+                    const sub = item.subPath || '';
+                    if (sub && !seen.has(sub)) {
+                        seen.add(sub);
+                        dirs.push(sub);
+                    }
+                });
+                // 根目录
+                dirs.sort();
+            } else {
+                const res = await fetch(`/api/music/cache/subdirs?folder=music`, {
+                    headers: window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}
+                });
+                const { data } = await res.json();
+                dirs = data || [];
+            }
+            this.renderSubPathList(dirs);
         } catch (e) {
             console.error('Failed to fetch subdirs:', e);
             if (typeof showError === 'function') showError('获取子目录失败');

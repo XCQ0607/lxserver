@@ -3149,6 +3149,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           username = verified
         }
         void fileCache.getCacheList(username).then(list => {
+          // [新增] 整合 OpenList：若服务器配置了 OpenList 服务器，把目录树扫描的音频文件合并进本地音乐列表
+          const mergeOpenList = global.lx.config['user.enableOpenListInLocalMusic'] !== false
+          if (mergeOpenList) {
+            return openlist.getAllLocalIndex().then(openListFiles => {
+              const merged = openListFiles.length ? [...list, ...openListFiles] : list
+              res.writeHead(200, {
+                'Content-Type': 'application/json',
+                'Cache-Control': 'no-cache, no-store, must-revalidate',
+              })
+              res.end(JSON.stringify({ success: true, data: merged }))
+            })
+          }
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
@@ -4634,6 +4646,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
             if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
             if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
+            // [Fix] 上游直链可能 302 跳转到对象存储/CDN，必须透传 Location
+            if (resp.headers['location']) outHeaders['Location'] = String(resp.headers['location'])
             outHeaders['Cache-Control'] = 'no-cache'
             res.writeHead(statusCode, outHeaders)
             resp.pipe(res)
@@ -5044,68 +5058,95 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           return
         }
         openlist.stream(server, filePath, sign, req.headers.range as string | undefined).then((proxyReq: any) => {
-          proxyReq.on('error', (err: any) => {
+          const httpMod = require('http')
+          const httpsMod = require('https')
+          const handleStreamError = (err: any) => {
             if (!res.headersSent) {
               res.writeHead(502, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: err.message }))
             } else {
               res.end()
             }
-          })
-          proxyReq.on('response', (resp: any) => {
-            const statusCode = resp.statusCode || 200
-            const outHeaders: Record<string, string | number> = {}
-            if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
-            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
-            if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
-            if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
-            outHeaders['Cache-Control'] = 'no-cache'
-            res.writeHead(statusCode, outHeaders)
+          }
+          // 递归跟随 3xx 重定向（上游 /d/ 直链会 302 到对象存储/CDN），最多 5 跳
+          const followRedirect = (currentReq: any, hop = 0) => {
+            currentReq.on('error', handleStreamError)
+            currentReq.on('response', (resp: any) => {
+              const statusCode = resp.statusCode || 200
+              const location = resp.headers['location']
+              if (hop < 5 && statusCode >= 300 && statusCode < 400 && location) {
+                resp.resume()
+                let targetUrl: URL
+                try {
+                  targetUrl = new URL(location)
+                } catch (e) {
+                  handleStreamError(new Error('非法重定向地址'))
+                  return
+                }
+                const lib = targetUrl.protocol === 'https:' ? httpsMod : httpMod
+                const redirectHeaders: Record<string, string> = {}
+                const rangeHeader = String(req.headers.range || '')
+                if (rangeHeader) redirectHeaders['Range'] = rangeHeader
+                const nextReq = lib.request(targetUrl, { method: 'GET', headers: redirectHeaders } as any)
+                nextReq.on('error', () => { /* 下一跳处理 */ })
+                nextReq.end()
+                followRedirect(nextReq, hop + 1)
+                return
+              }
+              const outHeaders: Record<string, string | number> = {}
+              if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
+              if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
+              if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
+              if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
+              outHeaders['Cache-Control'] = 'no-cache'
+              res.writeHead(statusCode, outHeaders)
 
-            // [边播边缓存] 仅当请求从头开始（无 Range 或 bytes=0-）时缓存，避免缓存部分分片
-            const rangeHeader = String(req.headers.range || '')
-            const isFullRange = !rangeHeader || rangeHeader === 'bytes=0-' || rangeHeader === 'bytes=0'
-            if (isFullRange) {
-              const tmpPath = cacheFilePath + '.tmp'
-              const cacheWs = fs.createWriteStream(tmpPath, { flags: 'w' })
-              let cacheReceived = 0
-              const total = parseInt(resp.headers['content-length'] || '0', 10)
-              openlist.trackCacheProgress(server.id, filePath, total, 0)
-              resp.on('data', (chunk: any) => {
-                cacheReceived += chunk.length
-                cacheWs.write(chunk)
-                openlist.trackCacheProgress(server.id, filePath, total, cacheReceived)
-              })
-              resp.on('end', () => {
-                cacheWs.end(() => {
-                  // 下载完整则正式落盘，否则丢弃临时文件
-                  if (total === 0 || cacheReceived >= total) {
-                    fs.rename(tmpPath, cacheFilePath, (err: any) => {
-                      if (err) fs.unlink(tmpPath, () => { })
-                      openlist.markCacheDone(server.id, filePath)
-                    })
-                  } else {
+              // [边播边缓存] 仅当请求从头开始（无 Range 或 bytes=0-）时缓存，避免缓存部分分片
+              const rangeHeader = String(req.headers.range || '')
+              const isFullRange = !rangeHeader || rangeHeader === 'bytes=0-' || rangeHeader === 'bytes=0'
+              if (isFullRange) {
+                const tmpPath = cacheFilePath + '.tmp'
+                const cacheWs = fs.createWriteStream(tmpPath, { flags: 'w' })
+                let cacheReceived = 0
+                const total = parseInt(resp.headers['content-length'] || '0', 10)
+                openlist.trackCacheProgress(server.id, filePath, total, 0)
+                resp.on('data', (chunk: any) => {
+                  cacheReceived += chunk.length
+                  cacheWs.write(chunk)
+                  openlist.trackCacheProgress(server.id, filePath, total, cacheReceived)
+                })
+                resp.on('end', () => {
+                  cacheWs.end(() => {
+                    // 下载完整则正式落盘，否则丢弃临时文件
+                    if (total === 0 || cacheReceived >= total) {
+                      fs.rename(tmpPath, cacheFilePath, (err: any) => {
+                        if (err) fs.unlink(tmpPath, () => { })
+                        openlist.markCacheDone(server.id, filePath)
+                      })
+                    } else {
+                      fs.unlink(tmpPath, () => { })
+                      openlist.clearCacheProgress(server.id, filePath)
+                    }
+                  })
+                })
+                resp.on('error', () => {
+                  cacheWs.destroy()
+                  fs.unlink(tmpPath, () => { })
+                  openlist.clearCacheProgress(server.id, filePath)
+                })
+                res.on('close', () => {
+                  // 客户端中断：停止缓存写入并清理临时文件（下次播放重新缓存）
+                  if (!resp.complete) {
+                    cacheWs.destroy()
                     fs.unlink(tmpPath, () => { })
                     openlist.clearCacheProgress(server.id, filePath)
                   }
                 })
-              })
-              resp.on('error', () => {
-                cacheWs.destroy()
-                fs.unlink(tmpPath, () => { })
-                openlist.clearCacheProgress(server.id, filePath)
-              })
-              res.on('close', () => {
-                // 客户端中断：停止缓存写入并清理临时文件（下次播放重新缓存）
-                if (!resp.complete) {
-                  cacheWs.destroy()
-                  fs.unlink(tmpPath, () => { })
-                  openlist.clearCacheProgress(server.id, filePath)
-                }
-              })
-            }
-            resp.pipe(res)
-          })
+              }
+              resp.pipe(res)
+            })
+          }
+          followRedirect(proxyReq)
           req.on('close', () => {
             if (!proxyReq.destroyed) proxyReq.destroy()
           })
@@ -5177,6 +5218,29 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true, totalSize, fileCount, byServer }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message }))
+        }
+        return
+      }
+
+      // [新增] OpenList 本地音乐索引（扫描目录树收集音频文件，供本地音乐整合）
+      if (pathname === '/api/openlist/local-list' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const refresh = urlObj.searchParams.get('refresh') === '1' || urlObj.searchParams.get('refresh') === 'true'
+        try {
+          const files = serverId
+            ? await openlist.getLocalIndex(serverId, refresh)
+            : await openlist.getAllLocalIndex(refresh)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, total: files.length, items: files }))
         } catch (e: any) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: e.message }))
