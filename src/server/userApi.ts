@@ -646,7 +646,7 @@ export async function callUserApiGetMusicUrl(
 
     // 逻辑分歧：
     // 1. 如果只有一个源支持 -> 重试 3 次
-    // 2. 如果有多个源支持 -> 每个源试一次 (轮询)
+    // 2. 如果有多个源支持 -> 并发查询所有源，返回第一个通过有效性预检的 URL
 
     const attempts: any[] = []
 
@@ -689,37 +689,58 @@ export async function callUserApiGetMusicUrl(
             }
         }
     } else {
-        // 多个源，轮流尝试（带 URL 有效性预检，自动切换到下一个可用源）
-        for (const api of candidates) {
-            try {
-                console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
+        // 多个源：并发查询所有源，返回第一个通过有效性预检的 URL
+        // 关键点：一旦拿到有效 URL 立即返回，不等最慢的源（避免串行等待 + 丢失并发优势）
+        let settled = false
+        let completed = 0
 
-                const url = await api.callRequest('musicUrl', source, {
-                    musicInfo: normalizedSongInfo,
-                    quality: quality,
-                    type: quality
-                })
+        const result = await new Promise<{ url: string, sourceName: string } | null>((resolve) => {
+            for (const api of candidates) {
+                ;(async () => {
+                    try {
+                        console.log(`[UserApi] 并发尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
 
-                // [Fix] URL 有效性预检：验证音源返回的链接是否真实可播放
-                console.log(`[UserApi] 验证 ${api.info.name} 返回的 URL 有效性...`)
-                const validation = await validateMusicUrl(url)
-                if (!validation.valid) {
-                    throw new Error(`URL 有效性预检失败: ${validation.reason}`)
-                }
-                console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner})`)
+                        const url = await api.callRequest('musicUrl', source, {
+                            musicInfo: normalizedSongInfo,
+                            quality: quality,
+                            type: quality
+                        })
 
-                const att = { name: api.info.name, status: 'success' }
-                attempts.push(att)
-                if (onProgress) await onProgress(att)
-                return { url, type: quality, sourceName: api.info.name, attempts }
-            } catch (error: any) {
-                console.error(`[UserApi] ${api.info.name} 失败:`, `音源日志：${error.message}`)
-                lastError = error
-                const att = { name: api.info.name, status: 'fail', message: `音源日志：${error.message}` }
-                attempts.push(att)
-                if (onProgress) await onProgress(att)
-                continue
+                        // [Fix] URL 有效性预检：验证音源返回的链接是否真实可播放
+                        console.log(`[UserApi] 验证 ${api.info.name} 返回的 URL 有效性...`)
+                        const validation = await validateMusicUrl(url)
+                        if (!validation.valid) {
+                            throw new Error(`URL 有效性预检失败: ${validation.reason}`)
+                        }
+
+                        // 第一个通过验证的源胜出，立即返回，不再等待其他源
+                        if (!settled) {
+                            settled = true
+                            console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner})`)
+                            const att = { name: api.info.name, status: 'success' }
+                            attempts.push(att)
+                            if (onProgress) await onProgress(att)
+                            resolve({ url, sourceName: api.info.name })
+                        }
+                    } catch (error: any) {
+                        console.error(`[UserApi] ${api.info.name} 失败:`, `音源日志：${error.message}`)
+                        lastError = error
+                        // 并发分支下多个源会同时失败，逐个提示会刷屏，只记录不推送进度
+                        const att = { name: api.info.name, status: 'fail', message: `音源日志：${error.message}` }
+                        attempts.push(att)
+                    } finally {
+                        completed++
+                        // 所有源都已结束且仍无有效 URL，才整体失败
+                        if (completed === candidates.length && !settled) {
+                            resolve(null)
+                        }
+                    }
+                })()
             }
+        })
+
+        if (result) {
+            return { url: result.url, type: quality, sourceName: result.sourceName, attempts }
         }
     }
 
