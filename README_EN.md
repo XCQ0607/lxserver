@@ -201,15 +201,26 @@ You can now run LX Music Sync Server more conveniently via our Desktop Client, a
     - **Setup Wizard**: Guided data path selection on first launch, supports **Portable Mode**.
     - **Multi-Arch Support**: Builds for Windows (x64/x86/ARM64 Setup & Portable), macOS (Intel x64 & Apple Silicon arm64), and Linux (amd64/arm64/armv7l deb/AppImage).
 
-### Option 4: Build Your Own Docker Image
+### Option 4: Containerized Deployment via Docker
 
-> The image is not published to Docker Hub yet — build it first, then run (same as the Compose build in Option 1):
+> Image published on **GitHub Container Registry** (see below for building your own / publishing to Docker Hub):
 
 ```bash
-# 1. Build the image
-docker build -t lxserver .
+docker run -d \
+  -p 9527:9527 \
+  -v $(pwd)/data:/server/data \
+  -v $(pwd)/logs:/server/logs \
+  -v $(pwd)/cache:/server/cache \
+  -v $(pwd)/music:/server/music \
+  --name lx-sync-server \
+  --restart unless-stopped \
+  ghcr.io/boy6656598/lxserver:latest
+```
 
-# 2. Run
+**Build the image from source (for customization or publishing to Docker Hub):**
+
+```bash
+docker build -t lxserver .
 docker run -d \
   -p 9527:9527 \
   -v $(pwd)/data:/server/data \
