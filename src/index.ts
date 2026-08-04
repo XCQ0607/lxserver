@@ -3,6 +3,7 @@
 import fs from 'fs'
 import path from 'path'
 import crypto from 'crypto'
+import dns from 'dns'
 import moduleAlias from 'module-alias'
 // @ts-ignore
 moduleAlias.addAliases({
@@ -10,6 +11,14 @@ moduleAlias.addAliases({
   '@renderer': path.join(__dirname, 'modules'),
   '@': __dirname
 })
+
+// 强制 DNS 优先 IPv4：部分环境 IPv6 路由不可达（如 alist 域名解析出 AAAA 后 ENETUNREACH）
+// 需在 http/https 请求前设置，覆盖 needle / webdav / 原生 http 等所有出站请求
+try {
+  dns.setDefaultResultOrder('ipv4first')
+} catch (e) {
+  // Node <17 不支持该 API，忽略
+}
 
 if (typeof (global as any).navigator === 'undefined') {
   (global as any).navigator = { userAgent: 'node.js' }
