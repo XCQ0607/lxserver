@@ -208,9 +208,15 @@ npm start
   - **托盘常驻**: 窗口关闭后自动缩回托盘，服务在后台始终运行。
   - **全架构支持**: 提供 Windows (x64/x86/ARM64 Setup 及 Portable)、macOS (Intel/Apple Silicon) 及 Linux (amd64/arm64/armv7l) 全家桶。
 
-### 方式四：使用 Docker 镜像
+### 方式四：自行构建 Docker 镜像
+
+> 本项目镜像暂未发布到 Docker Hub，需先构建后再运行（等同于方式一的 Compose 构建）：
 
 ```bash
+# 1. 构建镜像
+docker build -t lxserver .
+
+# 2. 运行
 docker run -d \
   -p 9527:9527 \
   -v $(pwd)/data:/server/data \
@@ -219,7 +225,7 @@ docker run -d \
   -v $(pwd)/music:/server/music \
   --name lx-sync-server \
   --restart unless-stopped \
-  boy6656598/lxserver:latest
+  lxserver
 ```
 
 ### 方式五：使用 Release 版本
