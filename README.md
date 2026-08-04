@@ -1,28 +1,25 @@
 # LX Music Sync Server (Enhanced Edition)
 
-![lxserver](https://socialify.git.ci/XCQ0607/lxserver/image?description=1&forks=0&issues=0&logo=https://raw.githubusercontent.com/XCQ0607/lxserver/refs/heads/main/public/icon.svg&owner=1&pulls=0&stargazers=0&theme=Auto)
+![lxserver](https://socialify.git.ci/boy6656598/lxserver/image?description=1&forks=0&issues=0&logo=https://raw.githubusercontent.com/boy6656598/lxserver/refs/heads/main/public/icon.svg&owner=1&pulls=0&stargazers=0&theme=Auto)
 
 <div align="center">
-  <!-- <img src="public/icon.svg" width="120" height="120" alt="Icon"> -->
-  <!-- <br>
-  <h1>LX Sync Server</h1> -->
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
     <img src="https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
-    <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/license/boy6656598/lxserver?style=flat-square" alt="License">
     <br>
     <br>
-    <a href="https://github.com/XCQ0607/lxserver/stargazers"><img src="https://img.shields.io/github/stars/XCQ0607/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
-    <a href="https://github.com/XCQ0607/lxserver/network/members"><img src="https://img.shields.io/github/forks/XCQ0607/lxserver?style=flat-square" alt="GitHub forks"></a>
-    <a href="https://github.com/XCQ0607/lxserver/issues"><img src="https://img.shields.io/github/issues/XCQ0607/lxserver?style=flat-square&color=red" alt="GitHub issues"></a>
-    <a href="https://github.com/XCQ0607/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/XCQ0607/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
-    <img src="https://img.shields.io/github/commit-activity/m/XCQ0607/lxserver?style=flat-square&color=ff69b4" alt="Commit Activity">
-    <a href="https://github.com/XCQ0607/lxserver/releases"><img src="https://img.shields.io/github/downloads/XCQ0607/lxserver/total?style=flat-square&color=blue" alt="Total Downloads"></a>
+    <a href="https://github.com/boy6656598/lxserver/stargazers"><img src="https://img.shields.io/github/stars/boy6656598/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
+    <a href="https://github.com/boy6656598/lxserver/network/members"><img src="https://img.shields.io/github/forks/boy6656598/lxserver?style=flat-square" alt="GitHub forks"></a>
+    <a href="https://github.com/boy6656598/lxserver/issues"><img src="https://img.shields.io/github/issues/boy6656598/lxserver?style=flat-square&color=red" alt="GitHub issues"></a>
+    <a href="https://github.com/boy6656598/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/boy6656598/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
+    <img src="https://img.shields.io/github/commit-activity/m/boy6656598/lxserver?style=flat-square&color=ff69b4" alt="Commit Activity">
+    <a href="https://github.com/boy6656598/lxserver/releases"><img src="https://img.shields.io/github/downloads/boy6656598/lxserver/total?style=flat-square&color=blue" alt="Total Downloads"></a>
   </p>
 </div>
 
-[帮助文档 Documentation](https://xcq0607.github.io/lxserver/) | [同步服务器 SyncServer](md/lxserver.md) | [更新日志 Changelog](changelog.md) | [English](README_EN.md)
+[同步服务器 SyncServer](md/lxserver.md) | [更新日志 Changelog](changelog.md) | [English](README_EN.md)
 
 ---
 
@@ -154,26 +151,64 @@ Web 播放器针对移动端进行了深度优化，手机浏览器访问也能�
 
 ## 🚀 快速启动
 
-本项目基于 **Node.js** 开发，支持多种部署方式。
+本项目基于 **Node.js** 开发，支持多种部署方式。推荐在 NAS / VPS 上使用 **Docker Compose** 一键部署。
 
-### 方式一：桌面客户端
+### 方式一：NAS / Docker Compose 一键部署（推荐）
+
+适用于飞牛 NAS、群晖 NAS、及任何支持 Docker 的主机。项目内置了 `Dockerfile` 与 `docker-compose.yml`，可直接构建运行。
+
+**已有数据迁移（可选）**：如果你已有运行中的数据（用户、OpenList、卡密、云盘配置、缓存），先执行迁移脚本生成部署包：
+
+```bash
+# 在项目目录执行，生成 lxserver-nas-deploy.tar.gz（含清洗后的 config.js + 完整 data/）
+bash scripts/migrate-to-nas.sh
+```
+
+**全新安装 / 迁移安装通用步骤：**
+
+```bash
+# 1. 将项目代码放到 NAS 固定目录
+mkdir -p /vol1/docker/lxserver
+#    （若迁移，把上面的部署包也解压进来）
+tar -xzf lxserver-nas-deploy.tar.gz -C /vol1/docker/lxserver
+
+# 2. 构建并启动（首次构建需编译 TS，约 5-15 分钟）
+cd /vol1/docker/lxserver && docker compose up -d --build
+
+# 3. 访问
+#    同步管理后台:  http://<NAS-IP>:9527/
+#    Web 播放器:    http://<NAS-IP>:9527/music/
+```
+
+> **提示**：
+> - 端口被占用时修改 `docker-compose.yml` 中 `ports` 左侧宿主机端口即可（如 `"9000:9527"`）。
+> - 所有数据（用户、OpenList、云盘配置、缓存）持久化在 `./data` 目录，**备份只需复制该目录**。
+> - 常用环境变量（优先级高于 `config.js`）见 `docker-compose.yml` 内注释：`LX_USER_<用户名>` 追加用户、`FRONTEND_PASSWORD` 后台密码、`ENABLE_WEBPLAYER_AUTH` / `WEBPLAYER_PASSWORD` 播放器密码、`WEBDAV_URL` 等开启 WebDAV 同步。
+
+### 方式二：直接运行 (Git Clone)
+
+```bash
+# 1. 克隆项目
+git clone https://github.com/boy6656598/lxserver.git && cd lxserver
+
+# 2. 安装依赖并编译
+npm ci && npm run build
+
+# 3. 启动服务
+npm start
+```
+
+### 方式三：桌面客户端
 
 可以通过桌面端更方便地运行 LX Music Sync Server，支持 Windows、macOS 和 Linux。
 
-- **📦 最新版本下载**: [GitHub Releases](https://github.com/XCQ0607/lxserver/releases/latest)
+- **📦 最新版本下载**: [GitHub Releases](https://github.com/boy6656598/lxserver/releases/latest)
 - **✨ 桌面端优势**:
   - **单窗口管理**: 服务器管理与 Web 播放器合二为一，界面更统一。
   - **托盘常驻**: 窗口关闭后自动缩回托盘，服务在后台始终运行。
   - **全架构支持**: 提供 Windows (x64/x86/ARM64 Setup 及 Portable)、macOS (Intel/Apple Silicon) 及 Linux (amd64/arm64/armv7l) 全家桶。
 
-### 方式二：使用 Docker
-
-本项目支持从 Docker Hub 或 GitHub Packages 拉取镜像：
-
-- **Docker Hub**: `xcq0607/lxserver:latest`
-- **GitHub Packages**: `ghcr.io/xcq0607/lxserver:latest`
-
-**Docker Run 示例：**
+### 方式四：使用 Docker 镜像
 
 ```bash
 docker run -d \
@@ -184,59 +219,24 @@ docker run -d \
   -v $(pwd)/music:/server/music \
   --name lx-sync-server \
   --restart unless-stopped \
-  xcq0607/lxserver:latest
+  boy6656598/lxserver:latest
 ```
 
-**Docker Compose 示例：**
-
-新建 `docker-compose.yml` 文件：
-
-```yaml
-version: '3'
-services:
-  lx-sync-server:
-    image: xcq0607/lxserver:latest
-    container_name: lx-sync-server
-    restart: unless-stopped
-    ports:
-      - "9527:9527"
-    volumes:
-      - ./data:/server/data
-      - ./logs:/server/logs
-      - ./cache:/server/cache
-      - ./music:/server/music
-    environment:
-      - NODE_ENV=production
-      # - FRONTEND_PASSWORD=123456
-      # - ENABLE_WEBPLAYER_AUTH=true
-      # - WEBPLAYER_PASSWORD=yourpassword
-      # - ADMIN_PATH=
-      # - PLAYER_PATH=/music
-```
-
-### 方式三：直接运行 (Git Clone)
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/XCQ0607/lxserver.git && cd lxserver
-
-# 2. 安装依赖并编译
-npm ci && npm run build
-
-# 3. 启动服务
-npm start
-```
-
-### 方式四：使用 Release 版本
+### 方式五：使用 Release 版本
 
 1. 在 GitHub Releases 下载压缩包。
 2. 解压后运行 `npm install --production`。
 3. 执行 `npm start` 启动。
 
-### 3. 访问说明
+### 群晖套件安装
 
-- **Web 播放器**: `http://your-ip:9527/music` (默认路径，可通过 `PLAYER_PATH` 修改)
+群晖用户也可使用项目内置的 SPK 打包方案（`packaging/synology-spk/`），支持 DSM 7 手动安装套件，详见 [packaging/synology-spk/README.md](packaging/synology-spk/README.md)。
+
+### 访问说明
+
 - **同步管理后台**: `http://your-ip:9527` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+- **Web 播放器**: `http://your-ip:9527/music` (默认路径，可通过 `PLAYER_PATH` 修改)
+- **Subsonic**: `http://your-ip:9527/rest` (可被音流、Feishin 等客户端连接)
 
 ---
 
@@ -334,28 +334,15 @@ npm start
 
 ### 👥 贡献者 (Contributors)
 
-<a href="https://github.com/xcq0607/lxserver/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xcq0607/lxserver" />
+<a href="https://github.com/boy6656598/lxserver/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=boy6656598/lxserver" />
 </a>
-
-
-## 📈 Star History
-
-<a href="https://gitdata.xuanhun520.com/?repos=xcq0607/lxserver&type=Date">
-<picture >
-  <source media="(prefers-color-scheme: dark) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-  <source  media="(prefers-color-scheme: light) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=light" />
-  <img style="width: 800px; height: 533px;" alt="Star History Chart" src="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-</picture>
-</a>
-
-
 
 ## 📄 开源协议
 
 本项目基于 Apache License 2.0 许可证发行，以下协议是对于 Apache License 2.0 的补充，如有冲突，以以下协议为准。
 
-Apache License 2.0 copyright (c) 2026 [xcq0607](https://github.com/xcq0607)
+Apache License 2.0 copyright (c) 2026 [boy6656598](https://github.com/boy6656598)
 
 **词语约定**：本协议中的“本项目”指 LX Music Web 播放器；“使用者”指签署本协议的使用者；“官方音乐平台”指对本项目内置的包括酷我、酷狗、咪咕等音乐源的官方平台统称；“版权数据”指包括但不限于图像、音频、名字等在内的他人拥有所属版权的数据。
 

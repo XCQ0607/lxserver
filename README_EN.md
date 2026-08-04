@@ -1,25 +1,25 @@
 # LX Music Sync Server (Enhanced Edition)
 
-![lxserver](https://socialify.git.ci/XCQ0607/lxserver/image?description=1&forks=0&issues=0&logo=https://raw.githubusercontent.com/XCQ0607/lxserver/refs/heads/main/public/icon.svg&owner=1&pulls=0&stargazers=0&theme=Auto)
+![lxserver](https://socialify.git.ci/boy6656598/lxserver/image?description=1&forks=0&issues=0&logo=https://raw.githubusercontent.com/boy6656598/lxserver/refs/heads/main/public/icon.svg&owner=1&pulls=0&stargazers=0&theme=Auto)
 
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
     <img src="https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
-    <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
+    <img src="https://img.shields.io/github/license/boy6656598/lxserver?style=flat-square" alt="License">
     <br>
     <br>
-    <a href="https://github.com/XCQ0607/lxserver/stargazers"><img src="https://img.shields.io/github/stars/XCQ0607/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
-    <a href="https://github.com/XCQ0607/lxserver/network/members"><img src="https://img.shields.io/github/forks/XCQ0607/lxserver?style=flat-square" alt="GitHub forks"></a>
-    <a href="https://github.com/XCQ0607/lxserver/issues"><img src="https://img.shields.io/github/issues/XCQ0607/lxserver?style=flat-square&color=red" alt="GitHub issues"></a>
-    <a href="https://github.com/XCQ0607/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/XCQ0607/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
-    <img src="https://img.shields.io/github/commit-activity/m/XCQ0607/lxserver?style=flat-square&color=ff69b4" alt="Commit Activity">
-    <a href="https://github.com/XCQ0607/lxserver/releases"><img src="https://img.shields.io/github/downloads/XCQ0607/lxserver/total?style=flat-square&color=blue" alt="Total Downloads"></a>
+    <a href="https://github.com/boy6656598/lxserver/stargazers"><img src="https://img.shields.io/github/stars/boy6656598/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
+    <a href="https://github.com/boy6656598/lxserver/network/members"><img src="https://img.shields.io/github/forks/boy6656598/lxserver?style=flat-square" alt="GitHub forks"></a>
+    <a href="https://github.com/boy6656598/lxserver/issues"><img src="https://img.shields.io/github/issues/boy6656598/lxserver?style=flat-square&color=red" alt="GitHub issues"></a>
+    <a href="https://github.com/boy6656598/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/boy6656598/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
+    <img src="https://img.shields.io/github/commit-activity/m/boy6656598/lxserver?style=flat-square&color=ff69b4" alt="Commit Activity">
+    <a href="https://github.com/boy6656598/lxserver/releases"><img src="https://img.shields.io/github/downloads/boy6656598/lxserver/total?style=flat-square&color=blue" alt="Total Downloads"></a>
   </p>
 </div>
 
-[Documentation](https://xcq0607.github.io/lxserver/) | [SyncServer](md/lxserver_EN.md) | [Changelog](changelog.md) | [中文版](README.md)
+[SyncServer](md/lxserver_EN.md) | [Changelog](changelog.md) | [中文版](README.md)
 
 ---
 This project features a powerful built-in **Web Player**, allowing you to enjoy music anywhere in your browser. It also serves as an enhanced [LX Music Data Sync Server](md/lxserver_EN.md).
@@ -142,14 +142,58 @@ The Web Player is deeply optimized for mobile devices, providing a native App-li
 
 ## 🚀 Quick Start
 
-Built with **Node.js**, supporting multiple deployment methods.
+Built with **Node.js**, supporting multiple deployment methods. For NAS / VPS, **Docker Compose** is the recommended one-click deployment.
 
+### Option 1: NAS / Docker Compose One-Click Deployment (Recommended)
 
-### Option 1: Desktop Client
+Works on FeiNiu NAS, Synology NAS, and any Docker-capable host. This repo ships with `Dockerfile` and `docker-compose.yml`, so you can build and run directly.
+
+**Migrate existing data (optional)**: If you already have runtime data (users, OpenList, card keys, cloud drive config, cache), run the migration script first:
+
+```bash
+# Generates lxserver-nas-deploy.tar.gz (cleaned config.js + full data/)
+bash scripts/migrate-to-nas.sh
+```
+
+**Fresh install / migration, common steps:**
+
+```bash
+# 1. Put the project code in a fixed NAS directory
+mkdir -p /vol1/docker/lxserver
+#    (for migration, extract the deploy package here as well)
+tar -xzf lxserver-nas-deploy.tar.gz -C /vol1/docker/lxserver
+
+# 2. Build and start (first build compiles TS, ~5-15 min)
+cd /vol1/docker/lxserver && docker compose up -d --build
+
+# 3. Access
+#    Sync Dashboard:  http://<NAS-IP>:9527/
+#    Web Player:      http://<NAS-IP>:9527/music/
+```
+
+> **Notes**:
+> - If the port is taken, change the left-hand host port under `ports` in `docker-compose.yml` (e.g. `"9000:9527"`).
+> - All data (users, OpenList, cloud drive config, cache) persists in `./data` — **backing up is just copying that directory**.
+> - Common env vars (higher priority than `config.js`) are documented as comments in `docker-compose.yml`: `LX_USER_<username>` to add users, `FRONTEND_PASSWORD` for dashboard password, `ENABLE_WEBPLAYER_AUTH` / `WEBPLAYER_PASSWORD` for player password, `WEBDAV_URL` etc. to enable WebDAV sync.
+
+### Option 2: Manual Run (Git Clone)
+
+```bash
+# 1. Clone project
+git clone https://github.com/boy6656598/lxserver.git && cd lxserver
+
+# 2. Install dependencies and build
+npm ci && npm run build
+
+# 3. Start service
+npm start
+```
+
+### Option 3: Desktop Client
 
 You can now run LX Music Sync Server more conveniently via our Desktop Client, available for Windows, macOS, and Linux.
 
-- **📦 Download Latest**: [GitHub Releases](https://github.com/XCQ0607/lxserver/releases/latest)
+- **📦 Download Latest**: [GitHub Releases](https://github.com/boy6656598/lxserver/releases/latest)
 - **✨ Key Advantages**:
     - **Single Window**: Integrated management dashboard and Web player for a unified experience.
     - **System Tray**: Minimizes to tray on close, ensuring the sync service stays active in the background.
@@ -157,13 +201,7 @@ You can now run LX Music Sync Server more conveniently via our Desktop Client, a
     - **Setup Wizard**: Guided data path selection on first launch, supports **Portable Mode**.
     - **Multi-Arch Support**: Builds for Windows (x64/x86/ARM64 Setup & Portable), macOS (Intel x64 & Apple Silicon arm64), and Linux (amd64/arm64/armv7l deb/AppImage).
 
-### Option 2: Containerized Deployment via Docker
-
-This project supports pulling images from Docker Hub or GitHub Packages:
-- **Docker Hub**: `xcq0607/lxserver:latest`
-- **GitHub Packages**: `ghcr.io/xcq0607/lxserver:latest`
-
-**Docker Run Example:**
+### Option 4: Containerized Deployment via Docker
 
 ```bash
 docker run -d \
@@ -174,59 +212,24 @@ docker run -d \
   -v $(pwd)/music:/server/music \
   --name lx-sync-server \
   --restart unless-stopped \
-  xcq0607/lxserver:latest
+  boy6656598/lxserver:latest
 ```
 
-**Docker Compose Example:**
-
-Create a `docker-compose.yml` file:
-
-```yaml
-version: '3'
-services:
-  lx-sync-server:
-    image: xcq0607/lxserver:latest
-    container_name: lx-sync-server
-    restart: unless-stopped
-    ports:
-      - "9527:9527"
-    volumes:
-      - ./data:/server/data
-      - ./logs:/server/logs
-      - ./cache:/server/cache
-      - ./music:/server/music
-    environment:
-      - NODE_ENV=production
-      # - FRONTEND_PASSWORD=123456
-      # - ENABLE_WEBPLAYER_AUTH=true
-      # - WEBPLAYER_PASSWORD=yourpassword
-      # - ADMIN_PATH=
-      # - PLAYER_PATH=/music
-```
-
-### Option 3: Manual Run (Git Clone)
-
-```bash
-# 1. Clone project
-git clone https://github.com/XCQ0607/lxserver.git && cd lxserver
-
-# 2. Install dependencies and build
-npm ci && npm run build
-
-# 3. Start service
-npm start
-```
-
-### Option 4: Using Release Build
+### Option 5: Using Release Build
 
 1. Download the archive from GitHub Releases.
 2. Extract and run `npm install --production`.
 3. Execute `npm start`.
 
-### 3. Access Info
+### Synology Package (SPK)
 
-- **Web Player**: `http://your-ip:9527/music` (Default path, configurable via `PLAYER_PATH`)
+Synology users can also use the bundled SPK packaging (`packaging/synology-spk/`) for DSM 7 manual install, see [packaging/synology-spk/README.md](packaging/synology-spk/README.md).
+
+### Access Info
+
 - **Sync Dashboard**: `http://your-ip:9527` (Default path, configurable via `ADMIN_PATH`, default password: `123456`)
+- **Web Player**: `http://your-ip:9527/music` (Default path, configurable via `PLAYER_PATH`)
+- **Subsonic**: `http://your-ip:9527/rest` (connectable by YinLiu, Feishin and other clients)
 
 ---
 
@@ -324,29 +327,17 @@ Anonymous telemetry via PostHog is used for:
 
 ### 👥 Contributors
 
-<a href="https://github.com/xcq0607/lxserver/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xcq0607/lxserver" />
+<a href="https://github.com/boy6656598/lxserver/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=boy6656598/lxserver" />
 </a>
 
-## 📈 Star History
-
-
-<a href="https://gitdata.xuanhun520.com/?repos=xcq0607/lxserver&type=Date">
-<picture >
-  <source media="(prefers-color-scheme: dark) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-  <source  media="(prefers-color-scheme: light) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=light" />
-  <img style="width: 800px; height: 533px;" alt="Star History Chart" src="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-</picture>
-</a>
-
-
----
+## 📄 Open Source License---
 
 ## 📄 License
 
 This project is released under the Apache License 2.0. The following agreement is a supplement to the Apache License 2.0. In case of conflict, this agreement shall prevail.
 
-Apache License 2.0 copyright (c) 2026 [xcq0607](https://github.com/xcq0607)
+Apache License 2.0 copyright (c) 2026 [boy6656598](https://github.com/boy6656598)
 
 **Terminology**: "This Project" refers to LX Music Web Player; "User" refers to the user who agrees to this agreement; "Official Music Platforms" refers to the collective official platforms of the music sources built into this project, including Kuwo, Kugou, Migu, etc.; "Copyrighted Data" refers to data owned by others, including but not limited to images, audio, names, etc.
 
