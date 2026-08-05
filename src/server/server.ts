@@ -28,7 +28,6 @@ import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
-import * as alidrive from './alidrive'
 import * as cards from './cards'
 import * as openlist from './openlist'
 
@@ -4260,7 +4259,6 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           'player.enableAuth': global.lx.config['player.enableAuth'] || false,
           'player.forceLogin': global.lx.config['player.forceLogin'] ?? true,
           'player.enableRegister': global.lx.config['player.enableRegister'] ?? true,
-          'player.enableAlidrive': global.lx.config['player.enableAlidrive'] ?? true,
           'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
           'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'] || false,
           'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'] || false,
@@ -4442,360 +4440,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
-      // ================= 阿里云盘 =================
-      // [新增] 查询阿里云盘绑定状态（无需管理员）
-      if (pathname === '/api/alidrive/status' && req.method === 'GET') {
-        const cfg = alidrive.getConfig()
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({
-          success: true,
-          linked: alidrive.isLinked(),
-          userName: cfg.userName || '',
-          hasClient: !!(cfg.clientId && cfg.clientSecret),
-        }))
-        return
-      }
-
-      // [新增] 获取/保存阿里云盘 ClientID/ClientSecret（管理员）
-      if (pathname === '/api/alidrive/config' && req.method === 'GET') {
-        if (!requireAdminAuth()) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const cfg = alidrive.getConfig()
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({
-          success: true,
-          clientId: cfg.clientId,
-          clientSecret: cfg.clientSecret,
-          linked: alidrive.isLinked(),
-          userName: cfg.userName || '',
-        }))
-        return
-      }
-
-      if (pathname === '/api/alidrive/config' && req.method === 'POST') {
-        if (!requireAdminAuth()) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        void readBody(req).then(body => {
-          try {
-            const { clientId, clientSecret } = JSON.parse(body)
-            if (!clientId || !clientSecret) {
-              res.writeHead(400, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ success: false, message: '缺少 ClientID 或 ClientSecret' }))
-              return
-            }
-            alidrive.updateClient(clientId, clientSecret)
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true }))
-          } catch (e: any) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
-          }
-        })
-        return
-      }
-
-      // [新增] 创建阿里云盘扫码登录二维码（管理员）
-      if (pathname === '/api/alidrive/qrcode' && req.method === 'POST') {
-        if (!requireAdminAuth()) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        alidrive.createQrCode().then(({ qr_content, sid }) => {
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true, qr_content, sid }))
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 轮询扫码状态（管理员）
-      if (pathname === '/api/alidrive/qrcode/status' && req.method === 'GET') {
-        if (!requireAdminAuth()) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const sid = urlObj.searchParams.get('sid')
-        if (!sid) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: '缺少 sid' }))
-          return
-        }
-        alidrive.checkQrStatus(sid).then(async (statusObj) => {
-          if (statusObj.status === 'LoginSuccess' && statusObj.auth_code) {
-            const ok = await alidrive.exchangeToken(statusObj.auth_code)
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true, ...statusObj, bound: ok ? 'Bound' : 'TokenExchangeFailed' }))
-          } else {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true, ...statusObj }))
-          }
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 解除阿里云盘绑定（管理员）
-      if (pathname === '/api/alidrive/unlink' && req.method === 'POST') {
-        if (!requireAdminAuth()) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        alidrive.unlink()
-        res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: true }))
-        return
-      }
-
-      // [新增] 阿里云盘文件列表（登录用户/管理员）
       const requirePlayerOrAdmin = (): string | null => {
         if (requireAdminAuth()) return 'admin'
         const user = verifyUserAuth(req)
         if (user) return user
         if (checkPlayerAuth(req)) return 'player'
         return null
-      }
-
-      if (pathname === '/api/alidrive/list' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
-        if (!username) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const parentFileId = urlObj.searchParams.get('parentFileId') || 'root'
-        const marker = urlObj.searchParams.get('marker') || ''
-        alidrive.listFiles(parentFileId, marker).then(({ items, next_marker }) => {
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true, items, next_marker }))
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 阿里云盘文件搜索（登录用户/管理员）
-      if (pathname === '/api/alidrive/search' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
-        if (!username) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const keyword = urlObj.searchParams.get('keyword') || ''
-        const marker = urlObj.searchParams.get('marker') || ''
-        if (!keyword) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: '缺少关键词' }))
-          return
-        }
-        const escaped = keyword.replace(/["\\]/g, '\\$&')
-        alidrive.searchFiles(`name match "${escaped}"`, marker).then(({ items, next_marker }) => {
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true, items, next_marker }))
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 阿里云盘音频流式播放（代理，支持 Range，登录用户/管理员）
-      if (pathname === '/api/alidrive/stream' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
-        if (!username) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const fileId = urlObj.searchParams.get('fileId')
-        if (!fileId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: '缺少 fileId' }))
-          return
-        }
-        alidrive.getDownloadUrl(fileId).then((downloadUrl) => {
-          const headers: Record<string, string> = {}
-          if (req.headers.range) headers['Range'] = req.headers.range as string
-          const proxyReq: any = needle.get(downloadUrl, { headers, follow_max: 5 })
-          proxyReq.on('error', (err: any) => {
-            if (!res.headersSent) {
-              res.writeHead(502, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ success: false, message: err.message }))
-            } else {
-              res.end()
-            }
-          })
-          proxyReq.on('response', (resp: any) => {
-            const statusCode = resp.statusCode || 200
-            const outHeaders: Record<string, string | number> = {}
-            if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
-            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
-            if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
-            if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
-            // [Fix] 上游直链可能 302 跳转到对象存储/CDN，必须透传 Location
-            if (resp.headers['location']) outHeaders['Location'] = String(resp.headers['location'])
-            outHeaders['Cache-Control'] = 'no-cache'
-            res.writeHead(statusCode, outHeaders)
-            resp.pipe(res)
-          })
-          req.on('close', () => {
-            if (!proxyReq.destroyed) proxyReq.destroy()
-          })
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 阿里云盘文件下载（登录用户/管理员）
-      if (pathname === '/api/alidrive/download' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
-        if (!username) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const fileId = urlObj.searchParams.get('fileId')
-        if (!fileId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: '缺少 fileId' }))
-          return
-        }
-        alidrive.getDownloadUrl(fileId).then((downloadUrl) => {
-          const headers: Record<string, string> = {}
-          if (req.headers.range) headers['Range'] = req.headers.range as string
-          needle.get(downloadUrl, { headers, follow_max: 5 }, (err: any, resp: any) => {
-            if (err) {
-              if (!res.headersSent) {
-                res.writeHead(502, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ success: false, message: err.message }))
-              } else {
-                res.end()
-              }
-              return
-            }
-            const outHeaders: Record<string, string | number> = {
-              'Content-Type': String(resp.headers['content-type'] || 'application/octet-stream').split(';')[0],
-            }
-            if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
-            res.writeHead(resp.statusCode || 200, outHeaders)
-            resp.pipe(res)
-          })
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 获取阿里云盘音频同目录歌词（登录用户/管理员）
-      if (pathname === '/api/alidrive/lyric' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
-        if (!username) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        const fileId = urlObj.searchParams.get('fileId')
-        if (!fileId) {
-          res.writeHead(400, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: '缺少 fileId' }))
-          return
-        }
-        alidrive.getFileInfo(fileId).then(async (fileInfo) => {
-          const lyricName = (fileInfo.name || '').replace(/\.[^.]+$/, '') + '.lrc'
-          const parentId = fileInfo.parent_file_id || 'root'
-          const { items } = await alidrive.listFiles(parentId)
-          const lyricFile = items.find((it: any) => it.type === 'file' && it.name.toLowerCase() === lyricName.toLowerCase())
-          if (!lyricFile) {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true, lyric: '' }))
-            return
-          }
-          const url = await alidrive.getDownloadUrl(lyricFile.file_id)
-          needle.get(url, { timeout: 20000 }, (err: any, resp: any) => {
-            if (err) {
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ success: true, lyric: '' }))
-              return
-            }
-            const text = resp.body && typeof resp.body === 'string' ? resp.body : (resp.body ? JSON.stringify(resp.body) : '')
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true, lyric: text || '' }))
-          })
-        }).catch((err: any) => {
-          res.writeHead(500, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: err.message }))
-        })
-        return
-      }
-
-      // [新增] 下载歌曲到阿里云盘（登录用户/管理员）
-      if (pathname === '/api/alidrive/upload-song' && req.method === 'POST') {
-        const username = requirePlayerOrAdmin()
-        if (!username) {
-          res.writeHead(401, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
-          return
-        }
-        void readBody(req).then(async body => {
-          let sourceUrl = ''
-          let fileName = ''
-          let dirPath = ''
-          try {
-            const parsed = JSON.parse(body)
-            sourceUrl = parsed.url
-            fileName = parsed.filename || 'song.mp3'
-            dirPath = parsed.dirPath || '/music/lxserver'
-          } catch (e) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, message: 'Bad Request' }))
-            return
-          }
-          if (!sourceUrl) {
-            res.writeHead(400, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, message: '缺少音频 URL' }))
-            return
-          }
-          const tmpDir = path.join(global.lx.dataPath, 'tmp')
-          checkAndCreateDir(tmpDir)
-          const tmpFile = path.join(tmpDir, `${Date.now()}_${Math.random().toString(36).slice(2, 8)}_${fileName.replace(/[\\/:*?"<>|]/g, '_')}`)
-          try {
-            await new Promise<void>((resolve, reject) => {
-              const fileStream = fs.createWriteStream(tmpFile)
-              const downloadReq = needle.get(sourceUrl, { timeout: 0, follow_max: 5 })
-              downloadReq.on('error', (e: any) => reject(e))
-              downloadReq.pipe(fileStream)
-              fileStream.on('finish', () => resolve())
-              fileStream.on('error', (e: any) => reject(e))
-            })
-            const dirId = await alidrive.ensureDirPath(dirPath)
-            const fileId = await alidrive.uploadFile(dirId, fileName, tmpFile)
-            try { fs.unlinkSync(tmpFile) } catch (e) { /* ignore */ }
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true, fileId }))
-          } catch (e: any) {
-            try { fs.unlinkSync(tmpFile) } catch (e2) { /* ignore */ }
-            res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: false, message: e.message }))
-          }
-        })
-        return
       }
 
       // ================= OpenList 存储 =================
@@ -7431,14 +7081,13 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 // }
 
 export const startServer = async (port: number, ip: string) => {
-  // 初始化卡密与阿里云盘
+  // 初始化卡密与存储模块
   try {
     cards.initCards()
-    alidrive.loadConfig()
     openlist.loadConfig()
-    console.log('[Server] Cards, Alidrive & OpenList modules initialized')
+    console.log('[Server] Cards & OpenList modules initialized')
   } catch (err: any) {
-    console.error('[Server] Failed to init cards/alidrive:', err.message)
+    console.error('[Server] Failed to init cards/openlist:', err.message)
   }
   // Initialize file cache settings from global config
   if (global.lx.config) {
