@@ -318,6 +318,9 @@ class App {
             case 'openlist':
                 this.loadOpenList();
                 break;
+            case 'webdav-mounts':
+                this.loadWebdavMounts();
+                break;
             case 'about':
                 this.loadAbout();
                 break;
@@ -2180,6 +2183,129 @@ class App {
     async testOpenList(id) {
         try {
             const res = await this.request('/api/openlist/test', {
+                method: 'POST',
+                body: JSON.stringify({ id })
+            });
+            if (res.success) showSuccess('测试成功: ' + res.message);
+            else showError('测试失败: ' + res.message);
+        } catch (err) {
+            showError('测试失败: ' + err.message);
+        }
+    }
+
+    // ========== WebDAV 挂载 ==========
+    async loadWebdavMounts() {
+        try {
+            const res = await this.request('/api/webdav-mounts');
+            this.renderWebdavMounts(res.mounts || []);
+        } catch (err) {
+            showError('加载 WebDAV 挂载源失败: ' + err.message);
+        }
+    }
+
+    renderWebdavMounts(mounts) {
+        const container = document.getElementById('webdav-mount-list');
+        if (!container) return;
+        if (!mounts.length) {
+            container.innerHTML = '<div class="text-secondary" style="text-align: center; padding: 40px 0;">尚未添加任何 WebDAV 挂载源，点击右上角"添加挂载源"开始配置。</div>';
+            return;
+        }
+        const rows = mounts.map(m => `
+            <div class="webdav-mount-item" style="display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06);">
+                <div style="flex: 1; min-width: 0;">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <strong style="font-size: 14px;">${this.escapeHtml(m.name)}</strong>
+                        ${m.enabled ? '<span style="font-size: 11px; color: var(--accent-success, #10b981);">已启用</span>' : '<span style="font-size: 11px; color: var(--text-secondary);">已停用</span>'}
+                        <span style="font-size: 11px; color: var(--text-secondary);">${m.hasPassword ? '已配置认证' : '无密码'}</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">${this.escapeHtml(m.baseUrl)}${m.rootPath && m.rootPath !== '/' ? ' · 根: ' + this.escapeHtml(m.rootPath) : ''}</div>
+                </div>
+                <div style="display: flex; gap: 8px; flex-shrink: 0;">
+                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="app.testWebdavMount('${m.id}')">测试连接</button>
+                    <button class="btn-secondary" style="padding: 4px 10px; font-size: 12px;" onclick="app.editWebdavMount('${m.id}')">编辑</button>
+                    <button class="btn-danger" style="padding: 4px 10px; font-size: 12px;" onclick="app.deleteWebdavMount('${m.id}')">删除</button>
+                </div>
+            </div>`).join('');
+        container.innerHTML = rows;
+    }
+
+    webdavMountModalData = null;
+
+    showWebdavMountModal(mount) {
+        this.webdavMountModalData = mount || null;
+        document.getElementById('webdav-mount-modal-title').textContent = mount ? '编辑 WebDAV 挂载源' : '添加 WebDAV 挂载源';
+        document.getElementById('wd-name').value = mount ? mount.name : '';
+        document.getElementById('wd-base-url').value = mount ? mount.baseUrl : '';
+        document.getElementById('wd-root-path').value = mount ? (mount.rootPath || '/') : '/';
+        document.getElementById('wd-username').value = mount ? mount.username : '';
+        document.getElementById('wd-password').value = '';
+        document.getElementById('wd-enabled').checked = mount ? (mount.enabled !== false) : true;
+        document.getElementById('webdav-mount-modal').classList.remove('hidden');
+    }
+
+    closeWebdavMountModal() {
+        document.getElementById('webdav-mount-modal').classList.add('hidden');
+        this.webdavMountModalData = null;
+    }
+
+    async saveWebdavMount() {
+        const data = {
+            name: document.getElementById('wd-name').value.trim(),
+            baseUrl: document.getElementById('wd-base-url').value.trim(),
+            rootPath: document.getElementById('wd-root-path').value.trim() || '/',
+            username: document.getElementById('wd-username').value.trim(),
+            password: document.getElementById('wd-password').value,
+            enabled: document.getElementById('wd-enabled').checked,
+        };
+        if (!data.baseUrl) {
+            showError('请填写 WebDAV 地址');
+            return;
+        }
+        try {
+            if (this.webdavMountModalData && this.webdavMountModalData.id) {
+                await this.request('/api/webdav-mounts', {
+                    method: 'PUT',
+                    body: JSON.stringify({ id: this.webdavMountModalData.id, ...data })
+                });
+                showSuccess('挂载源已更新');
+            } else {
+                await this.request('/api/webdav-mounts', {
+                    method: 'POST',
+                    body: JSON.stringify(data)
+                });
+                showSuccess('挂载源已添加');
+            }
+            this.closeWebdavMountModal();
+            this.loadWebdavMounts();
+        } catch (err) {
+            showError('保存失败: ' + err.message);
+        }
+    }
+
+    editWebdavMount(id) {
+        this.request('/api/webdav-mounts').then(res => {
+            const mount = (res.mounts || []).find(m => m.id === id);
+            if (mount) this.showWebdavMountModal(mount);
+        }).catch(err => showError('加载失败: ' + err.message));
+    }
+
+    async deleteWebdavMount(id) {
+        if (!confirm('确定删除该 WebDAV 挂载源吗？')) return;
+        try {
+            await this.request('/api/webdav-mounts', {
+                method: 'DELETE',
+                body: JSON.stringify({ id })
+            });
+            showSuccess('已删除');
+            this.loadWebdavMounts();
+        } catch (err) {
+            showError('删除失败: ' + err.message);
+        }
+    }
+
+    async testWebdavMount(id) {
+        try {
+            const res = await this.request('/api/webdav-mounts/test', {
                 method: 'POST',
                 body: JSON.stringify({ id })
             });

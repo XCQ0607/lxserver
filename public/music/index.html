@@ -1199,6 +1199,7 @@
                                             <option value="music">下载</option>
                                             <option value="cache">缓存</option>
                                             <option value="openlist">OpenList</option>
+                                            <option value="webdav">WebDAV</option>
                                         </select>
                                     </div>
                                     <div class="flex items-center gap-1">
@@ -1363,6 +1364,40 @@
                             </div>
                             <div id="lm-ol-status" class="px-3 py-1 text-[10px] t-text-muted"></div>
                             <div id="lm-ol-file-list" class="flex-1 overflow-y-auto custom-scrollbar max-h-[300px] p-1 space-y-0.5"></div>
+                        </div>
+                    </div>
+
+                    <!-- [新增] 内嵌 WebDAV 挂载目录树浏览面板 -->
+                    <div class="shrink-0 mt-2 border t-border-main rounded-xl overflow-hidden">
+                        <button id="lm-wm-panel-toggle" onclick="window.LocalMusicManager.toggleWebdavPanel()"
+                            class="w-full flex items-center justify-between px-3 py-2 text-[10px] md:text-xs font-bold t-text-main hover:t-bg-main transition-colors">
+                            <span class="flex items-center gap-1.5">
+                                <i class="fas fa-server text-amber-500 text-xs"></i>
+                                <span>WebDAV 目录</span>
+                                <span id="lm-wm-panel-hint" class="hidden t-text-muted font-normal">浏览挂载源并一键加入歌单</span>
+                            </span>
+                            <i id="lm-wm-panel-arrow" class="fas fa-chevron-down text-[10px] t-text-muted"></i>
+                        </button>
+                        <div id="lm-wm-panel-body" class="hidden border-t t-border-main bg-white/40 dark:bg-gray-800/40">
+                            <div class="flex items-center gap-1.5 px-3 py-2 flex-wrap">
+                                <select id="lm-wm-server-select"
+                                    class="text-[10px] md:text-xs bg-gray-100 dark:bg-gray-800 border-none rounded-lg px-2 py-1.5 outline-none max-w-[140px] md:max-w-[200px]"
+                                    onchange="window.LocalMusicManager.selectWmServer(this.value)">
+                                    <option value="">选择挂载源</option>
+                                </select>
+                                <div id="lm-wm-breadcrumb" class="flex items-center gap-1 flex-wrap text-xs flex-1 min-w-[100px]"></div>
+                                <button onclick="window.LocalMusicManager.refreshWebdav()"
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
+                                    title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
+                                <button onclick="window.LocalMusicManager.wmAddCurrentDirToPlaylist()"
+                                    class="text-[10px] md:text-xs flex items-center gap-1 px-2 py-1 rounded-lg bg-amber-500/10 text-amber-500 hover:bg-amber-500 hover:text-white transition-all"
+                                    title="将当前浏览目录下歌曲保存为歌单">
+                                    <i class="fas fa-folder-plus text-[10px]"></i>
+                                    <span class="hidden sm:inline">目录加歌单</span>
+                                </button>
+                            </div>
+                            <div id="lm-wm-status" class="px-3 py-1 text-[10px] t-text-muted"></div>
+                            <div id="lm-wm-file-list" class="flex-1 overflow-y-auto custom-scrollbar max-h-[300px] p-1 space-y-0.5"></div>
                         </div>
                     </div>
 

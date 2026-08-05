@@ -157,6 +157,14 @@
                     <span>OpenList</span>
                 </a>
 
+                <a href="#" class="nav-item" data-view="webdav-mounts">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+                        <path d="M22 19l-4.5-4.5M13 19l4.5-4.5" opacity="0" />
+                    </svg>
+                    <span>WebDAV挂载</span>
+                </a>
+
                 <a href="#" class="nav-item" data-view="snapshots">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 2v20M2 12h20" />
@@ -1363,6 +1371,70 @@
                             <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
                                 <button class="btn-secondary" onclick="app.closeOpenListModal()">取消</button>
                                 <button class="btn-primary" onclick="app.saveOpenListServer()">保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- WebDAV 挂载视图 -->
+                <div id="view-webdav-mounts" class="view">
+                    <div class="view-header">
+                        <div class="header-left">
+                            <h3>WebDAV 挂载</h3>
+                            <p class="text-secondary">挂载 WebDAV 服务器作为音乐存储源，支持浏览、播放、边播边缓存到本地与收藏为歌单。</p>
+                        </div>
+                        <div class="header-side-actions">
+                            <button class="btn-primary" onclick="app.showWebdavMountModal()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">
+                                    <line x1="12" y1="5" x2="12" y2="19" />
+                                    <line x1="5" y1="12" x2="19" y2="12" />
+                                </svg>
+                                <span>添加挂载源</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div id="webdav-mount-list" class="glass" style="border-radius: 12px; padding: 20px;">
+                        <div class="text-secondary" style="text-align: center; padding: 40px 0;">正在加载挂载源列表...</div>
+                    </div>
+
+                    <!-- 添加/编辑挂载源弹窗 -->
+                    <div id="webdav-mount-modal" class="modal hidden">
+                        <div class="modal-content" style="max-width: 560px;">
+                            <div class="modal-header">
+                                <h3 id="webdav-mount-modal-title">添加 WebDAV 挂载源</h3>
+                                <button class="modal-close" onclick="app.closeWebdavMountModal()">&times;</button>
+                            </div>
+                            <div class="modal-body" style="display: grid; gap: 14px;">
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">挂载源名称</label>
+                                    <input type="text" id="wd-name" class="form-input" placeholder="例如: 我的 NAS">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">WebDAV 地址 (BaseUrl)</label>
+                                    <input type="text" id="wd-base-url" class="form-input" placeholder="https://example.com/dav/音乐">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">根路径</label>
+                                    <input type="text" id="wd-root-path" class="form-input" placeholder="/ (默认根目录)">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">用户名</label>
+                                    <input type="text" id="wd-username" class="form-input" placeholder="WebDAV 用户名">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">密码</label>
+                                    <input type="password" id="wd-password" class="form-input" placeholder="密码">
+                                </div>
+                                <div>
+                                    <label style="font-size: 13px; color: var(--text-secondary);">
+                                        <input type="checkbox" id="wd-enabled" checked style="margin-right: 6px;">启用
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="modal-footer" style="display: flex; gap: 10px; justify-content: flex-end;">
+                                <button class="btn-secondary" onclick="app.closeWebdavMountModal()">取消</button>
+                                <button class="btn-primary" onclick="app.saveWebdavMount()">保存</button>
                             </div>
                         </div>
                     </div>

@@ -3,6 +3,8 @@ import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
+import * as webdavMount from '@/server/webdavMount'
+import * as openlist from '@/server/openlist'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
@@ -546,6 +548,66 @@ class SubsonicHandler {
         if (this.onlineSongCache.has(id)) {
             return { music: this.onlineSongCache.get(id)!, listId: 'online' }
         }
+
+        return null
+    }
+
+    /**
+     * 解析本地挂载歌曲的内部流 URL（webdav/openlist/local）
+     * - webdav_ 前缀: songmid 为 encodeURIComponent 后的远程路径，从 webdav 挂载索引匹配
+     * - openlist_ 前缀: songmid 同理，从 openlist 服务器索引匹配
+     * - local: 本地缓存文件直接由 /api/music/cache/file 服务
+     */
+    private async resolveLocalStreamUrl(username: string, source: string, songmid: string, id: string): Promise<string | null> {
+        const serverPath = songmid.replace(/\+/g, ' ')
+
+        if (source === 'webdav') {
+            let filePath = ''
+            try {
+                filePath = decodeURIComponent(serverPath)
+            } catch (e) {
+                filePath = serverPath
+            }
+            const items = await webdavMount.getAllLocalIndex()
+            const hit = items.find((it: any) => it.id === id || it.songmid === songmid || it.path === filePath || it.filename === filePath)
+            if (hit && hit.serverId) {
+                const p = encodeURIComponent(hit.path || filePath)
+                return `/api/webdav-mounts/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
+            }
+            return null
+        }
+
+        if (source === 'openlist') {
+            let filePath = ''
+            try {
+                filePath = decodeURIComponent(serverPath)
+            } catch (e) {
+                filePath = serverPath
+            }
+            const items = await openlist.getAllLocalIndex()
+            const hit = items.find((it: any) => it.id === id || it.songmid === songmid || it.path === filePath || it.filename === filePath)
+            if (hit && hit.serverId) {
+                const p = encodeURIComponent(hit.path || filePath)
+                let url = `/api/openlist/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
+                if (hit.sign) url += `&sign=${encodeURIComponent(hit.sign)}`
+                return url
+            }
+            return null
+        }
+
+        // local: 优先走内部缓存文件服务
+        try {
+            const userDir = getUserDirname(username)
+            const fileName = songmid.split('/').pop() || ''
+            const cacheRoot = path.join(userDir, 'music', 'cache')
+            if (fs.existsSync(cacheRoot)) {
+                const files = fs.readdirSync(cacheRoot)
+                const matched = files.find((f: string) => f === fileName || f.startsWith(fileName))
+                if (matched) {
+                    return `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(matched)}`
+                }
+            }
+        } catch (e) { }
 
         return null
     }
@@ -1972,6 +2034,20 @@ class SubsonicHandler {
         } else {
             source = id.split('-')[0] || ''
             songmid = id
+        }
+
+        // [本地挂载] webdav_/openlist_/local 走内部流 302，由内部流路由统一负责「缓存优先 + 边播边写」
+        if (source === 'webdav' || source === 'openlist' || source === 'local') {
+            try {
+                const internalUrl = await this.resolveLocalStreamUrl(username, source, songmid, id)
+                if (internalUrl) {
+                    res.writeHead(302, { Location: internalUrl })
+                    return res.end()
+                }
+            } catch (e: any) {
+                console.error(`[Subsonic] resolve local stream failed: ${id}`, e?.message || e)
+            }
+            return this.sendError(res, 0, 'Could not resolve local track', format)
         }
 
         try {

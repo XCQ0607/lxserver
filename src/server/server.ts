@@ -30,6 +30,7 @@ import needle from 'needle'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import * as cards from './cards'
 import * as openlist from './openlist'
+import * as webdavMount from './webdavMount'
 
 // ===== Player Session Store =====
 const playerSessions = new Map<string, { createdAt: number }>()
@@ -3152,12 +3153,16 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           const mergeOpenList = global.lx.config['user.enableOpenListInLocalMusic'] !== false
           if (mergeOpenList) {
             return openlist.getAllLocalIndex().then(openListFiles => {
-              const merged = openListFiles.length ? [...list, ...openListFiles] : list
-              res.writeHead(200, {
-                'Content-Type': 'application/json',
-                'Cache-Control': 'no-cache, no-store, must-revalidate',
+              const withOpenList = openListFiles.length ? [...list, ...openListFiles] : list
+              // [新增] 整合 WebDAV 挂载：把挂载源扫描的音频文件合并进本地音乐列表
+              return webdavMount.getAllLocalIndex().then(webdavFiles => {
+                const merged = webdavFiles.length ? [...withOpenList, ...webdavFiles] : withOpenList
+                res.writeHead(200, {
+                  'Content-Type': 'application/json',
+                  'Cache-Control': 'no-cache, no-store, must-revalidate',
+                })
+                res.end(JSON.stringify({ success: true, data: merged }))
               })
-              res.end(JSON.stringify({ success: true, data: merged }))
             })
           }
           res.writeHead(200, {
@@ -4927,6 +4932,386 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: e.message }))
         }
+        return
+      }
+
+      // ===== WebDAV 音乐挂载：管理路由 =====
+
+      // 挂载源列表（管理员，密码脱敏）
+      if (pathname === '/api/webdav-mounts' && req.method === 'GET') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mounts = webdavMount.listMounts().map((m: any) => ({
+          id: m.id,
+          name: m.name,
+          baseUrl: m.baseUrl,
+          username: m.username,
+          hasPassword: !!m.password,
+          rootPath: m.rootPath,
+          enabled: m.enabled,
+          createdAt: m.createdAt,
+        }))
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, mounts }))
+        return
+      }
+
+      // 新增挂载源（管理员）
+      if (pathname === '/api/webdav-mounts' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const data = JSON.parse(body)
+            if (!data.baseUrl) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少 WebDAV 地址' }))
+              return
+            }
+            const mount = webdavMount.addMount(data)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, mount }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // 更新挂载源（管理员）
+      if (pathname === '/api/webdav-mounts' && req.method === 'PUT') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const data = JSON.parse(body)
+            if (!data.id) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少挂载源 ID' }))
+              return
+            }
+            const mount = webdavMount.updateMount(data.id, data)
+            if (!mount) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '挂载源不存在' }))
+              return
+            }
+            webdavMount.clearLocalIndex(data.id)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, mount }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // 删除挂载源（管理员，同时清理缓存）
+      if (pathname === '/api/webdav-mounts' && req.method === 'DELETE') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { id } = JSON.parse(body)
+            if (!id) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少挂载源 ID' }))
+              return
+            }
+            const ok = webdavMount.deleteMount(id)
+            webdavMount.clearLocalIndex(id)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, deleted: ok }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // 测试挂载源连接（管理员）
+      if (pathname === '/api/webdav-mounts/test' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { id } = JSON.parse(body)
+            if (!id) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少挂载源 ID' }))
+              return
+            }
+            webdavMount.testConnection(id).then(result => {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: result.ok, message: result.message }))
+            }).catch((err: any) => {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            })
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
+      // 可用的挂载源列表（登录用户/管理员，用于播放器选择）
+      if (pathname === '/api/webdav-mounts/available' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mounts = webdavMount.listMounts()
+          .filter((m: any) => m.enabled)
+          .map((m: any) => ({
+            id: m.id,
+            name: m.name,
+            baseUrl: m.baseUrl,
+            rootPath: m.rootPath,
+            hasAuth: !!(m.username && m.password),
+          }))
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, mounts }))
+        return
+      }
+
+      // 目录浏览（登录用户/管理员）
+      if (pathname === '/api/webdav-mounts/browse' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mountId = urlObj.searchParams.get('server') || urlObj.searchParams.get('id') || ''
+        const dirPath = urlObj.searchParams.get('path') || '/'
+        webdavMount.browse(mountId, dirPath).then(result => {
+          res.writeHead(result.success ? 200 : 404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        })
+        return
+      }
+
+      // 音频索引（单挂载或全部合并）
+      if (pathname === '/api/webdav-mounts/local-list' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mountId = urlObj.searchParams.get('server') || ''
+        const refresh = urlObj.searchParams.get('refresh') === '1'
+        webdavMount.getLocalIndex(mountId, refresh)
+          .then(files => {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, total: files.length, items: files }))
+          })
+          .catch((e: any) => {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message }))
+          })
+        return
+      }
+
+      // 播放/流式代理（本地缓存优先 + 边播边写）
+      if (pathname === '/api/webdav-mounts/stream' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        if (!serverId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 server 或 path 参数' }))
+          return
+        }
+        const mount = webdavMount.getMount(serverId)
+        if (!mount) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '挂载源不存在' }))
+          return
+        }
+        // 本地缓存优先
+        const cacheFilePath = webdavMount.getCacheFilePath(mount, filePath)
+        if (webdavMount.serveCacheFile(cacheFilePath, req.headers.range as string | undefined, res)) {
+          return
+        }
+        try {
+          const proxyReq = webdavMount.stream(mount, filePath, req.headers.range as string | undefined)
+          const httpMod = require('http')
+          const httpsMod = require('https')
+          const handleStreamError = (err: any) => {
+            if (!res.headersSent) {
+              res.writeHead(502, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            } else {
+              res.end()
+            }
+          }
+          // 递归跟随 3xx 重定向，最多 5 跳
+          const followRedirect = (currentReq: any, hop = 0) => {
+            currentReq.on('error', handleStreamError)
+            currentReq.on('response', (resp: any) => {
+              const statusCode = resp.statusCode || 200
+              const location = resp.headers['location']
+              if (hop < 5 && statusCode >= 300 && statusCode < 400 && location) {
+                resp.resume()
+                let targetUrl: URL
+                try {
+                  targetUrl = new URL(location)
+                } catch (e) {
+                  handleStreamError(new Error('非法重定向地址'))
+                  return
+                }
+                const lib = targetUrl.protocol === 'https:' ? httpsMod : httpMod
+                const redirectHeaders: Record<string, string> = {}
+                const rangeHeader = String(req.headers.range || '')
+                if (rangeHeader) redirectHeaders['Range'] = rangeHeader
+                const nextReq = lib.request(targetUrl, { method: 'GET', headers: redirectHeaders } as any)
+                nextReq.on('error', () => { /* 下一跳处理 */ })
+                nextReq.end()
+                followRedirect(nextReq, hop + 1)
+                return
+              }
+              const outHeaders: Record<string, string | number> = {}
+              if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
+              if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
+              if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
+              if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
+              outHeaders['Cache-Control'] = 'no-cache'
+              res.writeHead(statusCode, outHeaders)
+
+              // 边播边缓存：仅从头开始请求时写入
+              const rangeHeader = String(req.headers.range || '')
+              const isFullRange = !rangeHeader || rangeHeader === 'bytes=0-' || rangeHeader === 'bytes=0'
+              if (isFullRange) {
+                const tmpPath = cacheFilePath + '.tmp'
+                const cacheWs = fs.createWriteStream(tmpPath, { flags: 'w' })
+                let cacheReceived = 0
+                const total = parseInt(resp.headers['content-length'] || '0', 10)
+                webdavMount.trackCacheProgress(mount.id, filePath, total, 0)
+                resp.on('data', (chunk: any) => {
+                  cacheReceived += chunk.length
+                  cacheWs.write(chunk)
+                  webdavMount.trackCacheProgress(mount.id, filePath, total, cacheReceived)
+                })
+                resp.on('end', () => {
+                  cacheWs.end(() => {
+                    if (total === 0 || cacheReceived >= total) {
+                      fs.rename(tmpPath, cacheFilePath, (err: any) => {
+                        if (err) fs.unlink(tmpPath, () => { })
+                        webdavMount.markCacheDone(mount.id, filePath)
+                      })
+                    } else {
+                      fs.unlink(tmpPath, () => { })
+                      webdavMount.clearCacheProgress(mount.id, filePath)
+                    }
+                  })
+                })
+                resp.on('error', () => {
+                  cacheWs.destroy()
+                  fs.unlink(tmpPath, () => { })
+                  webdavMount.clearCacheProgress(mount.id, filePath)
+                })
+                res.on('close', () => {
+                  if (!resp.complete) {
+                    cacheWs.destroy()
+                    fs.unlink(tmpPath, () => { })
+                    webdavMount.clearCacheProgress(mount.id, filePath)
+                  }
+                })
+              }
+              resp.pipe(res)
+            })
+          }
+          followRedirect(proxyReq)
+          req.on('close', () => {
+            if (!proxyReq.destroyed) proxyReq.destroy()
+          })
+        } catch (err: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        }
+        return
+      }
+
+      // 单文件缓存状态（登录用户/管理员）
+      if (pathname === '/api/webdav-mounts/cache/check' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const serverId = urlObj.searchParams.get('server') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        const mount = webdavMount.getMount(serverId)
+        if (!mount || !filePath) {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, cached: false }))
+          return
+        }
+        const cached = webdavMount.isFileCached(mount, filePath)
+        const progress = webdavMount.getCacheProgress(mount.id, filePath)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          cached,
+          progress: progress ? { total: progress.total, received: progress.received, done: progress.done } : null,
+        }))
+        return
+      }
+
+      // 缓存汇总（登录用户/管理员）
+      if (pathname === '/api/webdav-mounts/cache/status' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mountId = urlObj.searchParams.get('server') || undefined
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true, ...webdavMount.cacheStatus(mountId) }))
+        return
+      }
+
+      // 清空缓存（管理员）
+      if (pathname === '/api/webdav-mounts/cache/clear' && req.method === 'POST') {
+        if (!requireAdminAuth()) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mountId = urlObj.searchParams.get('server') || undefined
+        webdavMount.clearCache(mountId)
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: true }))
         return
       }
 

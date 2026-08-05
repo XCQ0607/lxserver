@@ -788,11 +788,11 @@ window.LocalMusicManager = {
         this.applyFilters();
     },
 
-    // 控制"目录加歌单"按钮显示：仅 OpenList / 下载 目录下可用
+    // 控制"目录加歌单"按钮显示：仅 OpenList / WebDAV / 下载 目录下可用
     syncDirPlaylistBtn() {
         const btn = document.getElementById('lm-add-dir-playlist-btn');
         if (!btn) return;
-        const show = this.filterFolder === 'openlist' || this.filterFolder === 'music';
+        const show = this.filterFolder === 'openlist' || this.filterFolder === 'webdav' || this.filterFolder === 'music';
         btn.classList.toggle('hidden', !show);
     },
 
@@ -1081,6 +1081,301 @@ window.LocalMusicManager = {
         const dirLabel = this.olCurrentPath || '/';
         if (typeof showInfo === 'function') showInfo(`正在将目录「${dirLabel}」下的 ${audios.length} 首歌曲加入歌单...`);
         window.openPlaylistAddModal(audios.map(file => this.olBuildSong(file)).filter(Boolean));
+    },
+
+    // ===== 内嵌 WebDAV 挂载目录树浏览面板 =====
+    toggleWebdavPanel() {
+        const body = document.getElementById('lm-wm-panel-body');
+        const arrow = document.getElementById('lm-wm-panel-arrow');
+        if (!body) return;
+        const open = body.classList.contains('hidden');
+        body.classList.toggle('hidden', !open);
+        if (arrow) arrow.className = open ? 'fas fa-chevron-up text-[10px] t-text-muted' : 'fas fa-chevron-down text-[10px] t-text-muted';
+        if (open && !this.wmPanelInitialized) {
+            this.wmPanelInitialized = true;
+            this.loadWmServers();
+        }
+    },
+
+    async loadWmServers() {
+        const headers = {};
+        if (window.getUserAuthHeaders) Object.assign(headers, window.getUserAuthHeaders());
+        try {
+            const res = await fetch('/api/webdav-mounts', { headers });
+            if (!res.ok) throw new Error('加载失败');
+            const data = await res.json();
+            this.wmServers = (data.mounts || []).filter(m => m.enabled && m.baseUrl);
+            const select = document.getElementById('lm-wm-server-select');
+            if (!select) return;
+            const saved = localStorage.getItem('lx_webdav_mount');
+            let options = '<option value="">选择挂载源</option>';
+            this.wmServers.forEach(s => {
+                options += `<option value="${this.escapeHtml(s.id)}">${this.escapeHtml(s.name)}</option>`;
+            });
+            select.innerHTML = options;
+            if (saved && this.wmServers.some(s => s.id === saved)) {
+                select.value = saved;
+                this.selectWmServer(saved);
+            }
+        } catch (err) {
+            const statusEl = document.getElementById('lm-wm-status');
+            if (statusEl) statusEl.textContent = '加载挂载源失败: ' + err.message;
+        }
+    },
+
+    async selectWmServer(serverId) {
+        this.wmCurrentServerId = serverId;
+        const server = this.wmServers.find(s => s.id === serverId) || null;
+        if (serverId) localStorage.setItem('lx_webdav_mount', serverId);
+        if (!server) {
+            const statusEl = document.getElementById('lm-wm-status');
+            if (statusEl) statusEl.textContent = '请先选择 WebDAV 挂载源';
+            const listEl = document.getElementById('lm-wm-file-list');
+            if (listEl) listEl.innerHTML = '';
+            const crumbEl = document.getElementById('lm-wm-breadcrumb');
+            if (crumbEl) crumbEl.innerHTML = '';
+            return;
+        }
+        await this.refreshWebdav();
+    },
+
+    async refreshWebdav() {
+        const server = this.wmServers.find(s => s.id === this.wmCurrentServerId) || null;
+        this.wmCurrentPath = server ? (server.rootPath || '/') : '/';
+        this.wmBreadcrumb = [{ path: this.wmCurrentPath, name: '根目录' }];
+        this.renderWmBreadcrumb();
+        await this.loadWmList(true);
+    },
+
+    async loadWmList(reset = true) {
+        if (!this.wmCurrentServerId) return;
+        const statusEl = document.getElementById('lm-wm-status');
+        const listEl = document.getElementById('lm-wm-file-list');
+        if (!statusEl || !listEl) return;
+        if (reset) listEl.innerHTML = '<div class="text-xs t-text-muted py-3 text-center">正在加载...</div>';
+
+        const headers = {};
+        if (window.getUserAuthHeaders) Object.assign(headers, window.getUserAuthHeaders());
+
+        let url = `/api/webdav-mounts/browse?server=${encodeURIComponent(this.wmCurrentServerId)}&path=${encodeURIComponent(this.wmCurrentPath)}`;
+
+        try {
+            const res = await fetch(url, { headers });
+            if (!res.ok) {
+                const text = await res.text();
+                throw new Error(text || '加载失败');
+            }
+            const data = await res.json();
+            if (!data.success) throw new Error(data.message || '加载失败');
+            this.wmItems = data.items || [];
+            this.renderWmList(reset);
+        } catch (err) {
+            statusEl.textContent = '加载失败: ' + err.message;
+            if (reset) listEl.innerHTML = '';
+        }
+    },
+
+    renderWmBreadcrumb() {
+        const crumbEl = document.getElementById('lm-wm-breadcrumb');
+        if (!crumbEl) return;
+        let html = '<button onclick="window.LocalMusicManager.refreshWebdav()" class="text-amber-500 hover:underline flex items-center gap-1 mr-1"><i class="fas fa-home text-[10px]"></i></button>';
+        this.wmBreadcrumb.forEach((item, i) => {
+            if (i === this.wmBreadcrumb.length - 1) {
+                html += `<span class="t-text-muted truncate max-w-[120px]">${this.escapeHtml(item.name)}</span>`;
+            } else {
+                html += `<span class="flex items-center gap-1">
+                    <button onclick="window.LocalMusicManager.wmGoTo(${i})" class="t-text-muted hover:text-amber-500 hover:underline truncate max-w-[80px]">${this.escapeHtml(item.name)}</button>
+                    <i class="fas fa-chevron-right text-[8px] t-text-muted"></i>
+                </span>`;
+            }
+        });
+        crumbEl.innerHTML = html;
+    },
+
+    wmGoTo(index) {
+        this.wmBreadcrumb = this.wmBreadcrumb.slice(0, index + 1);
+        const target = this.wmBreadcrumb[this.wmBreadcrumb.length - 1];
+        this.wmCurrentPath = target.path;
+        this.renderWmBreadcrumb();
+        this.loadWmList(true);
+    },
+
+    wmNavigateTo(dirPath, name) {
+        this.wmCurrentPath = dirPath;
+        this.wmBreadcrumb.push({ path: dirPath, name });
+        this.renderWmBreadcrumb();
+        this.loadWmList(true);
+    },
+
+    wmGoBack() {
+        if (this.wmBreadcrumb.length > 1) {
+            this.wmBreadcrumb.pop();
+            const prev = this.wmBreadcrumb[this.wmBreadcrumb.length - 1];
+            this.wmCurrentPath = prev.path;
+            this.renderWmBreadcrumb();
+            this.loadWmList(true);
+        }
+    },
+
+    renderWmList(reset) {
+        const statusEl = document.getElementById('lm-wm-status');
+        const listEl = document.getElementById('lm-wm-file-list');
+        if (!statusEl || !listEl) return;
+
+        const folders = this.wmItems.filter(it => it.isDir);
+        const audios = this.wmItems.filter(it => !it.isDir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        const lyricFiles = this.wmItems.filter(it => !it.isDir && /\.(lrc|lrcx)$/i.test(it.name));
+        const otherCount = this.wmItems.length - folders.length - audios.length - lyricFiles.length;
+
+        if (!this.wmItems.length) {
+            statusEl.textContent = '此目录为空';
+            if (reset) listEl.innerHTML = '<div class="text-xs t-text-muted py-4 text-center">此目录为空</div>';
+            return;
+        }
+        statusEl.textContent = `共 ${this.wmItems.length} 项（音频 ${audios.length}）`;
+
+        let html = '';
+        if (reset && this.wmBreadcrumb.length > 1) {
+            html += `
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer hover:t-bg-main transition-colors"
+                    onclick="window.LocalMusicManager.wmGoBack()">
+                    <i class="fas fa-level-up-alt text-[10px] t-text-muted w-4 text-center"></i>
+                    <span class="text-[10px] md:text-xs t-text-main">返回上级</span>
+                </div>`;
+        }
+
+        folders.forEach(it => {
+            const childPath = (this.wmCurrentPath === '/' ? '' : this.wmCurrentPath) + '/' + it.name;
+            html += `
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer hover:t-bg-main transition-colors"
+                    onclick="window.LocalMusicManager.wmNavigateTo('${this.escapeHtml(childPath)}', '${this.escapeHtml(it.name)}')">
+                    <i class="fas fa-folder text-[var(--c-500)] text-xs w-4 text-center"></i>
+                    <span class="text-[10px] md:text-xs t-text-main truncate flex-1">${this.escapeHtml(it.name)}</span>
+                </div>`;
+        });
+
+        audios.forEach((it, i) => {
+            const fullPath = (this.wmCurrentPath === '/' ? '' : this.wmCurrentPath) + '/' + it.name;
+            html += `
+                <div class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer hover:t-bg-main transition-colors group"
+                    onclick="window.LocalMusicManager.wmPlayAudio('${this.escapeHtml(it.name)}', ${i})">
+                    <i class="fas fa-music text-emerald-500 text-xs w-4 text-center"></i>
+                    <span class="text-[10px] md:text-xs t-text-main truncate flex-1">${this.escapeHtml(it.name)}</span>
+                    <span id="wm-cache-${this.escapeHtml(encodeURIComponent(fullPath))}" class="text-[9px] shrink-0"></span>
+                    <span class="text-[10px] t-text-muted shrink-0">${this.escapeHtml(this.formatOlSize(it.size))}</span>
+                    <span class="hidden group-hover:flex items-center gap-1 shrink-0">
+                        <button class="w-6 h-6 flex items-center justify-center rounded hover:bg-amber-500 hover:text-white transition-all"
+                            title="加入歌单" onclick="event.stopPropagation(); window.LocalMusicManager.wmAddSongToPlaylist('${this.escapeHtml(it.name)}')">
+                            <i class="fas fa-folder-plus text-xs"></i>
+                        </button>
+                    </span>
+                </div>`;
+        });
+
+        if (lyricFiles.length) {
+            html += `<div class="text-[10px] t-text-muted px-3 py-0.5">歌词文件（随歌曲自动识别）</div>`;
+        }
+        if (otherCount > 0) {
+            html += `<div class="text-[10px] t-text-muted px-3 py-0.5">其他文件 ${otherCount} 个（已隐藏）</div>`;
+        }
+
+        if (reset) {
+            listEl.innerHTML = html;
+        } else {
+            listEl.insertAdjacentHTML('beforeend', html);
+        }
+        this.refreshWmCacheBadges(audios);
+    },
+
+    // 异步查询当前 WebDAV 目录音频的缓存状态，更新"已缓存/缓存中"徽标
+    async refreshWmCacheBadges(audios) {
+        if (!this.wmCurrentServerId || !audios.length) return;
+        const headers = {};
+        if (window.getUserAuthHeaders) Object.assign(headers, window.getUserAuthHeaders());
+        const changed = {};
+        for (const it of audios) {
+            const fullPath = (this.wmCurrentPath === '/' ? '' : this.wmCurrentPath) + '/' + it.name;
+            try {
+                const res = await fetch(`/api/webdav-mounts/cache/check?server=${encodeURIComponent(this.wmCurrentServerId)}&path=${encodeURIComponent(fullPath)}`, { headers });
+                if (!res.ok) continue;
+                const data = await res.json();
+                if (!data.success) continue;
+                let badge = '';
+                if (data.cached) {
+                    badge = `<span class="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-500" title="已缓存到本地">已缓存</span>`;
+                } else if (data.progress && data.progress.done === false && data.progress.total > 0) {
+                    const pct = Math.round((data.progress.received / data.progress.total) * 100);
+                    badge = `<span class="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-500" title="正在缓存到本地 ${pct}%">缓存中 ${pct}%</span>`;
+                }
+                changed[encodeURIComponent(fullPath)] = badge;
+            } catch (e) { /* 网络错误忽略 */ }
+        }
+        for (const key of Object.keys(changed)) {
+            const el = document.getElementById(`wm-cache-${key}`);
+            if (el) el.innerHTML = changed[key];
+        }
+    },
+
+    wmBuildSong(file) {
+        const name = file.name.replace(/\.[^.]+$/, '');
+        const fullPath = (this.wmCurrentPath === '/' ? '' : this.wmCurrentPath) + '/' + file.name;
+        return {
+            id: `webdav_${encodeURIComponent(fullPath)}`,
+            songmid: `webdav_${encodeURIComponent(fullPath)}`,
+            songId: `webdav_${encodeURIComponent(fullPath)}`,
+            source: 'webdav',
+            name,
+            singer: '',
+            path: fullPath,
+            serverId: this.wmCurrentServerId,
+            url: `/api/webdav-mounts/stream?server=${encodeURIComponent(this.wmCurrentServerId)}&path=${encodeURIComponent(fullPath)}`,
+            isLocal: true,
+            webdav: true,
+            folder: 'webdav',
+            quality: 'flac',
+            type: 'flac',
+            interval: 0
+        };
+    },
+
+    wmPlayAudio(fileName, audioIndex = 0) {
+        const audios = this.wmItems.filter(it => !it.isDir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        if (!audios.length) return;
+        const playlist = audios.map(f => this.wmBuildSong(f));
+        const idx = Math.max(audios.findIndex(a => a.name === fileName), 0);
+        if (typeof window.updatePlaylist === 'function') {
+            window.updatePlaylist(playlist, idx, 'webdav');
+        } else if (typeof window.playSong === 'function') {
+            window.playSong(playlist[idx], idx);
+        }
+    },
+
+    wmAddSongToPlaylist(fileName) {
+        const audios = this.wmItems.filter(it => !it.isDir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        const target = audios.find(a => a.name === fileName);
+        if (!target) return;
+        const song = this.wmBuildSong(target);
+        if (typeof window.openPlaylistAddModal !== 'function') {
+            if (typeof showError === 'function') showError('歌单组件尚未加载完成');
+            return;
+        }
+        window.openPlaylistAddModal([song]);
+    },
+
+    // 将内嵌面板当前浏览目录下的所有音频保存为歌单
+    async wmAddCurrentDirToPlaylist() {
+        const audios = this.wmItems.filter(it => !it.isDir && /\.(mp3|flac|wav|ogg|aac|m4a|ape|wma|opus|alac)$/i.test(it.name));
+        if (!audios.length) {
+            if (typeof showError === 'function') showError('当前目录没有音频文件');
+            return;
+        }
+        if (typeof window.openPlaylistAddModal !== 'function') {
+            if (typeof showError === 'function') showError('歌单组件尚未加载完成');
+            return;
+        }
+        const dirLabel = this.wmCurrentPath || '/';
+        if (typeof showInfo === 'function') showInfo(`正在将目录「${dirLabel}」下的 ${audios.length} 首歌曲加入歌单...`);
+        window.openPlaylistAddModal(audios.map(file => this.wmBuildSong(file)).filter(Boolean));
     },
 
     toggleUnindexed() {
@@ -1609,7 +1904,9 @@ window.LocalMusicManager = {
                 ? '<i class="fas fa-download text-blue-500 mr-1" title="下载目录"></i>'
                 : (item.folder === 'openlist' || item.openlist)
                     ? '<i class="fas fa-cloud text-violet-500 mr-1" title="OpenList 目录"></i>'
-                    : '<i class="fas fa-hdd text-emerald-500 mr-1" title="缓存目录"></i>';
+                    : (item.folder === 'webdav' || item.webdav)
+                        ? '<i class="fas fa-server text-amber-500 mr-1" title="WebDAV 挂载"></i>'
+                        : '<i class="fas fa-hdd text-emerald-500 mr-1" title="缓存目录"></i>';
 
             html += `
             <div class="grid grid-cols-12 gap-2 md:gap-4 p-3 md:p-2 items-center rounded-xl hover:t-bg-item-hover transition-all t-border-main border-b last:border-b-0 group relative ${isSelected ? 't-bg-item-hover ring-1 ring-emerald-500/30' : ''}" data-lm-row-index="${index}">
@@ -1896,15 +2193,19 @@ window.LocalMusicManager = {
 
     isPlaylistCollectable(item) {
         if (item.folder === 'openlist' || item.openlist || (item.songInfo && item.songInfo.source === 'openlist')) return true;
+        if (item.folder === 'webdav' || item.webdav || (item.songInfo && item.songInfo.source === 'webdav')) return true;
         return !!this.getPlaylistPlatformIdentity(item);
     },
 
     buildPlaylistSong(item) {
         const songInfo = item?.songInfo || {};
         const isOpenList = item.folder === 'openlist' || item.openlist || songInfo.source === 'openlist';
+        const isWebdav = item.folder === 'webdav' || item.webdav || songInfo.source === 'webdav';
         const identity = isOpenList
             ? { source: 'openlist', platformId: String(item?.path || item?.filename || ''), id: `openlist_${encodeURIComponent(item?.path || item?.filename || '')}` }
-            : this.getPlaylistPlatformIdentity(item);
+            : isWebdav
+                ? { source: 'webdav', platformId: String(item?.path || item?.filename || ''), id: `webdav_${encodeURIComponent(item?.path || item?.filename || '')}` }
+                : this.getPlaylistPlatformIdentity(item);
         if (!identity) return null;
         const quality = item?.quality || songInfo.quality || songInfo.type || '128k';
         let types = songInfo.types;
@@ -1946,6 +2247,15 @@ window.LocalMusicManager = {
             result.isLocal = true;
             result.folder = 'openlist';
         }
+        // 保留 WebDAV 播放所需字段（收藏到歌单后仍可恢复播放）
+        if (isWebdav) {
+            result.url = item?.url || songInfo.url || '';
+            result.serverId = item?.serverId || songInfo.serverId || '';
+            result.path = item?.path || item?.filename || '';
+            result.webdav = true;
+            result.isLocal = true;
+            result.folder = 'webdav';
+        }
         return result;
     },
 
@@ -1980,12 +2290,12 @@ window.LocalMusicManager = {
     // 将当前目录（OpenList 目录或下载目录子路径）下的歌曲一键保存为歌单
     async addCurrentDirToPlaylist() {
         const folder = this.filterFolder;
-        if (folder !== 'openlist' && folder !== 'music') {
-            if (typeof showInfo === 'function') showInfo('请先在筛选中选择“OpenList”或“下载”目录');
+        if (folder !== 'openlist' && folder !== 'webdav' && folder !== 'music') {
+            if (typeof showInfo === 'function') showInfo('请先在筛选中选择"OpenList"、"WebDAV"或"下载"目录');
             return;
         }
         const targetSubPath = this.selectedSubPath;
-        const dirLabel = targetSubPath === '' ? (folder === 'openlist' ? 'OpenList 全部' : '下载根目录')
+        const dirLabel = targetSubPath === '' ? (folder === 'openlist' ? 'OpenList 全部' : folder === 'webdav' ? 'WebDAV 全部' : '下载根目录')
             : targetSubPath === '__ROOT__' ? '根目录'
                 : targetSubPath;
 
@@ -1993,6 +2303,8 @@ window.LocalMusicManager = {
         const targets = this.originalData.filter(item => {
             if (folder === 'openlist') {
                 if (item.folder !== 'openlist' && !item.openlist) return false;
+            } else if (folder === 'webdav') {
+                if (item.folder !== 'webdav' && !item.webdav) return false;
             } else {
                 if (item.folder !== 'music') return false;
             }
@@ -2031,11 +2343,15 @@ window.LocalMusicManager = {
         const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
-        // OpenList 条目使用其 stream URL（含 server/path/sign），本地缓存条目使用 cache/file URL
+        // OpenList 条目使用其 stream URL（含 server/path/sign），WebDAV 条目使用挂载 stream URL，本地缓存条目使用 cache/file URL
         const isOpenList = item.folder === 'openlist' || item.openlist;
+        const isWebdav = item.folder === 'webdav' || item.webdav || item.songInfo?.source === 'webdav';
         const buildLocalUrl = (d) => {
             if (isOpenList && d.openlist) {
                 return d.url + (authToken && d.url && !d.url.includes('token=') ? `${d.url.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}` : '');
+            }
+            if (isWebdav && (d.webdav || d.url)) {
+                return d.url || `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
             }
             return `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
         };
@@ -2044,7 +2360,7 @@ window.LocalMusicManager = {
             ...item.songInfo,
             // Reconstruct full URL locally
             url: buildLocalUrl(item),
-            pic: isOpenList ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+            pic: (isOpenList || isWebdav) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true,
             folder: item.folder
         };
@@ -2056,13 +2372,20 @@ window.LocalMusicManager = {
             songInfo.openlist = true;
             songInfo.source = 'openlist';
         }
+        // 保留 WebDAV 播放所需的 serverId/path 字段
+        if (isWebdav) {
+            songInfo.serverId = item.serverId;
+            songInfo.path = item.path;
+            songInfo.webdav = true;
+            songInfo.source = 'webdav';
+        }
 
         // If 'app.js' exposes playSong(song), we use it.
         // We might want to construct a playlist of local tracks.
         const playlist = this.displayData.map(d => ({
             ...d.songInfo,
             url: buildLocalUrl(d),
-            pic: (d.folder === 'openlist' || d.openlist) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+            pic: (d.folder === 'openlist' || d.openlist || d.folder === 'webdav' || d.webdav) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
             isLocal: true
         }));
 
