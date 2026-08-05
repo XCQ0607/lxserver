@@ -477,6 +477,8 @@ if (webdavSync.isConfigured()) {
     }
     // 启动自动同步
     webdavSync.startAutoSync()
+  }).catch((err: any) => {
+    console.error('WebDAV restore failed (non-fatal):', err)
   })
 } else {
   console.log('WebDAV not configured, skipping remote restore')

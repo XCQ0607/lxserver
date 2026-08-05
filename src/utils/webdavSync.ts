@@ -55,6 +55,20 @@ class WebDAVSync extends EventEmitter {
     private client: any = null
     private initPromise: Promise<boolean> | null = null
     private ensuredDirs: Set<string> = new Set()
+    private static REQUEST_TIMEOUT = 30000 // 单次远程请求超时（毫秒），防止 dav 服务无响应导致进程挂起
+    private static LIST_DEPTH_LIMIT = 4 // 分层列举最大深度，避免单次 Depth:infinity 全树拉取触发 OOM
+
+    private withTimeout<T>(run: (signal: AbortSignal) => Promise<T>, label: string, ms: number = WebDAVSync.REQUEST_TIMEOUT): Promise<T> {
+        const controller = new AbortController()
+        const abortPromise = new Promise<never>((_, reject) => {
+            controller.signal.addEventListener('abort', () => reject(new Error(`WebDAV ${label} timed out after ${ms}ms`)), { once: true })
+        })
+        const timer = setTimeout(() => controller.abort(), ms)
+        return Promise.race([run(controller.signal), abortPromise]).finally(() => {
+            clearTimeout(timer)
+            controller.abort()
+        })
+    }
 
     constructor(config: WebDAVConfig, dataPath: string) {
         super()
@@ -188,6 +202,33 @@ class WebDAVSync extends EventEmitter {
         return remoteFilename.replace(/^\/+/, '')
     }
 
+    // 分层列举远程目录（不使用 Depth:infinity），避免 dav 服务一次返回整个目录树导致 OOM 或挂起
+    private async listRemoteFiles(remoteDir: string, depth = 0): Promise<any[]> {
+        if (depth > WebDAVSync.LIST_DEPTH_LIMIT) return []
+        let items: any[] = []
+        try {
+            items = await this.withTimeout(
+                (signal) => this.client.getDirectoryContents(remoteDir, { deep: false, signal }),
+                `list ${remoteDir}`
+            )
+        } catch (err: any) {
+            // 目录不存在或单层列举失败时返回空，交由调用方按降级逻辑处理
+            console.log(`[WebDAV] List ${remoteDir} failed: ${err.message}`)
+            return []
+        }
+        const files: any[] = []
+        for (const item of items) {
+            if (item.type === 'file') {
+                files.push(item)
+            } else if (item.type === 'directory') {
+                const subDir = item.filename.endsWith('/') ? item.filename : item.filename + '/'
+                const subFiles = await this.listRemoteFiles(subDir, depth + 1)
+                files.push(...subFiles)
+            }
+        }
+        return files
+    }
+
     private async runConcurrent<T, R>(
         items: T[],
         concurrency: number,
@@ -319,13 +360,16 @@ class WebDAVSync extends EventEmitter {
                 fs.mkdirSync(localDir, { recursive: true })
             }
 
-            const content = await this.client.getFileContents(remotePath) as any
+            const content = await this.withTimeout<any>(
+                (signal) => this.client.getFileContents(remotePath, { signal }) as any,
+                `download ${remotePath}`
+            )
 
             // 对比内容哈希，如果一致则跳过写入，避免触发文件系统监控
             if (fs.existsSync(localPath)) {
                 const localContent = fs.readFileSync(localPath) as any
                 const localHash = crypto.createHash('md5').update(localContent).digest('hex')
-                const remoteHash = crypto.createHash('md5').update(content).digest('hex')
+                const remoteHash = crypto.createHash('md5').update(content as any).digest('hex')
 
                 if (localHash === remoteHash) {
                     // console.log(`File ${relativePath} is up to date, skipping write.`)
@@ -569,7 +613,10 @@ class WebDAVSync extends EventEmitter {
         if (!this.client) return
 
         try {
-            const items = await this.client.getDirectoryContents(`${this.backupPath}/`)
+            const items = await this.withTimeout<any[]>(
+                (signal) => this.client.getDirectoryContents(`${this.backupPath}/`, { signal }),
+                `list ${this.backupPath}`
+            )
             const backups = items
                 .filter((item: any) => item.basename.startsWith('lx-sync-backup-'))
                 .sort((a: any, b: any) => this.parseBackupTime(b) - this.parseBackupTime(a))
@@ -590,7 +637,10 @@ class WebDAVSync extends EventEmitter {
         try {
             this.emit('progress', { type: 'restore', status: 'start', message: '正在获取备份列表...' })
 
-            const items = await this.client.getDirectoryContents(`${this.backupPath}/`)
+            const items = await this.withTimeout<any[]>(
+                (signal) => this.client.getDirectoryContents(`${this.backupPath}/`, { signal }),
+                `list ${this.backupPath}`
+            )
             const backups = items
                 .filter((item: any) => item.basename.startsWith('lx-sync-backup-'))
                 .sort((a: any, b: any) => this.parseBackupTime(b) - this.parseBackupTime(a))
@@ -605,7 +655,10 @@ class WebDAVSync extends EventEmitter {
                 message: `正在下载备份: ${latestBackup.basename}`
             })
 
-            const content = await this.client.getFileContents(latestBackup.filename)
+            const content = await this.withTimeout<any>(
+                (signal) => this.client.getFileContents(latestBackup.filename, { signal }) as any,
+                `download backup ${latestBackup.basename}`
+            )
             const zipPath = path.join(this.dataPath, 'temp-restore.zip')
 
             // 修复类型错误：使用 as any
@@ -692,7 +745,7 @@ class WebDAVSync extends EventEmitter {
 
         // 1. 尝试恢复散文件
         try {
-            const items = await this.client.getDirectoryContents(`${this.syncPath}/`, { deep: true })
+            const items = await this.listRemoteFiles(`${this.syncPath}/`)
             const files = items.filter((item: any) => item.type === 'file')
 
             if (files.length > 0) {
