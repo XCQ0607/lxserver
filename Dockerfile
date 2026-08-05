@@ -12,7 +12,7 @@ RUN apk add --update \
   npm \
   && (apk add --no-cache chromaprint || true) \
   && npm install --ignore-scripts --no-audit --no-fund && npm run build \
-  && rm -rf node_modules && npm install --omit=dev --no-audit --no-fund \
+  && rm -rf node_modules && npm install --omit=dev --ignore-scripts --no-audit --no-fund \
   && mkdir -p build-output \
   && mv server node_modules index.js package.json public scripts -t build-output
 
