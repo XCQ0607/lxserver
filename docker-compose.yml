@@ -14,6 +14,11 @@ services:
     build: .
     container_name: lx-sync-server
     restart: always
+    extra_hosts:
+      # 容器内访问宿主机服务的专用地址(如本机 NAS 上的 Alist/WebDAV):
+      # 后台填写地址时用 http://host.docker.internal:端口 替代 宿主机IP:端口
+      # (bridge 网络下直接访问宿主机内网 IP 可能被网络栈重置导致 socket hang up)
+      - "host.docker.internal:host-gateway"
     ports:
       # 端口映射: 宿主机端口:容器端口. 若 9527 被占用, 改左侧为其他端口即可, 例如 "9000:9527"
       - "9527:9527"
