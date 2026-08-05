@@ -55,3 +55,14 @@ Entries discovered by the Agent during task execution should follow this format:
   - OpenList `/d/` 直链会 302 到对象存储/CDN（如阿里云盘 OSS 签名 URL），代理必须服务端跟随重定向（最多 5 跳），否则播放器拿到无 Location 的 302 无法播放。OSS 签名 URL 可直接访问，无需转发 Authorization。
   - 远程目录树扫描必须加防护：单目录 listFiles 加 20s 超时（needle 对超大目录可能永久挂起）、整体 60s 截止、目录数上限 800、子目录并发 6，否则真实 OpenList（含大量网盘挂载）递归扫描会把进程拖死。
   - 本地音乐整合 OpenList：`/api/openlist/local-list?server=&refresh=` 递归扫描生成索引（TTL 120s）；`/api/music/cache/list` 后端合并 folder='openlist' 条目；前端 local_music.js 过滤 tab 加 openlist 选项，内嵌目录树面板（`lm-ol-*` 元素 + LocalMusicManager.ol* 方法），收藏走 openlist 字段（url/serverId/path/sign）恢复播放。
+
+[Project Knowledge Summary]
+- Date: 2026-08-05
+- Context: Discovered by Agent while implementing WebDAV 音乐挂载功能（边播边缓存+目录歌单）
+- Category: Build Methods / Troubleshooting & Debugging
+- Instructions:
+  - 测试框架：node:test + `npx tsx --test <file>`（项目无 vitest/jest）；mock WebDAV 服务器须注意 PROPFIND 目录 key 去尾部斜杠归一化、响应过滤 `.`/`..`、GET 支持 Range。
+  - 新增 `src/server/webdavMount.ts`（挂载源 CRUD 持久化 webdav-mounts.json、密码脱敏 hasPassword、目录扫描防护同 openlist、边播边缓存 .tmp->rename、本地 Range 206/416）；`subsonic.ts handleStream` 对 webdav_/openlist_/local source 走内部流 302，由内部流路由统一承担缓存优先（避免重复实现）。
+  - `stream` 返回同步 ClientRequest，server.ts 路由用 try/catch 包裹而非 `.then()`（误用 `.then` 会 TS2339）。
+  - 服务启动时 config.js 的 webdav.* 备份 restore 会阻塞监听（当前环境 host.docker.internal 不可达，需等网络超时约 2-3 分钟才完成启动）；冒烟测试前先 curl 首页确认 200。
+  - 构建/推送镜像：`docker build -t lxserver:webdav . && docker tag ... ghcr.io/boy6656598/lxserver:latest && docker push`；容器内产物路径为 `/server/server/server/*.js`（根目录是 `/server` 非 `/app`）。
