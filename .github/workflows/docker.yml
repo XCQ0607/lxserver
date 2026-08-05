@@ -7,8 +7,6 @@ env:
   REGISTRY: ghcr.io
   # 使用 github.repository_owner 获取用户名，并指定镜像名为 lxserver
   IMAGE_NAME: ${{ github.repository_owner }}/lxserver
-  # Docker Hub 仓库名
-  DOCKER_HUB_REPO: ${{ secrets.DOCKER_USERNAME }}/lxserver
 
 jobs:
   build_and_push:
@@ -35,12 +33,6 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
       # Extract project version from config.js
       - name: Read version from config
         id: get_version
@@ -64,7 +56,6 @@ jobs:
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-            ${{ env.DOCKER_HUB_REPO }}
           tags: |
             type=raw,value=latest
             type=raw,value=${{ env.PROJECT_VERSION }}
