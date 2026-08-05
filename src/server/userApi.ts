@@ -358,22 +358,17 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
             info: { ...fullApiInfo, sources: registeredSources },
             handlers: eventHandlers,
             callRequest: async (action: string, source: string, info: any) => {
-                try {
-                    const handler = eventHandlers.get('request')
-                    if (!handler) throw new Error(`源 ${fullApiInfo.name} 未注册 request 处理器`)
+                const handler = eventHandlers.get('request')
+                if (!handler) throw new Error(`源 ${fullApiInfo.name} 未注册 request 处理器`)
 
-                    // 核心修复：如果是原生 VM 模式，将传入数据 JSON 化以纯净化原型链（确保它是 VM 内的对象）
-                    let inputData = { action, source, info }
-                    if (apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
-                        inputData = JSON.parse(JSON.stringify(inputData))
-                    }
-
-                    const result = await handler(inputData)
-                    return decontextify(result)
-                } catch (e: any) {
-                    console.error(`[UserApi-${fullApiInfo.name}] callRequest Error:`, e.message)
-                    throw e
+                // 核心修复：如果是原生 VM 模式，将传入数据 JSON 化以纯净化原型链（确保它是 VM 内的对象）
+                let inputData = { action, source, info }
+                if (apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
+                    inputData = JSON.parse(JSON.stringify(inputData))
                 }
+
+                const result = await handler(inputData)
+                return decontextify(result)
             }
         }
 
@@ -655,29 +650,29 @@ export async function callUserApiGetMusicUrl(
         const maxRetries = 3
 
         for (let i = 0; i < maxRetries; i++) {
+            let url = ''
             try {
                 console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (第 ${i + 1}/${maxRetries} 次, Owner: ${api.info.owner})`)
 
-                const url = await api.callRequest('musicUrl', source, {
+                url = await api.callRequest('musicUrl', source, {
                     musicInfo: normalizedSongInfo,
                     quality: quality,
                     type: quality
                 })
 
                 // [Fix] URL 有效性预检：验证音源返回的链接是否真实可播放
-                console.log(`[UserApi] 验证 ${api.info.name} 返回的 URL 有效性...`)
                 const validation = await validateMusicUrl(url)
                 if (!validation.valid) {
                     throw new Error(`URL 有效性预检失败: ${validation.reason}`)
                 }
-                console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner})`)
+                console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner}) URL: ${url}`)
 
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
                 return { url, type: quality, sourceName: api.info.name, attempts }
             } catch (error: any) {
-                console.error(`[UserApi] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
+                console.error(`[UserApi] ✗ ${api.info.name} URL 验证失败 (第 ${i + 1}/${maxRetries} 次)${url ? ` URL: ${url}` : ''} 音源日志：${error.message}`)
                 lastError = error
                 const att = { name: api.info.name, status: 'fail', message: `第 ${i + 1} 次尝试失败,音源日志：${error.message}` }
                 attempts.push(att)
@@ -696,18 +691,18 @@ export async function callUserApiGetMusicUrl(
 
         const result = await new Promise<{ url: string, sourceName: string } | null>((resolve) => {
             for (const api of candidates) {
-                ;(async () => {
+                ; (async () => {
+                    let url = ''
                     try {
                         console.log(`[UserApi] 并发尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
 
-                        const url = await api.callRequest('musicUrl', source, {
+                        url = await api.callRequest('musicUrl', source, {
                             musicInfo: normalizedSongInfo,
                             quality: quality,
                             type: quality
                         })
 
                         // [Fix] URL 有效性预检：验证音源返回的链接是否真实可播放
-                        console.log(`[UserApi] 验证 ${api.info.name} 返回的 URL 有效性...`)
                         const validation = await validateMusicUrl(url)
                         if (!validation.valid) {
                             throw new Error(`URL 有效性预检失败: ${validation.reason}`)
@@ -716,14 +711,14 @@ export async function callUserApiGetMusicUrl(
                         // 第一个通过验证的源胜出，立即返回，不再等待其他源
                         if (!settled) {
                             settled = true
-                            console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner})`)
+                            console.log(`[UserApi] ✓ ${api.info.name} URL 验证通过 (Owner: ${api.info.owner}) URL: ${url}`)
                             const att = { name: api.info.name, status: 'success' }
                             attempts.push(att)
                             if (onProgress) await onProgress(att)
                             resolve({ url, sourceName: api.info.name })
                         }
                     } catch (error: any) {
-                        console.error(`[UserApi] ${api.info.name} 失败:`, `音源日志：${error.message}`)
+                        console.error(`[UserApi] ✗ ${api.info.name} URL 验证失败${url ? ` URL: ${url}` : ''} 音源日志：${error.message}`)
                         lastError = error
                         // 并发分支下多个源会同时失败，逐个提示会刷屏，只记录不推送进度
                         const att = { name: api.info.name, status: 'fail', message: `音源日志：${error.message}` }

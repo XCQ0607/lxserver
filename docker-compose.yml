@@ -1,9 +1,9 @@
 version: '3.8'
 
 services:
-  lx-sync-server:
+  lxserver:
     build: .
-    container_name: lx-sync-server
+    container_name: lxserver
     restart: always
     ports:
       - "9527:9527"
