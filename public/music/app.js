@@ -1098,11 +1098,6 @@ function switchTab(tabId) {
         document.getElementById('page-title').innerText = "本地音乐";
     }
 
-    if (tabId === 'alidrive') {
-        document.getElementById('page-title').innerText = "阿里云盘";
-        if (window.AliyunManager) window.AliyunManager.refresh();
-    }
-
     if (tabId === 'openlist') {
         document.getElementById('page-title').innerText = "OpenList";
         if (window.OpenListManager) window.OpenListManager.init();
@@ -3649,7 +3644,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
 
     // 0. 本地文件/带有本地播放 URL 的歌曲：直接播放本地文件，无需走在线 API 解析
-    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/alidrive/stream') || song.url?.startsWith('/api/openlist/stream')) && song.url && !isRetry) {
+    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/openlist/stream')) && song.url && !isRetry) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
         return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
@@ -7085,34 +7080,6 @@ async function fetchLyric(song, quality = null) {
         }
     }
 
-    // ===== 2.5 阿里云盘歌曲：从云盘同目录读取 .lrc 歌词 =====
-    if (source === 'alipan' && song.fileId) {
-        try {
-            const lyricRes = await fetch(`/api/alidrive/lyric?fileId=${encodeURIComponent(song.fileId)}`, { headers });
-            if (lyricRes.ok) {
-                const lyricData = await lyricRes.json();
-                const lrcText = (lyricData && lyricData.lyric) || '';
-                if (lrcText) {
-                    currentRawLrc = lrcText;
-                    currentRawTlrc = '';
-                    currentRawRlrc = '';
-                    currentRawKlrc = '';
-                    if (settings.enableLyricCache !== false) {
-                        try {
-                            localStorage.setItem(cacheKey, JSON.stringify({ lrc: lrcText, tlyric: '', rlyric: '', klyric: '' }));
-                        } catch (e) { }
-                    }
-                    initLyricPlayer();
-                    applyLyricUpdate();
-                    return;
-                }
-            }
-        } catch (e) {
-            console.warn('[Lyric] 阿里云盘歌词获取失败:', e);
-        }
-        renderLyric([], '暂无歌词');
-        return;
-    }
 
     // ===== 2.6 OpenList 歌曲：从同目录读取 .lrc 歌词 =====
     if (source === 'openlist' && song.path) {

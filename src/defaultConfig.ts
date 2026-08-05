@@ -47,7 +47,6 @@ const config: LX.Config = {
   'player.password': '123456',
   'player.forceLogin': true, // 是否强制登录（未注册/未登录用户无法进入播放器）
   'player.enableRegister': true, // 是否开放注册（允许使用卡密注册新账号）
-  'player.enableAlidrive': true, // 是否启用阿里云盘功能（文件浏览/播放/上传下载）
 
   // 代理配置
   'proxy.all.enabled': false,

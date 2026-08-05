@@ -32,6 +32,15 @@ const normalizeRemotePath = (p?: string, defaultPath: string = ''): string => {
     return str.replace(/\/+$/, '')
 }
 
+// [Fix] 内网地址修复：无协议时默认补 http://（内网 WebDAV 多为 HTTP 服务），
+// 避免 webdav 库内部 url-parse 无法解析无协议地址导致请求失败
+const normalizeWebdavUrl = (url?: string): string => {
+    const trimmed = (url || '').trim()
+    if (!trimmed) return ''
+    if (/^https?:\/\//i.test(trimmed)) return trimmed
+    return 'http://' + trimmed
+}
+
 class WebDAVSync extends EventEmitter {
     private config: WebDAVConfig
     private dataPath: string
@@ -76,7 +85,7 @@ class WebDAVSync extends EventEmitter {
                 const options: any = {}
                 if (this.config.username) options.username = this.config.username
                 if (this.config.password) options.password = this.config.password
-                this.client = createClient(this.config.url, options)
+                this.client = createClient(normalizeWebdavUrl(this.config.url), options)
                 console.log('WebDAV client initialized')
                 return true
             } catch (err) {

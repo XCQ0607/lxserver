@@ -2484,16 +2484,38 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     const range = req.headers.range
     if (range) {
         const parts = range.replace(/bytes=/, "").split("-")
-        const start = parseInt(parts[0], 10)
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        // [Fix] 支持 suffix range（如 bytes=-500）与无效 range，避免 ERR_OUT_OF_RANGE 崩溃
+        let start: number
+        let end: number
+        if (parts[0] === '') {
+            // suffix range: 请求最后 N 字节
+            const suffix = parseInt(parts[1], 10)
+            if (!Number.isFinite(suffix) || suffix <= 0) {
+                res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
+                res.end()
+                return
+            }
+            start = Math.max(0, stat.size - suffix)
+            end = stat.size - 1
+        } else {
+            start = parseInt(parts[0], 10)
+            end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
+        }
+        if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start >= stat.size || end < start) {
+            res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` })
+            res.end()
+            return
+        }
+        if (end >= stat.size) end = stat.size - 1
         const chunksize = (end - start) + 1
         res.writeHead(206, {
             'Content-Range': `bytes ${start}-${end}/${stat.size}`,
             'Accept-Ranges': 'bytes', 'Content-Length': chunksize, 'Content-Type': contentType,
+            'Cache-Control': 'no-cache',
         })
         fs.createReadStream(filePath, { start, end }).pipe(res)
     } else {
-        res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes' })
+        res.writeHead(200, { 'Content-Length': stat.size, 'Content-Type': contentType, 'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache' })
         fs.createReadStream(filePath).pipe(res)
     }
 }

@@ -73,7 +73,8 @@ export const getServer = (id: string): OpenListServer | null => {
 
 const normalizeServer = (data: any): OpenListServer => {
   let baseUrl = String(data.baseUrl || '').trim().replace(/\/+$/, '')
-  if (baseUrl && !/^https?:\/\//i.test(baseUrl)) baseUrl = 'https://' + baseUrl
+  // [Fix] 内网地址修复：无协议时默认补 http://（内网 OpenList 多为 HTTP 服务），保留用户已填写的协议
+  if (baseUrl && !/^https?:\/\//i.test(baseUrl)) baseUrl = 'http://' + baseUrl
   return {
     id: data.id || crypto.randomBytes(8).toString('hex'),
     name: String(data.name || 'OpenList').trim(),

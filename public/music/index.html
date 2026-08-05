@@ -121,13 +121,6 @@
                         </a>
                     </li>
                     <li>
-                        <a href="#" onclick="switchTab('alidrive')" id="tab-alidrive"
-                            class="flex items-center px-6 py-3 t-text-muted hover:t-bg-main transition-colors duration-200">
-                            <i class="fas fa-cloud w-6 text-center"></i>
-                            <span class="ml-3 font-medium">阿里云盘</span>
-                        </a>
-                    </li>
-                    <li>
                         <a href="#" onclick="switchTab('openlist')" id="tab-openlist"
                             class="flex items-center px-6 py-3 t-text-muted hover:t-bg-main transition-colors duration-200">
                             <i class="fas fa-database w-6 text-center"></i>
@@ -1412,50 +1405,6 @@
                             <span class="hidden sm:inline">下一页</span><i class="fas fa-chevron-right md:ml-1"></i>
                         </button>
                     </div>
-                </div>
-
-                <!-- 阿里云盘视图 -->
-                <div id="view-alidrive"
-                    class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 hidden opacity-0 transition-all duration-300 overflow-hidden">
-                    <!-- 顶栏：标题 + 操作 -->
-                    <div class="flex items-center justify-between gap-2 mb-2 shrink-0 px-1">
-                        <div class="flex items-baseline gap-2">
-                            <h2 class="text-sm md:text-base font-bold t-text-main whitespace-nowrap">阿里云盘</h2>
-                            <span id="ad-total-count" class="text-[9px] md:text-[10px] t-text-muted opacity-60 whitespace-nowrap"></span>
-                        </div>
-                        <div class="flex items-center gap-1.5">
-                            <button onclick="window.AliyunManager.uploadFromUrl()"
-                                class="text-[10px] md:text-xs flex items-center gap-1 px-2 py-1 rounded-lg bg-emerald-600/10 text-emerald-600 hover:bg-emerald-600 hover:text-white transition-all"
-                                title="将歌曲下载到阿里云盘">
-                                <i class="fas fa-cloud-arrow-up text-[10px] md:text-xs"></i>
-                                <span class="hidden sm:inline">上传到云盘</span>
-                            </button>
-                            <button onclick="window.AliyunManager.refresh()"
-                                class="w-7 h-7 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
-                                title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
-                        </div>
-                    </div>
-
-                    <!-- 搜索栏 -->
-                    <div class="flex items-center gap-2 mb-2 shrink-0 px-1">
-                        <div class="relative flex-1 max-w-xs">
-                            <i class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 t-text-muted text-xs pointer-events-none"></i>
-                            <input id="ad-search-input" type="text" placeholder="搜索云盘文件..."
-                                class="w-full bg-gray-100 dark:bg-gray-800 border-none rounded-lg pl-8 pr-2 py-1.5 text-xs focus:ring-1 focus:ring-emerald-500/30 outline-none"
-                                onkeydown="if(event.key==='Enter')window.AliyunManager.search()">
-                        </div>
-                        <button onclick="window.AliyunManager.search()"
-                            class="text-[10px] px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700/50 hover:text-emerald-500 transition-all">搜索</button>
-                        <button onclick="window.AliyunManager.clearSearch()"
-                            class="text-[10px] px-2.5 py-1.5 rounded-lg bg-gray-100 dark:bg-gray-700/50 hover:text-emerald-500 transition-all">清除</button>
-                    </div>
-
-                    <!-- 路径导航（面包屑） -->
-                    <div id="ad-breadcrumb" class="flex items-center gap-1 flex-wrap mb-2 shrink-0 px-1 text-xs"></div>
-
-                    <!-- 文件列表 -->
-                    <div id="ad-status" class="px-2 py-3 text-xs t-text-muted mb-2 shrink-0"></div>
-                    <div id="ad-file-list" class="flex-1 overflow-y-auto custom-scrollbar space-y-0.5 px-1"></div>
                 </div>
 
                 <!-- OpenList View -->
@@ -5136,7 +5085,6 @@
     <script src="js/sound-effects.js"></script>
     <script src="js/download_manager.js"></script>
     <script src="js/local_music.js"></script>
-    <script src="js/aliyun_manager.js"></script>
     <script src="js/openlist_manager.js"></script>
     <script src="js/common_ui.js"></script>
     <script src="app.js"></script>

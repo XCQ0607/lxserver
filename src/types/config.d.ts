@@ -185,11 +185,6 @@ declare namespace LX {
     'player.enableRegister'?: boolean
 
     /**
-     * 是否启用阿里云盘功能
-     */
-    'player.enableAlidrive'?: boolean
-
-    /**
      * 是否启用针对所有外发请求的代理 (目前主要用于 Music SDK)
      */
     'proxy.all.enabled'?: boolean

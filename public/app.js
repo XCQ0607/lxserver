@@ -277,7 +277,6 @@ class App {
             files: '文件管理',
             snapshots: '快照管理',
             cards: '卡密管理',
-            alidrive: '阿里云盘',
             about: '关于'
         };
         document.getElementById('page-title').textContent = titles[viewName] || viewName;
@@ -315,9 +314,6 @@ class App {
                 break;
             case 'cards':
                 this.loadCards();
-                break;
-            case 'alidrive':
-                this.loadAlidrive();
                 break;
             case 'openlist':
                 this.loadOpenList();
@@ -2068,121 +2064,6 @@ class App {
                 this.loadCards();
             }).catch(err => showError('生成失败: ' + err.message));
         });
-    }
-
-    // ========== 阿里云盘 ==========
-    async loadAlidrive() {
-        try {
-            const res = await this.request('/api/alidrive/config');
-            document.getElementById('alidrive-client-id').value = res.clientId || '';
-            document.getElementById('alidrive-client-secret').value = res.clientSecret || '';
-            this.updateAlidriveStatus(res);
-        } catch (err) {
-            showError('加载阿里云盘配置失败: ' + err.message);
-        }
-    }
-
-    updateAlidriveStatus(res) {
-        const statusEl = document.getElementById('alidrive-status');
-        if (!statusEl) return;
-        const linked = res && res.linked;
-        const userName = (res && res.userName) || '';
-        if (linked) {
-            statusEl.innerHTML = `<span style="color: var(--accent-success, #10b981); font-weight: 600;">
-                <i class="fas fa-check-circle"></i> 已绑定</span>
-                <span style="margin-left: 8px;">账号：${this.escapeHtml(userName || '未知')}</span>`;
-            document.getElementById('alidrive-unlink-btn').style.display = 'inline-block';
-        } else {
-            const hasClient = !!(document.getElementById('alidrive-client-id').value && document.getElementById('alidrive-client-secret').value);
-            statusEl.innerHTML = hasClient
-                ? '<span style="color: var(--accent-warning, #f59e0b);">尚未绑定，请点击"获取二维码"扫码登录</span>'
-                : '<span style="color: var(--text-secondary);">尚未配置应用凭据，请先填写 ClientID 与 ClientSecret 并保存</span>';
-            document.getElementById('alidrive-unlink-btn').style.display = 'none';
-        }
-    }
-
-    async saveAlidriveClient() {
-        const clientId = document.getElementById('alidrive-client-id').value.trim();
-        const clientSecret = document.getElementById('alidrive-client-secret').value.trim();
-        if (!clientId || !clientSecret) {
-            showError('请填写 ClientID 与 ClientSecret');
-            return;
-        }
-        try {
-            await this.request('/api/alidrive/config', {
-                method: 'POST',
-                body: JSON.stringify({ clientId, clientSecret })
-            });
-            showSuccess('凭据已保存');
-            this.updateAlidriveStatus({ linked: false });
-        } catch (err) {
-            showError('保存失败: ' + err.message);
-        }
-    }
-
-    async startAlidriveQrLogin() {
-        const qrImg = document.getElementById('alidrive-qrcode-img');
-        const placeholder = document.getElementById('alidrive-qrcode-placeholder');
-        placeholder.style.display = 'flex';
-        placeholder.textContent = '正在获取二维码...';
-        qrImg.style.display = 'none';
-        qrImg.innerHTML = '';
-
-        let sid = '';
-        try {
-            const res = await this.request('/api/alidrive/qrcode', { method: 'POST' });
-            sid = res.sid;
-            if (!res.qr_content) throw new Error('未获取到二维码内容');
-
-            placeholder.style.display = 'none';
-            qrImg.style.display = 'block';
-            qrImg.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(res.qr_content)}" alt="扫码登录二维码" style="width:220px; height:220px; border-radius:12px; background:#fff;">`;
-            this.pollAlidriveQr(sid);
-        } catch (err) {
-            placeholder.style.display = 'flex';
-            placeholder.textContent = '获取二维码失败: ' + err.message;
-        }
-    }
-
-    async pollAlidriveQr(sid) {
-        let qrImg = document.getElementById('alidrive-qrcode-img');
-        let placeholder = document.getElementById('alidrive-qrcode-placeholder');
-        for (let i = 0; i < 60; i++) {
-            await new Promise(r => setTimeout(r, 2000));
-            try {
-                const res = await this.request(`/api/alidrive/qrcode/status?sid=${encodeURIComponent(sid)}`);
-                if (res.status === 'LoginSuccess') {
-                    placeholder.style.display = 'flex';
-                    placeholder.textContent = '扫码成功，绑定完成！';
-                    qrImg.style.display = 'none';
-                    showSuccess('阿里云盘绑定成功');
-                    this.loadAlidrive();
-                    return;
-                }
-                if (res.status === 'Expired' || res.status === 'Cancel') {
-                    placeholder.style.display = 'flex';
-                    placeholder.textContent = '二维码已失效，请重新获取';
-                    qrImg.style.display = 'none';
-                    return;
-                }
-            } catch (err) {
-                // 继续轮询
-            }
-        }
-        placeholder.style.display = 'flex';
-        placeholder.textContent = '等待扫码超时，请重新获取二维码';
-        qrImg.style.display = 'none';
-    }
-
-    async unlinkAlidrive() {
-        if (!confirm('确定解除阿里云盘绑定吗？')) return;
-        try {
-            await this.request('/api/alidrive/unlink', { method: 'POST' });
-            showSuccess('已解除绑定');
-            this.loadAlidrive();
-        } catch (err) {
-            showError('解除绑定失败: ' + err.message);
-        }
     }
 
     // ========== OpenList ==========
