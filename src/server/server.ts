@@ -4937,9 +4937,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
       // ===== WebDAV 音乐挂载：管理路由 =====
 
-      // 挂载源列表（管理员，密码脱敏）
+      // 挂载源列表（播放器用户/管理员，密码脱敏）
       if (pathname === '/api/webdav-mounts' && req.method === 'GET') {
-        if (!requireAdminAuth()) {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
           return

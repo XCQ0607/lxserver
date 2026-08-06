@@ -230,21 +230,23 @@ export const searchFiles = async (server: OpenListServer, keyword: string, page 
  * 获取文件的下载链接（/d/ 直链，带 sign）
  */
 export const getDownloadUrl = async (server: OpenListServer, filePath: string, sign?: string): Promise<string> => {
-  let s = sign || ''
-  if (!s) {
-    try {
-      const token = await ensureToken(server)
-      const headers: Record<string, string> = {}
-      if (token) headers['Authorization'] = token
-      const info = await request(server, 'POST', '/api/fs/get', {
-        path: filePath,
-        password: '',
-      }, headers)
-      s = info && info.sign ? info.sign : ''
-    } catch (e) {
-      s = ''
-    }
+  // 始终优先实时获取最新 sign：收藏/歌单中固化的 sign 可能已过期（Alist sign 有时效），
+  // 服务端有 token 能力时用最新 sign 直链，避免旧 sign 导致播放失败。
+  let s = ''
+  try {
+    const token = await ensureToken(server)
+    const headers: Record<string, string> = {}
+    if (token) headers['Authorization'] = token
+    const info = await request(server, 'POST', '/api/fs/get', {
+      path: filePath,
+      password: '',
+    }, headers)
+    s = info && info.sign ? info.sign : ''
+  } catch (e) {
+    s = ''
   }
+  // 实时获取失败（如未配置账号的 guest 场景）时回退到调用方传入的 sign
+  if (!s) s = sign || ''
   const q = s ? `?sign=${encodeURIComponent(s)}` : ''
   return `${server.baseUrl}/d${encodePath(filePath)}${q}`
 }
