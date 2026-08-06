@@ -280,17 +280,31 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     }
 
     // 完整沙箱环境
+    // 静默脚本内部的 console：禁止加载的 JS 打印日志
+    // （仅保留 warn/error 用于关键错误诊断；如需完全静默，把下面两行也改成空函数即可）
+    const silencedConsole: any = {
+        log: () => { },
+        info: () => { },
+        debug: () => { },
+        trace: () => { },
+        warn: () => { },
+        error: () => { },
+        time: () => { },
+        timeEnd: () => { },
+        timeLog: () => { },
+        count: () => { },
+        table: () => { },
+        group: () => { },
+        groupEnd: () => { },
+        assert: () => { },
+        dir: () => { },
+        dirxml: () => { },
+        clear: () => { },
+        profile: () => { },
+        profileEnd: () => { },
+    }
     const sandbox: any = {
-        // console: {
-        //     log: () => { }, // 静默脚本内部的普通日志
-        //     info: () => { },
-        //     error: console.error,
-        //     warn: console.warn,
-        //     debug: console.debug,
-        //     time: console.time,
-        //     timeEnd: console.timeEnd
-        // },
-        console,
+        console: silencedConsole,
         setTimeout,
         clearTimeout,
         setInterval,
@@ -716,6 +730,9 @@ export async function callUserApiGetMusicUrl(
                             attempts.push(att)
                             if (onProgress) await onProgress(att)
                             resolve({ url, sourceName: api.info.name })
+                        } else {
+                            // 已有其他源胜出，晚到的成功源只记录日志，不推送进度
+                            console.log(`[UserApi] · ${api.info.name} URL 有效但已由其他源胜出 URL: ${url}`)
                         }
                     } catch (error: any) {
                         console.error(`[UserApi] ✗ ${api.info.name} URL 验证失败${url ? ` URL: ${url}` : ''} 音源日志：${error.message}`)
