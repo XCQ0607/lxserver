@@ -9833,12 +9833,22 @@ function formatSongToLxMusicStandard(item) {
             rootItem.isLocal = true;
             rootItem.folder = s.folder || 'openlist';
             break;
+        case 'webdav':
+            // WebDAV 挂载歌曲：保留播放所需的完整字段，收藏后可直接恢复播放
+            rootItem.id = songmid;
+            if (s.url) rootItem.url = s.url;
+            if (s.serverId) rootItem.serverId = s.serverId;
+            if (s.path) rootItem.path = s.path;
+            rootItem.webdav = true;
+            rootItem.isLocal = true;
+            rootItem.folder = s.folder || 'webdav';
+            break;
         default:
             rootItem.id = songmid;
             break;
     }
 
-    // 兜底：保留本地歌曲的 url/文件字段（覆盖 openlist 等已在 case 中处理的场景）
+    // 兜底：保留本地歌曲的 url/文件字段（覆盖 openlist/webdav 等已在 case 中处理的场景）
     if (s.openlist) {
         if (s.url) rootItem.url = s.url;
         if (s.serverId) rootItem.serverId = s.serverId;
@@ -9847,6 +9857,14 @@ function formatSongToLxMusicStandard(item) {
         rootItem.openlist = true;
         rootItem.isLocal = true;
         rootItem.folder = s.folder || 'openlist';
+    }
+    if (s.webdav) {
+        if (s.url) rootItem.url = s.url;
+        if (s.serverId) rootItem.serverId = s.serverId;
+        if (s.path) rootItem.path = s.path;
+        rootItem.webdav = true;
+        rootItem.isLocal = true;
+        rootItem.folder = s.folder || 'webdav';
     }
 
     return rootItem;
@@ -11229,6 +11247,14 @@ function cleanSongData(song) {
         if (song.path) cleanSong.path = song.path;
         if (song.sign) cleanSong.sign = song.sign;
         cleanSong.openlist = true;
+    }
+
+    // [WebDAV] 保留挂载播放所需字段，保证收藏/歌单恢复后可直链播放并读取歌词
+    if (song.source === 'webdav' || song.webdav) {
+        if (song.serverId) cleanSong.serverId = song.serverId;
+        if (song.path) cleanSong.path = song.path;
+        cleanSong.webdav = true;
+        cleanSong.isLocal = true;
     }
 
     // Remove undefined keys

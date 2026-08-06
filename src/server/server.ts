@@ -5715,13 +5715,67 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
             // [新增] WebDAV/OpenList 歌曲是本地挂载直连，不走在线自定义源：
             // 前端本地直放应覆盖，但歌单/收藏等入口若丢失 url 仍会到达此处，兜底返回 stream URL
-            if ((source === 'webdav' || source === 'openlist') && songInfo.path && songInfo.serverId) {
-              const streamPath = source === 'webdav'
-                ? `/api/webdav-mounts/stream?server=${encodeURIComponent(songInfo.serverId)}&path=${encodeURIComponent(songInfo.path)}`
-                : `/api/openlist/stream?server=${encodeURIComponent(songInfo.serverId)}&path=${encodeURIComponent(songInfo.path)}${songInfo.sign ? `&sign=${encodeURIComponent(songInfo.sign)}` : ''}`
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ url: streamPath, quality: songInfo.quality || quality || '128k', sourceType: 'server_cache', source }))
-              return
+            if (source === 'webdav' || source === 'openlist') {
+              // 1. 解析路径：优先 songInfo.path，否则从 id (webdav_/openlist_ 前缀) 解码
+              let localPath = songInfo.path || ''
+              if (!localPath) {
+                const rawId = String(songInfo.id || songInfo.songmid || songInfo.songId || '')
+                const prefix = source === 'webdav' ? 'webdav_' : 'openlist_'
+                if (rawId.startsWith(prefix)) {
+                  try { localPath = decodeURIComponent(rawId.slice(prefix.length)) } catch (e) { localPath = '' }
+                }
+              }
+              // 2. 解析 serverId：优先 songInfo.serverId，否则从 url query 提取，否则按路径查找挂载/服务器
+              let localServerId = songInfo.serverId || ''
+              if (!localServerId && songInfo.url) {
+                try {
+                  const u = new URL(songInfo.url, 'http://localhost')
+                  localServerId = u.searchParams.get('server') || u.searchParams.get('id') || ''
+                } catch (e) { /* ignore */ }
+              }
+              if (localPath && !localServerId) {
+                try {
+                  if (source === 'webdav') {
+                    const mounts = webdavMount.listMounts().filter((m: any) => m.enabled && m.baseUrl)
+                    const rootMatch = mounts.filter((m: any) => {
+                      const rp = String(m.rootPath || '/').replace(/\/+$/, '')
+                      return rp === '/' || localPath.startsWith(rp)
+                    })
+                    const candidates = rootMatch.length ? rootMatch : mounts
+                    if (candidates.length === 1) {
+                      localServerId = candidates[0].id
+                    } else {
+                      for (const m of candidates) {
+                        const idx = await webdavMount.getLocalIndex(m.id)
+                        if (idx.some((it: any) => (it.path || it.filename) === localPath)) { localServerId = m.id; break }
+                      }
+                    }
+                  } else {
+                    const servers = openlist.listServers().filter((s: any) => s.enabled && s.baseUrl)
+                    const rootMatch = servers.filter((s: any) => {
+                      const rp = String(s.rootPath || '/').replace(/\/+$/, '')
+                      return rp === '/' || localPath.startsWith(rp)
+                    })
+                    const candidates = rootMatch.length ? rootMatch : servers
+                    if (candidates.length === 1) {
+                      localServerId = candidates[0].id
+                    } else {
+                      for (const s of candidates) {
+                        const idx = await openlist.getLocalIndex(s.id)
+                        if (idx.some((it: any) => (it.path || it.filename) === localPath)) { localServerId = s.id; break }
+                      }
+                    }
+                  }
+                } catch (e) { /* 恢复失败则继续走下方逻辑 */ }
+              }
+              if (localPath && localServerId) {
+                const streamPath = source === 'webdav'
+                  ? `/api/webdav-mounts/stream?server=${encodeURIComponent(localServerId)}&path=${encodeURIComponent(localPath)}`
+                  : `/api/openlist/stream?server=${encodeURIComponent(localServerId)}&path=${encodeURIComponent(localPath)}${songInfo.sign ? `&sign=${encodeURIComponent(songInfo.sign)}` : ''}`
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ url: streamPath, quality: songInfo.quality || quality || '128k', sourceType: 'server_cache', source }))
+                return
+              }
             }
 
             let result: any
