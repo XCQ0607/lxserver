@@ -3644,7 +3644,8 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
 
     // 0. 本地文件/带有本地播放 URL 的歌曲：直接播放本地文件，无需走在线 API 解析
-    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/openlist/stream')) && song.url && !isRetry) {
+    // 覆盖本地缓存、OpenList stream、WebDAV mount stream
+    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/openlist/stream') || song.url?.startsWith('/api/webdav-mounts/stream')) && song.url && !isRetry) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
         return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
@@ -7107,6 +7108,36 @@ async function fetchLyric(song, quality = null) {
             }
         } catch (e) {
             console.warn('[Lyric] OpenList 歌词获取失败:', e);
+        }
+        renderLyric([], '暂无歌词');
+        return;
+    }
+
+    // ===== 2.7 WebDAV 歌曲：从同目录读取 .lrc 歌词 =====
+    if (source === 'webdav' && song.path) {
+        try {
+            let lyricUrl = `/api/webdav-mounts/lyric?server=${encodeURIComponent(song.serverId || '')}&path=${encodeURIComponent(song.path)}`;
+            const lyricRes = await fetch(lyricUrl, { headers });
+            if (lyricRes.ok) {
+                const lyricData = await lyricRes.json();
+                const lrcText = (lyricData && lyricData.lyric) || '';
+                if (lrcText) {
+                    currentRawLrc = lrcText;
+                    currentRawTlrc = '';
+                    currentRawRlrc = '';
+                    currentRawKlrc = '';
+                    if (settings.enableLyricCache !== false) {
+                        try {
+                            localStorage.setItem(cacheKey, JSON.stringify({ lrc: lrcText, tlyric: '', rlyric: '', klyric: '' }));
+                        } catch (e) { }
+                    }
+                    initLyricPlayer();
+                    applyLyricUpdate();
+                    return;
+                }
+            }
+        } catch (e) {
+            console.warn('[Lyric] WebDAV 歌词获取失败:', e);
         }
         renderLyric([], '暂无歌词');
         return;

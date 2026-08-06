@@ -398,6 +398,31 @@ export const stream = (mount: WebDAVMount, filePath: string, range?: string): ht
   return req
 }
 
+/**
+ * 获取同目录歌词（filePath 形如 /dir/song.mp3，找 /dir/song.lrc）
+ */
+export const getLyric = async (mount: WebDAVMount, filePath: string): Promise<string> => {
+  try {
+    const client = await initClient(mount)
+    const dir = path.posix.dirname(filePath === '/' ? '/' : filePath)
+    const baseName = path.posix.basename(filePath || '').replace(/\.[^.]+$/, '')
+    const lyricName = baseName + '.lrc'
+    const lyricPath = path.posix.join(dir, lyricName).replace(/\/{2,}/g, '/')
+    const content: any = await Promise.race([
+      client.getFileContents(lyricPath, { format: 'text' }),
+      new Promise<any>((resolve) => setTimeout(() => resolve(''), 20000)),
+    ])
+    if (typeof content === 'string') return content
+    if (Buffer.isBuffer(content)) return content.toString('utf-8')
+    if (content) {
+      try { return JSON.stringify(content) } catch (e) { return String(content) }
+    }
+    return ''
+  } catch (e) {
+    return ''
+  }
+}
+
 export const getCacheProgress = (mountId: string, filePath: string): { total: number; received: number; done: boolean } | null => {
   return cacheProgress[cacheProgressKey(mountId, filePath)] || null
 }

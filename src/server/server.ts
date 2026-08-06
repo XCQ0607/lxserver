@@ -5113,6 +5113,37 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [新增] WebDAV 同目录歌词
+      if (pathname === '/api/webdav-mounts/lyric' && req.method === 'GET') {
+        const username = requirePlayerOrAdmin()
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const mountId = urlObj.searchParams.get('server') || urlObj.searchParams.get('id') || ''
+        const filePath = urlObj.searchParams.get('path') || ''
+        if (!mountId || !filePath) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '缺少 server 或 path 参数' }))
+          return
+        }
+        const mount = webdavMount.getMount(mountId)
+        if (!mount) {
+          res.writeHead(404, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '挂载源不存在' }))
+          return
+        }
+        webdavMount.getLyric(mount, filePath).then((lyric) => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lyric: lyric || '' }))
+        }).catch(() => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, lyric: '' }))
+        })
+        return
+      }
+
       // 音频索引（单挂载或全部合并）
       if (pathname === '/api/webdav-mounts/local-list' && req.method === 'GET') {
         const username = requirePlayerOrAdmin()
@@ -5681,6 +5712,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               throw new Error('Invalid songInfo')
             }
             const source = songInfo.source
+
+            // [新增] WebDAV/OpenList 歌曲是本地挂载直连，不走在线自定义源：
+            // 前端本地直放应覆盖，但歌单/收藏等入口若丢失 url 仍会到达此处，兜底返回 stream URL
+            if ((source === 'webdav' || source === 'openlist') && songInfo.path && songInfo.serverId) {
+              const streamPath = source === 'webdav'
+                ? `/api/webdav-mounts/stream?server=${encodeURIComponent(songInfo.serverId)}&path=${encodeURIComponent(songInfo.path)}`
+                : `/api/openlist/stream?server=${encodeURIComponent(songInfo.serverId)}&path=${encodeURIComponent(songInfo.path)}${songInfo.sign ? `&sign=${encodeURIComponent(songInfo.sign)}` : ''}`
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ url: streamPath, quality: songInfo.quality || quality || '128k', sourceType: 'server_cache', source }))
+              return
+            }
+
             let result: any
 
             let customSourceError: string | null = null
@@ -5846,6 +5889,13 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               throw new Error('Invalid songInfo')
             }
             const source = songInfo.source
+            // WebDAV/OpenList 歌词由前端走同目录 .lrc 接口（/api/webdav-mounts/lyric、/api/openlist/lyric），
+            // 这里直接返回空，避免 Source not supported 刷屏
+            if (source === 'webdav' || source === 'openlist') {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ lyric: '', tlyric: '', rlyric: '' }))
+              return
+            }
             if (!musicSdk[source] || !musicSdk[source].getLyric) {
               throw new Error(`Source ${source} not supported`)
             }

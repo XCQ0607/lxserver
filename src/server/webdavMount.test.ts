@@ -360,6 +360,12 @@ describe('webdavMount 边播边缓存', () => {
     assert.equal(st2.fileCount, 0)
     assert.equal(wm.isFileCached(m, '/music/a.mp3'), false)
   })
+
+  test('getLyric: 同目录无 .lrc 时返回空串且不抛异常', async () => {
+    const m = wm.addMount({ name: 'lyric-mock', baseUrl: `http://127.0.0.1:${port}/dav`, rootPath: '/' })
+    const lyric = await wm.getLyric(m, '/music/a.mp3')
+    assert.equal(lyric, '')
+  })
 })
 
 import { after } from 'node:test'
