@@ -2358,6 +2358,9 @@ window.LocalMusicManager = {
 
         const songInfo = {
             ...item.songInfo,
+            name: item.name || item.songInfo?.name,
+            singer: item.singer || item.songInfo?.singer,
+            quality: item.quality || item.songInfo?.quality || item.songInfo?.type || '128k',
             // Reconstruct full URL locally
             url: buildLocalUrl(item),
             pic: (isOpenList || isWebdav) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
@@ -2382,12 +2385,25 @@ window.LocalMusicManager = {
 
         // If 'app.js' exposes playSong(song), we use it.
         // We might want to construct a playlist of local tracks.
-        const playlist = this.displayData.map(d => ({
-            ...d.songInfo,
-            url: buildLocalUrl(d),
-            pic: (d.folder === 'openlist' || d.openlist || d.folder === 'webdav' || d.webdav) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            isLocal: true
-        }));
+        // OpenList/WebDAV 合并条目是平铺结构（无嵌套 songInfo），必须走 buildPlaylistSong
+        // 保留 source/name/singer/url 等字段，否则播放时会被当作无源歌曲导致 Invalid songInfo
+        const playlist = this.displayData.map(d => {
+            const built = this.buildPlaylistSong(d);
+            if (built) {
+                // 与 playItem 原有行为一致：OpenList/WebDAV 播放 URL 追加 token 供 <audio> 鉴权
+                if ((built.openlist || built.webdav) && authToken && built.url && !built.url.includes('token=')) {
+                    built.url += `${built.url.includes('?') ? '&' : '?'}token=${encodeURIComponent(authToken)}`;
+                }
+                return built;
+            }
+            // 本地缓存条目（folder=music/cache）：songInfo 由服务端生成，字段完整
+            return {
+                ...d.songInfo,
+                url: buildLocalUrl(d),
+                pic: (d.folder === 'openlist' || d.openlist || d.folder === 'webdav' || d.webdav) ? '' : `/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
+                isLocal: true
+            };
+        });
 
         if (typeof window.updatePlaylist === 'function') {
             window.updatePlaylist(playlist, index, 'local_all');

@@ -402,9 +402,12 @@ const collectAudioFiles = async (server: OpenListServer, dirPath: string, depth 
   ctx.dirCount++
   const content: any[] = (list && list.content) || []
   const subDirs: string[] = []
+  // 跳过 WebDAV 同步目录：其中的缓存/备份文件会被误索引为远程音乐（自我污染）
+  const skipDirs = new Set(['lx-sync', 'lx-sync-backups'])
   for (const it of content) {
     if (result.length >= MAX_SCAN_FILES || ctx.dirCount >= MAX_SCAN_DIRS || Date.now() > ctx.deadline) break
     if (it.is_dir) {
+      if (skipDirs.has(it.name)) continue
       const childPath = (dirPath === '/' ? '' : dirPath) + '/' + it.name
       subDirs.push(childPath)
       continue

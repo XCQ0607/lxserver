@@ -129,10 +129,17 @@ export const initClient = async (mount: WebDAVMount, force = false): Promise<any
 }
 
 const joinRemotePath = (rootPath: string, dirPath: string): string => {
-  const root = rootPath === '/' ? '' : rootPath
-  const dir = dirPath === '/' ? '' : dirPath
-  const full = (root + '/' + dir).replace(/\/{2,}/g, '/')
-  return full || '/'
+  // 路径统一为相对 baseUrl：rootPath 为 baseUrl 下的根目录
+  // 若 dirPath 已含 rootPath 前缀（前端 browse 传绝对路径）则去重，避免路径翻倍
+  const root = rootPath === '/' ? '' : String(rootPath || '').replace(/^\/+|\/+$/g, '')
+  const dir = dirPath === '/' ? '' : String(dirPath || '').replace(/^\/+|\/+$/g, '')
+  let rel = dir
+  if (root && dir) {
+    if (dir === root) rel = ''
+    else if (dir.startsWith(root + '/')) rel = dir.slice(root.length + 1)
+  }
+  const full = root ? (rel ? `${root}/${rel}` : root) : rel
+  return '/' + full.replace(/\/{2,}/g, '/').replace(/\/+$/, '') || '/'
 }
 
 /**
@@ -203,15 +210,20 @@ const collectAudioFiles = async (mount: WebDAVMount, dirPath: string, depth = 0,
   if (error) return result
   ctx.dirCount++
   const subDirs: string[] = []
+  // 跳过 WebDAV 同步目录：其中的缓存/备份文件会被误索引为挂载音乐（自我污染）
+  const skipDirs = new Set(['lx-sync', 'lx-sync-backups'])
   for (const it of items) {
     if (result.length >= MAX_SCAN_FILES || ctx.dirCount >= MAX_SCAN_DIRS || Date.now() > ctx.deadline) break
     if (it.isDir) {
+      if (skipDirs.has(it.name)) continue
       subDirs.push(joinDir(dirPath, it.name))
       continue
     }
     if (!it.name || !AUDIO_EXT_RE.test(it.name)) continue
     const ext = (path.extname(it.name) || '.mp3').toLowerCase().slice(1)
-    const fullPath = joinDir(dirPath, it.name)
+    const relPath = joinDir(dirPath, it.name)
+    // 统一为相对 baseUrl 的完整路径（含 rootPath 前缀），与 stream/browse 语义一致
+    const fullPath = joinRemotePath(mount.rootPath, relPath)
     const id = `webdav_${encodeURIComponent(fullPath)}`
     result.push({
       id,

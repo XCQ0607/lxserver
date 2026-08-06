@@ -142,12 +142,16 @@ class WebDAVSync extends EventEmitter {
 
     private async scanFiles(): Promise<Map<string, string>> {
         const files = new Map<string, string>()
+        // 排除缓存目录：openlist-cache/webdav-cache 内的音频缓存文件
+        // 若同步上云会被挂载源索引成"远程音乐"，造成自我污染（列表混入缓存文件、播放异常）
+        const skipDirs = new Set(['openlist-cache', 'webdav-cache'])
         const scanDir = (dir: string) => {
             const items = fs.readdirSync(dir)
             for (const item of items) {
                 const fullPath = path.join(dir, item)
                 const stat = fs.statSync(fullPath)
                 if (stat.isDirectory()) {
+                    if (skipDirs.has(item)) continue
                     scanDir(fullPath)
                 } else {
                     const relativePath = path.relative(this.dataPath, fullPath)
