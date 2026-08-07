@@ -4,6 +4,7 @@ import * as crypto from 'crypto'
 import * as http from 'http'
 import * as https from 'https'
 import needle from 'needle'
+import { resolveHost } from './hostResolver'
 
 const CONFIG_FILE = 'openlist.json'
 
@@ -125,7 +126,7 @@ const encodePath = (p: string): string => {
 
 const request = (server: OpenListServer, method: string, urlPath: string, data?: any, headers?: any, isDownload = false): Promise<any> => {
   return new Promise((resolve, reject) => {
-    const baseUrl = server.baseUrl || ''
+    const baseUrl = resolveHost(server.baseUrl || '')
     const opts: any = { json: !isDownload, timeout: 30000, headers: {} }
     if (headers) opts.headers = { ...headers }
     needle.request(method as any, `${baseUrl}${urlPath}`, isDownload ? data : data, opts, (err: any, resp: any) => {
@@ -248,7 +249,7 @@ export const getDownloadUrl = async (server: OpenListServer, filePath: string, s
   // 实时获取失败（如未配置账号的 guest 场景）时回退到调用方传入的 sign
   if (!s) s = sign || ''
   const q = s ? `?sign=${encodeURIComponent(s)}` : ''
-  return `${server.baseUrl}/d${encodePath(filePath)}${q}`
+  return `${resolveHost(server.baseUrl)}/d${encodePath(filePath)}${q}`
 }
 
 /**
@@ -566,7 +567,7 @@ export const uploadFromUrl = async (server: OpenListServer, sourceUrl: string, f
           'Authorization': token,
         },
       }
-      const putReq = needle.put(`${server.baseUrl}/api/fs/put?path=${encodeURIComponent(targetPath)}`, fileStream, opts, (err: any, r: any) => {
+      const putReq = needle.put(`${resolveHost(server.baseUrl)}/api/fs/put?path=${encodeURIComponent(targetPath)}`, fileStream, opts, (err: any, r: any) => {
         if (err) return reject(new Error(err.message || 'Upload failed'))
         if (r.statusCode && r.statusCode >= 400) {
           const msg = r.body && (r.body.message || r.body.error) || `HTTP ${r.statusCode}`

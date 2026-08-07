@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as crypto from 'crypto'
 import * as http from 'http'
 import * as https from 'https'
+import { resolveHost } from './hostResolver'
 
 const CONFIG_FILE = 'webdav-mounts.json'
 
@@ -125,7 +126,7 @@ export const initClient = async (mount: WebDAVMount, force = false): Promise<any
   const options: any = {}
   if (mount.username) options.username = mount.username
   if (mount.password) options.password = mount.password
-  return createClient(normalizeWebdavUrl(mount.baseUrl), options)
+  return createClient(resolveHost(normalizeWebdavUrl(mount.baseUrl)), options)
 }
 
 const joinRemotePath = (rootPath: string, dirPath: string): string => {
@@ -374,7 +375,7 @@ export const serveCacheFile = (filePath: string, range: string | undefined, res:
  * 生成 WebDAV 文件 URL（baseUrl + 路径拼接，路径保留编码）
  */
 const fileUrl = (mount: WebDAVMount, filePath: string): string => {
-  const base = normalizeWebdavUrl(mount.baseUrl).replace(/\/+$/, '')
+  const base = resolveHost(normalizeWebdavUrl(mount.baseUrl)).replace(/\/+$/, '')
   const p = (filePath || '/').replace(/^\/+/, '')
   return `${base}/${p.split('/').map(seg => encodeURIComponent(seg)).join('/')}`
 }

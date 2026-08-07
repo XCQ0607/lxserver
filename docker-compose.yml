@@ -21,6 +21,10 @@ services:
       # 容器内访问宿主机服务的专用地址(如本机 NAS 上的 Alist/WebDAV):
       # 后台填写地址时用 http://host.docker.internal:端口 替代 宿主机IP:端口
       # (bridge 网络下直接访问宿主机内网 IP 可能被网络栈重置导致 socket hang up)
+      #
+      # 注意: 部分环境(如飞牛 NAS) 对 host-gateway 支持不稳定, 容器内可能无法解析
+      # host.docker.internal. 此时服务端会自动把该域名替换为探测到的宿主机网关 IP,
+      # 若仍失败可在下方 environment 中显式设置 LX_HOST_ADDR=<宿主机IP> 兜底.
       - "host.docker.internal:host-gateway"
     ports:
       # 端口映射: 宿主机端口:容器端口. 若 9527 被占用, 改左侧为其他端口即可, 例如 "9000:9527"
@@ -61,3 +65,8 @@ services:
 
       # 自定义配置文件路径(默认读取镜像内 /server/config.js)
       # - CONFIG_PATH=/server/config.js
+
+      # 宿主机可达地址(兜底): 当 host.docker.internal 无法解析时,
+      # 服务端会用此地址替换配置中的 host.docker.internal 去访问宿主机上的
+      # Alist/WebDAV 等服务. 例如 - LX_HOST_ADDR=192.168.2.100
+      # - LX_HOST_ADDR=
