@@ -117,6 +117,20 @@ When **"Enable Public Favorites and Songs"** is enabled in the backend settings,
   <img src="md/_open_song.png" width="800" alt="Public Library & Shared Favorites">
 </p>
 
+### 12. WebDAV / OpenList Music Mounting
+
+Mount **WebDAV** cloud drives (Nutstore, Nextcloud, Alist, etc.) and **OpenList (AList)** servers directly, seamlessly integrating your remote music library into the player:
+
+- **Multiple mount sources**: Configure multiple WebDAV mounts and OpenList servers at once, with connection testing and enable/disable.
+- **Directory tree & one-click add**: Embedded **WebDAV Directory** / **OpenList Directory** panels in the Local Music manager let you browse the remote directory tree and add audio to playlists in one click.
+- **Play-while-caching**: Remote audio is automatically downloaded to the local cache during playback, managed granularly via the cache control panel — smooth playback even on weak networks.
+- **Directory indexing & merged list**: Audio files under mounted directories are scanned automatically and merged into the local music main list for direct search and playback.
+- **Lyrics support**: `.lrc` lyrics files in the same directory are read automatically and displayed during playback.
+
+<p align="center">
+  <img src="md/WEBDAV同步.png" width="800" alt="WebDAV Music Mounting">
+</p>
+
 ## 🔒 Access Control & Security
 To protect your privacy, the Web Player supports password protection.
 ### How to Enable
@@ -321,6 +335,19 @@ Some advanced options are only configurable by directly editing `config.js`:
 | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
 
 > **Note**: The service currently supports two types of sync connection URLs: `Root Path` (URL configuration is `ip:port`) and `User Path` (URL configuration is `ip:port/username`). If the User Path is disabled, all sync user passwords must be completely unique.
+
+### 🎵 WebDAV / OpenList Music Mounting Config
+
+The music mounting feature is configured inside the **Web Player** (`/music`), with data persisted in the `./data` directory:
+
+| Data File | Description |
+| --- | --- |
+| `./data/webdav-mounts.json` | WebDAV mount source config (URL, credentials, root path, etc.) |
+| `./data/openlist.json` | OpenList server config |
+
+- **WebDAV mount**: Enter the WebDAV URL (e.g. `https://dav.example.com/music`, may include the root directory path), username and password; optionally set a root path and test the connection.
+- **OpenList server**: Enter the AList service URL, path prefix and access token (anonymous access optional).
+- Once enabled, the Web Player automatically scans remote audio, merges it into the local music list, and supports directory browsing, play-while-caching and same-directory lyrics.
 
 ---
 
