@@ -66,7 +66,7 @@ services:
       # 自定义配置文件路径(默认读取镜像内 /server/config.js)
       # - CONFIG_PATH=/server/config.js
 
-      # 宿主机可达地址(兜底): 当 host.docker.internal 无法解析时,
-      # 服务端会用此地址替换配置中的 host.docker.internal 去访问宿主机上的
-      # Alist/WebDAV 等服务. 例如 - LX_HOST_ADDR=192.168.2.100
-      # - LX_HOST_ADDR=
+      # 宿主机可达地址: 当 host.docker.internal 无法解析时, 服务端会用此地址替换
+      # 配置中的 host.docker.internal 去访问宿主机上的 Alist/WebDAV 等服务.
+      # 请改为你的 NAS 实际 IP(可用 ip addr 查看, 此处以 192.168.2.100 为例)
+      - LX_HOST_ADDR=192.168.2.100
