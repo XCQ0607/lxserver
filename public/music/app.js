@@ -3645,9 +3645,15 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
 
     // 0. 本地文件/带有本地播放 URL 的歌曲：直接播放本地文件，无需走在线 API 解析
     // 覆盖本地缓存、OpenList stream、WebDAV mount stream
-    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/openlist/stream') || song.url?.startsWith('/api/webdav-mounts/stream')) && song.url && !isRetry) {
+    const isWebdavStream = song.webdav || (song.url && song.url.indexOf('/api/webdav-mounts/stream') === 0);
+    const canDirectPlay = (song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/openlist/stream') || isWebdavStream) && song.url;
+    if (canDirectPlay && (!isRetry || isWebdavStream)) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
+        // webdav 重试（首次拉流失败）时绕过本地损坏缓存，强制从上游重新拉流
+        if (isRetry && isWebdavStream && localUrl && localUrl.indexOf('/api/webdav-mounts/stream') === 0) {
+            localUrl += (localUrl.indexOf('?') >= 0 ? '&' : '?') + 'nocache=1';
+        }
         return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
     }
 

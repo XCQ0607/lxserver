@@ -5188,9 +5188,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.end(JSON.stringify({ success: false, message: '挂载源不存在' }))
           return
         }
-        // 本地缓存优先
+        // 本地缓存优先（nocache=1 强制绕过缓存，供前端重试时跳过损坏缓存）
+        const noCache = urlObj.searchParams.get('nocache') === '1'
         const cacheFilePath = webdavMount.getCacheFilePath(mount, filePath)
-        if (webdavMount.serveCacheFile(cacheFilePath, req.headers.range as string | undefined, res)) {
+        if (!noCache && webdavMount.serveCacheFile(cacheFilePath, req.headers.range as string | undefined, res)) {
           return
         }
         try {
@@ -5231,7 +5232,13 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 return
               }
               const outHeaders: Record<string, string | number> = {}
-              if (resp.headers['content-type']) outHeaders['Content-Type'] = String(resp.headers['content-type']).split(';')[0] || 'audio/mpeg'
+              let contentType = resp.headers['content-type'] ? String(resp.headers['content-type']).split(';')[0] : ''
+              // 上游返回泛型类型或缺省时，按文件扩展名兜底为正确音频 MIME，
+              // 否则浏览器 <audio> 会因 octet-stream 而拒绝解码
+              if (!contentType || contentType === 'application/octet-stream' || !contentType.startsWith('audio/')) {
+                contentType = webdavMount.getAudioMime(filePath)
+              }
+              outHeaders['Content-Type'] = contentType
               if (resp.headers['content-length']) outHeaders['Content-Length'] = resp.headers['content-length']
               if (resp.headers['accept-ranges']) outHeaders['Accept-Ranges'] = resp.headers['accept-ranges']
               if (resp.headers['content-range']) outHeaders['Content-Range'] = resp.headers['content-range']
@@ -5254,7 +5261,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 })
                 resp.on('end', () => {
                   cacheWs.end(() => {
-                    if (total === 0 || cacheReceived >= total) {
+                    // 上游无 Content-Length（total=0）时仍要求收到数据才落盘，
+                    // 空响应不生成缓存文件，避免 0 字节坏缓存导致后续播放失败
+                    if (cacheReceived > 0 && (total === 0 || cacheReceived >= total)) {
                       fs.rename(tmpPath, cacheFilePath, (err: any) => {
                         if (err) fs.unlink(tmpPath, () => { })
                         webdavMount.markCacheDone(mount.id, filePath)

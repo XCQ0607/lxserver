@@ -333,12 +333,21 @@ const MIME_TYPES: Record<string, string> = {
   '.ape': 'audio/x-ape', '.opus': 'audio/ogg', '.aac': 'audio/aac', '.wma': 'audio/x-ms-wma',
 }
 
+/** 按文件路径扩展名返回音频 MIME；无法识别时回退 audio/mpeg */
+export const getAudioMime = (filePath: string): string => {
+  const ext = path.extname(filePath || '').toLowerCase()
+  return MIME_TYPES[ext] || 'audio/mpeg'
+}
+
 /**
  * 服务本地缓存文件（支持 Range），返回是否已完整缓存
  */
 export const serveCacheFile = (filePath: string, range: string | undefined, res: any): boolean => {
   if (!fs.existsSync(filePath)) return false
   const stat = fs.statSync(filePath)
+  // 损坏缓存防御：0 字节文件（下载中断/上游无 Content-Length 导致的空文件）
+  // 视为无效缓存，回退到上游 dav 流式，避免 audio 收到空响应而播放失败
+  if (stat.size === 0) return false
   const ext = path.extname(filePath).toLowerCase()
   const contentType = MIME_TYPES[ext] || 'application/octet-stream'
   if (range) {
@@ -494,7 +503,9 @@ export const downloadToCache = (mount: WebDAVMount, filePath: string, onProgress
       })
       resp.on('end', () => {
         ws.end(() => {
-          if (total === 0 || received >= total) {
+          // 上游无 Content-Length（total=0）时，仍要求至少收到数据才落盘；
+          // 空响应（received=0）视为无效，清理临时文件避免产生空缓存
+          if (received > 0 && (total === 0 || received >= total)) {
             try { fs.renameSync(tmpPath, cacheFilePath) } catch (e) {
               try { fs.unlinkSync(tmpPath) } catch (e2) { /* ignore */ }
             }
