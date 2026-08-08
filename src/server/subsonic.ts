@@ -573,34 +573,37 @@ class SubsonicHandler {
      */
     private async resolveLocalStreamUrl(username: string, source: string, songmid: string, id: string): Promise<string | null> {
         const serverPath = songmid.replace(/\+/g, ' ')
+        let filePath = ''
+        try {
+            filePath = decodeURIComponent(serverPath)
+        } catch (e) {
+            filePath = serverPath
+        }
+
+        // 路径归一化比较：容忍收藏/歌单中固化的路径与实时索引在「多斜杠、URL 编码」上的差异
+        const findHit = (items: any[]) => items.find((it: any) =>
+            it.id === id ||
+            it.songmid === songmid ||
+            this.normForMatch(it.id) === this.normForMatch(id) ||
+            this.normForMatch(it.path) === this.normForMatch(filePath) ||
+            this.normForMatch(it.filename) === this.normForMatch(filePath))
 
         if (source === 'webdav') {
-            let filePath = ''
-            try {
-                filePath = decodeURIComponent(serverPath)
-            } catch (e) {
-                filePath = serverPath
-            }
             const items = await webdavMount.getAllLocalIndex()
-            const hit = items.find((it: any) => it.id === id || it.songmid === songmid || it.path === filePath || it.filename === filePath)
+            const hit = findHit(items)
             if (hit && hit.serverId) {
                 const p = encodeURIComponent(hit.path || filePath)
                 let url = `/api/webdav-mounts/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
                 url += `&sst=${this.signInternalStream(hit.serverId, hit.path || filePath)}`
                 return url
             }
-            return null
+            // 索引匹配失败（如收藏时固化的路径与实时索引结构不一致）时，兜底使用歌单中固化的播放 url
+            return this.resolveFromUserList(username, id)
         }
 
         if (source === 'openlist') {
-            let filePath = ''
-            try {
-                filePath = decodeURIComponent(serverPath)
-            } catch (e) {
-                filePath = serverPath
-            }
             const items = await openlist.getAllLocalIndex()
-            const hit = items.find((it: any) => it.id === id || it.songmid === songmid || it.path === filePath || it.filename === filePath)
+            const hit = findHit(items)
             if (hit && hit.serverId) {
                 const p = encodeURIComponent(hit.path || filePath)
                 let url = `/api/openlist/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
@@ -608,7 +611,8 @@ class SubsonicHandler {
                 url += `&sst=${this.signInternalStream(hit.serverId, hit.path || filePath)}`
                 return url
             }
-            return null
+            // 索引匹配失败时兜底使用歌单中固化的播放 url
+            return this.resolveFromUserList(username, id)
         }
 
         // local: 优先走内部缓存文件服务
@@ -626,6 +630,45 @@ class SubsonicHandler {
         } catch (e) { }
 
         return null
+    }
+
+    /**
+     * 路径归一化：URL 解码 + 合并连续斜杠 + 去除尾部斜杠，
+     * 用于索引条目与收藏/歌单中歌曲 id、path 的匹配。
+     */
+    private normForMatch(p: string): string {
+        let s = String(p || '')
+        try { s = decodeURIComponent(s) } catch (e) { /* 保持原样 */ }
+        return s.replace(/\/{2,}/g, '/').replace(/\/+$/, '')
+    }
+
+    /**
+     * 兜底解析：实时索引匹配失败时，从用户歌单数据中查找该歌曲固化的播放 url
+     * （Web 端可用的内部流地址），并追加 sst 令牌供 Subsonic 客户端无 cookie 播放。
+     */
+    private async resolveFromUserList(username: string, id: string): Promise<string | null> {
+        try {
+            const userSpace = getUserSpace(username)
+            const listData = await userSpace.listManage.getListData()
+            const all: any[] = [...listData.loveList, ...listData.defaultList]
+            for (const l of listData.userList || []) all.push(...((l.list || []) as any[]))
+            const music = all.find((m: any) => this.normForMatch(m.id) === this.normForMatch(id) && m.url && typeof m.url === 'string')
+            if (!music) return null
+            let internalUrl = String(music.url)
+            if (!/^(https?:\/\/|\/api\/)/.test(internalUrl)) return null
+            const parsed = new URL(internalUrl, 'http://internal.local')
+            const serverId = parsed.searchParams.get('server')
+            const p = parsed.searchParams.get('path')
+            if (serverId && p) {
+                let filePath = ''
+                try { filePath = decodeURIComponent(p) } catch (e) { filePath = p }
+                internalUrl += (internalUrl.includes('?') ? '&' : '?') + `sst=${this.signInternalStream(serverId, filePath)}`
+            }
+            return internalUrl
+        } catch (e: any) {
+            console.error(`[Subsonic] resolveFromUserList failed: ${id}`, e?.message || e)
+            return null
+        }
     }
 
     // ─────────────────────────────────────────────
