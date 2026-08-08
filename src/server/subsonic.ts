@@ -553,6 +553,19 @@ class SubsonicHandler {
     }
 
     /**
+     * 为 Subsonic 内部流签发一次性认证令牌（服务端 HMAC 签名，带过期时间）。
+     * Subsonic 客户端仅使用 u/p 参数认证，无 lxserver session cookie；
+     * 302 跳转到 /api/openlist/stream、/api/webdav-mounts/stream 时需要携带该令牌通过内部流认证。
+     */
+    private signInternalStream(serverId: string, filePath: string): string {
+        const secret = global.lx.config['frontend.password'] || 'lxserver-internal'
+        const expiry = Date.now() + 600 * 1000
+        const payload = `${serverId}|${filePath}|${expiry}`
+        const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url')
+        return `${sig}.${expiry}`
+    }
+
+    /**
      * 解析本地挂载歌曲的内部流 URL（webdav/openlist/local）
      * - webdav_ 前缀: songmid 为 encodeURIComponent 后的远程路径，从 webdav 挂载索引匹配
      * - openlist_ 前缀: songmid 同理，从 openlist 服务器索引匹配
@@ -572,7 +585,9 @@ class SubsonicHandler {
             const hit = items.find((it: any) => it.id === id || it.songmid === songmid || it.path === filePath || it.filename === filePath)
             if (hit && hit.serverId) {
                 const p = encodeURIComponent(hit.path || filePath)
-                return `/api/webdav-mounts/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
+                let url = `/api/webdav-mounts/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
+                url += `&sst=${this.signInternalStream(hit.serverId, hit.path || filePath)}`
+                return url
             }
             return null
         }
@@ -590,6 +605,7 @@ class SubsonicHandler {
                 const p = encodeURIComponent(hit.path || filePath)
                 let url = `/api/openlist/stream?server=${encodeURIComponent(hit.serverId)}&path=${p}`
                 if (hit.sign) url += `&sign=${encodeURIComponent(hit.sign)}`
+                url += `&sst=${this.signInternalStream(hit.serverId, hit.path || filePath)}`
                 return url
             }
             return null

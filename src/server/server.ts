@@ -4453,6 +4453,27 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return null
       }
 
+      // Subsonic 内部流令牌校验：Subsonic 客户端仅用 u/p 参数认证，无 session cookie。
+      // Subsonic stream 302 到 /api/openlist/stream、/api/webdav-mounts/stream 时携带 sst 令牌，
+      // 这里对合法且未过期的令牌放行，使 Subsonic 客户端可正常播放挂载音乐。
+      const verifyInternalStreamToken = (u: URL): string | null => {
+        const token = u.searchParams.get('sst')
+        if (!token) return null
+        const sep = token.lastIndexOf('.')
+        if (sep <= 0) return null
+        const sig = token.slice(0, sep)
+        const expStr = token.slice(sep + 1)
+        const expiry = Number(expStr)
+        if (!Number.isFinite(expiry) || expiry < Date.now()) return null
+        const secret = global.lx.config['frontend.password'] || 'lxserver-internal'
+        const payload = `${u.searchParams.get('server') || ''}|${u.searchParams.get('path') || ''}|${expStr}`
+        const expect = crypto.createHmac('sha256', secret).update(payload).digest('base64url')
+        const a = Buffer.from(sig)
+        const b = Buffer.from(expect)
+        if (a.length !== b.length) return null
+        return crypto.timingSafeEqual(a, b) ? 'subsonic' : null
+      }
+
       // ================= OpenList 存储 =================
       // [新增] OpenList 服务器列表（管理员）
       if (pathname === '/api/openlist/servers' && req.method === 'GET') {
@@ -4686,7 +4707,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
       // [新增] OpenList 音频流式播放（代理，支持 Range，登录用户/管理员）
       if (pathname === '/api/openlist/stream' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
+        const username = requirePlayerOrAdmin() || verifyInternalStreamToken(urlObj)
         if (!username) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
@@ -5169,7 +5190,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
       // 播放/流式代理（本地缓存优先 + 边播边写）
       if (pathname === '/api/webdav-mounts/stream' && req.method === 'GET') {
-        const username = requirePlayerOrAdmin()
+        const username = requirePlayerOrAdmin() || verifyInternalStreamToken(urlObj)
         if (!username) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
