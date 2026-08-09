@@ -2605,6 +2605,30 @@ class SubsonicHandler {
             songmid = id.substring(index + 1)
         }
 
+        // [挂载类歌曲] webdav / openlist：歌词从歌曲同目录的 .lrc 文件读取
+        if (source === 'webdav' || source === 'openlist') {
+            try {
+                const found = await this.findMusicById(username, id)
+                const musicMeta = found?.music || {
+                    id,
+                    source,
+                    songmid,
+                    name: params.get('title') || '',
+                    singer: params.get('artist') || ''
+                } as any
+                const rawLrc = await this.resolveMountedLyric(username, source, songmid, id)
+                if (rawLrc && rawLrc.lrc) {
+                    if (rawLrc.name) (musicMeta as any).name = rawLrc.name
+                    if (rawLrc.singer) (musicMeta as any).singer = rawLrc.singer
+                    return this.buildLyricResponse(res, rawLrc.lrc, '', musicMeta, format)
+                }
+                return this.buildLyricResponse(res, '', '', musicMeta, format)
+            } catch (err: any) {
+                console.error(`[Subsonic] Mounted lyric fetch error:`, err)
+                return this.sendError(res, 0, 'Failed to fetch lyrics: ' + err.message, format)
+            }
+        }
+
         if (!source || !musicSdk[source]) {
             return this.sendError(res, 70, 'Song or source not supported: ' + id, format)
         }
@@ -2652,56 +2676,130 @@ class SubsonicHandler {
             const rawLrc = lyricInfo.lyric || ''
             const transLrc = lyricInfo.tlyric || ''
 
-            const mergedLrc = this.buildMergedLrc(rawLrc, transLrc)
-
-            // 转换结构化歌词
-            const lines = this.parseLrc(rawLrc)
-            const tlines = transLrc ? this.parseLrc(transLrc) : []
-
-            const structuredLyrics: any[] = [
-                {
-                    lang: 'und',
-                    synced: lines.some(l => l.start !== undefined),
-                    line: lines,
-                    displayArtist: musicMeta.singer,
-                    displayTitle: musicMeta.name,
-                }
-            ]
-
-            if (tlines.length > 0) {
-                structuredLyrics.push({
-                    lang: 'zh',
-                    synced: tlines.some(l => l.start !== undefined),
-                    line: tlines,
-                    displayArtist: musicMeta.singer,
-                    displayTitle: musicMeta.name,
-                })
-            }
-
-            if (format === 'json') {
-                return this.sendResponse(res, {
-                    lyricsList: { structuredLyrics },
-                    // 兼容标准 Subsonic getLyrics (同频时间戳双行/多行歌词)
-                    lyrics: {
-                        artist: musicMeta.singer,
-                        title: musicMeta.name,
-                        value: mergedLrc
-                    }
-                }, format)
-            }
-
-            // XML 模式逻辑
-            return this.sendResponse(res, {
-                lyrics: {
-                    attrs: { artist: musicMeta.singer, title: musicMeta.name },
-                    children: mergedLrc
-                },
-            }, format)
+            return this.buildLyricResponse(res, rawLrc, transLrc, musicMeta, format)
 
         } catch (err: any) {
             console.error(`[Subsonic] Lyric fetch error:`, err)
             return this.sendError(res, 0, 'Failed to fetch lyrics: ' + err.message, format)
         }
+    }
+
+    /**
+     * 统一的歌词响应构建：合并原文与翻译为双行 LRC，并输出 OpenSubsonic structuredLyrics
+     */
+    private buildLyricResponse(res: http.ServerResponse, rawLrc: string, transLrc: string, musicMeta: any, format: string) {
+        const mergedLrc = this.buildMergedLrc(rawLrc, transLrc)
+
+        // 转换结构化歌词
+        const lines = this.parseLrc(rawLrc)
+        const tlines = transLrc ? this.parseLrc(transLrc) : []
+
+        const structuredLyrics: any[] = [
+            {
+                lang: 'und',
+                synced: lines.some(l => l.start !== undefined),
+                line: lines,
+                displayArtist: musicMeta.singer,
+                displayTitle: musicMeta.name,
+            }
+        ]
+
+        if (tlines.length > 0) {
+            structuredLyrics.push({
+                lang: 'zh',
+                synced: tlines.some(l => l.start !== undefined),
+                line: tlines,
+                displayArtist: musicMeta.singer,
+                displayTitle: musicMeta.name,
+            })
+        }
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                lyricsList: { structuredLyrics },
+                // 兼容标准 Subsonic getLyrics (同频时间戳双行/多行歌词)
+                lyrics: {
+                    artist: musicMeta.singer,
+                    title: musicMeta.name,
+                    value: mergedLrc
+                }
+            }, format)
+        }
+
+        // XML 模式逻辑
+        return this.sendResponse(res, {
+            lyrics: {
+                attrs: { artist: musicMeta.singer, title: musicMeta.name },
+                children: mergedLrc
+            },
+        }, format)
+    }
+
+    /**
+     * 解析挂载类歌曲（webdav/openlist）的歌词：优先从索引匹配歌曲路径，
+     * 失败则兜底从歌单固化播放 url 解析，然后尝试多个候选路径读取同目录 .lrc
+     */
+    private async resolveMountedLyric(username: string, source: string, songmid: string, id: string): Promise<{ lrc: string; name?: string; singer?: string } | null> {
+        const candidates: string[] = []
+        const serverPath = songmid.replace(/\+/g, ' ')
+        let filePath = ''
+        try {
+            filePath = decodeURIComponent(serverPath)
+        } catch (e) {
+            filePath = serverPath
+        }
+        candidates.push(filePath)
+
+        let serverId = ''
+        let sign = ''
+
+        const items = source === 'webdav'
+            ? await webdavMount.getAllLocalIndex()
+            : await openlist.getAllLocalIndex()
+        const normId = this.normForMatch(id)
+        const normPath = this.normForMatch(filePath)
+        const hit = (items || []).find((it: any) =>
+            this.normForMatch(it.id) === normId ||
+            this.normForMatch(it.path) === normPath ||
+            this.normForMatch(it.filename) === normPath)
+
+        if (hit?.serverId) {
+            serverId = hit.serverId
+            if (hit.path) candidates.unshift(hit.path)
+            if (source === 'openlist' && hit.sign) sign = hit.sign
+        }
+
+        if (!serverId) return null
+
+        const meta: { lrc: string; name?: string; singer?: string } = { lrc: '' }
+        if (hit) {
+            if (hit.name) meta.name = hit.name
+            if (hit.singer) meta.singer = hit.singer
+        }
+
+        const seen = new Set<string>()
+        for (const c of candidates) {
+            const norm = String(c || '').replace(/\/{2,}/g, '/')
+            if (seen.has(norm)) continue
+            seen.add(norm)
+            try {
+                let lrc = ''
+                if (source === 'webdav') {
+                    const mount = webdavMount.getMount(serverId)
+                    if (mount) lrc = await webdavMount.getLyric(mount, c)
+                } else if (source === 'openlist') {
+                    const server = openlist.getServer(serverId)
+                    if (server) lrc = await openlist.getLyric(server, c, sign)
+                }
+                if (lrc && typeof lrc === 'string' && lrc.trim()) {
+                    meta.lrc = lrc
+                    return meta
+                }
+            } catch (e) {
+                // 尝试下一个候选路径
+            }
+        }
+        return meta
     }
 
     private parseLrc(lrc: string): { value: string, start?: number }[] {

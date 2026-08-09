@@ -502,6 +502,39 @@ export const clearLocalIndex = (serverId?: string): void => {
 }
 
 /**
+ * 智能解码歌词文本：优先按 UTF-8 严格解码，失败回退 GB18030（远端常见 GBK 编码 .lrc）
+ */
+const decodeText = (buf: Buffer): string => {
+  if (!buf || !buf.length) return ''
+  try {
+    const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+    if (!utf8.includes('\uFFFD')) return utf8
+  } catch (e) { /* 非合法 UTF-8，回退 GB18030 */ }
+  try {
+    return new TextDecoder('gb18030').decode(buf)
+  } catch (e) {
+    return buf.toString('utf-8')
+  }
+}
+
+/**
+ * 原生 HTTP GET 获取原始字节（needle 始终将 body 解码为 string，GBK 歌词会丢失原始字节）
+ */
+const httpGetBuffer = (url: string, headers: Record<string, string>, timeoutMs = 20000): Promise<Buffer> => new Promise((resolve, reject) => {
+  let u: URL
+  try { u = new URL(url) } catch (e) { return reject(e as Error) }
+  const lib = u.protocol === 'https:' ? https : http
+  const req = lib.get(u, { headers } as any, (res: any) => {
+    const chunks: Buffer[] = []
+    res.on('data', (c: any) => chunks.push(Buffer.isBuffer(c) ? c : Buffer.from(c)))
+    res.on('end', () => resolve(Buffer.concat(chunks)))
+    res.on('error', reject)
+  })
+  req.on('error', reject)
+  req.setTimeout(timeoutMs, () => req.destroy(new Error('fetch timeout')))
+})
+
+/**
  * 获取同目录歌词（path 形如 /dir/song.mp3，找 /dir/song.lrc）
  */
 export const getLyric = async (server: OpenListServer, filePath: string, sign?: string): Promise<string> => {
@@ -522,20 +555,8 @@ export const getLyric = async (server: OpenListServer, filePath: string, sign?: 
   const match = content.find((it: any) => !it.is_dir && it.name && it.name.toLowerCase() === lyricName.toLowerCase())
   if (!match) return ''
   const lyricUrl = await getDownloadUrl(server, path.posix.join(dir, match.name).replace(/\/{2,}/g, '/'), match.sign)
-  const resp = await new Promise<any>((resolve, reject) => {
-    const h: Record<string, string> = {}
-    if (token) h['Authorization'] = token
-    needle.get(lyricUrl, { headers: h, timeout: 20000, json: false }, (err: any, r: any) => {
-      if (err) return reject(err)
-      resolve(r)
-    })
-  })
-  const text = resp && resp.body
-  if (typeof text === 'string') return text
-  if (Buffer.isBuffer(text)) return text.toString('utf-8')
-  if (text) {
-    try { return JSON.stringify(text) } catch (e) { return String(text) }
-  }
+  const buf = await httpGetBuffer(lyricUrl, headers)
+  if (buf && buf.length) return decodeText(buf)
   return ''
 }
 

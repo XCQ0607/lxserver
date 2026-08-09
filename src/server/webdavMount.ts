@@ -409,6 +409,22 @@ export const stream = (mount: WebDAVMount, filePath: string, range?: string): ht
 }
 
 /**
+ * 智能解码歌词文本：优先按 UTF-8 严格解码，失败回退 GB18030（远端常见 GBK 编码 .lrc）
+ */
+const decodeText = (buf: Buffer): string => {
+  if (!buf || !buf.length) return ''
+  try {
+    const utf8 = new TextDecoder('utf-8', { fatal: true }).decode(buf)
+    if (!utf8.includes('\uFFFD')) return utf8
+  } catch (e) { /* 非合法 UTF-8，回退 GB18030 */ }
+  try {
+    return new TextDecoder('gb18030').decode(buf)
+  } catch (e) {
+    return buf.toString('utf-8')
+  }
+}
+
+/**
  * 获取同目录歌词（filePath 形如 /dir/song.mp3，找 /dir/song.lrc）
  */
 export const getLyric = async (mount: WebDAVMount, filePath: string): Promise<string> => {
@@ -419,11 +435,11 @@ export const getLyric = async (mount: WebDAVMount, filePath: string): Promise<st
     const lyricName = baseName + '.lrc'
     const lyricPath = path.posix.join(dir, lyricName).replace(/\/{2,}/g, '/')
     const content: any = await Promise.race([
-      client.getFileContents(lyricPath, { format: 'text' }),
+      client.getFileContents(lyricPath, { format: 'binary' }),
       new Promise<any>((resolve) => setTimeout(() => resolve(''), 20000)),
     ])
+    if (Buffer.isBuffer(content)) return decodeText(content)
     if (typeof content === 'string') return content
-    if (Buffer.isBuffer(content)) return content.toString('utf-8')
     if (content) {
       try { return JSON.stringify(content) } catch (e) { return String(content) }
     }
