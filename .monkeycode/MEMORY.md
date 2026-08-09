@@ -73,6 +73,6 @@ Entries discovered by the Agent during task execution should follow this format:
 - Category: Troubleshooting & Debugging
 - Instructions:
   - needle 3.x 始终将 body 解码为 string（即使 `decode_response:false`/`output:buffer`），GBK 编码的 .lrc 经 needle 读取后字节已损坏为 U+FFFD，无法恢复。读取远端歌词/文本必须用原生 `http/https.get` 拿原始 Buffer（openlist.ts 的 `httpGetBuffer`）。
-  - 远端 .lrc 常见 GBK/GB18030 编码；解码策略：先 `new TextDecoder('utf-8',{fatal:true})` 严格解码，异常或含 `\uFFFD` 则回退 `new TextDecoder('gb18030')`（本环境 Node 22 full ICU 可用）。
+  - 远端 .lrc 常见 GBK/GB18030 编码；解码策略：先 `new TextDecoder('utf-8',{fatal:true})` 严格解码，异常或含 `\uFFFD` 则回退 `iconv-lite` 的 gb18030。**禁止用 `TextDecoder('gb18030')`**：Docker 镜像（Alpine node，small-icu）不支持该编码，会回退 utf-8 导致乱码；iconv-lite 为纯 JS 实现且已随镜像打包，可用。
   - Subsonic 歌词端点：`handleGetLyricsBySongId` 对 `webdav`/`openlist` 源不查在线 SDK（musicSdk 无此二源，会返回错误 70），改为读歌曲同目录同名 .lrc；`resolveMountedLyric` 先按索引匹配、失败再兜底解析歌单固化 url 的 server/path/sign，多候选路径逐个尝试。
   - webdav 索引 path 为相对 baseUrl 的路径（baseUrl 已指向挂载根）；openlist 索引 path 为含 rootPath 的完整 fs 路径，二者语义不同。
