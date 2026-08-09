@@ -4706,7 +4706,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
       }
 
       // [新增] OpenList 音频流式播放（代理，支持 Range，登录用户/管理员）
-      if (pathname === '/api/openlist/stream' && req.method === 'GET') {
+      if (pathname === '/api/openlist/stream' && (req.method === 'GET' || req.method === 'HEAD')) {
         const username = requirePlayerOrAdmin() || verifyInternalStreamToken(urlObj)
         if (!username) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
@@ -5189,7 +5189,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
       }
 
       // 播放/流式代理（本地缓存优先 + 边播边写）
-      if (pathname === '/api/webdav-mounts/stream' && req.method === 'GET') {
+      if (pathname === '/api/webdav-mounts/stream' && (req.method === 'GET' || req.method === 'HEAD')) {
         const username = requirePlayerOrAdmin() || verifyInternalStreamToken(urlObj)
         if (!username) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
