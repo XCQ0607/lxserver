@@ -3,6 +3,7 @@ import * as path from 'path'
 import * as crypto from 'crypto'
 import * as http from 'http'
 import * as https from 'https'
+import iconv from 'iconv-lite'
 import { resolveHost } from './hostResolver'
 
 const CONFIG_FILE = 'webdav-mounts.json'
@@ -409,7 +410,8 @@ export const stream = (mount: WebDAVMount, filePath: string, range?: string): ht
 }
 
 /**
- * 智能解码歌词文本：优先按 UTF-8 严格解码，失败回退 GB18030（远端常见 GBK 编码 .lrc）
+ * 智能解码歌词文本：优先按 UTF-8 严格解码，失败回退 GB18030（远端常见 GBK 编码 .lrc）。
+ * 不使用 TextDecoder('gb18030')：Alpine/Docker 的 node 仅 small-icu，不支持该编码。
  */
 const decodeText = (buf: Buffer): string => {
   if (!buf || !buf.length) return ''
@@ -418,7 +420,7 @@ const decodeText = (buf: Buffer): string => {
     if (!utf8.includes('\uFFFD')) return utf8
   } catch (e) { /* 非合法 UTF-8，回退 GB18030 */ }
   try {
-    return new TextDecoder('gb18030').decode(buf)
+    return iconv.decode(buf, 'gb18030')
   } catch (e) {
     return buf.toString('utf-8')
   }
