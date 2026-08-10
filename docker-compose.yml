@@ -12,7 +12,7 @@
 services:
   lx-sync-server:
     # 使用已发布到 ghcr.io 的官方镜像(推荐, 无需本地源码/Dockerfile)
-    image: ghcr.io/boy6656598/lxserver:latest
+    image: ghcr.io/boy6656598/lxserver:3.0.1
     # 如需从源码自行构建, 请注释掉上面 image 行, 并取消下面一行的注释
     # build: .
     container_name: lx-sync-server

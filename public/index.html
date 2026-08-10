@@ -59,19 +59,32 @@
 <body>
     <!-- 登录界面 -->
     <div id="login-overlay" class="overlay">
-        <div class="login-box glass">
-            <div class="login-header">
-                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M9 18V5l12-2v13M6 15v8m6-8v8" />
-                </svg>
-                <h1>LX Sync Server</h1>
+        <div class="login-stack">
+            <div class="login-box glass">
+                <div class="login-header">
+                    <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18V5l12-2v13M6 15v8m6-8v8" />
+                    </svg>
+                    <h1>LX Sync Server</h1>
+                </div>
+                <p class="login-subtitle">管理控制台</p>
+                <input type="password" id="access-password" placeholder="请输入访问密码" autocomplete="off" />
+                <button id="login-btn" class="btn-primary">
+                    <span>登录</span>
+                </button>
+                <p id="login-error" class="error-msg"></p>
             </div>
-            <p class="login-subtitle">管理控制台</p>
-            <input type="password" id="access-password" placeholder="请输入访问密码" autocomplete="off" />
-            <button id="login-btn" class="btn-primary">
-                <span>登录</span>
-            </button>
-            <p id="login-error" class="error-msg"></p>
+
+            <!-- v3.0.1 新增功能 -->
+            <div class="login-features glass">
+                <h3>✨ v3.0.1 新增功能</h3>
+                <ul>
+                    <li><b>WebDAV 音乐挂载</b>：远程音乐边播边缓存 + 目录歌单</li>
+                    <li><b>OpenList 音乐整合</b>：网盘目录扫描、收藏与播放</li>
+                    <li><b>Subsonic 客户端</b>：音流 / Feishin 直接播放挂载音乐</li>
+                    <li><b>同目录 .lrc 歌词</b>：UTF-8 / GBK 编码自适应</li>
+                </ul>
+            </div>
         </div>
     </div>
 
@@ -291,6 +304,17 @@
                     <div class="welcome-section">
                         <h1><span id="greeting-text" class="greeting-text">你好</span>，管理员 👋</h1>
                         <p id="dashboard-date">欢迎回到 LX Sync Server 管理控制台</p>
+                    </div>
+
+                    <!-- v3.0.1 版本公告 -->
+                    <div class="release-note glass">
+                        <div class="release-note-title">🎉 v3.0.1 更新公告</div>
+                        <ul class="release-note-list">
+                            <li><b>WebDAV 音乐挂载</b>：挂载远程 WebDAV 音乐目录，边播边缓存 + 目录歌单。</li>
+                            <li><b>OpenList 音乐整合</b>：网盘目录扫描、合并列表、内嵌目录树与收藏播放。</li>
+                            <li><b>Subsonic 客户端播放</b>：音流 / Feishin 等客户端可直接播放 WebDAV / OpenList 挂载音乐。</li>
+                            <li><b>挂载歌曲同目录 .lrc 歌词</b>：`getLyricsBySongId` 读取同目录歌词，UTF-8 / GBK 编码自适应。</li>
+                        </ul>
                     </div>
 
                     <div class="stats-grid">

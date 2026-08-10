@@ -67,6 +67,69 @@ body {
     animation: fadeInUp 0.6s ease-out;
 }
 
+.login-stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    width: 100%;
+}
+
+.login-features {
+    width: 420px;
+    max-width: 90%;
+    padding: 1.1rem 1.5rem;
+    text-align: left;
+    border-radius: 12px;
+    animation: fadeInUp 0.6s ease-out;
+}
+
+.login-features h3 {
+    margin: 0 0 0.6rem;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent-secondary);
+    text-align: center;
+}
+
+.login-features ul {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    line-height: 1.8;
+}
+
+.login-features li b {
+    color: var(--text-primary);
+}
+
+.release-note {
+    margin: 1.2rem 0;
+    padding: 1.2rem 1.5rem;
+    border-radius: 12px;
+    border-left: 4px solid var(--accent-secondary);
+}
+
+.release-note-title {
+    font-size: 0.95rem;
+    font-weight: 600;
+    margin-bottom: 0.6rem;
+    color: var(--accent-secondary);
+}
+
+.release-note-list {
+    margin: 0;
+    padding-left: 1.2rem;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+    line-height: 1.8;
+}
+
+.release-note-list b {
+    color: var(--text-primary);
+}
+
 .login-header {
     display: flex;
     flex-direction: column;

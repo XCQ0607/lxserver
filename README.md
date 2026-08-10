@@ -5,7 +5,7 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v3.0.1-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/boy6656598/lxserver?style=flat-square" alt="License">
     <br>
@@ -235,7 +235,7 @@ docker run -d \
   -v $(pwd)/music:/server/music \
   --name lx-sync-server \
   --restart unless-stopped \
-  ghcr.io/boy6656598/lxserver:latest
+  ghcr.io/boy6656598/lxserver:3.0.1
 ```
 
 **从源码构建镜像（如需自定义或自行发布 Docker Hub）：**
