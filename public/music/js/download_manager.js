@@ -1461,6 +1461,13 @@ class DownloadManager {
     }
 
     // Render a single task row item to HTML
+    addTaskToPlaylist(taskId) {
+        const task = this.tasks.find(item => item.id === taskId);
+        if (task?.song && typeof window.openPlaylistAddModalForSongObject === 'function') {
+            window.openPlaylistAddModalForSongObject(task.song);
+        }
+    }
+
     renderTaskHtml(task) {
         const coverSrc = this.getSongCover(task.song);
         const sourceName = {
@@ -1603,7 +1610,10 @@ class DownloadManager {
                 </div>
 
                 <!-- Actions -->
-                <div class="flex items-center pl-1 opacity-0 group-hover:opacity-100 transition-all transform translate-x-2 group-hover:translate-x-0">
+                <div class="flex items-center pl-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all sm:translate-x-2 group-hover:translate-x-0">
+                    <button onclick="window.SystemDownloadManager.addTaskToPlaylist('${task.id}')" class="w-8 h-8 rounded-full border border-emerald-100 text-emerald-500 hover:bg-emerald-50 flex items-center justify-center transition-colors mr-1 shadow-sm" title="添加到歌单">
+                        <i class="fas fa-plus text-xs"></i>
+                    </button>
                     ${actionBtnHTML}
                 </div>
             </div>

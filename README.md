@@ -111,7 +111,7 @@
 
 ### 10. Subsonic 协议与全网检索支持
 
-全面适配 Subsonic 协议，支持使用各类 Subsonic 客户端（如音流、Feishin 等）连接并播放本站资源。支持在 Subsonic 客户端中通过 `wy:`, `kg:`, `tx:`, `kw:`, `mg:` 等指定平台前缀，或 `online:` / `local:` 强制指定全网在线或本地搜索。
+全面适配 Subsonic 协议，支持使用各类 Subsonic 客户端（如音流、Feishin 等）连接并播放本站资源。可通过客户端的音乐目录选择本地、全部在线或指定平台，也可在关键词前使用 `wy:`、`kg:`、`tx:`、`kw:`、`mg:` 指定平台，使用 `all:` / `online:` 或 `local:` 强制全部在线或本地搜索。
 
 <p align="center">
   <img src="md/subsonic.png" width="400" alt="Subsonic 支持">
@@ -210,8 +210,8 @@ services:
       # - FRONTEND_PASSWORD=123456
       # - ENABLE_WEBPLAYER_AUTH=true
       # - WEBPLAYER_PASSWORD=yourpassword
-      # - ADMIN_PATH=
-      # - PLAYER_PATH=/music
+      # - ADMIN_PATH=/music
+      # - PLAYER_PATH=/
 ```
 
 ### 方式三：直接运行 (Git Clone)
@@ -235,8 +235,8 @@ npm start
 
 ### 3. 访问说明
 
-- **Web 播放器**: `http://your-ip:9527` (默认根路径，可通过 `PLAYER_PATH` 修改)
-- **同步管理后台**: `http://your-ip:9527/admin` (默认路径 `/admin`，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+- **Web 播放器**: `http://your-ip:9527` (默认路径，可通过 `PLAYER_PATH` 修改)
+- **同步管理后台**: `http://your-ip:9527/music` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
 
 ---
 
@@ -246,7 +246,7 @@ npm start
 
 - **Backend (Express + WebSocket)**: 核心同步逻辑与 WebDAV 备份。
 - **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为根路径 `/`。
-- **Console (Vanilla JS)**: 位于 `/admin` 路径，负责用户与数据管理。
+- **Console (Vanilla JS)**: 位于 `/music` 路径，负责用户与数据管理。
 
 ---
 
@@ -258,8 +258,8 @@ npm start
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
 | `BIND_IP`                             | `bindIP`                           | 绑定 IP                                                            | `0.0.0.0`        |
-| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径 (默认为 `/admin`)                             | `/admin`           |
-| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为空，即根路径 `/`)                        | (空)               |
+| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/music`           |
+| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
 | `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持 (服务默认开启)                          | `true`           |
 | `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 访问路径 (默认为 `/rest`)                               | `/rest`          |
 | `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |

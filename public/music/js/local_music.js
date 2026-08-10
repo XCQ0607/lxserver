@@ -556,6 +556,9 @@ window.LocalMusicManager = {
                 case 'download':
                     this.downloadSingle(index);
                     break;
+                case 'playlist':
+                    this.addItemToPlaylist(index);
+                    break;
                 case 'delete':
                     this.deleteSingle(index);
                     break;
@@ -1174,8 +1177,12 @@ window.LocalMusicManager = {
     },
 
     changePage(delta) {
+        this.goToPage(this.currentPage + delta);
+    },
+
+    goToPage(page) {
         const totalPages = this.getTotalPages();
-        const nextPage = Math.min(totalPages, Math.max(1, this.currentPage + delta));
+        const nextPage = page === 'last' ? totalPages : Math.min(totalPages, Math.max(1, Number(page) || 1));
         if (nextPage === this.currentPage) return;
         this.currentPage = nextPage;
         this.render();
@@ -1186,8 +1193,10 @@ window.LocalMusicManager = {
     updatePagination() {
         const pagination = document.getElementById('lm-pagination');
         const info = document.getElementById('lm-page-info');
+        const first = document.getElementById('lm-page-first');
         const prev = document.getElementById('lm-page-prev');
         const next = document.getElementById('lm-page-next');
+        const last = document.getElementById('lm-page-last');
         if (!pagination) return;
 
         const total = this.displayData.length;
@@ -1201,8 +1210,10 @@ window.LocalMusicManager = {
         }
 
         if (info) info.textContent = `第 ${this.currentPage} / ${totalPages} 页 (${total} 首)`;
+        if (first) first.disabled = this.currentPage <= 1;
         if (prev) prev.disabled = this.currentPage <= 1;
         if (next) next.disabled = this.currentPage >= totalPages;
+        if (last) last.disabled = this.currentPage >= totalPages;
     },
 
     render() {
@@ -1322,7 +1333,7 @@ window.LocalMusicManager = {
                 </div>
 
                 <!-- Song & Cover -->
-                <div class="col-span-8 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0 pr-2">
+                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0 pr-2">
                     ${coverHtml}
                     <div class="min-w-0 flex-1 truncate">
                         <div class="font-bold text-sm md:text-base t-text-main truncate group-hover:text-emerald-500 transition-colors cursor-pointer" data-lm-action="play" data-lm-index="${index}">
@@ -1396,7 +1407,7 @@ window.LocalMusicManager = {
                 </div>
 
                 <!-- Action Button -->
-                <div class="col-span-3 sm:col-span-2 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 md:gap-2">
+                <div class="col-span-4 sm:col-span-2 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 md:gap-2">
                     <div class="hidden lg:block text-xs text-right pr-2 font-mono t-text-muted shrink-0 mr-1">
                         ${formatSize(item.size)}
                     </div>
@@ -1407,17 +1418,21 @@ window.LocalMusicManager = {
                         </button>
                     ` : ''}
                     <button data-lm-action="play" data-lm-index="${index}"
-                            class="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-emerald-500 hover:border-emerald-300 transition-all shadow-sm shrink-0" title="播放">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-emerald-500 hover:border-emerald-300 transition-all shadow-sm shrink-0" title="播放">
                         <i class="fas fa-play text-[10px] ml-0.5"></i>
                     </button>
                     <!-- Download -->
                     <button data-lm-action="download" data-lm-index="${index}"
-                            class="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-blue-500 hover:border-blue-300 transition-all shadow-sm shrink-0" title="保存到设备">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-blue-500 hover:border-blue-300 transition-all shadow-sm shrink-0" title="保存到设备">
                         <i class="fas fa-download text-[10px]"></i>
+                    </button>
+                    <button data-lm-action="playlist" data-lm-index="${index}"
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main text-emerald-500 hover:bg-emerald-50 hover:border-emerald-300 transition-all shadow-sm shrink-0" title="添加到歌单">
+                        <i class="fas fa-plus text-[10px]"></i>
                     </button>
                     <!-- Deletion from single operations -->
                     <button data-lm-action="delete" data-lm-index="${index}"
-                            class="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-muted hover:text-red-500 hover:border-red-300 transition-all shadow-sm shrink-0" title="删除">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-muted hover:text-red-500 hover:border-red-300 transition-all shadow-sm shrink-0" title="删除">
                         <i class="far fa-trash-alt text-[10px]"></i>
                     </button>
                 </div>
@@ -1657,6 +1672,21 @@ window.LocalMusicManager = {
         }
 
         window.openPlaylistAddModal(collectableTargets.map(item => this.buildPlaylistSong(item)).filter(Boolean));
+    },
+
+    addItemToPlaylist(index) {
+        const item = this.displayData[index];
+        if (!item) return;
+        if (!this.isPlaylistCollectable(item)) {
+            if (typeof showError === 'function') {
+                showError('歌曲不在曲库中，无法收藏到歌单。请先使用“手动关联”绑定平台歌曲 ID。');
+            }
+            return;
+        }
+        const song = this.buildPlaylistSong(item);
+        if (song && typeof window.openPlaylistAddModalForSongObject === 'function') {
+            window.openPlaylistAddModalForSongObject(song);
+        }
     },
 
     playItem(index) {
@@ -2362,15 +2392,28 @@ window.LocalMusicManager = {
                         <div class="text-[10px] uppercase font-black t-text-muted opacity-30 tracking-widest mb-0.5">${item.source}</div>
                         <div class="text-[11px] font-mono font-bold ${isMatch ? 'text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded-lg' : 't-text-main'}">${item.interval || '--:--'}</div>
                     </div>
-                    <button onclick="window.LocalMusicManager.linkItem(${originalIdx})"
-                        class="px-6 py-2.5 ${isMatch ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 't-bg-track hover:t-bg-item-hover t-text-main border t-border-main'} font-bold text-xs rounded-xl shadow-lg transition-all active:scale-95">
-                        关联
-                    </button>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <button onclick="window.LocalMusicManager.addManualResultToPlaylist(${originalIdx})"
+                            class="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-50 text-emerald-500 hover:bg-emerald-100 border border-emerald-100 transition-all active:scale-95" title="添加到歌单">
+                            <i class="fas fa-plus text-xs"></i>
+                        </button>
+                        <button onclick="window.LocalMusicManager.linkItem(${originalIdx})"
+                            class="px-6 py-2.5 ${isMatch ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 't-bg-track hover:t-bg-item-hover t-text-main border t-border-main'} font-bold text-xs rounded-xl shadow-lg transition-all active:scale-95">
+                            关联
+                        </button>
+                    </div>
                 </div>
             `;
         });
 
         container.innerHTML = html || `<div class="text-center py-20 opacity-50 font-bold">未找到搜索结果</div>`;
+    },
+
+    addManualResultToPlaylist(index) {
+        const song = this.currentManualResults?.[index];
+        if (song && typeof window.openPlaylistAddModalForSongObject === 'function') {
+            window.openPlaylistAddModalForSongObject(song);
+        }
     },
 
     async linkItem(idx) {

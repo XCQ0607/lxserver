@@ -513,16 +513,21 @@ window.SongListManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- Actions -->
-                <div class="col-span-2 md:col-span-1 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button class="p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" 
-                            title="播放" 
+                <div class="col-span-2 md:col-span-1 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors"
+                            title="播放"
                             onclick="event.stopPropagation(); window.SongListManager.playSong(${index})">
                         <i class="fas fa-play w-3.5 h-3.5"></i>
                     </button>
-                    <button class="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" 
-                            title="下载" 
+                    <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors"
+                            title="下载"
                             onclick="event.stopPropagation(); downloadSong(${JSON.stringify(song).replace(/"/g, '&quot;')})">
                         <i class="fas fa-download w-3.5 h-3.5"></i>
+                    </button>
+                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
+                            title="添加到歌单"
+                            onclick="event.stopPropagation(); window.SongListManager.addSongToPlaylist(${index})">
+                        <i class="fas fa-plus w-3.5 h-3.5"></i>
                     </button>
                 </div>
             </div>
@@ -538,10 +543,12 @@ window.SongListManager = (function () {
     }
 
     function updatePaginationUI() {
-        document.getElementById('songlist-page-info').innerText = `第 ${currentState.page} 页`;
+        const totalPages = Math.max(1, Math.ceil((currentState.total || currentState.list.length) / currentState.limit));
+        document.getElementById('songlist-page-info').innerText = `第 ${currentState.page} / ${totalPages} 页`;
+        document.getElementById('btn-songlist-first').disabled = currentState.page <= 1;
         document.getElementById('btn-songlist-prev').disabled = currentState.page <= 1;
-        // Simplified check for next page, can be improved with total/limit
-        document.getElementById('btn-songlist-next').disabled = currentState.list.length < currentState.limit;
+        document.getElementById('btn-songlist-next').disabled = currentState.page >= totalPages;
+        document.getElementById('btn-songlist-last').disabled = currentState.page >= totalPages;
     }
 
     // --- Public Methods ---
@@ -577,9 +584,13 @@ window.SongListManager = (function () {
             loadList(1);
         },
         changePage: function (delta) {
-            const next = currentState.page + delta;
-            if (next < 1) return;
-            loadList(next);
+            this.goToPage(currentState.page + delta);
+        },
+        goToPage: function (page) {
+            const totalPages = Math.max(1, Math.ceil((currentState.total || currentState.list.length) / currentState.limit));
+            const target = page === 'last' ? totalPages : Math.min(totalPages, Math.max(1, Number(page) || 1));
+            if (target === currentState.page) return;
+            loadList(target);
             document.getElementById('songlist-grid').scrollTo({ top: 0, behavior: 'smooth' });
         },
         openDetail: function (id, source) {
@@ -599,6 +610,14 @@ window.SongListManager = (function () {
                 // 单曲点击：加入默认列表 (shouldAddToDefault = true)
                 window.updatePlaylist(listWithSource, index, 'songlist', true);
             }
+        },
+        addSongToPlaylist: function (index) {
+            const song = detailState.list[index];
+            if (!song || typeof window.openPlaylistAddModalForSongObject !== 'function') return;
+            window.openPlaylistAddModalForSongObject({
+                ...song,
+                source: song.source || detailState.source
+            });
         },
         playAll: function () {
             if (detailState.list.length === 0) return;

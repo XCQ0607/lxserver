@@ -52,8 +52,8 @@ const config: LX.Config = {
   'proxy.all.address': '',
 
   // 访问路径配置
-  'admin.path': '/admin', // 后台管理路径，默认为 /admin
-  'player.path': '', // 播放器路径，默认为根路径 /
+  'admin.path': '/music', // 后台管理路径
+  'player.path': '/', // 播放器路径，默认为根路径 /
   'subsonic.enable': true, // 是否启用 Subsonic 服务
   'subsonic.path': '/rest', // Subsonic 访问路径
   'subsonic.enableDebug': false, // 是否开启 Subsonic 调试日志模式

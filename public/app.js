@@ -319,7 +319,7 @@ class App {
                 window.location.href = 'filemanager.html';
                 return;
             case 'music':
-                window.location.href = (window.CONFIG && window.CONFIG['player.path']) || '/music';
+                window.location.href = (window.CONFIG && window.CONFIG['player.path']) || '/';
                 return;
         }
     }
@@ -1785,13 +1785,13 @@ class App {
                 form.elements['admin.path'].value = config['admin.path'] ?? '';
             }
             if (form.elements['player.path']) {
-                const pPath = config['player.path'] ?? '/music';
+                const pPath = config['player.path'] ?? '/';
                 form.elements['player.path'].value = pPath === '' ? '/' : pPath;
             }
 
             // [新增] 同时更新侧边栏链接
             const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/music'));
+            if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/'));
 
             // Subsonic 配置
             if (form.elements['subsonic.enable']) {
@@ -1922,7 +1922,7 @@ class App {
 
             // 更新侧边栏播放器链接
             const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/music');
+            if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/');
 
             if (!silent) {
                 if (res.warning) {

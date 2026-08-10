@@ -34,6 +34,7 @@ let currentPlayingScope = 'network'; // Scope for active playback
 window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' - Scope for UI view
 let currentPlayingSong = null; // Track currently playing song independently of view
 window.batchCollectSongs = null; // Store songs for batch collection modal
+window.playlistAddTargetSong = null; // Explicit single-song target from any song list
 const audio = document.getElementById('audio-player');
 let currentPlaybackRate = 1.0;
 
@@ -155,6 +156,24 @@ let currentRawKlrc = ''; // 逐词歌词 (klyric/lxlyric)
 let lastLyricSongId = null; // 追踪上次加载歌词的歌曲ID
 
 let currentRecoveryState = null; // 播放失败自动恢复状态管理
+let currentPlaybackErrorHandler = null; // 当前音频地址的错误恢复监听器
+let shouldAutoRecoverPlayback = false;
+let playbackRecoveryTriggeredForRequestId = 0;
+
+function handleUnexpectedPlaybackPause() {
+    const requestId = currentRecoveryState?.thisRequestId;
+    if (!shouldAutoRecoverPlayback || !requestId || audio.ended || !audio.src) return false;
+    if (playbackRecoveryTriggeredForRequestId === requestId) return false;
+
+    shouldAutoRecoverPlayback = false;
+    playbackRecoveryTriggeredForRequestId = requestId;
+    if (currentPlaybackErrorHandler && typeof audio.removeEventListener === 'function') {
+        audio.removeEventListener('error', currentPlaybackErrorHandler);
+        currentPlaybackErrorHandler = null;
+    }
+    void runRecoveryFlow(new Error('播放链接意外暂停'));
+    return true;
+}
 
 // 从 localStorage 加载设置
 try {
@@ -696,6 +715,7 @@ async function handleLogout() {
 
     try {
         if (typeof audio !== 'undefined' && audio) {
+            shouldAutoRecoverPlayback = false;
             audio.pause();
             audio.currentTime = 0;
             audio.src = '';
@@ -714,7 +734,7 @@ async function handleLogout() {
     sessionStorage.clear();
     if (agreementAccepted) localStorage.setItem('lx_agreement_accepted', agreementAccepted);
 
-    const playerPath = (window.CONFIG && window.CONFIG['player.path']) || (window.lx_config && window.lx_config['player.path']) || '/music';
+    const playerPath = (window.CONFIG && window.CONFIG['player.path']) || (window.lx_config && window.lx_config['player.path']) || '/';
     const normalizedPlayerPath = (playerPath === '/' || playerPath === '') ? '' : playerPath.replace(/\/+$/, '');
     window.location.replace(`${normalizedPlayerPath}/login`);
 }
@@ -1323,7 +1343,10 @@ function renderQueue() {
                     </div>
                 </div>
 
-                <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button onclick="event.stopPropagation(); openPlaylistAddModalForSongObject(currentPlaylist[${index}])" class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
+                        <i class="fas fa-plus text-xs"></i>
+                    </button>
                     <button onclick="event.stopPropagation(); removeFromQueue(${index})" class="p-2 text-gray-400 hover:text-red-500 transition-colors">
                         <i class="fas fa-trash-alt text-xs"></i>
                     </button>
@@ -1411,6 +1434,7 @@ function removeFromQueue(index) {
         // Typically people expect it to stay at same index but if it was last, wrap around
         if (currentPlaylist.length === 0) {
             currentIndex = -1;
+            shouldAutoRecoverPlayback = false;
             try { audio.pause(); } catch (e) { }
         } else if (currentIndex >= currentPlaylist.length) {
             currentIndex = 0; // Wrap to start
@@ -1433,6 +1457,7 @@ async function clearQueue() {
     if (await showSelect('清空队列', '确定要清空当前播放队列吗？', { danger: true })) {
         currentPlaylist = [];
         currentIndex = -1;
+        shouldAutoRecoverPlayback = false;
         try { audio.pause(); } catch (e) { }
         renderQueue();
         savePlaybackState(); // Save empty state
@@ -2460,11 +2485,14 @@ function renderArtistSongsUI(list, page) {
 
                     <!-- Actions -->
                     <div class="col-span-2 sm:col-span-1 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
+                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
                             <i class="fas fa-play w-3.5 h-3.5"></i>
                         </button>
-                        <button class="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                        <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
                             <i class="fas fa-download w-3.5 h-3.5"></i>
+                        </button>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
+                            <i class="fas fa-plus w-3.5 h-3.5"></i>
                         </button>
                     </div>
                 </div>
@@ -2473,7 +2501,11 @@ function renderArtistSongsUI(list, page) {
         </div>
 
         <!-- 歌手详情内部分页控件 -->
-        <div class=" mt-2 flex-shrink-0">
+        <div class="mt-2 flex-shrink-0 flex items-center justify-center gap-2 md:gap-4">
+            <button onclick="artistSongsFirstPage()" title="首页"
+                class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors ${currentPage <= 1 ? 'opacity-30 pointer-events-none' : ''}">
+                <i class="fas fa-angles-left"></i><span class="hidden md:inline ml-1">首页</span>
+            </button>
             <button onclick="artistSongsPrevPage()"
                 class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors ${currentPage <= 1 ? 'opacity-30 pointer-events-none' : ''}">
                 <i class="fas fa-chevron-left"></i> 上一页
@@ -2482,6 +2514,10 @@ function renderArtistSongsUI(list, page) {
             <button onclick="artistSongsNextPage()"
                 class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors ${currentPage >= totalPages ? 'opacity-30 pointer-events-none' : ''}">
                 下一页 <i class="fas fa-chevron-right"></i>
+            </button>
+            <button onclick="artistSongsLastPage()" title="末页"
+                class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors ${currentPage >= totalPages ? 'opacity-30 pointer-events-none' : ''}">
+                <span class="hidden md:inline mr-1">末页</span><i class="fas fa-angles-right"></i>
             </button>
         </div>
     `;
@@ -2499,6 +2535,10 @@ function artistSongsPrevPage() {
     if (!window.artistSongsPage || window.artistSongsPage <= 1) return;
     renderArtistSongsUI(list, window.artistSongsPage - 1);
 }
+function artistSongsFirstPage() {
+    const list = window.currentArtistSongsCache;
+    if (list && (window.artistSongsPage || 1) !== 1) renderArtistSongsUI(list, 1);
+}
 function artistSongsNextPage() {
     const list = window.currentArtistSongsCache;
     if (!list) return;
@@ -2509,8 +2549,18 @@ function artistSongsNextPage() {
     if ((window.artistSongsPage || 1) >= totalPages) return;
     renderArtistSongsUI(list, (window.artistSongsPage || 1) + 1);
 }
+function artistSongsLastPage() {
+    const list = window.currentArtistSongsCache;
+    if (!list) return;
+    const totalItems = list.length;
+    let itemsPerPage = (settings && settings.itemsPerPage === 'all') ? totalItems : parseInt((settings && settings.itemsPerPage) || 20);
+    if (!itemsPerPage || itemsPerPage <= 0) itemsPerPage = 20;
+    renderArtistSongsUI(list, Math.max(1, Math.ceil(totalItems / itemsPerPage)));
+}
 window.artistSongsPrevPage = artistSongsPrevPage;
 window.artistSongsNextPage = artistSongsNextPage;
+window.artistSongsFirstPage = artistSongsFirstPage;
+window.artistSongsLastPage = artistSongsLastPage;
 
 const ARTIST_ALBUM_PAGE_SIZE = 50;
 const ARTIST_ALBUM_MAX_PAGES = 100;
@@ -3037,15 +3087,33 @@ function renderResults(list) {
                         onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
                     <i class="fas fa-download w-3 h-3 sm:w-4 sm:h-4"></i>
                 </button>
+                <button class="add-to-playlist-btn p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
+                        title="添加到歌单">
+                    <i class="fas fa-plus w-3 h-3 sm:w-4 sm:h-4"></i>
+                </button>
                 ${currentSearchScope !== 'network' ? `
-                <button class="p-1 sm:p-1.5 hover:bg-red-50 rounded-lg text-red-600 transition-colors" 
-                        title="删除" 
-                        onclick="event.stopPropagation(); deleteSingleSong('${item.id}')">
+                <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 rounded-lg text-red-600 transition-colors"
+                        title="删除">
                     <i class="fas fa-trash w-3 h-3 sm:w-4 sm:h-4"></i>
                 </button>
                 ` : ''}
             </div>
         `;
+
+        const addToPlaylistBtn = row.querySelector('.add-to-playlist-btn');
+        if (addToPlaylistBtn) {
+            addToPlaylistBtn.onclick = (event) => {
+                event.stopPropagation();
+                openPlaylistAddModalForSong(actualIndexInOriginal);
+            };
+        }
+        const deleteSongBtn = row.querySelector('.delete-song-btn');
+        if (deleteSongBtn) {
+            deleteSongBtn.onclick = (event) => {
+                event.stopPropagation();
+                deleteSingleSong(String(item.id));
+            };
+        }
 
         container.appendChild(row);
     });
@@ -4258,26 +4326,21 @@ async function runRecoveryFlow(error) {
             await runRecoveryFlow(error);
         }
     } else if (currentStep === 'switch_platform') {
-        if (currentRecoveryState.currentSong === currentRecoveryState.originalSong) {
-            showInfo('正在自动尝试换源匹配...');
-            const matchedSong = await findOtherSourceMatch(currentRecoveryState.originalSong);
-            if (matchedSong) {
-                currentRecoveryState.currentSong = matchedSong;
-                currentRecoveryState.triedPlatforms.push(matchedSong.source);
-                const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
-                currentRecoveryState.currentQuality = bestNextQuality;
-                currentRecoveryState.triedQualities = [bestNextQuality];
-                
-                showInfo(`找到备选源，尝试从 ${getSourceName(matchedSong.source)} 播放...`);
-                // Re-invoke playSong with isRetry = true
-                playSong(matchedSong, currentRecoveryState.currentIndex, bestNextQuality, false, true);
-            } else {
-                // No match found, move to next recovery step
-                currentRecoveryState.currentStepIndex++;
-                await runRecoveryFlow(error);
-            }
+        showInfo('正在自动尝试换源匹配...');
+        const matches = await findOtherSourceMatches(currentRecoveryState.originalSong);
+        const matchedSong = matches.find(song => !currentRecoveryState.triedPlatforms.includes(song.source));
+        if (matchedSong) {
+            currentRecoveryState.currentSong = matchedSong;
+            currentRecoveryState.triedPlatforms.push(matchedSong.source);
+            const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
+            currentRecoveryState.currentQuality = bestNextQuality;
+            currentRecoveryState.triedQualities = [bestNextQuality];
+
+            showInfo(`找到备选源，尝试从 ${getSourceName(matchedSong.source)} 播放...`);
+            // Keep this recovery step active so another platform can be tried if needed.
+            playSong(matchedSong, currentRecoveryState.currentIndex, bestNextQuality, false, true);
         } else {
-            // Already switched once, move to next recovery step
+            // No untried source remains, move to the next recovery strategy.
             currentRecoveryState.currentStepIndex++;
             await runRecoveryFlow(error);
         }
@@ -4311,6 +4374,13 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     const thisRequestId = ++loadingRequestCounter;
     currentLoadingSongId = thisRequestSongId;
     currentLoadingRequestId = thisRequestId;
+    shouldAutoRecoverPlayback = false;
+    playbackRecoveryTriggeredForRequestId = 0;
+
+    if (currentPlaybackErrorHandler) {
+        audio.removeEventListener('error', currentPlaybackErrorHandler);
+        currentPlaybackErrorHandler = null;
+    }
 
     if (!isRetry) {
         const order = (settings.playbackErrorPriority || 'platform,quality,next').split(',');
@@ -4474,7 +4544,12 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         if (playbackSong !== song) {
             currentPlayingSong = playbackSong;
             window.currentPlayingSong = playbackSong;
-            if (currentRecoveryState) currentRecoveryState.currentSong = playbackSong;
+            if (currentRecoveryState) {
+                currentRecoveryState.currentSong = playbackSong;
+                if (playbackSong.source && !currentRecoveryState.triedPlatforms.includes(playbackSong.source)) {
+                    currentRecoveryState.triedPlatforms.push(playbackSong.source);
+                }
+            }
             updateMediaSessionMetadata(playbackSong);
             fetchLyric(playbackSong, currentQuality);
         }
@@ -4502,18 +4577,26 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
         // [Removed] 这里的代理逻辑已统一移动至 fetchSongUrl 阶段处理，确保预加载地址一致性
 
-        // Pre-handle error for invalid cache links
-        if (currentSourceType !== 'normal') {
-            const retryHandler = () => {
+        // Media errors happen asynchronously after play() resolves, so every source
+        // needs an explicit recovery entry point.
+        currentPlaybackErrorHandler = () => {
+            if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
+            currentPlaybackErrorHandler = null;
+
+            if (currentSourceType !== 'normal') {
+                shouldAutoRecoverPlayback = false;
                 console.warn(`[Player] ${currentSourceType} link failed, retrying online...`);
                 if (currentSourceType === 'cache') localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
                 playSong(playbackSong, index, targetQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
-            };
-            audio.addEventListener('error', retryHandler, { once: true });
-            const cleanup = () => audio.removeEventListener('error', retryHandler);
-            audio.addEventListener('playing', cleanup, { once: true });
-            audio.addEventListener('pause', cleanup, { once: true });
-        }
+                return;
+            }
+
+            playbackRecoveryTriggeredForRequestId = thisRequestId;
+            shouldAutoRecoverPlayback = false;
+            const mediaError = audio.error || new Error('媒体播放失败');
+            void runRecoveryFlow(mediaError);
+        };
+        audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
 
         audio.src = finalUrl;
 
@@ -4533,6 +4616,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             if (settings.enableCrossfade) audio.volume = 0;
             else audio.volume = typeof currentVolume !== 'undefined' ? currentVolume : 1;
 
+            shouldAutoRecoverPlayback = true;
             await audio.play();
 
             if (settings.enableCrossfade) fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 1000);
@@ -4571,13 +4655,26 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 }
             }
         } catch (playError) {
-            // [Fix] 仅在请求仍有效且非 AbortError 时显示“请点击”提示，防止切歌太快导致旧请求的错误覆盖新请求的新状态
+            // Only browser autoplay blocking needs a manual click. Decode, network,
+            // and unsupported-source failures should continue through auto recovery.
             if (currentLoadingRequestId !== thisRequestId) return;
             const isAbort = playError && (playError.name === 'AbortError' || playError.code === 20);
-            if (isAbort) return;
+            if (isAbort) {
+                shouldAutoRecoverPlayback = false;
+                return;
+            }
 
-            console.error('[Player] Playback blocked:', playError);
-            setPlayerStatus('请点击播放按钮');
+            const isAutoplayBlocked = playError && playError.name === 'NotAllowedError';
+            if (isAutoplayBlocked) {
+                shouldAutoRecoverPlayback = false;
+                console.warn('[Player] Playback blocked by browser autoplay policy:', playError);
+                setPlayerStatus('请点击播放按钮');
+            } else if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId) {
+                shouldAutoRecoverPlayback = false;
+                playbackRecoveryTriggeredForRequestId = thisRequestId;
+                console.error('[Player] Playback failed:', playError);
+                await runRecoveryFlow(playError);
+            }
         }
 
         // [Trigger Prefetch] 确保即便 play() 被拦截也尝试发起下一首预读
@@ -4679,6 +4776,20 @@ function savePlayHistory(song, quality) {
     }
 }
 
+function getConfiguredAddMusicLocationType() {
+    return window.CONFIG && window.CONFIG['list.addMusicLocationType'] === 'bottom' ? 'bottom' : 'top';
+}
+
+function addMusicByConfiguredLocation(list, music) {
+    const addMusicLocationType = getConfiguredAddMusicLocationType();
+    if (addMusicLocationType === 'bottom') {
+        list.push(music);
+    } else {
+        list.unshift(music);
+    }
+    return addMusicLocationType;
+}
+
 // 添加到默认列表 (试听列表)
 async function addToDefaultList(song) {
     if (!currentListData || !currentListData.defaultList) return;
@@ -4696,12 +4807,15 @@ async function addToDefaultList(song) {
             list.splice(idx, 1);
         }
 
-        // Add to top
-        list.unshift(cleanedData);
+        const addMusicLocationType = addMusicByConfiguredLocation(list, cleanedData);
 
         // Limit size to avoid bloat (e.g., 200 songs)
         if (list.length > 200) {
-            list.length = 200;
+            if (addMusicLocationType === 'bottom') {
+                list.splice(0, list.length - 200);
+            } else {
+                list.length = 200;
+            }
         }
 
         // Sync
@@ -4991,6 +5105,7 @@ async function togglePlay() {
             if (settings.enableCrossfade) {
                 audio.volume = 0;
             }
+            shouldAutoRecoverPlayback = true;
             await audio.play();
             updatePlayButton(true);
 
@@ -4998,6 +5113,7 @@ async function togglePlay() {
                 fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 600);
             }
         } catch (e) {
+            shouldAutoRecoverPlayback = false;
             console.error("[Player] Play blocked:", e);
         }
     } else {
@@ -5005,6 +5121,7 @@ async function togglePlay() {
         if (settings.enableCrossfade) {
             await fadeVolume(0, 600);
         }
+        shouldAutoRecoverPlayback = false;
         audio.pause();
         if (window._autoSkipTimer) {
             clearTimeout(window._autoSkipTimer);
@@ -5223,6 +5340,7 @@ audio.addEventListener('pause', () => {
     // [Fix] 这里的状态更新确保 UI 与实际播放状态同步
     setPlayerStatus('', false); // 使用智能状态显示
     updatePlayButton(false);
+    handleUnexpectedPlaybackPause();
 
     if (lyricPlayer) {
         lyricPlayer.pause();
@@ -5381,6 +5499,7 @@ window.updatePositionState = updatePositionState; // 暴露给保活模块调用
 
 // 歌曲播放结束时根据播放模式处理
 audio.addEventListener('ended', () => {
+    shouldAutoRecoverPlayback = false;
     playNext();
 });
 
@@ -6574,8 +6693,12 @@ function renderCacheList() {
                     `}
                 </div>
 
-                <div class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     ${!cacheBatchMode ? `
+                        <button onclick="event.stopPropagation(); openCacheItemPlaylist(${idx})"
+                                class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
+                            <i class="fas fa-plus text-xs"></i>
+                        </button>
                         <button onclick="event.stopPropagation(); removeCacheItem(${idx})"
                                 class="p-2 t-text-muted hover:text-red-500 transition-colors" title="删除">
                             <i class="fas fa-trash-alt text-xs"></i>
@@ -6586,6 +6709,17 @@ function renderCacheList() {
         `;
     }).join('');
 }
+
+function openCacheItemPlaylist(index) {
+    const item = currentCacheList[index];
+    if (!item) return;
+    openPlaylistAddModalForSongObject({
+        ...item,
+        songmid: item.songmid || item.songId || item.id,
+        albumName: item.albumName || item.album || ''
+    });
+}
+window.openCacheItemPlaylist = openCacheItemPlaylist;
 
 /**
  * 缓存列表专用的歌词重试逻辑
@@ -8697,6 +8831,7 @@ async function handleSyncLogout(skipConfirm = false) {
         // 3. 停止音频播放及歌词，清空内存播放状态
         if (typeof audio !== 'undefined' && audio) {
             try {
+                shouldAutoRecoverPlayback = false;
                 audio.pause();
                 audio.currentTime = 0;
                 audio.src = '';
@@ -9254,6 +9389,53 @@ async function handleRemoveList(listId, event) {
     }
 }
 
+function buildPlaylistExport(listId, exportedAt = new Date().toISOString()) {
+    if (!currentListData) return null;
+
+    let playlist;
+    if (listId === 'default') {
+        playlist = { id: 'default', name: '默认列表', source: 'lxserver', list: currentListData.defaultList || [] };
+    } else if (listId === 'love') {
+        playlist = { id: 'love', name: '我的收藏', source: 'lxserver', list: currentListData.loveList || [] };
+    } else {
+        playlist = currentListData.userList?.find(item => item.id === listId);
+    }
+    if (!playlist) return null;
+
+    const safeName = String(playlist.name || '未命名歌单')
+        .replace(/[\\/:*?"<>|\x00-\x1f]/g, '_')
+        .replace(/[. ]+$/g, '') || '未命名歌单';
+    const payload = {
+        type: 'lxserver-playlist',
+        version: 1,
+        exportedAt,
+        playlist: { ...playlist, list: Array.isArray(playlist.list) ? playlist.list : [] }
+    };
+    return {
+        fileName: `${safeName}.json`,
+        json: JSON.stringify(payload, null, 2)
+    };
+}
+
+function exportPlaylistToLocal(listId, event) {
+    if (event) event.stopPropagation();
+    const exported = buildPlaylistExport(listId);
+    if (!exported) {
+        showError('未找到要导出的歌单');
+        return;
+    }
+
+    const url = URL.createObjectURL(new Blob([exported.json], { type: 'application/json;charset=utf-8' }));
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = exported.fileName;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
+    showSuccess(`歌单已导出: ${exported.fileName}`);
+}
+
 function getFavoriteSidebarOrder() {
     return Array.isArray(settings.favoriteSidebarOrder) ? settings.favoriteSidebarOrder : [];
 }
@@ -9380,6 +9562,7 @@ function renderMyLists(data) {
             <i class="fas ${icon} w-5 t-text-muted group-hover:text-emerald-500 transition-colors flex-shrink-0"></i>
             ${displayName.length > 8 ? `<div class="ml-2 flex-1 overflow-hidden">${nameHtml}</div>` : nameHtml}
             <span class="text-xs text-gray-300 group-hover:t-text-muted mr-2 flex-shrink-0">${count}</span>
+            <button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="导出歌单到本地" aria-label="导出歌单到本地" onclick="exportPlaylistToLocal('${id}', event)"><i class="fas fa-download text-[10px]"></i></button>
             ${typeof listObj !== 'string' ? `<button type="button" class="text-gray-300 hover:text-emerald-500 flex-shrink-0 mr-2 transition-colors" title="重命名歌单" aria-label="重命名歌单" onclick="handleRenameList('${id}', event)"><i class="fas fa-pen text-[10px]"></i></button>` : ''}
             ${id !== 'default' && id !== 'love' ? `<i class="fas fa-trash text-gray-300 hover:text-red-500 hidden group-hover:block flex-shrink-0" onclick="handleRemoveList('${id}', event)"></i>` : ''}
         `;
@@ -9460,7 +9643,7 @@ function renderMyLists(data) {
     }
 }
 
-function handleListClick(listId, skipAutoUpdate = false) {
+function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     exitListSecondaryModes();
 
     if (!currentListData) return;
@@ -9550,7 +9733,10 @@ function handleListClick(listId, skipAutoUpdate = false) {
     }
 
     // Render
-    currentPage = 1; // Reset pagination
+    if (!preservePage) {
+        currentPage = 1;
+        window.currentPage = 1;
+    }
     renderResults(list);
 
     // [New] Auto Update Logic: If it's a network playlist (has sourceListId) and setting is ON, refresh background
@@ -9834,7 +10020,7 @@ async function toggleLove() {
     if (index >= 0) {
         activeListData.loveList.splice(index, 1);
     } else {
-        activeListData.loveList.push(formattedSong);
+        addMusicByConfiguredLocation(activeListData.loveList, formattedSong);
     }
 
     updatePlayerInfo(song);
@@ -10145,6 +10331,7 @@ async function refreshUserListData() {
     if (!window.SyncManager) return;
     try {
         const listData = await window.SyncManager.sync();
+        currentListData = listData;
         window.currentListData = listData;
         if (listData && listData.username !== '_open') {
             window.myPersonalListData = listData;
@@ -10156,14 +10343,16 @@ async function refreshUserListData() {
         // [New] If currently viewing a local list, refresh its contents in main view
         if (window.currentSearchScope === 'local_list' && window.currentViewingListId) {
             console.log('[Sync] Auto-refreshing current list view:', window.currentViewingListId);
-            handleListClick(window.currentViewingListId, true); // true to skip background auto-update
+            handleListClick(window.currentViewingListId, true, true);
         }
 
         // Save to cache
         await window.ListStore.set(listData).catch(e => console.error('[IDBStore] 保存失败:', e));
         console.log('[Sync] List Data Refreshed');
+        return listData;
     } catch (e) {
         console.error('[Sync] Failed to refresh list data:', e);
+        return null;
     }
 }
 
@@ -10173,6 +10362,7 @@ window.handleCreateList = handleCreateList;
 window.handleRenameList = handleRenameList;
 window.handleRefreshList = handleRefreshList;
 window.handleRemoveList = handleRemoveList;
+window.exportPlaylistToLocal = exportPlaylistToLocal;
 window.toggleFavorites = toggleFavorites;
 window.handleFavoritesClick = handleFavoritesClick;
 window.handleRemoteStep1 = handleRemoteStep1;
@@ -10910,7 +11100,7 @@ function closeCustomSourceModal() {
 // Helper to render the grid (can be called from anywhere)
 function renderPlaylistAddGrid() {
     const isBatch = !!window.batchCollectSongs;
-    const songs = isBatch ? window.batchCollectSongs : [currentPlayingSong];
+    const songs = isBatch ? window.batchCollectSongs : [window.playlistAddTargetSong || currentPlayingSong];
     const firstSong = songs[0];
     if (!firstSong) return;
 
@@ -10934,7 +11124,7 @@ function renderPlaylistAddGrid() {
 
         // Active/Inactive styles (Highlight only in single-song mode)
         if (!isBatch && isIncluded) {
-            className += "bg-emerald-500 text-white shadow-md scale-[1.02] ring-2 ring-emerald-200";
+            className += "bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200";
         } else {
             className += "bg-emerald-50 text-emerald-500 hover:bg-emerald-100 hover:shadow";
         }
@@ -10976,9 +11166,30 @@ function renderPlaylistAddGrid() {
     listContainer.appendChild(createNewBtn);
 }
 
+function hasPlaylistData(data) {
+    return !!data && Array.isArray(data.loveList) && Array.isArray(data.userList) &&
+        data.userList.every(list => list && Array.isArray(list.list));
+}
+
+async function ensurePlaylistDataAvailable() {
+    const getActiveData = () => isUserLoggedIn()
+        ? (window.myPersonalListData || currentListData)
+        : currentListData;
+
+    let activeListData = getActiveData();
+    if (hasPlaylistData(activeListData)) return activeListData;
+
+    if (window.SyncManager?.client && typeof refreshUserListData === 'function') {
+        await refreshUserListData();
+        activeListData = getActiveData();
+    }
+    return hasPlaylistData(activeListData) ? activeListData : null;
+}
+
 async function openPlaylistAddModal(batchSongs = null) {
-    if (!currentListData) {
-        showError('请先登录后使用收藏功能');
+    const activeListData = await ensurePlaylistDataAvailable();
+    if (!activeListData) {
+        showError('未找到可用歌单，请先登录或创建歌单');
         return;
     }
 
@@ -10994,14 +11205,22 @@ async function openPlaylistAddModal(batchSongs = null) {
         if (collectableSongs.length === 0) {
             showError('歌曲不在曲库中，无法收藏到歌单。请先使用“手动关联”绑定平台歌曲 ID。');
             window.batchCollectSongs = null;
+            window.playlistAddTargetSong = null;
             return;
         }
         if (unavailableCount > 0) {
             showInfo(`已跳过 ${unavailableCount} 首未绑定平台 ID 的歌曲；歌曲不在曲库中，无法收藏到歌单。`);
         }
-        window.batchCollectSongs = collectableSongs;
+        if (collectableSongs.length === 1) {
+            window.batchCollectSongs = null;
+            window.playlistAddTargetSong = collectableSongs[0];
+        } else {
+            window.batchCollectSongs = collectableSongs;
+            window.playlistAddTargetSong = null;
+        }
     } else {
         window.batchCollectSongs = null;
+        window.playlistAddTargetSong = null;
         if (isUnboundLocalSong(currentPlayingSong)) {
             showError('歌曲不在曲库中，无法收藏到歌单。请先使用“手动关联”绑定平台歌曲 ID。');
             return;
@@ -11009,7 +11228,7 @@ async function openPlaylistAddModal(batchSongs = null) {
     }
 
     const isBatch = !!window.batchCollectSongs;
-    const song = isBatch ? window.batchCollectSongs[0] : currentPlayingSong;
+    const song = isBatch ? window.batchCollectSongs[0] : (window.playlistAddTargetSong || currentPlayingSong);
 
     if (!song) {
         showError(isBatch ? '无可收藏的歌曲' : '当前没有正在播放的歌曲');
@@ -11036,6 +11255,26 @@ async function openPlaylistAddModal(batchSongs = null) {
     }, 10);
 }
 
+function openPlaylistAddModalForSong(index) {
+    const song = window.viewingPlaylist?.[index];
+    if (!song) {
+        showError('未找到要添加的歌曲');
+        return;
+    }
+    openPlaylistAddModal([song]);
+}
+
+function openPlaylistAddModalForSongObject(song) {
+    if (!song) {
+        showError('未找到要添加的歌曲');
+        return;
+    }
+    return openPlaylistAddModal([song]);
+}
+
+window.openPlaylistAddModalForSong = openPlaylistAddModalForSong;
+window.openPlaylistAddModalForSongObject = openPlaylistAddModalForSongObject;
+
 function closePlaylistAddModal() {
     const modal = document.getElementById('playlist-add-modal');
     const content = document.getElementById('playlist-add-modal-content');
@@ -11047,6 +11286,8 @@ function closePlaylistAddModal() {
 
     setTimeout(() => {
         if (modal) modal.classList.add('hidden');
+        window.batchCollectSongs = null;
+        window.playlistAddTargetSong = null;
         // Update Player Info to refresh heart icon state
         if (currentPlayingSong) {
             updatePlayerInfo(currentPlayingSong);
@@ -11156,7 +11397,7 @@ async function handleTogglePlaylist(listId, btnElement) {
         if (!(await requireAdminForOpenWrite('修改公开收藏'))) return;
     }
     const isBatch = !!window.batchCollectSongs;
-    const songs = isBatch ? window.batchCollectSongs : [currentPlayingSong];
+    const songs = isBatch ? window.batchCollectSongs : [window.playlistAddTargetSong || currentPlayingSong];
     if (songs.length === 0 || !songs[0]) return;
 
     // --- Batch Mode Logic ---
@@ -11179,7 +11420,7 @@ async function handleTogglePlaylist(listId, btnElement) {
         songs.forEach(s => {
             const cleaned = cleanSongData(s);
             if (!targetListArray.some(existing => existing.id === cleaned.id)) {
-                targetListArray.unshift(cleaned);
+                addMusicByConfiguredLocation(targetListArray, cleaned);
                 addedSongs.push(cleaned);
             }
         });
@@ -11193,7 +11434,7 @@ async function handleTogglePlaylist(listId, btnElement) {
         // 3. Immediate UI Refresh
         renderMyLists(currentListData);
         if (window.currentSearchScope === 'local_list' && window.currentViewingListId) {
-            handleListClick(window.currentViewingListId, true);
+            handleListClick(window.currentViewingListId, true, true);
         }
 
         // 4. Close Modal Immediately
@@ -11266,7 +11507,7 @@ async function handleTogglePlaylist(listId, btnElement) {
 
     try {
         if (willAdd) {
-            targetListArray.unshift(cleanedSong);
+            addMusicByConfiguredLocation(targetListArray, cleanedSong);
         } else {
             const idx = targetListArray.findIndex(s => s.id === targetId);
             if (idx >= 0) targetListArray.splice(idx, 1);
@@ -11291,7 +11532,7 @@ function updateGridItemVisuals(btn, isIncluded) {
             <i class="fas fa-check text-xs ml-1 opacity-80"></i>
         `;
     } else {
-        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-red-50 text-red-500 hover:bg-red-100 hover:shadow";
+        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-emerald-50 text-emerald-500 hover:bg-emerald-100 hover:shadow";
         const textSpan = btn.querySelector('span');
         const text = textSpan ? textSpan.innerText : btn.innerText;
         btn.innerHTML = `<span class="truncate max-w-[80%]">${text}</span>`;
@@ -12232,6 +12473,7 @@ function finishSleepTimer() {
     cancelSleepTimer();
     // Use audio.pause directly or togglePlay if music is active
     if (audio && !audio.paused) {
+        shouldAutoRecoverPlayback = false;
         audio.pause();
         updatePlayButton(false);
         showInfo('睡眠时间到，音乐已停止播放 🌙');
