@@ -424,9 +424,6 @@ const urlValidationCache = new Map<string, { valid: boolean; reason?: string; ti
 const URL_VALIDATION_CACHE_TTL = 30 * 60 * 1000
 const URL_VALIDATION_CACHE_MAX = 1000 // 缓存上限，防止无限增长
 
-// 进行中的预检请求：并发去重（多个音源同时返回相同 URL 时，只发一次网络请求，其余复用同一 Promise）
-const urlValidationInFlight = new Map<string, Promise<{ valid: boolean; reason?: string }>>()
-
 // 清理过期的缓存条目
 function cleanUrlValidationCache() {
     const now = Date.now()
@@ -442,72 +439,57 @@ async function validateMusicUrl(
     url: string,
     timeout: number = 5000
 ): Promise<{ valid: boolean; reason?: string }> {
-    // 1. 命中结果缓存：同一 URL 已验证过则直接返回，不再重复预检
+    // 命中结果缓存：同一 URL 已验证过则直接返回，不再重复预检
     const cached = urlValidationCache.get(url)
     if (cached && Date.now() - cached.time < URL_VALIDATION_CACHE_TTL) {
         return { valid: cached.valid, reason: cached.reason }
     }
 
-    // 2. 命中进行中的请求：并发场景下多个音源返回相同 URL，复用同一个预检 Promise
-    const inFlight = urlValidationInFlight.get(url)
-    if (inFlight) {
-        return inFlight
+    let result: { valid: boolean; reason?: string }
+    try {
+        const resp = await needle('get', url, null, {
+            headers: {
+                'Range': 'bytes=0-1',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Referer': new URL(url).origin,
+            },
+            follow_max: 5,
+            response_timeout: timeout,
+            read_timeout: timeout,
+            open_timeout: timeout,
+        })
+
+        // HTTP 状态码为 2xx 或 3xx（部分音源返回 302 但有 body）均视为可达
+        if (resp.statusCode && resp.statusCode >= 200 && resp.statusCode < 400) {
+            // 排除常见错误页 MIME：音源不可能返回 HTML / JSON / 纯文本
+            const contentType = (resp.headers?.['content-type'] || '').toLowerCase()
+            if (/text\/html|application\/json|text\/plain/.test(contentType)) {
+                result = { valid: false, reason: `URL 返回非音频内容 (${contentType}, HTTP ${resp.statusCode})` }
+            } else {
+                // 检查是否有 body 数据或声明了 content-length
+                const contentLength = parseInt(String(resp.headers?.['content-length'] || '0'), 10)
+                const hasBody = Buffer.isBuffer(resp.body) ? (resp.body as Buffer).length > 0 : resp.body && String(resp.body).length > 0
+                result = (hasBody || contentLength > 0)
+                    ? { valid: true }
+                    : { valid: false, reason: '响应体为空，URL 可能不可用' }
+            }
+        } else {
+            result = { valid: false, reason: `HTTP ${resp.statusCode || '无状态码'}` }
+        }
+    } catch (e: any) {
+        // 连接超时、DNS 解析失败、连接被拒等均视为无效
+        result = { valid: false, reason: e.message || '网络请求失败' }
     }
 
-    // 3. 发起真正的预检
-    const promise = (async () => {
-        let result: { valid: boolean; reason?: string }
-        try {
-            const resp = await needle('get', url, null, {
-                headers: {
-                    'Range': 'bytes=0-1',
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                    'Referer': new URL(url).origin,
-                },
-                follow_max: 5,
-                response_timeout: timeout,
-                read_timeout: timeout,
-                open_timeout: timeout,
-            })
+    // 写入结果缓存
+    urlValidationCache.set(url, { valid: result.valid, reason: result.reason, time: Date.now() })
 
-            // HTTP 状态码为 2xx 或 3xx（部分音源返回 302 但有 body）均视为可达
-            if (resp.statusCode && resp.statusCode >= 200 && resp.statusCode < 400) {
-                // 排除常见错误页 MIME：音源不可能返回 HTML / JSON / 纯文本
-                const contentType = (resp.headers?.['content-type'] || '').toLowerCase()
-                if (/text\/html|application\/json|text\/plain/.test(contentType)) {
-                    result = { valid: false, reason: `URL 返回非音频内容 (${contentType}, HTTP ${resp.statusCode})` }
-                } else {
-                    // 检查是否有 body 数据或声明了 content-length
-                    const contentLength = parseInt(String(resp.headers?.['content-length'] || '0'), 10)
-                    const hasBody = Buffer.isBuffer(resp.body) ? (resp.body as Buffer).length > 0 : resp.body && String(resp.body).length > 0
-                    result = (hasBody || contentLength > 0)
-                        ? { valid: true }
-                        : { valid: false, reason: '响应体为空，URL 可能不可用' }
-                }
-            } else {
-                result = { valid: false, reason: `HTTP ${resp.statusCode || '无状态码'}` }
-            }
-        } catch (e: any) {
-            // 连接超时、DNS 解析失败、连接被拒等均视为无效
-            result = { valid: false, reason: e.message || '网络请求失败' }
-        }
+    // 缓存达到上限时清理过期条目，避免无限增长
+    if (urlValidationCache.size > URL_VALIDATION_CACHE_MAX) {
+        cleanUrlValidationCache()
+    }
 
-        // 写入结果缓存（复用已存在的条目的 reason，保证命中时返回一致）
-        urlValidationCache.set(url, { valid: result.valid, reason: result.reason, time: Date.now() })
-
-        // 缓存达到上限时清理过期条目，避免无限增长
-        if (urlValidationCache.size > URL_VALIDATION_CACHE_MAX) {
-            cleanUrlValidationCache()
-        }
-
-        return result
-    })().finally(() => {
-        // 请求结束后从进行中集合移除
-        urlValidationInFlight.delete(url)
-    })
-
-    urlValidationInFlight.set(url, promise)
-    return promise
+    return result
 }
 
 // 调用自定义源的 getMusicUrl
