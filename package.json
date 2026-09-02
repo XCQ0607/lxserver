@@ -72,7 +72,7 @@
     "chalk": "^4.1.2",
     "changelog-parser": "^4.1.0",
     "electron": "^42.0.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.15.3",
     "eslint-config-love": "^47.0.0",
     "nodemon": "^3.1.14",
     "rimraf": "^5.0.5",
