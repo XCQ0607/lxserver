@@ -6,7 +6,6 @@ import crypto from 'crypto'
 import moduleAlias from 'module-alias'
 // @ts-ignore
 moduleAlias.addAliases({
-  '@common': path.join(__dirname, 'common'),
   '@renderer': path.join(__dirname, 'modules'),
   '@': __dirname
 })

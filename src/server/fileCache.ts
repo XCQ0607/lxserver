@@ -9,7 +9,7 @@ import crypto from 'crypto'
 import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { buildLyrics, parseLyrics } from '../utils/lrcTool'
-import { formatPlayTime } from '../common/utils/common'
+import { formatPlayTime } from '../utils/common'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
