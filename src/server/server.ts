@@ -920,7 +920,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     // 读取路径配置（每次请求都重新读取，保存后立刻生效）
     const normalizePath = (p: string) => (p || '').replace(/\/+$/, '')
     const playerPath = global.lx.config['player.path'] ?? '/'
-    const adminPath = global.lx.config['admin.path'] ?? '/music'
+    const adminPath = global.lx.config['admin.path'] ?? '/admin'
 
     // 映射播放器逻辑 (无论是自定义路径还是前端硬编码的 /music/)
     const isPlayerRequest = (playerPath === '/' || playerPath === '')
@@ -1047,7 +1047,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         'player.enableAuth': global.lx.config['player.enableAuth'] || false,
         port: global.lx.config.port,
         bindIP: global.lx.config.bindIP,
-        'admin.path': global.lx.config['admin.path'] ?? '/music',
+        'admin.path': global.lx.config['admin.path'] ?? '/admin',
         'player.path': global.lx.config['player.path'] ?? '/',
       }
 
@@ -5310,7 +5310,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
-                const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/music'))
+                const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
                 const playerPath = (newConfig['player.path'] !== undefined ? newConfig['player.path'] : (global.lx.config['player.path'] ?? '/'))
                 const normalizedAdmin = adminPath.replace(/\/+$/, '')
                 const normalizedPlayer = playerPath.replace(/\/+$/, '')
@@ -5408,7 +5408,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'sync.backupInterval': global.lx.config['sync.backupInterval'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
-                'admin.path': global.lx.config['admin.path'] ?? '/music',
+                'admin.path': global.lx.config['admin.path'] ?? '/admin',
                 'player.path': global.lx.config['player.path'] ?? '/',
                 'subsonic.enable': global.lx.config['subsonic.enable'],
                 'subsonic.path': global.lx.config['subsonic.path'],

@@ -258,7 +258,7 @@ npm start
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
 | `BIND_IP`                             | `bindIP`                           | 绑定 IP                                                            | `0.0.0.0`        |
-| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/music`           |
+| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
 | `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
 | `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持 (服务默认开启)                          | `true`           |
 | `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 访问路径 (默认为 `/rest`)                               | `/rest`          |

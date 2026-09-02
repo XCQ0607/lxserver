@@ -144,9 +144,9 @@ module.exports = {
   // 环境变量: PROXY_ALL_ADDRESS (例如: http://127.0.0.1:7890)
   "proxy.all.address": "",
 
-  // 后台管理界面访问路径（默认为 /music）
+  // 后台管理界面访问路径（默认为 /admin）
   // 环境变量: ADMIN_PATH
-  "admin.path": "/music",
+  "admin.path": "/admin",
 
   // Web播放器访问路径（默认为根路径 /）
   // 环境变量: PLAYER_PATH
