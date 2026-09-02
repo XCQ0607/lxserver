@@ -1965,9 +1965,10 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
     console.log(`[FileCache] Starting download for: ${baseName}`)
 
     return new Promise<void>((resolve, reject) => {
-        const protocol = url.startsWith('https') ? https : http
         let req: http.ClientRequest
         let settled = false
+        let redirectCount = 0
+        const MAX_REDIRECTS = 10
 
         const fail = (err: Error) => {
             if (settled) return
@@ -1992,12 +1993,41 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
         if (signal) signal.addEventListener('abort', abortHandler)
 
-        req = protocol.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                fs.unlink(tempPath, () => { })
-                fail(new Error(`Status: ${res.statusCode}`))
+        // 递归下载，自动跟随 3xx 重定向（浏览器会自动跟随，但 http.get 不会）
+        const downloadFrom = (currentUrl: string) => {
+            if (signal?.aborted) {
+                fail(new Error('Aborted'))
                 return
             }
+            const protocol = currentUrl.startsWith('https') ? https : http
+            req = protocol.get(currentUrl, (res) => {
+                const status = res.statusCode || 0
+                // 处理重定向：301/302/303/307/308
+                if ([301, 302, 303, 307, 308].includes(status)) {
+                    const location = res.headers['location']
+                    res.resume() // 消费响应体，避免连接挂起
+                    if (!location) {
+                        fs.unlink(tempPath, () => { })
+                        fail(new Error(`Status: ${status} (missing Location header)`))
+                        return
+                    }
+                    if (redirectCount >= MAX_REDIRECTS) {
+                        fs.unlink(tempPath, () => { })
+                        fail(new Error(`Too many redirects (${MAX_REDIRECTS})`))
+                        return
+                    }
+                    redirectCount++
+                    const nextUrl = new URL(location, currentUrl).toString()
+                    console.log(`[FileCache] Redirect ${status} -> ${nextUrl} (${redirectCount}/${MAX_REDIRECTS})`)
+                    downloadFrom(nextUrl)
+                    return
+                }
+                if (status !== 200) {
+                    fs.unlink(tempPath, () => { })
+                    fail(new Error(`Status: ${status}`))
+                    return
+                }
+
 
             cacheProgress.set(songKey, { progress: 0, status: 'downloading', total: 0, received: 0, speed: 0, updatedAt: Date.now() })
             const total = parseInt(res.headers['content-length'] || '0', 10)
@@ -2164,6 +2194,9 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
         req.setTimeout(30000, () => {
             req.destroy(new Error('Download request timeout'))
         })
+        }
+
+        downloadFrom(url)
     })
 }
 
