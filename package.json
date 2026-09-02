@@ -5,6 +5,7 @@
   "scripts": {
     "prebuild": "node scripts/download-binary.js && node scripts/update-build-hash.js",
     "build": "rimraf server && tsc --project tsconfig.json && tsc-alias -p tsconfig.json",
+    "test": "node --test test/*.test.cjs",
     "prestart": "node scripts/download-binary.js && node scripts/update-build-hash.js",
     "start": "node ./index.js",
     "predev": "node scripts/update-build-hash.js",

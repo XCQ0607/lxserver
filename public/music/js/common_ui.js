@@ -80,8 +80,8 @@
  * 跳转至管理后台
  */
 function goToAdmin() {
-    var adminPath = (window.CONFIG && window.CONFIG['admin.path']) || '';
-    location.href = adminPath || '/';
+    var adminPath = (window.CONFIG && window.CONFIG['admin.path']) || '/music';
+    location.href = adminPath;
 }
 
 /**

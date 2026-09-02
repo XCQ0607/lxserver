@@ -186,30 +186,15 @@ async function batchDeleteFromList() {
     const idsToDelete = Array.from(window.selectedItems);
 
     if (window.SyncManager.mode === 'local') {
-        // Local mode: Use user credentials to directly manipulate data
-        const username = localStorage.getItem('lx_sync_user');
-        const password = localStorage.getItem('lx_sync_pass');
-
-        if (!username || !password) {
+        // Token authentication is sufficient; a saved plaintext password is not required.
+        const authHeaders = getUserAuthHeaders();
+        if (!authHeaders['x-user-token'] && !authHeaders['x-user-password']) {
             showError('请先登录本地账号');
             return;
         }
 
         try {
-            // Call user-specific API endpoint
-            const res = await fetch('/api/music/user/list/remove', {
-                method: 'POST',
-                headers: getUserAuthHeaders(),
-                body: JSON.stringify({
-                    listId: activeListId,
-                    songIds: idsToDelete
-                })
-            });
-
-            if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(errorText || '删除失败');
-            }
+            await window.requestListSongRemoval(activeListId, idsToDelete);
 
             // Reload data from server
             const data = await window.SyncManager.sync();
@@ -220,7 +205,7 @@ async function batchDeleteFromList() {
             renderMyLists(data);
 
             // Refresh current view
-            handleListClick(activeListId);
+            handleListClick(activeListId, true, true);
 
             console.log('[Batch] 本地模式删除成功');
 
@@ -257,7 +242,7 @@ async function batchDeleteFromList() {
 
             // Update UI
             renderMyLists(currentListData);
-            handleListClick(activeListId);
+            handleListClick(activeListId, true, true);
 
         } catch (e) {
             showError('批量删除失败: ' + e.message);
@@ -328,12 +313,36 @@ function updatePaginationInfo(start, end, total, current, totalPages) {
             jumpInput.value = pageNum;
         }
     }
+
+    const pageNum = current || 1;
+    const pageCount = totalPages || 1;
+    const isNetwork = window.currentSearchScope === 'network';
+    const firstBtn = document.getElementById('search-btn-first');
+    const prevBtn = document.getElementById('search-btn-prev');
+    const nextBtn = document.getElementById('search-btn-next');
+    const lastBtn = document.getElementById('search-btn-last');
+    if (firstBtn) firstBtn.disabled = pageNum <= 1;
+    if (prevBtn) prevBtn.disabled = pageNum <= 1;
+    if (nextBtn) nextBtn.disabled = pageNum >= pageCount && !isNetwork;
+    if (lastBtn) lastBtn.disabled = pageNum >= pageCount;
 }
 
-function goToPage(page) {
+function goToResultPage(page) {
     currentPage = page;
+    window.currentPage = page;
     renderResults(window.viewingPlaylist);
     scrollToSearchResultsTop();
+}
+
+function firstPage() {
+    if (currentPage !== 1) goToResultPage(1);
+}
+
+function lastPage() {
+    const totalItems = window.viewingPlaylist ? window.viewingPlaylist.length : 0;
+    const itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
+    const totalPages = Math.max(1, Math.ceil((totalItems || 1) / (itemsPerPage || 1)));
+    if (currentPage !== totalPages) goToResultPage(totalPages);
 }
 
 async function nextPage() {
@@ -346,7 +355,7 @@ async function nextPage() {
         renderResults(window.viewingPlaylist);
         scrollToSearchResultsTop();
     } else if (window.currentSearchScope === 'network') {
-        const btn = document.querySelector('button[onclick="nextPage()"]');
+        const btn = document.getElementById('search-btn-next');
         const oldHtml = btn ? btn.innerHTML : '';
         if (btn) {
             btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 加载中...';

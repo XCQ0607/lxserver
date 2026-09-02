@@ -251,16 +251,21 @@ window.LeaderboardManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- 操作 -->
-                <div class="col-span-2 sm:col-span-1 md:col-span-1 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button class="p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors"
+                <div class="col-span-2 sm:col-span-1 md:col-span-1 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors"
                             title="播放"
                             onclick="event.stopPropagation(); window.LeaderboardManager.playSong(${index})">
                         <i class="fas fa-play w-3.5 h-3.5"></i>
                     </button>
-                    <button class="p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors"
+                    <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors"
                             title="下载"
                             onclick="event.stopPropagation(); downloadSong(${JSON.stringify(song).replace(/"/g, '&quot;')})">
                         <i class="fas fa-download w-3.5 h-3.5"></i>
+                    </button>
+                    <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
+                            title="添加到歌单"
+                            onclick="event.stopPropagation(); window.LeaderboardManager.addSongToPlaylist(${index})">
+                        <i class="fas fa-plus w-3.5 h-3.5"></i>
                     </button>
                 </div>
             </div>
@@ -272,8 +277,10 @@ window.LeaderboardManager = (function () {
     }
 
     function renderPagination() {
+        const firstBtn = document.getElementById('lb-btn-first');
         const prevBtn = document.getElementById('lb-btn-prev');
         const nextBtn = document.getElementById('lb-btn-next');
+        const lastBtn = document.getElementById('lb-btn-last');
         const info = document.getElementById('lb-page-info');
 
         const displayList = window.ListSearch && window.ListSearch.state && window.ListSearch.state.active && window.ListSearch.state.id === 'leaderboard'
@@ -282,14 +289,17 @@ window.LeaderboardManager = (function () {
 
         const itemsPerPage = typeof settings !== 'undefined' ? (settings.itemsPerPage === 'all' ? displayList.length : parseInt(settings.itemsPerPage)) : 20;
         const totalItems = displayList.length;
-        const totalPages = Math.ceil(totalItems / (itemsPerPage || 20)) || 1;
+        const loadedPages = Math.ceil(totalItems / (itemsPerPage || 20)) || 1;
+        const totalPages = Math.max(loadedPages, Math.ceil((state.total || totalItems) / (itemsPerPage || 20)) || 1);
 
+        if (firstBtn) firstBtn.disabled = state.localPage <= 1;
         if (prevBtn) prevBtn.disabled = state.localPage <= 1;
         if (nextBtn) {
             // 当本地页数超出，且已经无法再次从后端拿到新数据时，才禁用“下一页”
             const canLoadMore = state.songs.length >= state.limit * state.page;
             nextBtn.disabled = state.localPage >= totalPages && !canLoadMore;
         }
+        if (lastBtn) lastBtn.disabled = state.localPage >= totalPages;
         if (info) info.innerText = `第 ${state.localPage} 页 / 共 ${totalPages} 页`;
     }
 
@@ -392,6 +402,29 @@ window.LeaderboardManager = (function () {
         }
     }
 
+    async function goToBoundary(boundary) {
+        if (state.loading || !state.songs.length) return;
+        if (boundary === 'first') {
+            state.localPage = 1;
+        } else {
+            const expectedTotal = Math.max(state.total || 0, state.songs.length);
+            const requiredBackendPages = Math.max(1, Math.ceil(expectedTotal / (state.limit || expectedTotal || 1)));
+            for (let page = state.page + 1; page <= requiredBackendPages; page++) {
+                await loadSongs(state.currentBangid, state.source, page);
+            }
+            const displayList = window.ListSearch && window.ListSearch.state && window.ListSearch.state.active && window.ListSearch.state.id === 'leaderboard'
+                ? window.ListSearch.getDisplayList(state.songs)
+                : state.songs;
+            const itemsPerPage = typeof settings !== 'undefined'
+                ? (settings.itemsPerPage === 'all' ? displayList.length : parseInt(settings.itemsPerPage))
+                : 20;
+            state.localPage = Math.max(1, Math.ceil(displayList.length / (itemsPerPage || 20)));
+        }
+        renderSongs(state.songs);
+        renderPagination();
+        document.getElementById('lb-songs-container')?.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
     function changeSource() {
         const sel = document.getElementById('lb-source-select');
         if (!sel) return;
@@ -420,6 +453,15 @@ window.LeaderboardManager = (function () {
         }
     }
 
+    function addSongToPlaylist(index) {
+        const song = state.songs[index];
+        if (!song || typeof window.openPlaylistAddModalForSongObject !== 'function') return;
+        window.openPlaylistAddModalForSongObject({
+            ...song,
+            source: song.source || state.source
+        });
+    }
+
 
     // ==================== 公共方法 ====================
 
@@ -433,6 +475,8 @@ window.LeaderboardManager = (function () {
         playAll,
         changePage,
         handleRowClick,
+        addSongToPlaylist,
+        goToBoundary,
 
         renderSongs: function () {
             renderSongs(state.songs);
@@ -535,4 +579,3 @@ function toggleLbSidebar(force) {
         }, 300);
     }
 }
-

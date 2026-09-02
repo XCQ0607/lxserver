@@ -73,7 +73,7 @@ module.exports = {
   // 环境变量: MAX_SNAPSHOT_NUM
   "maxSnapshotNum": 10,
 
-  // 添加歌曲到列表时的位置 (top: 顶部, bottom: 底部)
+  // 添加歌曲到列表时的位置，Web 播放器与 Subsonic API 均使用此配置 (top: 顶部, bottom: 底部)
   // 环境变量: LIST_ADD_MUSIC_LOCATION_TYPE
   "list.addMusicLocationType": "top",
 
@@ -144,13 +144,13 @@ module.exports = {
   // 环境变量: PROXY_ALL_ADDRESS (例如: http://127.0.0.1:7890)
   "proxy.all.address": "",
 
-  // 后台管理界面访问路径（默认为 /admin）
+  // 后台管理界面访问路径（默认为 /music）
   // 环境变量: ADMIN_PATH
-  "admin.path": "/admin",
+  "admin.path": "/music",
 
-  // Web播放器访问路径（默认为空，即根路径 /）
+  // Web播放器访问路径（默认为根路径 /）
   // 环境变量: PLAYER_PATH
-  "player.path": "",
+  "player.path": "/",
 
   // Subsonic 协议配置
   // 是否启用 Subsonic 协议支持 (服务默认开启)

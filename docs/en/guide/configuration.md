@@ -28,8 +28,8 @@ This module manages the Node.js listening process and the basic settings of the 
 | :-------------------- | :------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT` | `9527` | Integer | **Service listening port**. It is recommended to avoid using other high-frequency ports in the host (such as 80, 443, 3306). |
 | `BIND_IP` | `0.0.0.0` | String | **Scope of service binding IP interfaces**. Set to `127.0.0.1` to accept only local Lookback calls; set to `0.0.0.0` means listening to all internal and external available network adapters of the host simultaneously. |
-| `ADMIN_PATH` | `'/admin'` | String | **Backend management interface path**. Default is `/admin`. |
-| `PLAYER_PATH` | `''` | String | **Web player access path**. Default is empty, i.e., root `/`. |
+| `ADMIN_PATH` | `'/music'` | String | **Backend management interface path**. Default is `/music`. |
+| `PLAYER_PATH` | `'/'` | String | **Web player access path**. Default is the root path `/`. |
 | `SERVER_NAME` | `My Sync Server` | String | **Sync service name**. Showed in client connections. |
 | `PROXY_HEADER` | `x-real-ip` | String | **Reverse proxy remote IP penetration identifier**. When the system runs behind reverse proxies or load balancers such as Nginx, it is used to extract the true client source IP address to ensure accurate traceability of equipment audit logs. |
 | `PROXY_ALL_ENABLED` | `false` | Boolean | **Enable global outgoing request proxy**. If enabled, network requests from the server (e.g. search, resolving) will go through the proxy. |

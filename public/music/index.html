@@ -128,6 +128,13 @@
                         </a>
                     </li>
                     <li>
+                        <a href="#" id="nav-admin-link" onclick="event.preventDefault(); goToAdmin()"
+                            class="flex items-center px-6 py-3 t-text-muted hover:t-bg-main transition-colors duration-200">
+                            <i class="fas fa-server w-6 text-center"></i>
+                            <span class="ml-3 font-medium">后台管理</span>
+                        </a>
+                    </li>
+                    <li>
                         <a href="#" onclick="switchTab('about')" id="tab-about"
                             class="flex items-center px-6 py-3 t-text-muted hover:t-bg-main transition-colors duration-200">
                             <i class="fas fa-info-circle w-6 text-center"></i>
@@ -427,11 +434,16 @@
                         <!-- Pagination -->
                         <div id="search-pagination-bar"
                             class="h-14 md:h-12 border-t t-border-main flex items-center justify-between px-3 md:px-6 t-bg-main flex-shrink-0">
-                            <button onclick="prevPage()"
-                                class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
-                                <i class="fas fa-chevron-left text-[10px]"></i> <span
-                                    class="hidden sm:inline">上一页</span>
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button id="search-btn-first" onclick="firstPage()" title="首页"
+                                    class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
+                                    <i class="fas fa-angles-left text-[10px]"></i><span class="hidden md:inline">首页</span>
+                                </button>
+                                <button id="search-btn-prev" onclick="prevPage()"
+                                    class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
+                                    <i class="fas fa-chevron-left text-[10px]"></i><span class="hidden sm:inline">上一页</span>
+                                </button>
+                            </div>
 
                             <div
                                 class="flex flex-col sm:flex-row items-center gap-1 sm:gap-4 flex-1 justify-center min-w-0 mx-2">
@@ -451,11 +463,16 @@
                                 </div>
                             </div>
 
-                            <button onclick="nextPage()"
-                                class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
-                                <span class="hidden sm:inline">下一页</span> <i
-                                    class="fas fa-chevron-right text-[10px]"></i>
-                            </button>
+                            <div class="flex items-center gap-2">
+                                <button id="search-btn-next" onclick="nextPage()"
+                                    class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
+                                    <span class="hidden sm:inline">下一页</span><i class="fas fa-chevron-right text-[10px]"></i>
+                                </button>
+                                <button id="search-btn-last" onclick="lastPage()" title="末页"
+                                    class="text-gray-500 hover:text-emerald-600 disabled:opacity-30 transition-colors text-sm flex items-center gap-1">
+                                    <span class="hidden md:inline">末页</span><i class="fas fa-angles-right text-[10px]"></i>
+                                </button>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -541,15 +558,23 @@
                         </div>
 
                         <!-- Pagination -->
-                        <div id="songlist-pagination" class="mt-10 mb-20 flex items-center justify-center gap-6">
+                        <div id="songlist-pagination" class="mt-10 mb-20 flex items-center justify-center gap-2 md:gap-6">
+                            <button onclick="window.SongListManager.goToPage(1)" id="btn-songlist-first" title="首页"
+                                class="px-2 md:px-4 py-2 t-bg-panel border t-border-main rounded-xl hover:text-emerald-500 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-2 shadow-sm font-medium">
+                                <i class="fas fa-angles-left text-xs"></i><span class="hidden md:inline">首页</span>
+                            </button>
                             <button onclick="changeSongListPage(-1)" id="btn-songlist-prev"
-                                class="px-6 py-2 t-bg-panel border t-border-main rounded-xl hover:text-emerald-500 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-2 shadow-sm font-medium">
-                                <i class="fas fa-chevron-left text-xs"></i> 上一页
+                                class="px-2 md:px-4 py-2 t-bg-panel border t-border-main rounded-xl hover:text-emerald-500 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-2 shadow-sm font-medium">
+                                <i class="fas fa-chevron-left text-xs"></i><span class="hidden sm:inline">上一页</span>
                             </button>
                             <span id="songlist-page-info" class="text-sm font-mono font-bold t-text-main">第 1 页</span>
                             <button onclick="changeSongListPage(1)" id="btn-songlist-next"
-                                class="px-6 py-2 t-bg-panel border t-border-main rounded-xl hover:text-emerald-500 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-2 shadow-sm font-medium">
-                                下一页 <i class="fas fa-chevron-right text-xs"></i>
+                                class="px-2 md:px-4 py-2 t-bg-panel border t-border-main rounded-xl hover:text-emerald-500 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-2 shadow-sm font-medium">
+                                <span class="hidden sm:inline">下一页</span><i class="fas fa-chevron-right text-xs"></i>
+                            </button>
+                            <button onclick="window.SongListManager.goToPage('last')" id="btn-songlist-last" title="末页"
+                                class="px-2 md:px-4 py-2 t-bg-panel border t-border-main rounded-xl hover:text-emerald-500 disabled:opacity-30 disabled:pointer-events-none transition-all flex items-center gap-2 shadow-sm font-medium">
+                                <span class="hidden md:inline">末页</span><i class="fas fa-angles-right text-xs"></i>
                             </button>
                         </div>
                     </div>
@@ -929,6 +954,10 @@
                             <!-- 分页 -->
                             <div id="lb-pagination"
                                 class="flex-shrink-0 flex items-center justify-center gap-2 md:gap-4 py-3 border-t t-border-main t-bg-panel/80">
+                                <button id="lb-btn-first" onclick="window.LeaderboardManager.goToBoundary('first')" disabled title="首页"
+                                    class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                    <i class="fas fa-angles-left md:mr-1"></i><span class="hidden md:inline">首页</span>
+                                </button>
                                 <button id="lb-btn-prev" onclick="leaderboardChangePage(-1)" disabled
                                     class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                                     <i class="fas fa-chevron-left md:mr-1"></i><span class="hidden sm:inline">上一页</span>
@@ -939,6 +968,10 @@
                                     class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                                     <span class="hidden sm:inline">下一页</span><i
                                         class="fas fa-chevron-right md:ml-1"></i>
+                                </button>
+                                <button id="lb-btn-last" onclick="window.LeaderboardManager.goToBoundary('last')" disabled title="末页"
+                                    class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                                    <span class="hidden md:inline">末页</span><i class="fas fa-angles-right md:ml-1"></i>
                                 </button>
                             </div>
                         </div>
@@ -1346,6 +1379,10 @@
                     </div>
                     <div id="lm-pagination"
                         class="flex-shrink-0 flex items-center justify-center gap-2 md:gap-4 py-2 border-x border-b t-border-main rounded-b-xl t-bg-panel/80 hidden">
+                        <button id="lm-page-first" onclick="window.LocalMusicManager.goToPage(1)" title="首页"
+                            class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                            <i class="fas fa-angles-left md:mr-1"></i><span class="hidden md:inline">首页</span>
+                        </button>
                         <button id="lm-page-prev" onclick="window.LocalMusicManager.changePage(-1)"
                             class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                             <i class="fas fa-chevron-left md:mr-1"></i><span class="hidden sm:inline">上一页</span>
@@ -1354,6 +1391,10 @@
                         <button id="lm-page-next" onclick="window.LocalMusicManager.changePage(1)"
                             class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
                             <span class="hidden sm:inline">下一页</span><i class="fas fa-chevron-right md:ml-1"></i>
+                        </button>
+                        <button id="lm-page-last" onclick="window.LocalMusicManager.goToPage('last')" title="末页"
+                            class="px-2 md:px-4 py-1.5 text-xs md:text-sm t-bg-main border t-border-main rounded-lg hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+                            <span class="hidden md:inline">末页</span><i class="fas fa-angles-right md:ml-1"></i>
                         </button>
                     </div>
                 </div>

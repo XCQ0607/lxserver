@@ -157,6 +157,29 @@ function getSelectableQualityOrder(song = null) {
         (window.QualityManager?.QUALITY_PRIORITY ? [...window.QualityManager.QUALITY_PRIORITY].reverse() : ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master']);
 }
 
+async function requestListSongRemoval(listId, songIds) {
+    const send = () => fetch('/api/music/user/list/remove', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            ...getUserAuthHeaders()
+        },
+        body: JSON.stringify({ listId, songIds })
+    });
+
+    let response = await send();
+    if (response.status === 401 && typeof ensureUserAuthToken === 'function') {
+        const refreshed = await ensureUserAuthToken({ force: true });
+        if (refreshed) response = await send();
+    }
+    if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || '删除失败');
+    }
+    return response;
+}
+window.requestListSongRemoval = requestListSongRemoval;
+
 // Single song deletion
 async function deleteSingleSong(songId) {
     if (!(await showSelect('删除歌曲', '确定要删除这首歌曲吗?', { danger: true }))) {
@@ -175,32 +198,15 @@ async function deleteSingleSong(songId) {
     }
 
     if (window.SyncManager.mode === 'local') {
-        // Local mode: Use user credentials
-        const username = localStorage.getItem('lx_sync_user');
-        const password = localStorage.getItem('lx_sync_pass');
-
-        if (!username || !password) {
+        // Token authentication is sufficient; a saved plaintext password is not required.
+        const authHeaders = getUserAuthHeaders();
+        if (!authHeaders['x-user-token'] && !authHeaders['x-user-password']) {
             showError('请先登录本地账号');
             return;
         }
 
         try {
-            const res = await fetch('/api/music/user/list/remove', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    ...getUserAuthHeaders()
-                },
-                body: JSON.stringify({
-                    listId: activeListId,
-                    songIds: [songId]
-                })
-            });
-
-            if (!res.ok) {
-                const errorText = await res.text();
-                throw new Error(errorText || '删除失败');
-            }
+            await requestListSongRemoval(activeListId, [songId]);
 
             // Reload data from server
             const data = await window.SyncManager.sync();
@@ -211,7 +217,7 @@ async function deleteSingleSong(songId) {
             renderMyLists(data);
 
             // Refresh current view
-            handleListClick(activeListId);
+            handleListClick(activeListId, true, true);
 
             console.log('[Single] 本地模式删除成功');
 
@@ -247,7 +253,7 @@ async function deleteSingleSong(songId) {
 
             // Update UI
             renderMyLists(currentListData);
-            handleListClick(activeListId);
+            handleListClick(activeListId, true, true);
 
         } catch (e) {
             showError('删除失败: ' + e.message);
