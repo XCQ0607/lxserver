@@ -516,8 +516,8 @@ export async function callUserApiGetMusicUrl(
 
     // 读取当前用户的公开源状态覆盖（启用/禁用）以及私有源 ID 集合
     let userStates: Record<string, any> = {}
+    const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
     if (clientUsername && clientUsername !== 'default') {
-        const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
         const userPath = path.join(dataPath, 'users', 'source', clientUsername)
         const statesPath = path.join(userPath, 'states.json')
         const metaPath = path.join(userPath, 'sources.json')
@@ -532,25 +532,48 @@ export async function callUserApiGetMusicUrl(
                 for (const s of userSources) userApiIds.add(s.id)
             } catch (e) { }
         }
+    } else {
+        const openStatesPath = path.join(dataPath, 'users', 'source', '_open', 'states.json')
+        if (fs.existsSync(openStatesPath)) {
+            try { userStates = JSON.parse(fs.readFileSync(openStatesPath, 'utf-8')) } catch (e) { }
+        }
+    }
+
+    const getSourceState = (id: string) => {
+        return userStates[id] || userStates[decodeURIComponent(id)] || userStates[encodeURIComponent(id)] || {}
     }
 
     // 按 loadedApis 收集所有可用候选源（权限过滤，不强制任何顺序）
     for (const [apiId, api] of loadedApis) {
         if (!api.info.sources || !api.info.sources[source]) continue
 
+        const state = getSourceState(api.info.id)
+
         if (api.info.owner === 'open') {
             // 计算公开源对当前用户的有效启用状态
             let isEnabled = api.info.enabled
-            if (clientUsername && clientUsername !== 'default' && userStates[api.info.id]) {
-                if (typeof userStates[api.info.id].enabled === 'boolean') {
-                    isEnabled = userStates[api.info.id].enabled
+            if (clientUsername && clientUsername !== 'default') {
+                if (typeof state.enabled === 'boolean') {
+                    isEnabled = state.enabled
                 }
             }
             if (!isEnabled) continue
             if (userApiIds.has(api.info.id)) continue  // 被同名私有版本覆盖，跳过
+
+            // 检查平台是否被禁用
+            if (Array.isArray(state.disabledSources) && state.disabledSources.includes(source)) {
+                continue
+            }
+
             candidates.push(api)
         } else if (clientUsername && api.info.owner === clientUsername) {
             if (!api.info.enabled) continue
+
+            // 检查平台是否被禁用
+            if (Array.isArray(state.disabledSources) && state.disabledSources.includes(source)) {
+                continue
+            }
+
             candidates.push(api)
             userApiIds.add(api.info.id) // 兜底：确保后续不重复添加公开同名源
         }
@@ -930,8 +953,40 @@ export function getLoadedApis() {
 // 检查某个源是否被支持
 // clientUsername: 调用者的用户名。如果未提供，则只能检查 open 源
 export function isSourceSupported(source: string, clientUsername?: string): boolean {
+    const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
+    let userStates: Record<string, any> = {}
+    if (clientUsername && clientUsername !== 'default') {
+        const statesPath = path.join(dataPath, 'users', 'source', clientUsername, 'states.json')
+        if (fs.existsSync(statesPath)) {
+            try { userStates = JSON.parse(fs.readFileSync(statesPath, 'utf-8')) } catch (e) { }
+        }
+    } else {
+        const openStatesPath = path.join(dataPath, 'users', 'source', '_open', 'states.json')
+        if (fs.existsSync(openStatesPath)) {
+            try { userStates = JSON.parse(fs.readFileSync(openStatesPath, 'utf-8')) } catch (e) { }
+        }
+    }
+
+    const getSourceState = (id: string) => {
+        return userStates[id] || userStates[decodeURIComponent(id)] || userStates[encodeURIComponent(id)] || {}
+    }
+
     for (const [apiId, api] of loadedApis) {
-        if (!api.info.enabled || !api.info.sources || !api.info.sources[source]) {
+        if (!api.info.sources || !api.info.sources[source]) {
+            continue
+        }
+
+        const state = getSourceState(api.info.id)
+        let isEnabled = api.info.enabled
+        if (api.info.owner === 'open' && clientUsername && clientUsername !== 'default') {
+            if (typeof state.enabled === 'boolean') {
+                isEnabled = state.enabled
+            }
+        }
+        if (!isEnabled) continue
+
+        // 检查平台是否被禁用
+        if (Array.isArray(state.disabledSources) && state.disabledSources.includes(source)) {
             continue
         }
 

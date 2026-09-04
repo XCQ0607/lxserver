@@ -10714,6 +10714,9 @@ async function renderCustomSources() {
         list = list.filter(item => item.owner !== 'open');
     }
 
+    // 缓存当前最新的源列表，供编辑模态框等快速查询
+    window._currentCustomSourcesList = list || [];
+
     updateSourceScopeUI();
 
     // 控制模态框头部的工具栏显示/隐藏
@@ -10770,8 +10773,9 @@ async function renderCustomSources() {
             div.dataset.enabled = source.enabled;
             div.dataset.index = index;
 
-            // 格式化支持的源
+            // 格式化支持的源 (标识出已禁用的平台)
             let supportedBadges = '';
+            const disabledSources = Array.isArray(source.disabledSources) ? source.disabledSources : [];
             if (source.supportedSources && source.supportedSources.length > 0) {
                 const sourceMap = {
                     'kg': { name: '酷狗', color: 't-badge-blue' },
@@ -10784,6 +10788,10 @@ async function renderCustomSources() {
                 supportedBadges = `<div class="flex flex-wrap gap-1 md:gap-1.5 mt-1.5 md:mt-2">
                 ${source.supportedSources.map(s => {
                     const info = sourceMap[s] || { name: s, color: 't-badge-gray' };
+                    const isPlatformDisabled = disabledSources.includes(s);
+                    if (isPlatformDisabled) {
+                        return `<span class="px-1.5 py-0.5 rounded-md text-[9px] md:text-[10px] font-medium transition-colors border border-transparent bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-neutral-500 opacity-50 line-through whitespace-nowrap cursor-help" title="${info.name} (在此音源中已关闭)">${info.name}</span>`;
+                    }
                     return `<span class="px-1.5 py-0.5 rounded-md text-[9px] md:text-[10px] font-medium transition-colors border border-transparent ${info.color} whitespace-nowrap">${info.name}</span>`;
                 }).join('')}
             </div>`;
@@ -10860,6 +10868,12 @@ async function renderCustomSources() {
                                 title="尝试重新加载">
                             <i class="fas fa-sync-alt text-xs md:text-sm"></i>
                         </button>` : ''}
+
+                        <button data-id="${encodeURIComponent(source.id)}" onclick="openEditSourceModal(decodeURIComponent(this.dataset.id))"
+                                class="p-1 md:p-1.5 t-text-muted hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
+                                title="编辑音源平台">
+                            <i class="fas fa-edit text-xs md:text-sm"></i>
+                        </button>
                         
                         ${canManageSource ? `
                         <button onclick="deleteSource('${source.id}')" 
@@ -11090,6 +11104,217 @@ function closeCustomSourceModal() {
         if (modal) modal.classList.add('hidden');
     }, 300);
 }
+
+// ========================================
+// Edit Custom Source Platforms Modal
+// ========================================
+
+window._editingSource = null;
+
+function openEditSourceModal(sourceId) {
+    const list = window._currentCustomSourcesList || [];
+    let source = list.find(s => s.id === sourceId);
+    if (!source) {
+        // 尝试解码匹配
+        try {
+            const decoded = decodeURIComponent(sourceId);
+            source = list.find(s => s.id === decoded || decodeURIComponent(s.id) === decoded);
+        } catch (e) { }
+    }
+
+    if (!source) {
+        showError('未找到指定的音源信息');
+        return;
+    }
+
+    window._editingSource = source;
+
+    const modal = document.getElementById('edit-source-modal');
+    const content = document.getElementById('edit-source-modal-content');
+    const nameEl = document.getElementById('edit-source-modal-name');
+    const versionEl = document.getElementById('edit-source-modal-version');
+    const listContainer = document.getElementById('edit-source-platform-list');
+
+    if (!modal || !content || !listContainer) return;
+
+    nameEl.textContent = source.name || source.id;
+    nameEl.title = source.name || source.id;
+    versionEl.textContent = source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : 'v1.0';
+
+    const sourceMap = {
+        'kg': { name: '酷狗音乐', icon: 'fas fa-dog', color: 'text-blue-500 bg-blue-50 dark:bg-blue-900/30' },
+        'kw': { name: '酷我音乐', icon: 'fas fa-music', color: 'text-amber-500 bg-amber-50 dark:bg-amber-900/30' },
+        'tx': { name: 'QQ音乐', icon: 'fab fa-qq', color: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-900/30' },
+        'wy': { name: '网易云音乐', icon: 'fas fa-cloud', color: 'text-red-500 bg-red-50 dark:bg-red-900/30' },
+        'mg': { name: '咪咕音乐', icon: 'fas fa-headphones-alt', color: 'text-pink-500 bg-pink-50 dark:bg-pink-900/30' },
+        'local': { name: '本地音乐', icon: 'fas fa-hdd', color: 'text-purple-500 bg-purple-50 dark:bg-purple-900/30' }
+    };
+
+    const supportedSources = Array.isArray(source.supportedSources) ? source.supportedSources : [];
+    const disabledSources = Array.isArray(source.disabledSources) ? source.disabledSources : [];
+
+    if (supportedSources.length === 0) {
+        listContainer.innerHTML = `
+            <div class="text-center py-8 t-text-muted text-xs">
+                <i class="fas fa-exclamation-circle text-2xl mb-2 opacity-50"></i>
+                <p>该脚本未声明支持的平台列表</p>
+            </div>
+        `;
+    } else {
+        listContainer.innerHTML = supportedSources.map(platform => {
+            const meta = sourceMap[platform] || {
+                name: platform.toUpperCase() + ' 平台',
+                icon: 'fas fa-compact-disc',
+                color: 'text-gray-500 bg-gray-50 dark:bg-neutral-800'
+            };
+            const isEnabled = !disabledSources.includes(platform);
+
+            return `
+                <div class="flex items-center justify-between p-3 rounded-xl border t-border-main t-bg-panel hover:shadow-sm transition-all platform-toggle-item" data-platform="${platform}">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl flex items-center justify-center ${meta.color} flex-shrink-0">
+                            <i class="${meta.icon} text-sm"></i>
+                        </div>
+                        <div>
+                            <div class="font-bold text-xs md:text-sm t-text-main flex items-center gap-2">
+                                <span>${meta.name}</span>
+                                <span class="text-[10px] font-mono px-1.5 py-0.5 rounded bg-gray-100 dark:bg-neutral-800 text-gray-500">${platform}</span>
+                            </div>
+                            <div class="text-[10px] t-text-muted mt-0.5 platform-status-text">
+                                ${isEnabled ? '<span class="text-emerald-500 font-medium"><i class="fas fa-check-circle mr-1"></i>允许解析</span>' : '<span class="text-gray-400 font-medium"><i class="fas fa-ban mr-1"></i>已在此源关闭</span>'}
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <label class="relative inline-flex items-center cursor-pointer select-none">
+                            <input type="checkbox" value="${platform}" class="sr-only peer platform-checkbox" ${isEnabled ? 'checked' : ''} onchange="handlePlatformCheckboxChange(this)">
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-neutral-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500"></div>
+                        </label>
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    modal.classList.remove('hidden');
+    setTimeout(() => {
+        content.classList.remove('scale-95', 'opacity-0');
+        content.classList.add('scale-100', 'opacity-100');
+    }, 10);
+}
+
+function handlePlatformCheckboxChange(checkbox) {
+    const item = checkbox.closest('.platform-toggle-item');
+    if (!item) return;
+    const statusText = item.querySelector('.platform-status-text');
+    if (statusText) {
+        statusText.innerHTML = checkbox.checked
+            ? '<span class="text-emerald-500 font-medium"><i class="fas fa-check-circle mr-1"></i>允许解析</span>'
+            : '<span class="text-gray-400 font-medium"><i class="fas fa-ban mr-1"></i>已在此源关闭</span>';
+    }
+}
+
+function toggleAllEditPlatforms(enableAll) {
+    const checkboxes = document.querySelectorAll('#edit-source-platform-list .platform-checkbox');
+    checkboxes.forEach(cb => {
+        cb.checked = enableAll;
+        handlePlatformCheckboxChange(cb);
+    });
+}
+
+function closeEditSourceModal() {
+    const modal = document.getElementById('edit-source-modal');
+    const content = document.getElementById('edit-source-modal-content');
+    if (content) {
+        content.classList.remove('scale-100', 'opacity-100');
+        content.classList.add('scale-95', 'opacity-0');
+    }
+    setTimeout(() => {
+        if (modal) modal.classList.add('hidden');
+        window._editingSource = null;
+    }, 250);
+}
+
+async function saveEditSourcePlatforms() {
+    if (!window._editingSource) return;
+
+    const source = window._editingSource;
+    const saveBtn = document.getElementById('edit-source-save-btn');
+    const originalHtml = saveBtn ? saveBtn.innerHTML : '';
+
+    try {
+        if (saveBtn) {
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-circle-notch fa-spin"></i><span>保存中...</span>';
+        }
+
+        const checkboxes = Array.from(document.querySelectorAll('#edit-source-platform-list .platform-checkbox'));
+        // 收集被关闭的平台
+        const disabledSources = checkboxes.filter(cb => !cb.checked).map(cb => cb.value);
+
+        const username = currentListData?.username || 'default';
+        const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+        const adminPass = localStorage.getItem('lx_admin_password');
+        if (adminPass) headers['x-frontend-auth'] = adminPass;
+
+        const response = await fetch('/api/custom-source/update-platforms', {
+            method: 'POST',
+            headers: headers,
+            body: JSON.stringify({
+                username,
+                id: source.id,
+                disabledSources
+            })
+        });
+
+        if (response.status === 403) {
+            const errData = await response.json();
+            showError(errData.error || '权限不足：修改平台配置需要管理员身份');
+            const authorized = await handleAdminAuth('修改自定义源平台配置需要管理员身份');
+            if (authorized) {
+                return await saveEditSourcePlatforms();
+            }
+            return;
+        }
+
+        if (!response.ok) {
+            const errData = await response.json().catch(() => ({}));
+            throw new Error(errData.error || `HTTP ${response.status}`);
+        }
+
+        // 更新本地对象
+        source.disabledSources = disabledSources;
+        showSuccess('已更新平台配置');
+        closeEditSourceModal();
+
+        // 重新渲染音源列表以更新徽章
+        await renderCustomSources();
+    } catch (error) {
+        console.error('[CustomSource] 保存平台配置失败:', error);
+        showError(`保存失败: ${error.message}`);
+    } finally {
+        if (saveBtn) {
+            saveBtn.disabled = false;
+            saveBtn.innerHTML = originalHtml;
+        }
+    }
+}
+
+// 绑定模态框背景点击关闭
+const editSourceModalEl = document.getElementById('edit-source-modal');
+if (editSourceModalEl) {
+    editSourceModalEl.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) {
+            closeEditSourceModal();
+        }
+    });
+}
+
+window.openEditSourceModal = openEditSourceModal;
+window.closeEditSourceModal = closeEditSourceModal;
+window.toggleAllEditPlatforms = toggleAllEditPlatforms;
+window.saveEditSourcePlatforms = saveEditSourcePlatforms;
+window.handlePlatformCheckboxChange = handlePlatformCheckboxChange;
 
 
 // ========================================

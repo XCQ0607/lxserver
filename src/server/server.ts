@@ -5029,6 +5029,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
       if (pathname === '/api/custom-source/reorder' && req.method === 'POST') {
         return customSourceHandlers.handleReorder(req, res)
       }
+      if (pathname === '/api/custom-source/update-platforms' && req.method === 'POST') {
+        return customSourceHandlers.handleUpdatePlatforms(req, res)
+      }
 
       // elFinder 文件管理器连接器
       if (pathname === '/api/elfinder/connector') {

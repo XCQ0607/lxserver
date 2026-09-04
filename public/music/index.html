@@ -3764,6 +3764,66 @@
         </div>
     </div>
 
+    <!-- Edit Custom Source Platforms Modal (编辑音源平台) -->
+    <div id="edit-source-modal"
+        class="fixed inset-0 bg-black/60 z-[80] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
+        <div class="t-bg-panel rounded-2xl w-full max-w-lg flex flex-col shadow-2xl transform transition-all duration-300 scale-95 opacity-0 overflow-hidden mx-4"
+            id="edit-source-modal-content">
+            <!-- Header -->
+            <div class="p-5 border-b t-border-main flex justify-between items-center t-bg-main rounded-t-2xl">
+                <div class="min-w-0 pr-3">
+                    <div class="flex items-center gap-2">
+                        <span class="p-1.5 rounded-lg bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400">
+                            <i class="fas fa-sliders-h text-sm"></i>
+                        </span>
+                        <h3 class="text-lg font-bold t-text-main truncate" id="edit-source-modal-title">编辑音源平台</h3>
+                    </div>
+                    <div class="flex items-center gap-2 mt-1.5 text-xs t-text-muted truncate">
+                        <span id="edit-source-modal-name" class="font-medium text-emerald-600 dark:text-emerald-400 truncate"></span>
+                        <span id="edit-source-modal-version" class="px-1.5 py-0.5 rounded t-bg-main border t-border-main text-[10px] font-mono"></span>
+                    </div>
+                </div>
+                <button onclick="closeEditSourceModal()"
+                    class="t-text-muted hover:t-text-main transition-colors p-2 hover:bg-gray-100 dark:hover:bg-neutral-800 rounded-full flex-shrink-0">
+                    <i class="fas fa-times text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Body -->
+            <div class="p-5 overflow-y-auto max-h-[60vh] custom-scrollbar space-y-4">
+                <div class="flex items-center justify-between text-xs t-text-muted bg-gray-50 dark:bg-neutral-800/60 p-3 rounded-xl border t-border-main">
+                    <div class="flex items-center gap-2">
+                        <i class="fas fa-info-circle text-blue-500"></i>
+                        <span>关闭某平台后，将不再通过此音源解析该平台的歌曲。</span>
+                    </div>
+                    <div class="flex items-center gap-2 flex-shrink-0 ml-2">
+                        <button type="button" onclick="toggleAllEditPlatforms(true)" class="text-xs font-semibold text-emerald-600 hover:text-emerald-700 dark:text-emerald-400 hover:underline">全启用</button>
+                        <span class="opacity-30">|</span>
+                        <button type="button" onclick="toggleAllEditPlatforms(false)" class="text-xs font-semibold text-red-500 hover:text-red-600 dark:text-red-400 hover:underline">全关闭</button>
+                    </div>
+                </div>
+
+                <!-- Platform List -->
+                <div id="edit-source-platform-list" class="space-y-2">
+                    <!-- 动态生成各平台开关卡片 -->
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="p-4 border-t t-border-main flex justify-end items-center gap-3 t-bg-main rounded-b-2xl">
+                <button type="button" onclick="closeEditSourceModal()"
+                    class="px-4 py-2 rounded-xl text-xs md:text-sm font-medium t-text-muted hover:t-text-main hover:bg-gray-100 dark:hover:bg-neutral-800 transition-colors">
+                    取消
+                </button>
+                <button type="button" id="edit-source-save-btn" onclick="saveEditSourcePlatforms()"
+                    class="px-5 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-xs md:text-sm font-bold shadow-md shadow-emerald-500/20 active:scale-95 transition-all flex items-center gap-1.5">
+                    <i class="fas fa-check"></i>
+                    <span>保存更改</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Playlist Add Modal (添加到歌单) -->
     <div id="playlist-add-modal"
         class="fixed inset-0 bg-black/60 z-[70] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
