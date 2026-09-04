@@ -6111,7 +6111,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
   wss = new WebSocketServer({
     noServer: true,
     perMessageDeflate: false,
-  })
+  }) as unknown as LX.SocketServer
 
   // WebDAV Sync Progress Broadcast
   if (global.lx.webdavSync) {
@@ -6128,14 +6128,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         }
       }
       // Broadcast to SSE clients
-      const sseMsg = `data: ${JSON.stringify(data)}\\n\\n`
+      const sseMsg = `data: ${JSON.stringify(data)}\n\n`
       for (const client of sseClients) {
         client.write(sseMsg)
       }
     })
   }
 
-  wss.on('connection', function (socket, request) {
+  wss.on('connection', function (socket: any, request) {
     socket.isReady = false
     socket.moduleReadys = {
       list: false,
@@ -6184,7 +6184,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     socket.remote = msg2call.remote
     socket.remoteQueueList = msg2call.createQueueRemote('list')
     socket.remoteQueueDislike = msg2call.createQueueRemote('dislike')
-    socket.addEventListener('message', ({ data }) => {
+    socket.addEventListener('message', ({ data }: any) => {
       if (typeof data != 'string') return
       void decryptMsg(socket.keyInfo, data).then((data) => {
         let syncData: any
@@ -6227,7 +6227,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         closeEvents.splice(closeEvents.indexOf(handler), 1)
       }
     }
-    socket.broadcast = function (handler) {
+    socket.broadcast = function (handler: any) {
       if (!wss) return
       for (const client of wss.clients) handler(client)
     }
@@ -6273,7 +6273,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     })
   }, 30000)
 
-  wss.on('close', function close() {
+  wss?.on('close', function close() {
     clearInterval(interval)
   })
 

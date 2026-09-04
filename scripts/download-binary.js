@@ -135,7 +135,13 @@ async function main() {
     try {
         if (!isAll) {
             // 环境检查：如果不是下载所有，则检查当前平台
-            const checkGlobal = spawnSync(os.platform() === 'win32' ? 'where' : 'which', ['fpcalc'], { encoding: 'utf8' });
+            const platform = os.platform();
+            const genericName = platform === 'win32' ? 'fpcalc.exe' : 'fpcalc';
+            if (fs.existsSync(path.join(TARGET_DIR, genericName))) {
+                console.log(`检测到 ${genericName} 已存在，跳过自动下载。`);
+                return;
+            }
+            const checkGlobal = spawnSync(platform === 'win32' ? 'where' : 'which', ['fpcalc'], { encoding: 'utf8' });
             if (checkGlobal.status === 0) {
                 console.log('检测到系统中已安装 fpcalc，跳过自动下载。');
                 return;
