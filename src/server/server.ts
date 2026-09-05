@@ -2748,6 +2748,92 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // 1.1-E Rename Subdirectory
+      if (pathname === '/api/music/cache/subdirs/rename' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const auth = req.headers['x-frontend-auth']
+        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
+
+        if (isPublic) {
+          if (!isAdmin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '权限不足：修改公共本地分类需要验证管理员权限。' }))
+            return
+          }
+        } else {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+
+        void readBody(req).then(body => {
+          try {
+            const { folder = 'music', oldSubPath, newSubPath } = JSON.parse(body)
+            if (!oldSubPath || !newSubPath) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少参数' }))
+              return
+            }
+            const result = fileCache.renameSubDirectory(username, folder, oldSubPath.trim(), newSubPath.trim())
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e?.message || 'Server error' }))
+          }
+        })
+        return
+      }
+
+      // 1.1-F Delete Subdirectory
+      if (pathname === '/api/music/cache/subdirs/delete' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const auth = req.headers['x-frontend-auth']
+        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
+
+        if (isPublic) {
+          if (!isAdmin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '权限不足：删除公共本地分类需要验证管理员权限。' }))
+            return
+          }
+        } else {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+
+        void readBody(req).then(body => {
+          try {
+            const { folder = 'music', subPath, deleteSongs = false } = JSON.parse(body)
+            if (!subPath) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少 subPath 参数' }))
+              return
+            }
+            const result = fileCache.deleteSubDirectory(username, folder, subPath.trim(), !!deleteSongs)
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e?.message || 'Server error' }))
+          }
+        })
+        return
+      }
+
       // 1.2 Batch Rename Cache Files
       if (pathname === '/api/music/cache/rename' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''

@@ -2954,3 +2954,118 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
     indexManager.save(normalizedUsername, folder)
     return { successCount, failCount }
 }
+
+/**
+ * [New] Rename a subdirectory and update index entries
+ */
+export const renameSubDirectory = (username: string | undefined, folder: 'cache' | 'music', oldSubPath: string, newSubPath: string) => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const root = getCacheDir(normalizedUsername, folder === 'music')
+    const oldDir = path.join(root, oldSubPath)
+    const newDir = path.join(root, newSubPath)
+
+    if (!fs.existsSync(oldDir)) return { success: false, message: '原分类目录不存在' }
+    if (fs.existsSync(newDir)) return { success: false, message: '目标分类目录名称已存在' }
+
+    try {
+        safeRenameSync(oldDir, newDir)
+    } catch (e: any) {
+        console.error('[FileCache] Rename directory failed:', e)
+        return { success: false, message: e?.message || '重命名目录失败' }
+    }
+
+    // Update indexes
+    const allItems = indexManager.getAll(normalizedUsername, folder)
+    let updatedCount = 0
+    for (const item of allItems) {
+        if (item.subPath === oldSubPath || item.subPath?.startsWith(oldSubPath + '/')) {
+            const relSub = item.subPath === oldSubPath ? '' : item.subPath.slice(oldSubPath.length + 1)
+            const updatedSub = relSub ? `${newSubPath}/${relSub}` : newSubPath
+            item.subPath = updatedSub
+
+            if (item.filename) {
+                const baseName = path.basename(item.filename)
+                item.filename = `${updatedSub}/${baseName}`
+            }
+            if (item.lyricFilename) {
+                const baseLrc = path.basename(item.lyricFilename)
+                item.lyricFilename = `${updatedSub}/${baseLrc}`
+            }
+            updatedCount++
+        }
+    }
+    indexManager.save(normalizedUsername, folder)
+    return { success: true, updatedCount }
+}
+
+/**
+ * [New] Delete a subdirectory. If deleteSongs is true, physically remove files and index. If false, move songs to root directory.
+ */
+export const deleteSubDirectory = (username: string | undefined, folder: 'cache' | 'music', subPath: string, deleteSongs: boolean) => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const root = getCacheDir(normalizedUsername, folder === 'music')
+    const targetDir = path.join(root, subPath)
+
+    if (!fs.existsSync(targetDir)) return { success: false, message: '分类目录不存在' }
+
+    const allItems = indexManager.getAll(normalizedUsername, folder)
+    const affectedItems = allItems.filter(item => item.subPath === subPath || item.subPath?.startsWith(subPath + '/'))
+
+    if (deleteSongs) {
+        // Remove from index
+        for (const item of affectedItems) {
+            indexManager.remove(normalizedUsername, item.id, folder, item.quality)
+        }
+        indexManager.save(normalizedUsername, folder)
+
+        // Remove physically
+        try {
+            fs.rmSync(targetDir, { recursive: true, force: true })
+        } catch (e: any) {
+            console.error('[FileCache] Delete directory physically failed:', e)
+            return { success: false, message: e?.message || '删除物理目录失败' }
+        }
+        return { success: true, affectedCount: affectedItems.length, action: 'deleted' }
+    } else {
+        // Move songs and lyrics to root
+        let movedCount = 0
+        for (const item of affectedItems) {
+            const oldAudioPath = path.join(root, item.filename)
+            const newFilename = path.basename(item.filename)
+            const newAudioPath = path.join(root, newFilename)
+
+            try {
+                if (fs.existsSync(oldAudioPath)) {
+                    if (oldAudioPath !== newAudioPath) {
+                        safeRenameSync(oldAudioPath, newAudioPath)
+                    }
+                }
+                if (item.lyricFilename) {
+                    const oldLrcPath = path.join(root, item.lyricFilename)
+                    const newLrcFilename = path.basename(item.lyricFilename)
+                    const newLrcPath = path.join(root, newLrcFilename)
+                    if (fs.existsSync(oldLrcPath) && oldLrcPath !== newLrcPath) {
+                        safeRenameSync(oldLrcPath, newLrcPath)
+                    }
+                    item.lyricFilename = newLrcFilename
+                }
+
+                item.filename = newFilename
+                item.subPath = ''
+                movedCount++
+            } catch (e: any) {
+                console.error('[FileCache] Move song to root failed:', item.filename, e)
+            }
+        }
+        indexManager.save(normalizedUsername, folder)
+
+        // Remove empty directory (or with leftover unknown files)
+        try {
+            fs.rmSync(targetDir, { recursive: true, force: true })
+        } catch (e: any) {
+            console.warn('[FileCache] Delete emptied dir warning:', e)
+        }
+        return { success: true, affectedCount: movedCount, action: 'moved_to_root' }
+    }
+}
+

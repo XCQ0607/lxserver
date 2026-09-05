@@ -612,12 +612,19 @@ window.LocalMusicManager = {
 
                 // Update UI elements
                 if (document.getElementById('lm-search-input')) this.setRichInputValue(document.getElementById('lm-search-input'), this.searchKeyword);
-                if (document.getElementById('lm-sort-by')) document.getElementById('lm-sort-by').value = this.sortBy;
-                if (document.getElementById('lm-sort-order')) document.getElementById('lm-sort-order').value = this.sortOrder;
-                if (document.getElementById('lm-folder-select')) {
-                    document.getElementById('lm-folder-select').value = this.filterFolder;
-                    this._syncSelectActive('lm-folder-select');
-                }
+                
+                ['lm-sort-by', 'lm-sort-order', 'lm-folder-select'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    if (id === 'lm-sort-by') el.value = this.sortBy;
+                    if (id === 'lm-sort-order') el.value = this.sortOrder;
+                    if (id === 'lm-folder-select') el.value = this.filterFolder;
+                    this._syncSelectActive(id);
+                    if (window.CustomSelectManager && typeof window.CustomSelectManager.syncUI === 'function') {
+                        window.CustomSelectManager.syncUI(el);
+                    }
+                });
+
                 // 标签按钮 UI 更新
                 this._syncTagUI('lm-quality-tags', this.filterQuality);
                 this._syncTagUI('lm-source-tags', this.filterSource);
@@ -730,7 +737,7 @@ window.LocalMusicManager = {
         // Initialization can run when the tab is clicked, or immediately.
         // Try reading global cache location to sync the selector.
         this.syncLocationSelector();
-        this.resetFilters(false);
+        this.loadFilters();
         this.bindListEvents();
         this.syncPublicSongsBtn();
         this.fetchData();
@@ -744,7 +751,7 @@ window.LocalMusicManager = {
             }
             if (tabId === 'localmusic') {
                 window.LocalMusicManager.syncLocationSelector();
-                window.LocalMusicManager.resetFilters();
+                window.LocalMusicManager.loadFilters();
                 window.LocalMusicManager.syncPublicSongsBtn();
                 window.LocalMusicManager.fetchData(true); // silent fetch
             } else {
@@ -2697,11 +2704,27 @@ window.LocalMusicManager = {
 
         dirs.forEach(dir => {
             const isActive = this.selectedSubPath === dir;
+            const safeDir = dir.replace(/'/g, "\\'");
             html += `
-                <button onclick="window.LocalMusicManager.selectSubPath('${dir.replace(/'/g, "\\'")}')" class="p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${isActive ? 'subpath-btn-active' : 'subpath-btn-inactive'}">
-                    <i class="fas fa-folder text-xl"></i>
-                    <span class="text-xs font-bold truncate w-full text-center" title="${dir}">${dir}</span>
-                </button>
+                <div class="relative group">
+                    <button onclick="window.LocalMusicManager.selectSubPath('${safeDir}')" class="w-full p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${isActive ? 'subpath-btn-active' : 'subpath-btn-inactive'}">
+                        <i class="fas fa-folder text-xl"></i>
+                        <span class="text-xs font-bold truncate w-full text-center" title="${dir}">${dir}</span>
+                    </button>
+                    <!-- Action buttons on top right -->
+                    <div class="absolute top-2 right-2 flex items-center gap-1 opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button onclick="event.stopPropagation(); window.LocalMusicManager.renameSubFolder('${safeDir}')"
+                            class="w-6 h-6 rounded-md bg-white/80 dark:bg-gray-800/80 hover:bg-emerald-500 hover:text-white t-text-muted transition-colors flex items-center justify-center text-xs shadow-sm"
+                            title="重命名分类">
+                            <i class="fas fa-pencil-alt text-[10px]"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); window.LocalMusicManager.deleteSubFolder('${safeDir}')"
+                            class="w-6 h-6 rounded-md bg-white/80 dark:bg-gray-800/80 hover:bg-red-500 hover:text-white t-text-muted transition-colors flex items-center justify-center text-xs shadow-sm"
+                            title="删除分类">
+                            <i class="fas fa-trash-alt text-[10px]"></i>
+                        </button>
+                    </div>
+                </div>
             `;
         });
 
@@ -3207,6 +3230,146 @@ window.LocalMusicManager = {
             }
         } catch (e) {
             console.error('Failed to create subdir:', e);
+        }
+    },
+
+    async renameSubFolder(oldSubPath) {
+        if (!oldSubPath) return;
+        const newName = prompt(`请输入分类【${oldSubPath}】的新名称：`, oldSubPath);
+        if (!newName || newName.trim() === '' || newName.trim() === oldSubPath) return;
+
+        try {
+            const res = await fetch('/api/music/cache/subdirs/rename', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {})
+                },
+                body: JSON.stringify({ folder: 'music', oldSubPath, newSubPath: newName.trim() })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (typeof showMsg === 'function') showMsg(`分类已重命名为【${newName.trim()}】`, 'success');
+                if (this.selectedSubPath === oldSubPath) {
+                    this.selectedSubPath = newName.trim();
+                    const text = document.getElementById('lm-subpath-text');
+                    if (text) text.innerText = newName.trim();
+                }
+                // Refresh subpath modal and list data
+                this.openSubPathModal(this.subPathModalMode || 'filter');
+                await this.fetchData(true);
+            } else {
+                if (typeof showError === 'function') showError(data.message || '重命名分类失败');
+            }
+        } catch (e) {
+            console.error('Rename subfolder error:', e);
+            if (typeof showError === 'function') showError('网络请求失败');
+        }
+    },
+
+    deleteSubFolder(subPath) {
+        if (!subPath) return;
+        this.pendingDeleteSubPath = subPath;
+        this.pendingDeleteSongs = false;
+
+        const modal = document.getElementById('subpath-delete-modal');
+        const content = document.getElementById('subpath-delete-modal-content');
+        const targetNameEl = document.getElementById('subpath-delete-target-name');
+        const step1 = document.getElementById('subpath-delete-step1');
+        const step2 = document.getElementById('subpath-delete-step2');
+
+        if (!modal || !content) return;
+        if (targetNameEl) targetNameEl.innerText = subPath;
+
+        if (step1) step1.classList.remove('hidden');
+        if (step2) step2.classList.add('hidden');
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        setTimeout(() => {
+            content.classList.remove('scale-95', 'opacity-0');
+            content.classList.add('scale-100', 'opacity-100');
+        }, 10);
+    },
+
+    closeSubPathDeleteModal() {
+        const modal = document.getElementById('subpath-delete-modal');
+        const content = document.getElementById('subpath-delete-modal-content');
+        if (!modal || !content) return;
+
+        content.classList.remove('scale-100', 'opacity-100');
+        content.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            this.pendingDeleteSubPath = null;
+        }, 300);
+    },
+
+    confirmDeleteStep(deleteSongs) {
+        this.pendingDeleteSongs = deleteSongs;
+        const step1 = document.getElementById('subpath-delete-step1');
+        const step2 = document.getElementById('subpath-delete-step2');
+        const notice = document.getElementById('subpath-delete-step2-notice');
+        const executeBtn = document.getElementById('subpath-delete-execute-btn');
+
+        if (step1) step1.classList.add('hidden');
+        if (step2) step2.classList.remove('hidden');
+
+        if (notice) {
+            if (deleteSongs) {
+                notice.innerHTML = `⚠️ <b>危险操作警告：</b>您即将永久删除分类【<b>${this.escapeHtml(this.pendingDeleteSubPath)}</b>】以及分类目录下的<b>所有歌曲和歌词文件</b>。此操作无法撤销，确认继续？`;
+            } else {
+                notice.innerHTML = `ℹ️ <b>操作确认：</b>您即将删除分类【<b>${this.escapeHtml(this.pendingDeleteSubPath)}</b>】。分类下的所有歌曲和歌词将<b>安全转移至根目录</b>，不会丢失文件。确认继续？`;
+            }
+        }
+
+        if (executeBtn) {
+            executeBtn.innerText = deleteSongs ? '彻底删除分类及歌曲' : '移到根目录并删除分类';
+        }
+    },
+
+    backToDeleteStep1() {
+        const step1 = document.getElementById('subpath-delete-step1');
+        const step2 = document.getElementById('subpath-delete-step2');
+        if (step1) step1.classList.remove('hidden');
+        if (step2) step2.classList.add('hidden');
+    },
+
+    async executeDeleteSubFolder() {
+        const subPath = this.pendingDeleteSubPath;
+        const deleteSongs = !!this.pendingDeleteSongs;
+        if (!subPath) return;
+
+        try {
+            const res = await fetch('/api/music/cache/subdirs/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {})
+                },
+                body: JSON.stringify({ folder: 'music', subPath, deleteSongs })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const actionText = deleteSongs ? '分类及歌曲已彻底删除' : '分类已删除，歌曲已全部移入根目录';
+                if (typeof showMsg === 'function') showMsg(actionText, 'success');
+                this.closeSubPathDeleteModal();
+
+                if (this.selectedSubPath === subPath) {
+                    this.selectedSubPath = '';
+                    const text = document.getElementById('lm-subpath-text');
+                    if (text) text.innerText = '全部';
+                }
+                // Refresh subpath modal and list data
+                this.openSubPathModal(this.subPathModalMode || 'filter');
+                await this.fetchData(true);
+            } else {
+                if (typeof showError === 'function') showError(data.message || '删除分类失败');
+            }
+        } catch (e) {
+            console.error('Delete subfolder error:', e);
+            if (typeof showError === 'function') showError('网络请求失败');
         }
     }
 };

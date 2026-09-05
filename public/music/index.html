@@ -3178,12 +3178,12 @@
                                 </h3>
                                 <div class="flex gap-2 flex-shrink-0">
                                     <button onclick="window.clearSystemLogs && window.clearSystemLogs()"
-                                        class="px-3 py-1.5 t-bg-track hover:bg-gray-200 t-text-muted rounded-lg text-xs transition-colors whitespace-nowrap"
+                                        class="px-3 py-1.5 t-bg-track hover:t-bg-item-hover t-text-muted rounded-lg text-xs transition-colors whitespace-nowrap border t-border-main"
                                         title="清空日志">
                                         <i class="fas fa-trash-alt mr-1"></i>清空
                                     </button>
                                     <button onclick="window.renderSystemLogs && window.renderSystemLogs()"
-                                        class="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-600 rounded-lg text-xs transition-colors whitespace-nowrap"
+                                        class="px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-xs transition-colors whitespace-nowrap shadow-sm"
                                         title="刷新">
                                         <i class="fas fa-sync-alt mr-1"></i>刷新
                                     </button>
@@ -3191,10 +3191,10 @@
                             </div>
 
                             <div
-                                class="flex-1 bg-gray-900 rounded-xl border border-gray-800 p-4 font-mono text-xs overflow-hidden flex flex-col shadow-inner">
+                                class="flex-1 t-bg-main rounded-xl border t-border-main p-4 font-mono text-xs overflow-hidden flex flex-col shadow-inner">
                                 <div id="system-log-container"
-                                    class="flex-1 overflow-y-auto custom-scrollbar space-y-1 bg-gray-900 text-gray-300">
-                                    <div class="text-gray-500 italic text-center py-4">暂无日志...</div>
+                                    class="flex-1 overflow-y-auto custom-scrollbar space-y-1 t-bg-main t-text-main">
+                                    <div class="t-text-muted italic text-center py-4 opacity-60">暂无日志...</div>
                                 </div>
                             </div>
                             <div class="text-[10px] t-text-muted text-right">
@@ -3903,6 +3903,65 @@
                     class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-sm transition-all whitespace-nowrap">
                     创建文件夹
                 </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- SubPath Delete Confirmation Modal -->
+    <div id="subpath-delete-modal"
+        class="fixed inset-0 bg-black/60 z-[80] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
+        <div class="t-bg-panel rounded-2xl w-full max-w-md flex flex-col shadow-2xl transform transition-all duration-300 scale-95 opacity-0 overflow-hidden border t-border-main"
+            id="subpath-delete-modal-content">
+            <div class="p-5 border-b t-border-main flex items-center justify-between bg-red-50/40 dark:bg-red-950/20">
+                <div class="flex items-center gap-2 text-red-500 font-bold">
+                    <i class="fas fa-exclamation-triangle text-lg"></i>
+                    <h3 class="text-base" id="subpath-delete-modal-title">删除分类目录</h3>
+                </div>
+                <button onclick="window.LocalMusicManager.closeSubPathDeleteModal()"
+                    class="t-text-muted hover:text-red-500 transition-colors">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="p-6 text-sm t-text-main flex flex-col gap-4">
+                <p id="subpath-delete-modal-desc">请选择如何处理该分类【<span id="subpath-delete-target-name" class="font-bold text-emerald-500"></span>】下的歌曲：</p>
+                <div id="subpath-delete-step1" class="flex flex-col gap-3">
+                    <button onclick="window.LocalMusicManager.confirmDeleteStep(false)"
+                        class="p-3.5 rounded-xl border t-border-main hover:border-emerald-500 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 transition-all text-left flex items-center justify-between group">
+                        <div>
+                            <div class="font-bold t-text-main group-hover:text-emerald-500 transition-colors flex items-center gap-2">
+                                <i class="fas fa-arrow-up text-emerald-500"></i>
+                                保留歌曲并移动到根目录
+                            </div>
+                            <div class="text-xs t-text-muted mt-1">仅删除分类目录，歌曲和歌词将安全移至主目录根路径下</div>
+                        </div>
+                        <i class="fas fa-chevron-right text-xs t-text-muted group-hover:text-emerald-500 transition-colors"></i>
+                    </button>
+                    <button onclick="window.LocalMusicManager.confirmDeleteStep(true)"
+                        class="p-3.5 rounded-xl border border-red-200 dark:border-red-900/50 hover:border-red-500 hover:bg-red-50/30 dark:hover:bg-red-950/20 transition-all text-left flex items-center justify-between group">
+                        <div>
+                            <div class="font-bold text-red-500 transition-colors flex items-center gap-2">
+                                <i class="fas fa-trash-alt"></i>
+                                连同分类内的歌曲一起删除
+                            </div>
+                            <div class="text-xs t-text-muted mt-1">彻底物理删除该分类目录及其包含的所有音频与歌词文件</div>
+                        </div>
+                        <i class="fas fa-chevron-right text-xs text-red-400 group-hover:text-red-500 transition-colors"></i>
+                    </button>
+                </div>
+                <div id="subpath-delete-step2" class="hidden flex flex-col gap-4">
+                    <div id="subpath-delete-step2-notice" class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300">
+                    </div>
+                    <div class="flex justify-end gap-2 pt-2">
+                        <button onclick="window.LocalMusicManager.backToDeleteStep1()"
+                            class="px-4 py-2 rounded-xl text-xs font-medium t-text-muted hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors">
+                            上一步
+                        </button>
+                        <button id="subpath-delete-execute-btn" onclick="window.LocalMusicManager.executeDeleteSubFolder()"
+                            class="px-4 py-2 bg-red-500 hover:bg-red-600 text-white rounded-xl text-xs font-bold shadow-md transition-all">
+                            确认删除
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     </div>

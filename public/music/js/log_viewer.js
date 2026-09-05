@@ -87,13 +87,13 @@
     // Helper: Append single log
     function appendLogToView(container, log) {
         const div = document.createElement('div');
-        div.className = `font-mono text-xs py-1 border-b t-border-main last:border-0 hover:t-bg-main transition-colors ${log.type === 'error' ? 'text-red-600 bg-red-50/50' :
-            log.type === 'warn' ? 'text-amber-600 bg-amber-50/50' :
-                't-text-muted'
+        div.className = `font-mono text-xs py-1.5 px-2 rounded border-b t-border-main last:border-0 hover:t-bg-item-hover transition-colors ${log.type === 'error' ? 'text-red-500 dark:text-red-400 bg-red-500/10' :
+            log.type === 'warn' ? 'text-amber-500 dark:text-amber-400 bg-amber-500/10' :
+                't-text-main'
             }`;
 
         // Colorize time
-        const timeHtml = `<span class="t-text-muted select-none mr-2">[${log.time}]</span>`;
+        const timeHtml = `<span class="t-text-muted opacity-70 select-none mr-2 font-semibold">[${log.time}]</span>`;
         // Message with preserved whitespace
         const msgHtml = `<span class="whitespace-pre-wrap break-words">${escapeHtml(log.message)}</span>`;
 
