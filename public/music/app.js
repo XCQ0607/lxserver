@@ -4310,6 +4310,167 @@ async function updateServerCacheConfig(location, pattern) {
 window.updateServerCacheConfig = updateServerCacheConfig; // Expose global
 
 /**
+ * 查看服务端当前真实存储目录 (综合缓存位置与仅下载模式)
+ */
+async function showServerDirectories() {
+    showLoading('正在获取服务器目录信息...');
+    try {
+        const loc = window.settings?.serverCacheLocation || 'root';
+        const onlyDownload = !!window.settings?.enableOnlyDownloadMode;
+
+        const headers = { 'Content-Type': 'application/json' };
+        Object.assign(headers, getUserAuthHeaders());
+
+        const url = `/api/music/cache/directories?location=${encodeURIComponent(loc)}&onlyDownload=${onlyDownload ? '1' : '0'}`;
+        const res = await fetch(url, { headers });
+        const json = await res.json();
+        hideLoading();
+
+        if (!json.success || !json.data) {
+            showToast('获取服务器目录失败: ' + (json.message || '未知错误'), 'error');
+            return;
+        }
+
+        const data = json.data;
+        const isWindows = data.cacheDirectory.includes('\\');
+        const sep = isWindows ? '\\' : '/';
+        const isSeparated = !data.isSameDirectory;
+
+        const modal = document.createElement('div');
+        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.innerHTML = `
+            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
+            <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
+                <!-- Header -->
+                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
+                    <div class="flex items-center gap-2">
+                        <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
+                            <i class="fas fa-folder-open text-base"></i>
+                        </div>
+                        <div>
+                            <h3 class="text-sm font-bold t-text-main">当前存储目录 (绝对路径)</h3>
+                            <p class="text-[11px] t-text-muted">运行环境当前物理存储位置</p>
+                        </div>
+                    </div>
+                    <button id="server-dir-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
+                        <i class="fas fa-times text-lg"></i>
+                    </button>
+                </div>
+
+                <!-- Body -->
+                <div class="p-5 space-y-4 max-h-[75vh] overflow-y-auto custom-scrollbar">
+                    <!-- Current Status Badges -->
+                    <div class="flex flex-wrap gap-2 text-xs">
+                        <span class="px-2.5 py-1 rounded-md font-medium ${data.isWebDAVSynced ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-900' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-gray-700'} flex items-center gap-1.5">
+                            <i class="fas ${data.isWebDAVSynced ? 'fa-cloud' : 'fa-laptop'} text-xs"></i>
+                            位置: ${data.rootType}
+                        </span>
+                        <span class="px-2.5 py-1 rounded-md font-medium ${isSeparated ? 'bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-900' : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900'} flex items-center gap-1.5">
+                            <i class="fas ${isSeparated ? 'fa-layer-group' : 'fa-folder'} text-xs"></i>
+                            模式: ${isSeparated ? '仅下载已开启 (缓存与下载已分离)' : '仅下载未开启 (缓存与下载合并)'}
+                        </span>
+                        <span class="px-2.5 py-1 rounded-md font-medium bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-900 flex items-center gap-1.5">
+                            <i class="fas fa-user text-xs"></i>
+                            空间: ${data.username === '_open' ? '公开空间 (_open)' : data.username}
+                        </span>
+                    </div>
+
+                    <!-- 缓存目录 -->
+                    <div class="p-3.5 rounded-xl border t-border-main bg-gray-50/70 dark:bg-gray-800/40 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold t-text-main flex items-center gap-1.5">
+                                <i class="fas fa-bolt text-amber-500"></i>
+                                歌曲缓存目录
+                            </span>
+                            <button class="copy-dir-btn text-xs text-emerald-500 hover:underline flex items-center gap-1 cursor-pointer" data-path="${data.cacheDirectory.replace(/"/g, '&quot;')}">
+                                <i class="far fa-copy"></i>
+                                复制路径
+                            </button>
+                        </div>
+                        <div class="p-2.5 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 select-all font-mono text-xs break-all text-gray-800 dark:text-gray-200 shadow-sm leading-relaxed">
+                            ${data.cacheDirectory}
+                        </div>
+                        <p class="text-[11px] t-text-muted">播放时在线流式预加载及临时缓存文件存放处，受 LRU 容量自动限制与清理。</p>
+                    </div>
+
+                    <!-- 下载目录 -->
+                    <div class="p-3.5 rounded-xl border t-border-main bg-gray-50/70 dark:bg-gray-800/40 space-y-2">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-bold t-text-main flex items-center gap-1.5">
+                                <i class="fas fa-arrow-circle-down text-emerald-500"></i>
+                                歌曲下载目录
+                            </span>
+                            <button class="copy-dir-btn text-xs text-emerald-500 hover:underline flex items-center gap-1 cursor-pointer" data-path="${data.downloadDirectory.replace(/"/g, '&quot;')}">
+                                <i class="far fa-copy"></i>
+                                复制路径
+                            </button>
+                        </div>
+                        <div class="p-2.5 rounded-lg bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 select-all font-mono text-xs break-all text-gray-800 dark:text-gray-200 shadow-sm leading-relaxed">
+                            ${data.downloadDirectory}
+                        </div>
+                        <p class="text-[11px] t-text-muted">
+                            ${isSeparated
+                                ? '开启“仅下载模式”时，歌曲将独立持久保存在此目录，不参与缓存容量淘汰，洗版功能仅针对此目录生效。'
+                                : '未开启“仅下载模式”时，下载歌曲与缓存歌曲合并存储在同一目录下。'}
+                        </p>
+                    </div>
+
+                    <!-- 提示说明 -->
+                    <div class="text-xs text-gray-500 dark:text-gray-400 p-3 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 flex items-start gap-2">
+                        <i class="fas fa-info-circle text-amber-500 mt-0.5 shrink-0"></i>
+                        <div class="space-y-1">
+                            <div>• <strong>缓存位置</strong>：选择「DATA_PATH」会将文件存放于 WebDAV 同步目录下，备份时可一并打包；选择「运行目录」则仅保存在当前服务器本地。</div>
+                            <div>• <strong>仅下载模式</strong>：开启后下载路径变更为 <code class="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[11px]">music${sep}${data.username}</code>；关闭时统一保存在 <code class="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[11px]">cache${sep}${data.username}</code>。</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="p-4 t-bg-main/50 border-t t-border-main/50 flex justify-end">
+                    <button id="server-dir-confirm" class="px-5 py-2 text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl shadow-lg transition-all active:scale-95">
+                        我知道了
+                    </button>
+                </div>
+            </div>
+        `;
+
+        document.body.appendChild(modal);
+
+        const close = () => {
+            const content = modal.querySelector('.max-w-lg');
+            if (content) {
+                content.classList.add('scale-95', 'opacity-0');
+            }
+            modal.classList.add('opacity-0');
+            setTimeout(() => modal.remove(), 200);
+        };
+
+        modal.querySelector('#server-dir-close-x').onclick = close;
+        modal.querySelector('#server-dir-confirm').onclick = close;
+        modal.querySelector('div:first-child').onclick = close;
+
+        modal.querySelectorAll('.copy-dir-btn').forEach(btn => {
+            btn.onclick = async () => {
+                const pathText = btn.getAttribute('data-path');
+                if (!pathText) return;
+                try {
+                    await navigator.clipboard.writeText(pathText);
+                    showToast('已复制绝对路径到剪贴板', 'success');
+                } catch (e) {
+                    showToast('复制失败，请手动全选复制', 'error');
+                }
+            };
+        });
+    } catch (err) {
+        hideLoading();
+        showToast('请求目录发生异常', 'error');
+        console.error(err);
+    }
+}
+window.showServerDirectories = showServerDirectories;
+
+
+/**
  * playFromView handles user click on a song in the search/list view.
  * It ensures the playback queue is updated to match the viewed list.
  */

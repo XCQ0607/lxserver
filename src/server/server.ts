@@ -2,6 +2,7 @@ import http, { type IncomingMessage } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import url from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import { registerLocalSyncEvent, callObj, sync } from './sync'
 import { authCode, authConnect } from './auth'
@@ -2559,6 +2560,48 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             res.end('Error')
           }
         })
+        return
+      }
+
+      // 1.05 Get Real Cache & Download Directories
+      if (pathname === '/api/music/cache/directories' && req.method === 'GET') {
+        const parsedUrl = url.parse(req.url || '', true)
+        const locationQuery = (parsedUrl.query.location as string) || undefined
+        const onlyDownloadQuery = parsedUrl.query.onlyDownload === 'true' || parsedUrl.query.onlyDownload === '1'
+
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+
+        const effectiveLocation = locationQuery || fileCache.getCacheLocation()
+        const cacheDir = fileCache.getCacheDir(username, false, effectiveLocation)
+        const downloadDir = fileCache.getCacheDir(username, true, effectiveLocation)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          data: {
+            username,
+            location: effectiveLocation,
+            isOnlyDownloadMode: onlyDownloadQuery,
+            isSameDirectory: !onlyDownloadQuery,
+            cacheDirectory: cacheDir,
+            downloadDirectory: onlyDownloadQuery ? downloadDir : cacheDir,
+            rawDownloadDirectory: downloadDir,
+            rootType: effectiveLocation === 'data' ? 'DATA_PATH (WebDAV同步)' : '运行目录 (仅本地)',
+            isWebDAVSynced: effectiveLocation === 'data'
+          }
+        }))
         return
       }
 

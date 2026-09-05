@@ -2066,6 +2066,25 @@
                                             </option>
                                             <option value="simple">简洁 (Name - Singer - Quality - Album)</option>
                                         </select>
+
+                                        <div class="mt-4 pt-3 border-t t-border-main flex items-center justify-between">
+                                            <div>
+                                                <div class="text-sm font-bold t-text-main flex items-center">
+                                                    查看当前存储目录
+                                                    <span class="setting-tooltip-trigger ml-1">
+                                                        <i class="fas fa-question-circle"></i>
+                                                        <span
+                                                            class="setting-tooltip-content">根据「缓存歌曲位置」与「仅下载模式」计算当前系统下的绝对存储物理路径。</span>
+                                                    </span>
+                                                </div>
+                                                <div class="text-xs t-text-muted mt-0.5">查看当前账号缓存与下载目录的物理绝对路径</div>
+                                            </div>
+                                            <button type="button" onclick="showServerDirectories()"
+                                                class="px-3.5 py-1.5 rounded-lg text-xs font-bold bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm hover:shadow transition-all active:scale-95 flex items-center gap-1.5 shrink-0">
+                                                <i class="fas fa-folder-open text-xs"></i>
+                                                <span>查看目录</span>
+                                            </button>
+                                        </div>
                                     </div>
 
                                     <div
