@@ -993,6 +993,32 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [PWA 适配] 动态生成播放器的 manifest.json，自动匹配当前 playerPath
+      if (pathname === `${normalizedPrefix}/manifest.json` || (isLegacyPlayerAsset && pathname === '/music/manifest.json')) {
+        const manifestFilePath = path.join(global.lx.staticPath, 'music', 'manifest.json')
+        try {
+          const raw = fs.readFileSync(manifestFilePath, 'utf-8')
+          const manifest = JSON.parse(raw)
+          // 规范化当前播放器的 base URL（必须以 / 结尾）
+          const effectivePlayerBase = (playerPath === '/' || playerPath === '') ? '/' : `${playerPath.replace(/\/+$/, '')}/`
+          manifest.start_url = effectivePlayerBase
+          manifest.scope = effectivePlayerBase
+          // 图标使用相对于当前有效根路径或者播放器物理路径的地址
+          if (Array.isArray(manifest.icons)) {
+            manifest.icons = manifest.icons.map((icon: any) => ({
+              ...icon,
+              src: icon.src ? (icon.src.startsWith('http') ? icon.src : `${effectivePlayerBase}${icon.src.replace(/^\.\//, '')}`) : icon.src
+            }))
+          }
+          res.writeHead(200, {
+            'Content-Type': 'application/manifest+json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          })
+          res.end(JSON.stringify(manifest, null, 2))
+          return
+        } catch { }
+      }
+
       const subPath = pathname.slice(normalizedPrefix.length)
       if (subPath === '/' || subPath === '') {
         targetPath = 'music/index.html'
