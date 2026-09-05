@@ -2948,10 +2948,10 @@
                                                             <span class="setting-tooltip-trigger ml-1">
                                                                 <i class="fas fa-question-circle"></i>
                                                                 <span class="setting-tooltip-content">
-                                                                    每次解析音频链接时，若当前的自定义解析脚本失败，是否自动尝试使用其他支持该平台的自定义源解析。<br>
+                                                                    解析或播放音频时，若首个自定义源解析报错或返回的链接无法播放（如失效/防盗链403），系统会自动排除该故障源，无缝切换尝试支持该平台的其他备选自定义源。<br>
                                                                     <span class="text-emerald-500 font-medium">*
-                                                                        开启：依次尝试其他解析脚本 |
-                                                                        关闭：首个解析脚本失效即报错</span>
+                                                                        开启：自动穷尽支持该平台的所有备选源脚本 |
+                                                                        关闭：首个源失效或播放报错即终止该平台</span>
                                                                 </span>
                                                             </span>
                                                         </h4>
@@ -3006,10 +3006,11 @@
                                                             <span class="setting-tooltip-trigger ml-1">
                                                                 <i class="fas fa-question-circle"></i>
                                                                 <span class="setting-tooltip-content">
-                                                                    依次尝试失败恢复逻辑的优先级顺序，关闭的策略逻辑会被自动跳过。<br>
+                                                                    当歌曲在原平台的所有可用自定义源均已尝试且确认无法播放后，客户端依次尝试容错恢复的顺序（关闭的策略会被自动跳过）：<br>
                                                                     <span class="text-emerald-500 font-medium">*
-                                                                        切换平台 -> 降低音质：优先切换一次平台（仅一次），后续音质降级将在新平台执行。<br>
-                                                                        降低音质 -> 切换平台：原平台所有音质均解析失败后，切换至新平台并读取偏好音质尝试解析一次，若再次失败则直接播放下一首。</span>
+                                                                        跨平台换源 -> 降低音质：原平台所有音源均无法播放时，优先在全网其他平台（网易/QQ/酷我/酷狗/咪咕等）搜索同名歌曲并切换播放；若在新平台仍无法播放，再在新平台执行音质降级。<br>
+                                                                        降低音质 -> 跨平台换源：优先尝试降低原平台的音质（如无损 -> 320k -> 128k，新音质下会重新探测同平台可用音源）；原平台所有音质均无法解析时，再跨平台全网搜索备选源。</span><br>
+                                                                    <span class="text-gray-400 text-xs">注：原平台内多个自定义源脚本的自动剔错与替补，由上方的「自动尝试换源」优先自动执行。</span>
                                                                 </span>
                                                             </span>
                                                         </h4>
@@ -3018,9 +3019,9 @@
                                                         <select id="setting-playback-error-priority"
                                                             onchange="updateSetting('playbackErrorPriority', this.value)"
                                                             class="lm-select !w-full !py-1.5">
-                                                            <option value="platform,quality,next">切换平台 -> 降低音质 -> 下一首
+                                                            <option value="platform,quality,next">跨平台换源 -> 降低音质 -> 下一首
                                                             </option>
-                                                            <option value="quality,platform,next">降低音质 -> 切换平台 -> 下一首
+                                                            <option value="quality,platform,next">降低音质 -> 跨平台换源 -> 下一首
                                                             </option>
                                                         </select>
                                                     </div>

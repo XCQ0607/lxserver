@@ -369,7 +369,7 @@ export default {
       source: 'kg',
       info: {
         name: info.name,
-        img: (info.img_size && info.img_size.replace('{size}', 240)) || info.img,
+        img: (info.img_size && info.img_size.replace('{size}', '1000')) || info.img,
         // desc: body.result.info.list_desc,
         author: info.username,
         // play_count: formatPlayCount(info.count),
@@ -463,7 +463,7 @@ export default {
       source: 'kg',
       info: {
         name: listInfo.name,
-        img: listInfo.pic && listInfo.pic.replace('{size}', 240),
+        img: listInfo.pic && listInfo.pic.replace('{size}', '1000'),
         // desc: body.result.info.list_desc,
         author: listInfo.list_create_username,
         // play_count: formatPlayCount(listInfo.count),
@@ -514,7 +514,7 @@ export default {
       source: 'kg',
       info: {
         name: info.specialname,
-        img: info.imgurl && info.imgurl.replace('{size}', 240),
+        img: info.imgurl && info.imgurl.replace('{size}', '1000'),
         desc: info.intro,
         author: info.nickname,
         play_count: formatPlayCount(info.playcount),
@@ -565,7 +565,7 @@ export default {
       source: 'kg',
       info: {
         name: listInfo.specialname,
-        img: listInfo.imgurl && listInfo.imgurl.replace('{size}', 240),
+        img: listInfo.imgurl && listInfo.imgurl.replace('{size}', '1000'),
         // desc: body.result.info.list_desc,
         author: listInfo.nickname,
         // play_count: formatPlayCount(info.count),
@@ -586,7 +586,7 @@ export default {
       source: 'kg',
       info: {
         name: listInfo.specialname,
-        img: listInfo.imgurl && listInfo.imgurl.replace('{size}', 240),
+        img: listInfo.imgurl && listInfo.imgurl.replace('{size}', '1000'),
         // desc: body.result.info.list_desc,
         author: listInfo.nickname,
         // play_count: formatPlayCount(info.count),
@@ -742,7 +742,7 @@ export default {
         songmid: item.audio_id,
         source: 'kg',
         interval: formatPlayTime(item.duration / 1000),
-        img: (item.img || item.album_img || '').replace('{size}', '400') || null,
+        img: (item.img || item.album_img || '').replace('{size}', '1000') || null,
         lrc: null,
         hash: item.hash,
         types,
@@ -865,7 +865,7 @@ export default {
         songmid: item.audio_info.audio_id,
         source: 'kg',
         interval: formatPlayTime(parseInt(item.audio_info.timelength) / 1000),
-        img: (item.img || item.album_info?.sizable_cover || item.audio_info?.trans_param?.union_cover || item.album_info?.pic || item.album_info?.img || item.album_info?.s_img || '').replace('{size}', '400') || null,
+        img: (item.img || item.album_info?.sizable_cover || item.audio_info?.trans_param?.union_cover || item.album_info?.pic || item.album_info?.img || item.album_info?.s_img || '').replace('{size}', '1000') || null,
         lrc: null,
         hash: item.audio_info.hash,
         otherSource: null,

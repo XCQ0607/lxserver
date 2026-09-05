@@ -2769,11 +2769,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           return
         }
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = auth === global.lx.config['frontend.password']
+        const isPublic = username === '_open'
+        const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
         const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
         const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
 
-        if (enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
+        if (enablePublicRestriction && !isServerCacheAllowed && isPublic && !isAdmin) {
           res.writeHead(403, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: '权限限制：非管理员服务器缓存已被禁用' }))
           return
@@ -2786,9 +2787,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             if (concurrency !== undefined) serverDownloadQueue.setConcurrency(username, concurrency)
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth !== global.lx.config['frontend.password']) throw new Error('Unauthorized to change cache naming pattern')
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              if (auth === global.lx.config['frontend.password']) {
+                const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
+                if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              }
             }
             const queued = serverDownloadQueue.enqueue(username, tasks)
             res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -2893,24 +2895,21 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             }
 
             const auth = req.headers['x-frontend-auth']
-            const isAdmin = auth === global.lx.config['frontend.password']
+            const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
             const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
             const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
 
-            if (enablePublicRestriction && !isServerCacheAllowed && !isAdmin) {
+            if (enablePublicRestriction && !isServerCacheAllowed && isPublic && !isAdmin) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限限制：非管理员服务器缓存已被禁用' }))
               return
             }
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth !== global.lx.config['frontend.password']) {
-                res.writeHead(403, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ success: false, error: 'Unauthorized to change cache naming pattern' }))
-                return
+              if (auth === global.lx.config['frontend.password']) {
+                const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
+                if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
               }
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
             }
             const songKey = fileCache.normalizeSongId(songInfo) + '_' + (quality || 'unknown')
 
@@ -4542,7 +4541,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           }
 
           try {
-            let { songInfo, quality, enableAutoSwitchApiSource } = JSON.parse(body)
+            let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources } = JSON.parse(body)
             songInfo = normalizeSongInfo(songInfo)
             // console.log('[MusicUrl] Song Info:', JSON.stringify(songInfo, null, 2))
             if (!songInfo || !songInfo.source) {
@@ -4560,7 +4559,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const userApiResult = await callUserApiGetMusicUrl(
                   source, songInfo, quality || '128k', verifiedUsername,
                   (attempt) => { void pushProgress(attempt) },
-                  enableAutoSwitchApiSource !== false
+                  enableAutoSwitchApiSource !== false,
+                  excludeApiSources
                 )
                 result = userApiResult
                 attempts = userApiResult.attempts || []

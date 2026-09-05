@@ -59,8 +59,8 @@ export default (songmid) => {
       strMediaMid: item.file.media_mid,
       songmid: item.mid,
       img: (albumId === '' || albumId === '空')
-        ? item.singer?.length ? `https://y.gtimg.cn/music/photo_new/T001R500x500M000${item.singer[0].mid}.jpg` : ''
-        : `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumId}.jpg`,
+        ? item.singer?.length ? `https://y.gtimg.cn/music/photo_new/T001R800x800M000${item.singer[0].mid}.jpg` : ''
+        : `https://y.gtimg.cn/music/photo_new/T002R800x800M000${albumId}.jpg`,
       types,
       _types,
       typeUrl: {},

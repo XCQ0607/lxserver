@@ -611,13 +611,13 @@ async function handleHeaderLogout(e) {
         if (confirmed) {
             try {
                 if (window.ListStore && typeof window.ListStore.remove === 'function') {
-                    await window.ListStore.remove().catch(() => {});
+                    await window.ListStore.remove().catch(() => { });
                 }
                 if ('caches' in window) {
                     const keys = await caches.keys();
                     await Promise.all(keys.map(k => caches.delete(k)));
                 }
-            } catch (err) {}
+            } catch (err) { }
             const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
             localStorage.clear();
             sessionStorage.clear();
@@ -721,13 +721,13 @@ async function handleLogout() {
             audio.src = '';
         }
         if (window.ListStore && typeof window.ListStore.remove === 'function') {
-            await window.ListStore.remove().catch(() => {});
+            await window.ListStore.remove().catch(() => { });
         }
         if ('caches' in window) {
             const keys = await caches.keys();
             await Promise.all(keys.map(k => caches.delete(k)));
         }
-    } catch (e) {}
+    } catch (e) { }
 
     const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
     localStorage.clear();
@@ -2669,11 +2669,11 @@ function renderArtistAlbumsUI(list) {
     const html = `
         <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-6 p-2 md:p-4 animate-in fade-in duration-300">
             ${list.map((album, index) => {
-                const albumId = album.id ?? album.mid;
-                const albumSource = album.source || window.currentArtistSource || 'wy';
-                const albumName = album.name || '未知专辑';
-                const favorited = isAlbumFavorited(albumId, albumSource);
-                return `
+        const albumId = album.id ?? album.mid;
+        const albumSource = album.source || window.currentArtistSource || 'wy';
+        const albumName = album.name || '未知专辑';
+        const favorited = isAlbumFavorited(albumId, albumSource);
+        return `
                 <div class="artist-album-card group flex flex-col p-3 rounded-2xl transition-all hover:t-bg-panel hover:shadow-lg cursor-pointer border border-transparent hover:border-emerald-500/20" data-album-index="${index}">
                     <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-3 relative bg-gray-100 dark:bg-gray-800">
                         <img src="${escapeHtmlText(getImgUrl(album))}"
@@ -2700,7 +2700,7 @@ function renderArtistAlbumsUI(list) {
                     </div>
                 </div>
             `;
-            }).join('')}
+    }).join('')}
         </div>
     `;
     content.innerHTML = html;
@@ -3223,16 +3223,16 @@ function lazyLoadImages(root = document) {
     if ('IntersectionObserver' in window) {
         if (!imageObserver) {
             imageObserver = new IntersectionObserver((entries, observer) => {
-            entries.forEach(entry => {
-                if (entry.isIntersecting) {
-                    loadImage(entry.target);
-                    observer.unobserve(entry.target);
-                }
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        loadImage(entry.target);
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, {
+                rootMargin: '100px 0px', // Load before it comes into view
+                threshold: 0.01
             });
-        }, {
-            rootMargin: '100px 0px', // Load before it comes into view
-            threshold: 0.01
-        });
         }
 
         const images = scope.querySelectorAll('img.lazy-image[data-src]');
@@ -3385,18 +3385,27 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     if (!isSilent) {
                         const fromName = window.QualityManager.getQualityDisplayName(quality);
                         const toName = window.QualityManager.getQualityDisplayName(nextQuality);
-                        showInfo(`从 ${fromName} 降级到 ${toName} 播放...`);
+                        RecoveryToast.show(song, `从 ${fromName} 降级到 ${toName} 播放...`, {
+                            triedPlatform: song.source,
+                            quality: nextQuality,
+                            status: 'trying'
+                        });
                     }
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
+                    RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
                 }
                 const matchedSong = await findOtherSourceMatch(song, isSilent);
                 if (matchedSong) {
+                    const targetPlatform = getSourceName(matchedSong.source);
                     if (!isSilent) {
-                        showInfo(`找到备选源，尝试从 ${getSourceName(matchedSong.source)} 播放...`);
+                        RecoveryToast.show(matchedSong, `找到备选源，尝试从 [${targetPlatform}] 播放...`, {
+                            triedPlatform: matchedSong.source,
+                            status: 'trying'
+                        });
                     }
                     const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
                     const matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent);
@@ -3702,7 +3711,7 @@ async function applyAutoProxy(url, song) {
     return url;
 }
 
-async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
+async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, options = {}) {
     const cleanedSong = cleanSongData(song);
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
 
@@ -3749,6 +3758,15 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
                 const attempt = JSON.parse(e.data);
                 const songNamePrefix = attempt.name || song.name || '';
                 const msg = `[${songNamePrefix}] ${attempt.message || (attempt.status === 'success' ? '解析成功' : '解析失败')}`;
+
+                // 若处于换源试错常驻提示中，将进度同步至常驻卡片，避免底层露出绿色普通 Toast
+                if (typeof RecoveryToast !== 'undefined' && RecoveryToast.isActive()) {
+                    if (attempt.status === 'success') {
+                        RecoveryToast.updateStatusText(`[${attempt.sourceName || '备选源'}] 解析成功，准备播放...`);
+                    }
+                    return;
+                }
+
                 if (attempt.status === 'success') showSuccess(msg);
                 else showError(msg);
             } catch (_) { }
@@ -3764,13 +3782,20 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
     await new Promise(r => setTimeout(r, 50));
 
     try {
+        const currentPlatform = song.source;
+        let excludeApiSources = options?.excludeApiSources;
+        if (!excludeApiSources && currentRecoveryState && currentRecoveryState.currentSong?.source === currentPlatform) {
+            excludeApiSources = currentRecoveryState.triedApiSourcesByPlatform?.[currentPlatform] || [];
+        }
+
         const res = await fetch(`${API_BASE}/url`, {
             method: 'POST',
             headers,
             body: JSON.stringify({
                 songInfo: song,
                 quality,
-                enableAutoSwitchApiSource: settings.enableAutoSwitchApiSource !== false
+                enableAutoSwitchApiSource: settings.enableAutoSwitchApiSource !== false,
+                excludeApiSources: Array.isArray(excludeApiSources) ? excludeApiSources : []
             })
         });
 
@@ -3806,6 +3831,8 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false) {
                 sourceType: 'normal',
                 quality: result.type || quality,
                 sourceName: result.sourceName,
+                sourceId: result.sourceId,
+                hasMoreSources: !!result.hasMoreSources,
                 requestedSource: result.requestedSource || song.source,
                 downloadSource: result.downloadSource || song.source,
                 songInfo: song,
@@ -4199,9 +4226,9 @@ async function triggerServerCache(song, url, quality) {
         await fetch('/api/music/cache/download', {
             method: 'POST',
             headers: headers,
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 songInfo: songInfoForCache,
-                url, 
+                url,
                 quality,
                 namingPattern: window.settings?.serverCacheNamingPattern || 'simple',
                 embedLyric: !!(window.settings?.embedLyricToFile ?? true)
@@ -4296,11 +4323,72 @@ window.playFromView = playFromView;
 async function runRecoveryFlow(error) {
     if (!currentRecoveryState) return;
 
+    // 标记上一尝试失败
+    if (currentRecoveryState.currentSong) {
+        RecoveryToast.markStepFailed(currentRecoveryState.currentSong.source, currentRecoveryState.currentQuality);
+    }
+
+    const currentPlatform = currentRecoveryState.currentSong?.source || currentRecoveryState.originalSong?.source;
+
+    // 1. 记录当前失败的音源脚本
+    if (!currentRecoveryState.triedApiSourcesByPlatform) {
+        currentRecoveryState.triedApiSourcesByPlatform = {};
+    }
+    if (!currentRecoveryState.triedApiSourcesByPlatform[currentPlatform]) {
+        currentRecoveryState.triedApiSourcesByPlatform[currentPlatform] = [];
+    }
+    if (currentRecoveryState.currentApiSourceName && !currentRecoveryState.triedApiSourcesByPlatform[currentPlatform].includes(currentRecoveryState.currentApiSourceName)) {
+        currentRecoveryState.triedApiSourcesByPlatform[currentPlatform].push(currentRecoveryState.currentApiSourceName);
+    }
+
+    // 2. 优先尝试当前平台下的其它备选自定义源 (需开启「自动切换自定义源」设置)
+    if (settings.enableAutoSwitchApiSource !== false && !currentRecoveryState.samePlatformExhausted) {
+        const triedSources = currentRecoveryState.triedApiSourcesByPlatform[currentPlatform] || [];
+        const platformName = typeof getSourceName === 'function' ? getSourceName(currentPlatform) : currentPlatform.toUpperCase();
+        const failedName = currentRecoveryState.currentApiSourceName || '当前自定义源';
+
+        console.log(`[Recovery] [${platformName}] 音源 [${failedName}] 播放失败，尝试同平台其他备选源... 已排除:`, triedSources);
+        RecoveryToast.show(currentRecoveryState.currentSong, `[${platformName}] ${failedName} 链接失效，正在尝试同平台其他备选源...`, {
+            triedPlatform: currentPlatform,
+            quality: currentRecoveryState.currentQuality,
+            status: 'trying'
+        });
+
+        try {
+            const nextResult = await fetchSongUrl(
+                currentRecoveryState.currentSong,
+                currentRecoveryState.currentQuality,
+                true, // isRetry
+                false, // isSilent
+                { excludeApiSources: triedSources }
+            );
+
+            if (nextResult && nextResult.url && !nextResult.errorMsg) {
+                console.log(`[Recovery] ✓ 命中同平台备选源 [${nextResult.sourceName}]，准备重新缓冲播放`);
+                currentRecoveryState.currentApiSourceName = nextResult.sourceName || '';
+                currentRecoveryState.currentApiSourceId = nextResult.sourceId || '';
+                currentRecoveryState.currentHasMoreSources = !!nextResult.hasMoreSources;
+
+                RecoveryToast.show(currentRecoveryState.currentSong, `已切换至备选源 [${nextResult.sourceName || '备选源'}]，重新缓冲播放...`, {
+                    triedPlatform: currentPlatform,
+                    quality: currentRecoveryState.currentQuality,
+                    status: 'trying'
+                });
+
+                playSong(currentRecoveryState.currentSong, currentRecoveryState.currentIndex, currentRecoveryState.currentQuality, false, true);
+                return;
+            }
+        } catch (candidateErr) {
+            console.warn(`[Recovery] [${platformName}] 所有备选自定义源均已尝试完毕:`, candidateErr.message || candidateErr);
+            currentRecoveryState.samePlatformExhausted = true;
+        }
+    }
+
     const { steps, currentStepIndex } = currentRecoveryState;
     if (currentStepIndex >= steps.length) {
         // All recovery steps exhausted
         setPlayerStatus('播放失败');
-        showError(`播放失败: ${error.message || '未知错误'}`);
+        RecoveryToast.error(`所有备选源均无法播放: ${error.message || '未知错误'}`);
         updatePlayButton(false);
         return;
     }
@@ -4313,11 +4401,16 @@ async function runRecoveryFlow(error) {
         if (nextQuality && !currentRecoveryState.triedQualities.includes(nextQuality)) {
             currentRecoveryState.currentQuality = nextQuality;
             currentRecoveryState.triedQualities.push(nextQuality);
-            
+            currentRecoveryState.samePlatformExhausted = false; // 新音质重新允许探测可用源
+
             const fromName = window.QualityManager.getQualityDisplayName(currentRecoveryState.triedQualities[currentRecoveryState.triedQualities.length - 2]);
             const toName = window.QualityManager.getQualityDisplayName(nextQuality);
-            showInfo(`从 ${fromName} 降级到 ${toName} 播放...`);
-            
+            RecoveryToast.show(currentRecoveryState.currentSong, `音质从 ${fromName} 降级至 ${toName} 播放...`, {
+                triedPlatform: currentRecoveryState.currentSong.source,
+                quality: nextQuality,
+                status: 'trying'
+            });
+
             // Re-invoke playSong with isRetry = true so we don't reset recovery state
             playSong(currentRecoveryState.currentSong, currentRecoveryState.currentIndex, nextQuality, false, true);
         } else {
@@ -4326,17 +4419,28 @@ async function runRecoveryFlow(error) {
             await runRecoveryFlow(error);
         }
     } else if (currentStep === 'switch_platform') {
-        showInfo('正在自动尝试换源匹配...');
+        RecoveryToast.show(currentRecoveryState.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
         const matches = await findOtherSourceMatches(currentRecoveryState.originalSong);
         const matchedSong = matches.find(song => !currentRecoveryState.triedPlatforms.includes(song.source));
         if (matchedSong) {
             currentRecoveryState.currentSong = matchedSong;
             currentRecoveryState.triedPlatforms.push(matchedSong.source);
+            if (!currentRecoveryState.triedApiSourcesByPlatform[matchedSong.source]) {
+                currentRecoveryState.triedApiSourcesByPlatform[matchedSong.source] = [];
+            }
+            currentRecoveryState.currentApiSourceName = '';
+            currentRecoveryState.samePlatformExhausted = false; // 新平台重置源耗尽状态
             const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
             currentRecoveryState.currentQuality = bestNextQuality;
             currentRecoveryState.triedQualities = [bestNextQuality];
 
-            showInfo(`找到备选源，尝试从 ${getSourceName(matchedSong.source)} 播放...`);
+            const platformName = getSourceName(matchedSong.source);
+            const qualityName = window.QualityManager.getQualityDisplayName(bestNextQuality);
+            RecoveryToast.show(matchedSong, `找到备选源，尝试从 [${platformName}] (${qualityName}) 播放...`, {
+                triedPlatform: matchedSong.source,
+                quality: bestNextQuality,
+                status: 'trying'
+            });
             // Keep this recovery step active so another platform can be tried if needed.
             playSong(matchedSong, currentRecoveryState.currentIndex, bestNextQuality, false, true);
         } else {
@@ -4349,6 +4453,7 @@ async function runRecoveryFlow(error) {
             error.message.includes('未找到支持') ||
             error.message.includes('not supported')
         );
+        RecoveryToast.error(`无法播放${isPlatformNotSupported ? '（不支持该平台）' : ''}，即将自动跳过`);
         setPlayerStatus('播放失败，即将跳过', null, true);
         if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
         window._autoSkipTimer = setTimeout(() => playNext(), isPlatformNotSupported ? 2000 : 3000);
@@ -4405,6 +4510,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             currentQuality: startQuality,
             triedQualities: [startQuality],
             triedPlatforms: [song.source],
+            triedApiSourcesByPlatform: { [song.source]: [] },
+            currentApiSourceName: '',
+            samePlatformExhausted: false,
             steps: steps,
             currentStepIndex: 0,
             thisRequestId: thisRequestId
@@ -4448,9 +4556,12 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
     // Show persistent loading toast
     if (!isRetry) {
+        RecoveryToast.dismiss();
         showInfo(`正在加载: ${song.name}...`);
     } else if (isRetry === true) {
-        showInfo(`链接过期或失效，正在为您重新在线解析: ${song.name}...`);
+        if (!RecoveryToast.isActive()) {
+            showInfo(`链接过期或失效，正在为您重新在线解析: ${song.name}...`);
+        }
     }
 
     // 处理切换提示的显示与隐藏
@@ -4513,6 +4624,12 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         // 2. Stale Check
         if (currentLoadingRequestId !== thisRequestId) return;
 
+        if (currentRecoveryState) {
+            currentRecoveryState.currentApiSourceName = urlResult.sourceName || '';
+            currentRecoveryState.currentApiSourceId = urlResult.sourceId || '';
+            currentRecoveryState.currentHasMoreSources = !!urlResult.hasMoreSources;
+        }
+
         // [Fix] 移除 dismissAllToasts()，允许成功/失败/尝试信息的 Toast 共存堆叠
 
         // Display attempts / success message
@@ -4527,7 +4644,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             showSuccess(`[预读] ${song.name} ${detail}`);
         } else if (urlResult.sourceType !== 'normal') {
             // 非在线解析（如命中本地/服务器缓存），WebSocket 进度不会触发，需手动显示
-            showSuccess(`[${song.name}] 命中${sourceText}`);
+            if (!RecoveryToast.isActive()) {
+                showSuccess(`[${song.name}] 命中${sourceText}`);
+            }
         }
         // 在线解析 (sourceType === 'normal') 的成功提示已由 fetchSongUrl 中的进度监听处理，此处不再重复显示
 
@@ -4593,6 +4712,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
             playbackRecoveryTriggeredForRequestId = thisRequestId;
             shouldAutoRecoverPlayback = false;
+            try {
+                localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
+            } catch (e) { }
             const mediaError = audio.error || new Error('媒体播放失败');
             void runRecoveryFlow(mediaError);
         };
@@ -4623,6 +4745,12 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
             setPlayerStatus('', true);
             updatePlayButton(true);
+
+            if (RecoveryToast.isActive()) {
+                const targetPlatform = typeof getSourceName === 'function' ? getSourceName(playbackSong.source) : playbackSong.source.toUpperCase();
+                const targetQualityName = currentQuality && window.QualityManager ? window.QualityManager.getQualityDisplayName(currentQuality) : (currentQuality || '').toUpperCase();
+                RecoveryToast.success(`已成功换至 [${targetPlatform}] ${targetQualityName} 播放`);
+            }
 
             // Save history and handle list logic
             savePlayHistory(playbackSong, currentQuality);
@@ -7934,7 +8062,7 @@ async function loadLibraryData() {
         const isPublic = window.isViewingPublicFavorites === true || !isUserLoggedIn();
         let headers = {};
         let artistsUrl = '/api/user/library/artists';
-        let albumsUrl  = '/api/user/library/albums';
+        let albumsUrl = '/api/user/library/albums';
 
         if (isPublic) {
             // 公开收藏模式：拉 _open 的歌手/专辑库
@@ -7942,17 +8070,17 @@ async function loadLibraryData() {
             if (adminPass) headers['x-frontend-auth'] = adminPass;
             headers['x-user-name'] = '_open';
             artistsUrl += '?user=_open';
-            albumsUrl  += '?user=_open';
+            albumsUrl += '?user=_open';
         } else {
             headers = getUserAuthHeaders();
         }
 
         const [ar, al] = await Promise.all([
             fetch(artistsUrl, { headers }).then(r => r.ok ? r.json() : []),
-            fetch(albumsUrl,  { headers }).then(r => r.ok ? r.json() : [])
+            fetch(albumsUrl, { headers }).then(r => r.ok ? r.json() : [])
         ]);
         window.libraryData.artists = Array.isArray(ar) ? ar : [];
-        window.libraryData.albums  = Array.isArray(al) ? al : [];
+        window.libraryData.albums = Array.isArray(al) ? al : [];
 
         if (!isPublic && isUserLoggedIn()) {
             window.myPersonalLibraryData = {
@@ -8805,7 +8933,7 @@ function updateSyncStatus(html, showLogout = true) {
 
 async function handleSyncLogout(skipConfirm = false) {
     if (!skipConfirm) {
-        const confirmed = typeof showSelect === 'function' 
+        const confirmed = typeof showSelect === 'function'
             ? await showSelect('退出同步账号', '确定要退出当前账号并清除同步凭证？', { danger: true })
             : confirm('确定要退出当前账号并清除同步凭证？');
         if (!confirmed) return;
@@ -8835,10 +8963,10 @@ async function handleSyncLogout(skipConfirm = false) {
                 audio.pause();
                 audio.currentTime = 0;
                 audio.src = '';
-            } catch (e) {}
+            } catch (e) { }
         }
         if (typeof lyricPlayer !== 'undefined' && lyricPlayer && typeof lyricPlayer.stop === 'function') {
-            try { lyricPlayer.stop(); } catch (e) {}
+            try { lyricPlayer.stop(); } catch (e) { }
         }
 
         window.currentSong = null;
@@ -12389,7 +12517,7 @@ async function handleDownloadClick(event) {
     }
 
     const song = currentPlayingSong;
-    
+
     // [优化] 检测是否已缓存
     const prefQuality = window.settings?.preferredQuality || 'flac';
     const checkResult = await window.checkServerCache?.(song, prefQuality);
@@ -12450,8 +12578,276 @@ async function handleDownloadClick(event) {
     }
 }
 
+// ========================================
+// 换源与降级故障恢复 - 常驻实时试错状态 Toast
+// ========================================
+const RecoveryToast = {
+    el: null,
+    hideTimer: null,
+    currentSong: null,
+    currentStatus: 'loading', // 'loading' | 'success' | 'error'
+    triedHistory: [], // 记录本次试错轨迹：[{ platform, platformName, qualityName, status }]
+
+    init() {
+        if (!document.getElementById('recovery-toast-keyframes')) {
+            const style = document.createElement('style');
+            style.id = 'recovery-toast-keyframes';
+            style.textContent = `
+                @keyframes recoveryProgressFlow {
+                    0% { transform: translateX(-100%); }
+                    100% { transform: translateX(350%); }
+                }
+                .animate-recovery-flow {
+                    animation: recoveryProgressFlow 1.6s infinite ease-in-out;
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        let container = document.getElementById('recovery-status-toast');
+        if (!container) {
+            container = document.createElement('div');
+            container.id = 'recovery-status-toast';
+            container.className = 'fixed right-4 bottom-24 md:bottom-28 z-[1005] w-80 md:w-96 max-w-[92vw] rounded-2xl shadow-2xl border transition-all duration-300 transform translate-y-4 opacity-0 pointer-events-auto overflow-hidden flex flex-col backdrop-blur-md bg-white/95 dark:bg-gray-900/95 text-gray-800 dark:text-gray-100 border-emerald-500/40 shadow-emerald-500/10 dark:border-emerald-500/40 dark:shadow-black/60';
+            document.body.appendChild(container);
+        }
+        this.el = container;
+        return this.el;
+    },
+
+    // 清理底层露出的普通播放类 toast
+    cleanupConflictingToasts() {
+        try {
+            document.querySelectorAll('.toast-item').forEach(el => {
+                const text = el.textContent || '';
+                if (text.includes('解析') || text.includes('加载') || text.includes('命中') || text.includes('播放') || text.includes('降级') || text.includes('备选源') || text.includes('换源')) {
+                    el.remove();
+                }
+            });
+        } catch (e) { }
+    },
+
+    show(song, message, details = {}) {
+        this.init();
+        this.cleanupConflictingToasts();
+        this.currentStatus = 'loading';
+
+        if (this.hideTimer) {
+            clearTimeout(this.hideTimer);
+            this.hideTimer = null;
+        }
+
+        const songName = song?.name || this.currentSong?.name || '未知歌曲';
+        const singerName = song?.singer || this.currentSong?.singer || '';
+
+        if (this.currentSong?.name !== songName) {
+            this.currentSong = song;
+            this.triedHistory = [];
+        }
+
+        if (details.triedPlatform) {
+            const platformName = typeof getSourceName === 'function' ? getSourceName(details.triedPlatform) : details.triedPlatform.toUpperCase();
+            const qualityName = details.quality && window.QualityManager ? window.QualityManager.getQualityDisplayName(details.quality) : '';
+            const key = `${details.triedPlatform}_${details.quality || ''}`;
+            const existing = this.triedHistory.find(item => item.key === key);
+            if (!existing) {
+                this.triedHistory.push({
+                    key,
+                    platform: details.triedPlatform,
+                    platformName,
+                    qualityName,
+                    status: details.status || 'trying'
+                });
+            } else if (details.status) {
+                existing.status = details.status;
+            }
+        }
+
+        // 生成试错历史脚印标签 (完全适配明亮/暗黑模式与主题色)
+        let historyHtml = '';
+        if (this.triedHistory.length > 0) {
+            historyHtml = `
+                <div class="flex flex-wrap items-center gap-1 mt-1 text-[11px]">
+                    <span class="text-gray-400 dark:text-gray-500 text-[10px]">尝试轨迹:</span>
+                    ${this.triedHistory.map((item) => {
+                if (item.status === 'failed') {
+                    return `<span class="px-1.5 py-0.5 rounded bg-red-50 text-red-500 border border-red-200 dark:bg-red-500/20 dark:text-red-300 dark:border-red-500/30 line-through text-[10px]">${item.platformName}</span>`;
+                } else if (item.status === 'success') {
+                    return `<span class="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-500/20 dark:text-emerald-300 dark:border-emerald-500/30 font-bold text-[10px]">${item.platformName}</span>`;
+                }
+                return `<span class="px-1.5 py-0.5 rounded bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-500/20 dark:text-blue-300 dark:border-blue-500/30 font-medium animate-pulse text-[10px]">${item.platformName}</span>`;
+            }).join('<span class="text-gray-300 dark:text-gray-600 text-[10px]">➔</span>')}
+                </div>
+            `;
+        }
+
+        // 样式：完全使用语义化主题类，自适应 Light / Dark 与当前主题色 (emerald/blue/amber/violet/rose)
+        this.el.className = 'fixed right-4 bottom-24 md:bottom-28 z-[1005] w-80 md:w-96 max-w-[92vw] rounded-2xl shadow-2xl border transition-all duration-300 transform translate-y-0 opacity-100 pointer-events-auto overflow-hidden flex flex-col backdrop-blur-md bg-white/95 dark:bg-gray-900/95 text-gray-800 dark:text-gray-100 border-emerald-500/40 shadow-emerald-500/10 dark:border-emerald-500/40 dark:shadow-black/60';
+
+        this.el.innerHTML = `
+            <div class="p-3.5 flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 flex items-center justify-center text-xs">
+                            <i class="fas fa-sync-alt fa-spin"></i>
+                        </div>
+                        <span class="text-xs font-bold text-emerald-600 dark:text-emerald-400">正在智能换源播放...</span>
+                    </div>
+                    <button onclick="RecoveryToast.dismiss()" class="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors p-1 rounded-lg">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>
+                <div class="text-xs font-semibold text-gray-800 dark:text-gray-100 truncate" title="${songName}">
+                    《${songName}》<span class="text-gray-400 dark:text-gray-500 text-[11px] font-normal">${singerName ? ' - ' + singerName : ''}</span>
+                </div>
+                <div class="text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-1.5 mt-0.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-500 animate-ping shrink-0"></span>
+                    <span class="truncate font-medium recovery-message-text">${message}</span>
+                </div>
+                ${historyHtml}
+            </div>
+            <div class="h-0.5 w-full bg-emerald-500/10 dark:bg-emerald-500/20 overflow-hidden">
+                <div class="h-full bg-emerald-500 w-1/3 animate-recovery-flow"></div>
+            </div>
+        `;
+    },
+
+    updateStatusText(msg) {
+        if (!this.el || !this.isActive()) return;
+        const textEl = this.el.querySelector('.recovery-message-text');
+        if (textEl) {
+            textEl.textContent = msg;
+        }
+    },
+
+    markStepFailed(platform, quality) {
+        if (!platform) return;
+        const key = `${platform}_${quality || ''}`;
+        let item = this.triedHistory.find(i => i.key === key);
+        if (!item) {
+            item = this.triedHistory.find(i => i.platform === platform);
+        }
+        if (item) {
+            item.status = 'failed';
+        }
+    },
+
+    success(message) {
+        if (!this.el || !document.body.contains(this.el) || this.el.classList.contains('opacity-0')) return;
+        this.currentStatus = 'success';
+        this.cleanupConflictingToasts();
+
+        if (this.triedHistory.length > 0) {
+            this.triedHistory[this.triedHistory.length - 1].status = 'success';
+        }
+
+        const songName = this.currentSong?.name || '当前歌曲';
+
+        // 成功状态自适应明暗模式与主题色
+        this.el.className = 'fixed right-4 bottom-24 md:bottom-28 z-[1005] w-80 md:w-96 max-w-[92vw] rounded-2xl shadow-2xl border transition-all duration-300 transform translate-y-0 opacity-100 pointer-events-auto overflow-hidden flex flex-col backdrop-blur-md bg-emerald-50/95 dark:bg-emerald-950/90 text-emerald-950 dark:text-emerald-100 border-emerald-400/80 dark:border-emerald-500/60 shadow-emerald-500/20';
+
+        this.el.innerHTML = `
+            <div class="p-3.5 flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-emerald-500 text-white flex items-center justify-center text-xs shadow-sm">
+                            <i class="fas fa-check"></i>
+                        </div>
+                        <span class="text-xs font-bold text-emerald-700 dark:text-emerald-300">换源成功</span>
+                    </div>
+                    <button onclick="RecoveryToast.dismiss()" class="text-emerald-600/70 hover:text-emerald-800 dark:text-emerald-400/70 dark:hover:text-emerald-200 transition-colors p-1 rounded-lg">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>
+                <div class="text-xs text-gray-800 dark:text-gray-100 truncate font-semibold">
+                    《${songName}》
+                </div>
+                <div class="text-xs text-emerald-700 dark:text-emerald-300 font-medium flex items-center gap-1.5">
+                    <i class="fas fa-play-circle text-emerald-600 dark:text-emerald-400"></i>
+                    <span>${message}</span>
+                </div>
+            </div>
+        `;
+
+        if (this.hideTimer) clearTimeout(this.hideTimer);
+        this.hideTimer = setTimeout(() => {
+            this.dismiss();
+        }, 2800);
+    },
+
+    error(message) {
+        if (!this.el || !document.body.contains(this.el)) return;
+        this.currentStatus = 'error';
+        this.cleanupConflictingToasts();
+
+        const songName = this.currentSong?.name || '当前歌曲';
+
+        // 失败状态自适应明暗模式
+        this.el.className = 'fixed right-4 bottom-24 md:bottom-28 z-[1005] w-80 md:w-96 max-w-[92vw] rounded-2xl shadow-2xl border transition-all duration-300 transform translate-y-0 opacity-100 pointer-events-auto overflow-hidden flex flex-col backdrop-blur-md bg-red-50/95 dark:bg-red-950/95 text-red-900 dark:text-red-100 border-red-300 dark:border-red-500/40 shadow-red-500/10';
+
+        this.el.innerHTML = `
+            <div class="p-3.5 flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                        <div class="w-6 h-6 rounded-full bg-red-500 text-white flex items-center justify-center text-xs shadow-sm">
+                            <i class="fas fa-times"></i>
+                        </div>
+                        <span class="text-xs font-bold text-red-600 dark:text-red-400">换源失败</span>
+                    </div>
+                    <button onclick="RecoveryToast.dismiss()" class="text-red-400 hover:text-red-600 dark:hover:text-white transition-colors p-1 rounded-lg">
+                        <i class="fas fa-times text-xs"></i>
+                    </button>
+                </div>
+                <div class="text-xs text-gray-800 dark:text-gray-100 truncate font-semibold">
+                    《${songName}》
+                </div>
+                <div class="text-xs text-red-600 dark:text-red-300 font-medium">
+                    ${message}
+                </div>
+            </div>
+        `;
+
+        if (this.hideTimer) clearTimeout(this.hideTimer);
+        this.hideTimer = setTimeout(() => {
+            this.dismiss();
+        }, 3200);
+    },
+
+    dismiss() {
+        if (!this.el) return;
+        if (this.hideTimer) {
+            clearTimeout(this.hideTimer);
+            this.hideTimer = null;
+        }
+        this.el.classList.remove('opacity-100', 'translate-y-0');
+        this.el.classList.add('opacity-0', 'translate-y-4');
+        setTimeout(() => {
+            if (this.el && this.el.parentNode) {
+                this.el.parentNode.removeChild(this.el);
+            }
+            this.el = null;
+            this.currentSong = null;
+            this.triedHistory = [];
+            this.currentStatus = 'loading';
+        }, 300);
+    },
+
+    isActive() {
+        return !!(this.el && !this.el.classList.contains('opacity-0'));
+    }
+};
+window.RecoveryToast = RecoveryToast;
+
 // 通用 Toast 显示函数 (支持宽屏、滚动文字、点击重置倒计时、动态堆叠)
 function showToast(type, message, duration = 3000) {
+    // 如果常驻试错换源 Toast 处于活跃状态，禁止歌曲解析/加载/降级/换源类提示弹出覆盖底层
+    if (typeof RecoveryToast !== 'undefined' && RecoveryToast.isActive()) {
+        const suppressKeywords = ['解析成功', '解析失败', '正在加载', '正在为您重新', '命中', '降级', '换源', '备选源', '播放失败'];
+        if (suppressKeywords.some(kw => typeof message === 'string' && message.includes(kw))) {
+            return;
+        }
+    }
+
     const config = {
         success: { bg: 'bg-emerald-500', icon: 'fa-check-circle' },
         info: { bg: 'bg-blue-500', icon: 'fa-info-circle' },
@@ -12471,8 +12867,9 @@ function showToast(type, message, duration = 3000) {
         ${contentHtml}
     `;
 
-    // [Strategy] Newest at bottom: 96px. Push old ones UP.
-    const bottomBase = 96;
+    // 避让常驻 Toast，如果 RecoveryToast 存在则向上偏移，防止层叠
+    const isRecoveryActive = typeof RecoveryToast !== 'undefined' && RecoveryToast.isActive();
+    const bottomBase = isRecoveryActive ? 220 : 96;
     const gap = 12;
 
     toast.style.visibility = 'hidden';
@@ -13916,22 +14313,22 @@ window.CustomSelectManager = {
     },
     init(select) {
         if (select.classList.contains('cs-hidden')) return;
-        
+
         // 创建包装器，继承原 select 的布局类（如 flex-1, flex-shrink-0）
         const wrapper = document.createElement('div');
         wrapper.className = 'cs-wrapper';
         // 提取布局类
-        const layoutClasses = Array.from(select.classList).filter(c => 
-            c.startsWith('flex-') || c.startsWith('md:flex-') || 
+        const layoutClasses = Array.from(select.classList).filter(c =>
+            c.startsWith('flex-') || c.startsWith('md:flex-') ||
             c.startsWith('w-') || c.startsWith('md:w-') ||
             c.startsWith('shrink-') || c.startsWith('md:shrink-')
         );
         if (layoutClasses.length) wrapper.classList.add(...layoutClasses);
         if (select.id) wrapper.id = 'cs-w-' + select.id;
-        
+
         const trigger = document.createElement('div');
         trigger.className = 'cs-trigger';
-        
+
         // 精准克隆外观属性以防止大小不一致 (匹配 Tailwind 值)
         if (select.classList.contains('px-4')) { trigger.style.paddingLeft = '1rem'; trigger.style.paddingRight = '1rem'; }
         if (select.classList.contains('py-3')) { trigger.style.paddingTop = '0.75rem'; trigger.style.paddingBottom = '0.75rem'; }
@@ -13939,22 +14336,22 @@ window.CustomSelectManager = {
         if (select.classList.contains('rounded-xl')) trigger.style.borderRadius = '0.75rem';
         if (select.classList.contains('text-sm')) trigger.style.fontSize = '0.875rem';
         if (select.classList.contains('font-medium')) trigger.style.fontWeight = '500';
-        
+
         const text = document.createElement('span');
         text.className = 'cs-trigger-text truncate mr-2';
-        
+
         const icon = document.createElement('i');
         icon.className = 'fas fa-chevron-down cs-trigger-icon';
-        
+
         trigger.appendChild(text);
         trigger.appendChild(icon);
         wrapper.appendChild(trigger);
-        
+
         // 隐藏原始 select
         select.classList.add('cs-hidden');
         select.style.display = 'none';
         select.parentNode.insertBefore(wrapper, select);
-        
+
         trigger.onclick = (e) => {
             e.stopPropagation();
             const isActive = wrapper.classList.contains('active');
@@ -13965,7 +14362,7 @@ window.CustomSelectManager = {
                 this.open(select, wrapper, trigger);
             }
         };
-        
+
         // 初始同步 UI
         this.syncUI(select, wrapper);
 
@@ -13973,11 +14370,11 @@ window.CustomSelectManager = {
         try {
             const originalSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set;
             Object.defineProperty(select, 'value', {
-                set: function(val) {
+                set: function (val) {
                     originalSetter.call(this, val);
                     window.CustomSelectManager.syncUI(this);
                 },
-                get: function() {
+                get: function () {
                     return Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').get.call(this);
                 },
                 configurable: true
@@ -13986,20 +14383,20 @@ window.CustomSelectManager = {
     },
     open(select, wrapper, trigger) {
         wrapper.classList.add('active');
-        
+
         // 创建下拉菜单并存入 body
         const dropdown = document.createElement('div');
         dropdown.className = 'cs-dropdown custom-scrollbar portal-active';
         dropdown.id = 'cs-dropdown-' + (select.id || Math.random().toString(36).substr(2, 9));
-        
+
         const optionsList = document.createElement('ul');
         optionsList.className = 'cs-options';
-        
+
         Array.from(select.options).forEach(opt => {
             const li = document.createElement('li');
             li.className = 'cs-option' + (opt.selected ? ' selected' : '');
             li.innerHTML = `<span>${opt.text}</span><i class="fas fa-check"></i>`;
-            
+
             li.onclick = (e) => {
                 e.stopPropagation();
                 select.value = opt.value;
@@ -14009,17 +14406,17 @@ window.CustomSelectManager = {
             };
             optionsList.appendChild(li);
         });
-        
+
         dropdown.appendChild(optionsList);
         document.body.appendChild(dropdown);
-        
+
         // 计算位置
         this.reposition(trigger, dropdown);
-        
+
         // 监听滚动以保持同步或关闭
         window.addEventListener('scroll', this.handleScrollOrResize, true);
         window.addEventListener('resize', this.handleScrollOrResize);
-        
+
         requestAnimationFrame(() => {
             dropdown.classList.add('visible');
         });
@@ -14028,11 +14425,11 @@ window.CustomSelectManager = {
         const rect = trigger.getBoundingClientRect();
         dropdown.style.width = rect.width + 'px';
         dropdown.style.left = rect.left + 'px';
-        
+
         // 检查空间，自动决定向上还是向下展开
         const spaceBelow = window.innerHeight - rect.bottom;
         const dropdownHeight = dropdown.offsetHeight || 260;
-        
+
         if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
             dropdown.style.top = (rect.top + window.scrollY - dropdownHeight - 6) + 'px';
             dropdown.classList.add('open-up');
@@ -14050,7 +14447,7 @@ window.CustomSelectManager = {
     syncUI(select, wrapper) {
         if (!wrapper) wrapper = select.previousSibling;
         if (!wrapper || !wrapper.classList.contains('cs-wrapper')) return;
-        
+
         const textEl = wrapper.querySelector('.cs-trigger-text');
         const selectedOpt = select.options[select.selectedIndex];
         if (selectedOpt) {
@@ -14067,7 +14464,7 @@ window.CustomSelectManager = {
                 isDefault = (String(val) === String(DEFAULT_SETTINGS[key]));
             }
         }
-        
+
         if (!select.id || isDefault || ['all', 'none', 'root', 'mtime', 'desc', 'wy', '20', 'song'].includes(val)) {
             wrapper.classList.remove('highlight');
         } else {

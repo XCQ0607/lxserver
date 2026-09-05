@@ -739,7 +739,9 @@ window.LocalMusicManager = {
         // Listen to tab switch to trigger refresh if we are on this tab
         const origSwitchTab = window.switchTab;
         window.switchTab = function (tabId) {
-            origSwitchTab(tabId);
+            if (typeof origSwitchTab === 'function') {
+                origSwitchTab(tabId);
+            }
             if (tabId === 'localmusic') {
                 window.LocalMusicManager.syncLocationSelector();
                 window.LocalMusicManager.resetFilters();

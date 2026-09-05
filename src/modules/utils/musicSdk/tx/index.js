@@ -30,7 +30,7 @@ const tx = {
     return lyric.getLyric(songInfo)
   },
   async getPic(songInfo) {
-    return `https://y.gtimg.cn/music/photo_new/T002R500x500M000${songInfo.albumId}.jpg`
+    return `https://y.gtimg.cn/music/photo_new/T002R800x800M000${songInfo.albumId}.jpg`
   },
   getMusicDetailPageUrl(songInfo) {
     return `https://y.qq.com/n/yqq/song/${songInfo.songmid}.html`

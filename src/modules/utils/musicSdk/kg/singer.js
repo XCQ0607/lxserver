@@ -17,7 +17,7 @@ export default {
         info: {
           name: body.singername,
           desc: body.intro,
-          avatar: body.imgurl.replace('{size}', 480),
+          avatar: body.imgurl.replace('{size}', '1000'),
           gender: body.grade === 1 ? 'man' : 'woman',
         },
         count: {
@@ -76,7 +76,7 @@ export default {
         info: {
           name: item.albumname,
           author: item.singername,
-          img: item.replaceAll('{size}', '480'),
+          img: item.replaceAll('{size}', '1000'),
           desc: item.intro,
         },
       }

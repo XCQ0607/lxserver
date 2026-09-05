@@ -415,8 +415,9 @@ export async function callUserApiGetMusicUrl(
     quality: string,
     clientUsername?: string,
     onProgress?: (attempt: any) => Promise<void> | void,
-    enableAutoSwitchApiSource?: boolean
-): Promise<{ url: string, type: string, sourceName?: string, attempts?: any[] }> {
+    enableAutoSwitchApiSource?: boolean,
+    excludeApiSources?: string[]
+): Promise<{ url: string, type: string, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean }> {
     // 标准化 songInfo 格式：将 meta 中的字段提升到顶层
     const normalizedSongInfo = { ...songInfo }
     if (songInfo.meta) {
@@ -614,6 +615,16 @@ export async function callUserApiGetMusicUrl(
     }
     // =========================================
 
+    // === 排除已在当前请求中上报失败/失效的自定义源 ===
+    if (Array.isArray(excludeApiSources) && excludeApiSources.length > 0) {
+        const excludeSet = new Set(excludeApiSources.map(s => String(s).trim().toLowerCase()))
+        candidates = candidates.filter(api => {
+            const name = (api.info?.name || '').trim().toLowerCase()
+            const id = (api.info?.id || '').trim().toLowerCase()
+            return !excludeSet.has(name) && !excludeSet.has(id)
+        })
+    }
+
     if (enableAutoSwitchApiSource === false && candidates.length > 1) {
         candidates = [candidates[0]]
     }
@@ -621,9 +632,14 @@ export async function callUserApiGetMusicUrl(
     supportedCount = candidates.length
 
     if (supportedCount === 0) {
-        const errMsg = `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
+        const hasExcluded = Array.isArray(excludeApiSources) && excludeApiSources.length > 0
+        const errMsg = hasExcluded
+            ? `支持 ${source} 平台的自定义源均已尝试且无法播放（已尝试 ${excludeApiSources.length} 个音源）`
+            : `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
         if (onProgress) await onProgress({ name: '系统', status: 'fail', message: errMsg })
-        throw new Error(errMsg)
+        const err: any = new Error(errMsg)
+        err.allSourcesExhausted = true
+        throw err
     }
 
     // 逻辑分歧：
@@ -650,7 +666,7 @@ export async function callUserApiGetMusicUrl(
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
-                return { url, type: quality, sourceName: api.info.name, attempts }
+                return { url, type: quality, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false }
             } catch (error: any) {
                 console.error(`[UserApi] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
                 lastError = error
@@ -665,7 +681,8 @@ export async function callUserApiGetMusicUrl(
         }
     } else {
         // 多个源，轮流尝试
-        for (const api of candidates) {
+        for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+            const api = candidates[candidateIndex]
             try {
                 console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
 
@@ -679,7 +696,14 @@ export async function callUserApiGetMusicUrl(
                 const att = { name: api.info.name, status: 'success' }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
-                return { url, type: quality, sourceName: api.info.name, attempts }
+                return {
+                    url,
+                    type: quality,
+                    sourceName: api.info.name,
+                    sourceId: api.info.id,
+                    attempts,
+                    hasMoreSources: candidateIndex < candidates.length - 1
+                }
             } catch (error: any) {
                 console.error(`[UserApi] ${api.info.name} 失败:`, `音源日志：${error.message}`)
                 lastError = error
