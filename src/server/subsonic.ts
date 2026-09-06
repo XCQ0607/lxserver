@@ -145,6 +145,7 @@ class SubsonicHandler {
 
     // 当前用户 love 列表歌曲 id 集合缓存，用于歌曲序列化时标记 starred（按用户名隔离，避免并发串号）
     private loveIdSets = new Map<string, Set<string>>()
+    private currentUsername = ''
 
     private cacheOnlineSong(music: LX.Music.MusicInfo) {
         if (!music || !music.id) return
@@ -333,6 +334,7 @@ class SubsonicHandler {
         if (!username) {
             return this.sendError(res, 40, 'Wrong username or password', format)
         }
+        this.currentUsername = username
 
         const { pathname } = urlObj
         const method = pathname.split('/').pop()?.split('.')[0] || ''
@@ -597,6 +599,8 @@ class SubsonicHandler {
         const defaultArtistId = (music as any).singerId ? `art_${source}_${(music as any).singerId}` : `artist_${primarySinger}`
         const finalArtistId = artistIdOverride || defaultArtistId
 
+        const isStarred = (this.loveIdSets.get(this.currentUsername)?.has(id)) || parentId === 'love'
+
         return {
             id,
             parent: parentId,
@@ -614,6 +618,7 @@ class SubsonicHandler {
             ...this.getBestQualityMeta(music),
             isVideo: false,
             isDir: false,
+            ...(isStarred ? { starred: new Date().toISOString() } : {}),
             // 某些客户端 (如 Feishin) 在特定视图下不喜欢非标准字段，可以保留但确保标准字段优先
             type: 'music',
         }
@@ -2321,8 +2326,10 @@ class SubsonicHandler {
                 }
                 if (isStar) {
                     await userSpace.listManage.listDataManage.listMusicAdd('love', [resolved], location)
+                    this.loveIdSets.get(username)?.add(resolved.id)
                 } else {
                     await userSpace.listManage.listDataManage.listMusicRemove('love', [resolved.id])
+                    this.loveIdSets.get(username)?.delete(resolved.id)
                 }
                 const fromSource = hit!.listId === 'online'
                 debugLog(`[Subsonic Debug] ${action} 歌曲 ${id} -> ${isStar ? '已加入' : '已移出'}我的收藏(love) 《${resolved.name}》${fromSource ? ' (从源取回)' : ''}(user=${username})`)
@@ -2373,7 +2380,6 @@ class SubsonicHandler {
             }
         }
         collect(listData.loveList, 'love')
-        collect(listData.defaultList, 'default')
         for (const list of listData.userList) {
             collect((list.list || []) as LX.Music.MusicInfo[], list.id)
         }
