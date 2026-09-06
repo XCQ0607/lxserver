@@ -36,6 +36,22 @@ const playerSessions = new Map<string, { createdAt: number }>()
 const SESSION_TTL = 24 * 60 * 60 * 1000 // 24小时
 const SESSION_COOKIE_NAME = 'lx_player_session'
 
+// 收藏歌手列表头像补全：内存缓存（避免每次刷新重复请求音源）
+const artistPicCache = new Map<string, string>()
+function extractArtistPic(d: any): string | null {
+  if (!d || typeof d !== 'object') return null
+  return d.avatar || d.img || d.pic || d.picUrl || d.picture || d.image || d.cover || null
+}
+
+// 收藏专辑列表封面补全：内存缓存（best-effort：取专辑歌曲列表首曲 img）
+const albumPicCache = new Map<string, string>()
+function extractAlbumPic(d: any): string | null {
+  const first = d?.list?.[0]
+  const candidates = [first?.img, first?.meta?.img, d?.info?.img, d?.img, d?.pic, d?.cover, d?.coverUrl]
+  for (const v of candidates) if (typeof v === 'string' && v) return v
+  return null
+}
+
 /** 生成随机 sessionId */
 const generateSessionId = () => crypto.randomBytes(32).toString('hex')
 
@@ -2079,7 +2095,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return username || '_open'
       }
 
-      // GET /api/user/library/artists  — 读取收藏歌手列表
+      // GET /api/user/library/artists  — 读取收藏歌手列表（自动补全缺失头像 picUrl）
       if (pathname === '/api/user/library/artists' && req.method === 'GET') {
         const username = getLibUsername(req)
         if (!username) { res.writeHead(401); res.end('Unauthorized'); return }
@@ -2091,8 +2107,31 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           if (!fs.existsSync(filePath)) {
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
           }
-          const data = fs.readFileSync(filePath, 'utf-8')
-          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(data)
+          let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (!Array.isArray(arr)) arr = []
+          // [修复] 对没有可用 picUrl 的歌手，实时从音源拉取头像并补全（带内存缓存，单条失败不影响整体）
+          const needFetch = arr.filter((a: any) => a && a.id != null && a.source &&
+            !(a.picUrl && /^https?:\/\//.test(String(a.picUrl))))
+          let changed = false
+          if (needFetch.length) {
+            await Promise.all(needFetch.map(async (a: any) => {
+              const key = `${a.source}::${a.id}`
+              try {
+                let pic: string | null = artistPicCache.get(key) ?? null
+                if (!pic) {
+                  const detail = await musicSdk[a.source]?.extendDetail?.getArtistDetail?.(String(a.id))
+                  pic = extractArtistPic(detail) || null
+                  if (pic) artistPicCache.set(key, pic)
+                }
+                if (pic) { a.picUrl = pic; changed = true }
+              } catch (e) { /* 忽略单个歌手的拉取失败 */ }
+            }))
+            // 将补全后的 picUrl 持久化回文件：每个歌手最多实时查一次，之后永久生效（重启也不再查询）
+            if (changed) {
+              try { fs.writeFileSync(filePath, JSON.stringify(arr, null, 2), 'utf-8') } catch { /* ignore */ }
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(arr))
         } catch (e: any) { res.writeHead(500); res.end(e.message) }
         return
       }
@@ -2108,7 +2147,22 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const userDirname = getUserDirname(username)
             const libDir = path.join(global.lx.userPath, userDirname, 'library')
             if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
-            fs.writeFileSync(path.join(libDir, 'artists.json'), JSON.stringify(parsed, null, 2), 'utf-8')
+            const filePath = path.join(libDir, 'artists.json')
+            // 反向同步：对比旧数据计算增量，回写 Subsonic 星标
+            let oldArr: any[] = []
+            try { if (fs.existsSync(filePath)) oldArr = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { /* ignore */ }
+            const keyOf = (x: any) => `${x.source}::${String(x.id)}`
+            const oldKeys = new Set(oldArr.map(keyOf))
+            const newKeys = new Set(parsed.map(keyOf))
+            const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
+            const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
+            fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+            try {
+              const { syncNativeLibraryToSubsonic } = require('./subsonic')
+              syncNativeLibraryToSubsonic(username, 'artists',
+                added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
+                removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
+            } catch (e: any) { console.error('[Library] 反向同步 Subsonic 星标失败:', e) }
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
           } catch (e: any) { res.writeHead(400); res.end(e.message) }
         })
@@ -2127,8 +2181,31 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           if (!fs.existsSync(filePath)) {
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
           }
-          const data = fs.readFileSync(filePath, 'utf-8')
-          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(data)
+          let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+          if (!Array.isArray(arr)) arr = []
+          // [修复] 对没有可用 picUrl 的专辑，实时从音源拉取封面并补全（best-effort，带内存缓存，单条失败不影响整体）
+          const needFetch = arr.filter((a: any) => a && a.id != null && a.source &&
+            !(a.picUrl && /^https?:\/\//.test(String(a.picUrl))))
+          let changed = false
+          if (needFetch.length) {
+            await Promise.all(needFetch.map(async (a: any) => {
+              const key = `${a.source}::${a.id}`
+              try {
+                let pic: string | null = albumPicCache.get(key) ?? null
+                if (!pic) {
+                  const detail = await musicSdk[a.source]?.extendDetail?.getAlbumSongs?.(String(a.id))
+                  pic = extractAlbumPic(detail) || null
+                  if (pic) albumPicCache.set(key, pic)
+                }
+                if (pic) { a.picUrl = pic; changed = true }
+              } catch (e) { /* 忽略单个专辑的拉取失败 */ }
+            }))
+            // 将补全后的 picUrl 持久化回文件：每个专辑最多实时查一次，之后永久生效（重启也不再查询）
+            if (changed) {
+              try { fs.writeFileSync(filePath, JSON.stringify(arr, null, 2), 'utf-8') } catch { /* ignore */ }
+            }
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(arr))
         } catch (e: any) { res.writeHead(500); res.end(e.message) }
         return
       }
@@ -2144,7 +2221,22 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const userDirname = getUserDirname(username)
             const libDir = path.join(global.lx.userPath, userDirname, 'library')
             if (!fs.existsSync(libDir)) fs.mkdirSync(libDir, { recursive: true })
-            fs.writeFileSync(path.join(libDir, 'albums.json'), JSON.stringify(parsed, null, 2), 'utf-8')
+            const filePath = path.join(libDir, 'albums.json')
+            // 反向同步：对比旧数据计算增量，回写 Subsonic 星标
+            let oldArr: any[] = []
+            try { if (fs.existsSync(filePath)) oldArr = JSON.parse(fs.readFileSync(filePath, 'utf8')) } catch { /* ignore */ }
+            const keyOf = (x: any) => `${x.source}::${String(x.id)}`
+            const oldKeys = new Set(oldArr.map(keyOf))
+            const newKeys = new Set(parsed.map(keyOf))
+            const added = parsed.filter((x: any) => !oldKeys.has(keyOf(x)))
+            const removed = oldArr.filter((x: any) => !newKeys.has(keyOf(x)))
+            fs.writeFileSync(filePath, JSON.stringify(parsed, null, 2), 'utf-8')
+            try {
+              const { syncNativeLibraryToSubsonic } = require('./subsonic')
+              syncNativeLibraryToSubsonic(username, 'albums',
+                added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
+                removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
+            } catch (e: any) { console.error('[Library] 反向同步 Subsonic 星标失败:', e) }
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true }))
           } catch (e: any) { res.writeHead(400); res.end(e.message) }
         })
