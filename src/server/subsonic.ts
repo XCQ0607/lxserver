@@ -2007,6 +2007,39 @@ class SubsonicHandler {
      * star / unstar：歌曲 → 「我的收藏(love)」列表
      * （github/dev 移植自 feat/subsonic：歌曲经 resolveSongMeta 解析，支持在线回源）
      */
+    private getUserMetaFilePath(username: string): string {
+        return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-meta.json')
+    }
+
+    /** 用户维度 Subsonic 扩展元数据：星标专辑 / 星标歌手 */
+    private async getUserSubsonicMeta(username: string): Promise<{ starredAlbums: string[], starredArtists: string[], ratings: Record<string, number> }> {
+        try {
+            const filePath = this.getUserMetaFilePath(username)
+            if (fs.existsSync(filePath)) {
+                const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+                return {
+                    starredAlbums: Array.isArray(data.starredAlbums) ? data.starredAlbums : [],
+                    starredArtists: Array.isArray(data.starredArtists) ? data.starredArtists : [],
+                    ratings: data.ratings && typeof data.ratings === 'object' ? data.ratings : {},
+                }
+            }
+        } catch (e) {
+            console.error('[Subsonic] Failed to read subsonic-meta.json:', e)
+        }
+        return { starredAlbums: [], starredArtists: [], ratings: {} }
+    }
+
+    private async saveUserSubsonicMeta(username: string, meta: { starredAlbums: string[], starredArtists: string[], ratings: Record<string, number> }) {
+        try {
+            const filePath = this.getUserMetaFilePath(username)
+            const dirPath = path.dirname(filePath)
+            if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+            fs.writeFileSync(filePath, JSON.stringify(meta), 'utf8')
+        } catch (e) {
+            console.error('[Subsonic] Failed to write subsonic-meta.json:', e)
+        }
+    }
+
     private async handleStar(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, isStar: boolean) {
         // 收集 id / albumId / artistId（均允许逗号分隔的多个值）
         const ids: string[] = []
@@ -2021,16 +2054,27 @@ class SubsonicHandler {
         if (!ids.length) return this.sendError(res, 10, 'Required parameter is missing: id', format)
 
         const userSpace = getUserSpace(username)
+        const meta = await this.getUserSubsonicMeta(username)
+        const starredAlbums = new Set(meta.starredAlbums)
+        const starredArtists = new Set(meta.starredArtists)
         const location = (global.lx.config['list.addMusicLocationType'] || 'bottom') as 'top' | 'bottom'
         let loveChanged = false
+        let metaChanged = false
         const action = isStar ? 'star' : 'unstar'
         const debug = !!global.lx.config['subsonic.enableDebug']
         const debugLog = (msg: string) => { if (debug) console.log(msg) }
 
         for (const id of ids) {
-            if (id.startsWith('alb_') || id.startsWith('art_')) {
-                // github/dev 未实现专辑/歌手星标元数据，跳过
-                debugLog(`[Subsonic Debug] ${action} 专辑/歌手 ${id} 暂不支持，已跳过 (user=${username})`)
+            if (id.startsWith('alb_')) {
+                isStar ? starredAlbums.add(id) : starredAlbums.delete(id)
+                metaChanged = true
+                debugLog(`[Subsonic Debug] ${action} 专辑 ${id} -> ${isStar ? '已星标' : '已取消星标'} (user=${username})`)
+                continue
+            }
+            if (id.startsWith('art_')) {
+                isStar ? starredArtists.add(id) : starredArtists.delete(id)
+                metaChanged = true
+                debugLog(`[Subsonic Debug] ${action} 歌手 ${id} -> ${isStar ? '已星标' : '已取消星标'} (user=${username})`)
                 continue
             }
             try {
@@ -2054,6 +2098,13 @@ class SubsonicHandler {
             }
         }
 
+        if (metaChanged) {
+            await this.saveUserSubsonicMeta(username, {
+                starredAlbums: Array.from(starredAlbums),
+                starredArtists: Array.from(starredArtists),
+                ratings: meta.ratings,
+            })
+        }
         if (loveChanged) {
             try {
                 await userSpace.listManage.createSnapshot()
@@ -2062,13 +2113,16 @@ class SubsonicHandler {
             }
         }
 
-        debugLog(`[Subsonic Debug] ${action} 完成: id 数=${ids.length}, 收藏变更=${loveChanged} (user=${username})`)
+        debugLog(`[Subsonic Debug] ${action} 完成: id 数=${ids.length}, 收藏变更=${loveChanged}, 星标元数据变更=${metaChanged} (user=${username})`)
         return this.sendResponse(res, {}, format)
     }
 
     private async handleGetStarred(res: http.ServerResponse, username: string, format: string, isV2 = true) {
         const userSpace = getUserSpace(username)
         const listData = await userSpace.listManage.getListData()
+        const meta = await this.getUserSubsonicMeta(username)
+        const starredAlbumSet = new Set(meta.starredAlbums)
+        const starredArtistSet = new Set(meta.starredArtists)
 
         // [汇总所有歌单歌曲]
         const allSongsMap = new Map<string, { music: LX.Music.MusicInfo, listId: string }>()
@@ -2090,27 +2144,31 @@ class SubsonicHandler {
         const libArtists = await this.getLibraryData(username, 'artists')
         const libAlbums = await this.getLibraryData(username, 'albums')
 
-        const mappedArtists = libArtists.map(a => {
-            const id = `art_${a.source || 'wy'}_${a.id}`
-            return {
-                id,
-                name: a.name,
-                coverArt: id
-            }
-        })
+        const mappedArtists = libArtists
+            .filter(a => starredArtistSet.has(`art_${a.source || 'wy'}_${a.id}`))
+            .map(a => {
+                const id = `art_${a.source || 'wy'}_${a.id}`
+                return {
+                    id,
+                    name: a.name,
+                    coverArt: id
+                }
+            })
 
-        const mappedAlbums = libAlbums.map(a => {
-            const source = a.source || 'wy'
-            const primarySinger = (a.artistName || '').split('、')[0] || 'Unknown Artist'
-            const artistId = a.singerId ? `art_${source}_${a.singerId}` : `artist_${primarySinger}`
-            return {
-                id: `alb_${source}_${a.id}`,
-                name: a.name,
-                artist: a.artistName,
-                artistId: artistId,
-                coverArt: a.picUrl || `alb_${source}_${a.id}`
-            }
-        })
+        const mappedAlbums = libAlbums
+            .filter(a => starredAlbumSet.has(`alb_${(a.source || 'wy')}_${a.id}`))
+            .map(a => {
+                const source = a.source || 'wy'
+                const primarySinger = (a.artistName || '').split('、')[0] || 'Unknown Artist'
+                const artistId = a.singerId ? `art_${source}_${a.singerId}` : `artist_${primarySinger}`
+                return {
+                    id: `alb_${source}_${a.id}`,
+                    name: a.name,
+                    artist: a.artistName,
+                    artistId: artistId,
+                    coverArt: a.picUrl || `alb_${source}_${a.id}`
+                }
+            })
 
         const wrapKey = isV2 ? 'starred2' : 'starred'
 
