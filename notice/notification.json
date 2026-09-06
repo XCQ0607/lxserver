@@ -18,25 +18,25 @@
         }
     },
     {
-        "comment": "=== 版本更新 v2.0.0 ===",
-        "id": "update_v2_0_0",
+        "comment": "=== 版本更新 v2.0.1 ===",
+        "id": "update_v2_0_1",
         "status": "active",
         "type": "version",
         "logic": {
-            "target_version": "v2.0.0",
+            "target_version": "v2.0.1",
             "operator": "<",
             "interval_hours": 24
         },
         "ui": {
-            "title": "发现新版本 v2.0.0",
+            "title": "发现新版本 v2.0.1",
             "date": "2026-07-23",
-            "message": "本次更新包含核心重磅升级与多项功能增强：\n1. 🎵 本地音乐精准洗版与高品质音质记忆 (@bobcc4)\n2. 🔎 高级布尔逻辑搜索 (&, |, !, () 空格激活) 与错误提醒\n3. 🎶 本地歌曲平台校验收藏至歌单、共享曲库与权限细化\n4. 🚀 登出自动全量清理缓存、WebDAV 与 Subsonic 协议全面优化",
+            "message": "本次更新包含核心体验重构与多项功能增强：\n1. 📁 自定义歌曲目录与权限映射，支持多层目录索引与关联歌单\n2. 🌟 数据查看支持收藏专辑与关注歌手展示，分类筛选与列表查阅\n3. ⚙️ 自定义第三方音源平台独立开关 (#292) & 非管理员缓存下载细粒度权限控制 (#284)\n4. 🎧 Subsonic 接口与搜索响应全面优化 (#311, #325)，PWA 自定义路径 404 修复与多项体验升级",
             "confirm_text": "查看日志",
             "cancel_text": "稍后提醒"
         },
         "action": {
             "type": "link",
-            "url": "https://github.com/XCQ0607/lxserver/releases/tag/v2.0.0"
+            "url": "https://github.com/XCQ0607/lxserver/releases/tag/v2.0.1"
         }
     }
 ]
