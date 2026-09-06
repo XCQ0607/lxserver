@@ -1969,7 +1969,22 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
         return Promise.resolve()
     }
 
+    // [去重] 同一 songKey 正在下载/写标签时直接跳过，避免并发重复下载
+    // (如 Subsonic 客户端反复请求 stream、或音流并行触发原生缓存)
+    const inFlight = cacheProgress.get(songKey)
+    if (inFlight && (inFlight.status === 'downloading' || inFlight.status === 'tagging')) {
+        const age = Date.now() - (inFlight.updatedAt || 0)
+        // 超过 10 分钟仍无进展视为卡死，允许本次重新下载（避免永久阻塞该歌曲，
+        // 尤其 fire-and-forget 的 Subsonic 缓存触发没有 abort 信号）
+        if (age < 10 * 60 * 1000) {
+            console.log(`[FileCache] Download already in progress for ${songKey}, skipping duplicate`)
+            return Promise.resolve()
+        }
+    }
     if (signal?.aborted) return
+    // 立即同步占坑标记下载中，关闭“拿到 200 响应前”的并发竞态窗口；
+    // 后续到达的相同 songKey 请求会被上面的守卫跳过，不再重复下载。
+    cacheProgress.set(songKey, { progress: 0, status: 'downloading', total: 0, received: 0, speed: 0, updatedAt: Date.now() })
     console.log(`[FileCache] Starting download for: ${baseName}`)
 
     return new Promise<void>((resolve, reject) => {

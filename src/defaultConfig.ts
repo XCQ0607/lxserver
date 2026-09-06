@@ -66,6 +66,7 @@ const config: LX.Config = {
   'subsonic.onlineSearchMode': 'fallback', // 在线搜索模式: fallback | merge | local_only
   'subsonic.onlineSearchSources': 'wy,tx,kw,kg,mg', // 在线搜索默认平台
   'subsonic.lyricTranslation': true, // 是否在 Subsonic 歌词中包含翻译
+  'subsonic.cacheOnPlay': false, // 是否在 Subsonic 播放时触发服务器缓存保存（落盘）
   'singer.sourcePriority': ['tx', 'wy'], // 歌手信息源优先级
   'artist.maxFetchPages': 20, // 歌手歌曲最大抓取页数
   'cache.namingPattern': 'simple', // 缓存命名规则
