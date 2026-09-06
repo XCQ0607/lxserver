@@ -31,9 +31,6 @@
       "@/*": [
         "./*"
       ],
-      "@common/*": [
-        "./common/*"
-      ],
       "@renderer/*": [
         "./modules/*"
       ]

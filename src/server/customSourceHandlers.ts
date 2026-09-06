@@ -422,16 +422,18 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
 
     // 2. 读取 User 源 (如果有)
     let userStates: Record<string, any> = {}
+    const targetStatesOwner = (username && username !== 'default') ? username : 'open'
+    const statesDir = getSourceDir(targetStatesOwner)
+    const userStatesPath = path.join(statesDir, 'states.json')
+    if (fs.existsSync(userStatesPath)) {
+        try {
+            userStates = JSON.parse(fs.readFileSync(userStatesPath, 'utf-8'))
+        } catch (e) { }
+    }
+
     if (username && username !== 'default') {
         const userSourcesDir = getSourceDir(username)
         const userMetaPath = path.join(userSourcesDir, 'sources.json')
-        const userStatesPath = path.join(userSourcesDir, 'states.json')
-
-        if (fs.existsSync(userStatesPath)) {
-            try {
-                userStates = JSON.parse(fs.readFileSync(userStatesPath, 'utf-8'))
-            } catch (e) { }
-        }
 
         if (fs.existsSync(userMetaPath)) {
             try {
@@ -460,7 +462,7 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
 
     allSources.push(...userSources)
 
-    // 补充运行时状态
+    // 补充运行时状态及禁用平台配置
     const enrichedSources = allSources.map((source: any) => {
         // 合并运行时状态
         const status = getApiStatus(source.owner, source.id)
@@ -468,6 +470,11 @@ export async function handleList(req: IncomingMessage, res: ServerResponse, user
             source.status = status.status
             source.error = status.error
         }
+
+        // 读取对应音源的禁用平台列表
+        const stateObj = userStates[source.id] || (userStates[decodeURIComponent(source.id)]) || (userStates[encodeURIComponent(source.id)]) || {}
+        source.disabledSources = Array.isArray(stateObj.disabledSources) ? stateObj.disabledSources : []
+
         return source
     })
 
@@ -853,5 +860,75 @@ export async function handleDelete(req: IncomingMessage, res: ServerResponse) {
         console.error('[CustomSource] Delete error:', err)
         res.writeHead(500)
         res.end(err.message)
+    }
+}
+
+// 更新音源的平台配置 (关闭/开启部分平台)
+export async function handleUpdatePlatforms(req: IncomingMessage, res: ServerResponse) {
+    try {
+        const body = await readBody(req)
+        const { id, sourceId, username, disabledSources } = JSON.parse(body)
+        const targetId = id || sourceId
+
+        if (!targetId) {
+            throw new Error('缺少音源ID')
+        }
+
+        let targetOwner = (username && username !== 'default') ? username : 'open'
+
+        // 核心安全逻辑：如果是全局公开源且为 open 模式，需要验证管理员身份
+        if (targetOwner === 'open') {
+            const auth = req.headers['x-frontend-auth']
+            if (auth !== global.lx.config['frontend.password']) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, error: '权限不足：修改全局公开源平台配置需要管理员身份。' }))
+                return
+            }
+        }
+
+        const sourcesDir = getSourceDir(targetOwner)
+        if (!fs.existsSync(sourcesDir)) {
+            fs.mkdirSync(sourcesDir, { recursive: true })
+        }
+
+        const userStatesPath = path.join(sourcesDir, 'states.json')
+        let states: Record<string, any> = {}
+        if (fs.existsSync(userStatesPath)) {
+            try {
+                states = JSON.parse(fs.readFileSync(userStatesPath, 'utf-8'))
+            } catch (e) { }
+        }
+
+        // 兼容原名、解码后或编码后的 key
+        let matchedKey = targetId
+        if (!states[matchedKey]) {
+            try {
+                const decoded = decodeURIComponent(targetId)
+                if (states[decoded]) matchedKey = decoded
+            } catch (e) { }
+        }
+        if (!states[matchedKey]) {
+            try {
+                const encoded = encodeURIComponent(targetId)
+                if (states[encoded]) matchedKey = encoded
+            } catch (e) { }
+        }
+
+        if (!states[matchedKey]) {
+            states[matchedKey] = {}
+        }
+
+        states[matchedKey].disabledSources = Array.isArray(disabledSources) ? disabledSources : []
+        fs.writeFileSync(userStatesPath, JSON.stringify(states, null, 2), 'utf-8')
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+            success: true,
+            id: matchedKey,
+            disabledSources: states[matchedKey].disabledSources
+        }))
+    } catch (error: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ success: false, error: error.message }))
     }
 }

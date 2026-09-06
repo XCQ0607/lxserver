@@ -9,8 +9,11 @@ const config: LX.Config = {
   'user.enableRoot': false, // 是否开启根路径
   'user.enablePublicRestriction': true, // 是否启用公开用户权限限制
   'user.enablePublicNonAdminLocalMusic': false, // 是否开启非管理员访问本地音乐
+  'user.enablePublicNonAdminBrowserDownload': true, // 是否开启非管理员浏览器下载
+  'user.enablePublicNonAdminServerCache': false, // 是否开启非管理员服务器缓存
   'user.enablePublicFavorites': false, // 是否开启公开收藏和歌曲
   'user.enablePublicNonAdminAccess': false, // 是否开启非管理员访问公开收藏和歌曲
+  'user.enableCustomMusicDir': false, // 是否启用自定义歌曲目录
   'user.enableLoginCacheRestriction': false, // 是否启用登录用户缓存限制
   'user.enableCacheSizeLimit': false, // 是否启用缓存空间限制
   'user.cacheSizeLimit': 2000, // 缓存空间限制大小 (MB)
@@ -26,6 +29,10 @@ const config: LX.Config = {
     //   password: '123.def', // 是连接密码，必须，不能与其他用户密码重复，若在外网，务必增加密码复杂度
     //   maxSnapshotNum: 10, // 可选，最大备份快照数
     //   'list.addMusicLocationType': 'top', // 可选，添加歌曲到我的列表时的位置 top | bottom，参考客户端的「设置 → 列表设置 → 添加歌曲到列表时的位置」
+    //   enableCustomMusicDir: false, // 可选，是否启用此用户自定义歌曲目录
+    //   customMusicDir: '', // 可选，自定义歌曲目录绝对路径
+    //   allowOperateCustomMusicDir: false, // 可选，是否允许操作目录歌曲（如删除、洗版）
+    //   allowWriteCustomMusicDir: false, // 可选，是否允许写入歌曲文件（如关联、更新元信息、嵌入歌词）
     // },
   ],
 
@@ -50,11 +57,11 @@ const config: LX.Config = {
   'proxy.all.address': '',
 
   // 访问路径配置
-  'admin.path': '', // 后台管理路径，默认为根路径 /
-  'player.path': '/music', // 播放器路径
+  'admin.path': '/admin', // 后台管理路径
+  'player.path': '/', // 播放器路径，默认为根路径 /
   'subsonic.enable': true, // 是否启用 Subsonic 服务
   'subsonic.path': '/rest', // Subsonic 访问路径
-  'subsonic.enableDebug': true, // 是否开启 Subsonic 调试日志模式
+  'subsonic.enableDebug': false, // 是否开启 Subsonic 调试日志模式
   'subsonic.onlineSearch': true, // 是否开启 Subsonic 在线全网搜索
   'subsonic.onlineSearchMode': 'fallback', // 在线搜索模式: fallback | merge | local_only
   'subsonic.onlineSearchSources': 'wy,tx,kw,kg,mg', // 在线搜索默认平台

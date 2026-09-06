@@ -20,9 +20,9 @@ Get the overall memory consumption, device online status, and uptime summary.
 
 ### 1.2 Admin: User Management (`/api/users`)
 - **Header Auth**: `x-frontend-auth: <Admin Password>`
-- `GET /api/users`: Get a list of all users and their passwords.
+- `GET /api/users`: Get a list of all users, their passwords, and permission configurations.
 - `POST /api/users`: Create a new user (`{"name": "...", "password": "..."}`).
-- `PUT /api/users`: Update user info (Rename or update password) (`{"name": "OldName", "newName": "NewName", "password": "NewPassword"}`).
+- `PUT /api/users`: Update user info (Rename, update password or permissions) (`{"name": "...", "newName": "...", "password": "...", "enableCustomMusicDir": false, "customMusicDir": "...", "allowOperateCustomMusicDir": false, "allowWriteCustomMusicDir": false}`).
 - `DELETE /api/users`: Delete users (`{"names": ["..."], "deleteData": true}`).
 
 ### 1.3 User: Login (`POST /api/user/login`)
@@ -113,6 +113,20 @@ Users can manage music files and lyrics cached on the server.
 - `POST /api/music/cache/clear`: Clear all music cache.
 - `POST /api/music/cache/lyric`: Save or read lyric cache.
 
+### 5.1 Custom Music Directory & Remaster (`/api/music/custom/*`)
+
+Allows users with the `enableCustomMusicDir` permission to mount and manage local music files on the server.
+
+- `GET /api/music/custom/list`: Get custom directory song list.
+- `POST /api/music/custom/sync`: Trigger server to rescan and sync custom directory data.
+- `GET /api/music/custom/file`: Get single audio file stream.
+- `GET /api/music/custom/cover`: Get audio embedded cover image stream.
+- `POST /api/music/custom/remove`: Delete audio files and data (requires user to have `allowOperateCustomMusicDir` permission).
+- `POST /api/music/custom/link`: Manually link and rewrite audio ID3 tag info (requires user to have `allowWriteCustomMusicDir` permission).
+- `POST /api/music/custom/updateMetadata`: Batch fetch metadata from the web and overwrite local files (requires user to have `allowWriteCustomMusicDir` permission).
+- `POST /api/music/custom/embedLyric`: Batch write lyrics to local file USLT tags (requires user to have `allowWriteCustomMusicDir` permission).
+- `POST /api/music/remaster/start`: Start audio remastering and downgrade transcoding task (if acting on a custom directory, requires user to have `allowOperateCustomMusicDir` permission).
+
 ---
 
 ## 6. Custom Source Management API
@@ -131,8 +145,11 @@ Used by the management dashboard for real-time adjustments of server behavior. R
 
 - `GET /api/config`: Get all current global configuration items (including final values overridden by env vars).
 - `POST /api/config`: Incrementally update global configuration.
-  - **Body Example**: `{"singer.sourcePriority": ["tx", "wy"], "user.enablePublicRestriction": true}`
-  - **Validation**: Certain fields like `singer.sourcePriority` will be validated for correctness.
+  - **Supported Keys**: Includes `admin.path`, `player.path`, `subsonic.enableDebug`, `subsonic.onlineSearch`, `subsonic.onlineSearchMode`, `subsonic.onlineSearchSources`, `subsonic.lyricTranslation`, `artist.maxFetchPages`, `cache.namingPattern`, `system.allowUnsafeVM`, etc.
+  - **Body Example**: `{"admin.path": "/admin", "player.path": "", "subsonic.enableDebug": false}`
+  - **Path Validation**: `admin.path` and `player.path` must start with `/` or be empty, cannot be equal, and cannot start with `/api`.
+- `POST /api/admin/reload`: Reload server `config.js`, `users.json`, and custom user source APIs.
+- `POST /api/admin/restart`: Safely restart the server process.
 
 ---
 
@@ -141,8 +158,8 @@ Used by the management dashboard for real-time adjustments of server behavior. R
 Interfaces designed specifically for Web Player frontend logic, supporting Session-based access.
 
 ### 8.1 Basic Config & Auth
-- `GET /api/music/config`: **Public interface**, get runtime status configuration of the Web Player.
-  - **Response**: `{"player.enableAuth": boolean, "user.enablePublicRestriction": boolean}`
+- `GET /api/music/config`: **Public interface**, get runtime status and base path configuration of the Web Player.
+  - **Response Example**: `{"admin.path": "/admin", "player.path": "", "player.enableAuth": false, "user.enablePublicRestriction": true}`
 - `POST /api/music/auth`: Validate access password and issue `lx_player_session` HttpOnly Cookie upon success.
 - `POST /api/music/auth/logout`: Completely invalidate the current Session.
 - `GET /api/music/auth/verify`: Check if the current Session is still valid.

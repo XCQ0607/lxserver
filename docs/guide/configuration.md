@@ -28,13 +28,18 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 | :-------------------- | :------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`              | `9527`      | Integer  | **服务监听端口**。建议避免使用主机中其他高频占用的端口（如 80、443、3306）。                                                                  |
 | `BIND_IP`           | `0.0.0.0`   | String   | **服务绑定的 IP 接口范围**。设定为 `127.0.0.1` 仅接受本机 Lookback 调用；设定为 `0.0.0.0` 意味着同时监听主机所有内外部可用网络适配器。    |
-| `ADMIN_PATH`        | `''`        | String   | **后台管理界面访问路径**。默认为空，即根路径 `/`。                                                                                             |
-| `PLAYER_PATH`       | `'/music'`  | String   | **Web 播放器访问路径**。默认为 `/music`。                                                                                                      |
+| `ADMIN_PATH`        | `'/music'`  | String   | **后台管理界面访问路径**。默认为 `/music`。                                                                                                    |
+| `PLAYER_PATH`       | `'/'`       | String   | **Web 播放器访问路径**。默认为根路径 `/`。                                                                                                     |
 | `SERVER_NAME`       | `My Sync Server` | String | **同步服务名称**。在客户端连接时显示的服务器标识名称。 |
 | `PROXY_HEADER`      | `x-real-ip` | String   | **逆向代理远端 IP 穿透标识**。当系统运行于 Nginx 等反向代理或负载均衡器后方时，用于提取客户端真实的源端 IP 地址，保障设备审计日志的准确溯源。 |
 | `PROXY_ALL_ENABLED` | `false` | Boolean | **启用全局外发请求代理**。开启后，服务端发起的网络请求（如搜索、播放链接解析）将通过指定的代理服务器。 |
 | `PROXY_ALL_ADDRESS` | `''` | String | **代理地址**。支持 `http://` 或 `socks5://` 协议，如 `socks5://127.0.0.1:10808`。 |
 | `DISABLE_TELEMETRY` | `false`     | Boolean  | **系统遥测反馈熔断器**。置为 `true` 将完全阻断系统与外界节点之间的匿名状态探针报文，同时禁用所有的系统级别新版本更新或公告下发。            |
+
+> 💡 **布尔类型环境变量格式说明**：
+> 所有布尔类型的环境变量支持不区分大小写的多种灵活写法：
+> - **开启 (True)**：`true` / `1` / `yes` / `y` / `on`
+> - **关闭 (False)**：`false` / `0` / `no` / `n` / `off`
 
 ### 二、 持久化与账户沙箱管理策略
 
@@ -50,6 +55,9 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 | `USER_ENABLE_PATH`  | `true`   | Boolean  | **账户独享存储沙箱隔离体系（关键）**。该状态启动后，底层数据系统即在 `/data` 目录依照活跃用户切分多个离散并并行的卷。确保不同分发设备、多用户的偏好文件不发生数据越权。 |
 | `USER_ENABLE_ROOT`  | `false`  | Boolean  | **根目录扁平化存取覆盖参数**。为 `true` 时，上述的多用户沙盒分卷操作将失效，数据读写降维直接击穿写入系统底册。                                                          |
 | `ENABLE_PUBLIC_USER_RESTRICTION` | `true` | Boolean | **限制公开用户权限**。开启后，非管理员公开用户将被限制上传、删除公开源、缓存到服务器等敏感操作。 |
+| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `false` | Boolean | **开启非管理员访问本地音乐**。开启后，允许未登录管理员的公开账号访问本地音乐。 |
+| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `true` | Boolean | **开启非管理员浏览器下载**。开启后，允许未登录管理员的公开/普通账号使用浏览器下载歌曲。 |
+| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `false` | Boolean | **开启非管理员服务器缓存**。开启后，允许未登录管理员的公开/普通账号将歌曲缓存或写入服务器存储。 |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `false` | Boolean | **限制登录用户缓存设置**。开启后，非管理员登录用户将被限制修改核心缓存项（缓存歌词、缓存歌曲链接、缓存歌曲文件及仅下载模式）。 |
 | `ENABLE_CACHE_SIZE_LIMIT` | `false` | Boolean | **启用自动缓存清理**。开启后，系统将监控并限制用户缓存总量，超出阈值时按 LRU 顺序自动删除最旧文件。 |
 | `CACHE_SIZE_LIMIT` | `2000` | Integer | **缓存容量阈值 (MB)**。自动清理机制生效的容量上限。 |
@@ -73,7 +81,7 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 
 | 环境变量映射键 (ENV)      | 系统默认值 | 数据类型 | 作用域与适用场景                                                                                                    |
 | :------------------------ | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------ |
-| `ENABLE_WEBPLAYER_AUTH` | `false`  | Boolean  | 是否针对于衍生开辟出的浏览器访问界面（默认 `/music` 路径下渲染的应用实体）建立起单独的阻入型防御围栏墙，拒绝散客直面。 |
+| `ENABLE_WEBPLAYER_AUTH` | `false`  | Boolean  | 是否针对于衍生开辟出的浏览器访问界面（默认根路径 `/` 渲染的应用实体）建立起单独的阻入型防御围栏墙，拒绝散客直面。 |
 | `WEBPLAYER_PASSWORD`    | `123456` | String   | 上层鉴权模式若生效，则用以核对的单独密匙字典。这赋予管理员解耦听众层级与后端控制台不同级别的密钥能力。              |
 
 ### 五、 播放列表管理策略
@@ -88,12 +96,20 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 | :--- | :--- | :--- | :--- |
 | `SUBSONIC_ENABLE` | `true` | Boolean | **启用 Subsonic 协议**。开启后允许使用兼容 Subsonic 协议的客户端连接。 |
 | `SUBSONIC_PATH` | `'/rest'` | String | **Subsonic 访问路径**。默认为 `/rest`。 |
+| `SUBSONIC_ENABLE_DEBUG` | `false` | Boolean | **是否开启 Subsonic 调试日志模式**。默认为 `false`。 |
+| `SUBSONIC_ONLINE_SEARCH` | `true` | Boolean | **是否开启 Subsonic 在线全网搜索**。开启后支持自动在线匹配并播放库外资源。 |
+| `SUBSONIC_ONLINE_SEARCH_MODE` | `'fallback'` | String | **Subsonic 在线搜索模式**。可选值为 `fallback`（回退模式）、`merge`（合并模式）、`local_only`（仅本地）。 |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES` | `'wy,tx,kw,kg,mg'` | String | **Subsonic 在线搜索默认音源列表**。多个音源用英文逗号分割。 |
+| `SUBSONIC_LYRIC_TRANSLATION` | `true` | Boolean | **Subsonic 歌词中是否包含翻译**。开启后在 Subsonic 客户端中请求歌词时将带上翻译。 |
 
 ### 八、 业务功能扩展配置
 
 | 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
 | :--- | :--- | :--- | :--- |
 | `SINGER_SOURCE_PRIORITY` | `'tx,wy'` | String | **歌手信息源优先级**。控制歌手详情、照片及 Mid 的获取源优先顺序。可选值为 `tx` (腾讯) 和 `wy` (网易)，多个来源用英文逗号隔开，排列靠前者优先尝试。 |
+| `ARTIST_MAX_FETCH_PAGES` | `20` | Integer | **歌手歌曲最大抓取页数**。抓取歌手全量歌曲时的页数上限。 |
+| `CACHE_NAMING_PATTERN` | `'simple'` | String | **缓存文件命名规则**。可选值为 `simple`（简单规则）或 `custom`（自定义规则）。 |
+| `SYSTEM_ALLOW_UNSAFE_VM` | `false` | Boolean | **是否允许运行 VM 模式自定义源脚本**。开启后允许加载含有高风险 VM 沙箱特性的自定义源脚本（需注意安全风险）。 |
 
 ### 九、 (高阶特性) CLI 环境下静默预置账户
 

@@ -134,7 +134,7 @@ export default {
         songmid: item.audio_id,
         source: 'kg',
         interval: formatPlayTime(item.duration),
-        img: (item.album_sizable_cover || item.trans_param?.union_cover || '').replace('{size}', '400') || null,
+        img: (item.album_sizable_cover || item.trans_param?.union_cover || '').replace('{size}', '1000') || null,
         lrc: null,
         hash: item.hash,
         otherSource: null,

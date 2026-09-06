@@ -9,21 +9,25 @@ import crypto from 'crypto'
 import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { buildLyrics, parseLyrics } from '../utils/lrcTool'
-import { formatPlayTime } from '../common/utils/common'
+import { formatPlayTime } from '../utils/common'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
     STANDARD: 'standard',       // {Name}_-_{Singer}_-_{Source}_-_{ID}_-_{Quality}
-    SIMPLE: 'simple'            // {Name} - {Singer} - {Quality} - {Album}
+    SIMPLE: 'simple',            // {Name} - {Singer} - {Quality} - {Album}
+    SINGER_NAME_QUALITY_ALBUM: 'singer_name_quality_album', // {Singer} - {Name} - {Quality} - {Album}
+    SINGER_NAME: 'singer_name', // {Singer} - {Name}
+    NAME_SINGER: 'name_singer'  // {Name} - {Singer}
 }
 
 let currentNamingPattern = CACHE_NAMING_PATTERNS.SIMPLE
 
-export const normalizeNamingPattern = (pattern: unknown) => (
-    pattern === CACHE_NAMING_PATTERNS.STANDARD
-        ? CACHE_NAMING_PATTERNS.STANDARD
-        : CACHE_NAMING_PATTERNS.SIMPLE
-)
+export const normalizeNamingPattern = (pattern: unknown) => {
+    if (Object.values(CACHE_NAMING_PATTERNS).includes(pattern as string)) {
+        return pattern as string
+    }
+    return CACHE_NAMING_PATTERNS.SIMPLE
+}
 
 export const setNamingPattern = (pattern: unknown) => {
     currentNamingPattern = normalizeNamingPattern(pattern)
@@ -54,6 +58,8 @@ let _lyricFetcher: LyricFetcher | null = null
 export const setLyricFetcher = (fn: LyricFetcher) => { _lyricFetcher = fn }
 
 export const getCacheDir = (username?: string, isOnlyDownload?: boolean, location?: string) => {
+    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
+
     const folderName = isOnlyDownload ? 'music' : 'cache'
     const loc = location || currentCacheLocation
     let baseDir = ''
@@ -62,9 +68,6 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
     } else {
         baseDir = path.join(process.cwd(), folderName)
     }
-
-    // [New] Segment cache by username
-    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
     const fullPath = path.join(baseDir, userDirName)
     if (!fs.existsSync(fullPath)) {
@@ -138,21 +141,7 @@ class CacheIndexManager {
     private indexes: Map<string, Map<string, CacheItem>> = new Map() // "location:username:folder" -> (songId -> CacheItem)
 
     private getIndexFile(username: string, folder: 'cache' | 'music', location?: string) {
-        const loc = location || currentCacheLocation
-        const folderName = folder === 'music' ? 'music' : 'cache'
-        let baseDir = ''
-        if (loc === CACHE_ROOTS.DATA) {
-            baseDir = path.join(global.lx.dataPath, folderName)
-        } else {
-            baseDir = path.join(process.cwd(), folderName)
-        }
-
-        const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
-        const userDir = path.join(baseDir, userDirName)
-
-        if (!fs.existsSync(userDir)) {
-            fs.mkdirSync(userDir, { recursive: true })
-        }
+        const userDir = getCacheDir(username, folder === 'music', location)
         const fileName = folder === 'music' ? 'music_index.json' : 'cache_index.json'
         return path.join(userDir, fileName)
     }
@@ -607,6 +596,12 @@ const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, 
     let baseName = ''
     if (currentNamingPattern === CACHE_NAMING_PATTERNS.SIMPLE) {
         baseName = `${nameStr} - ${singerStr} - ${sanitizeFilename(q)} - ${albumStr}`
+    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME_QUALITY_ALBUM) {
+        baseName = `${singerStr} - ${nameStr} - ${sanitizeFilename(q)} - ${albumStr}`
+    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME) {
+        baseName = `${singerStr} - ${nameStr}`
+    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
+        baseName = `${nameStr} - ${singerStr}`
     } else {
         // Default/Standard: {Name}_-_{Singer}_-_{Source}_-_{ID}_-_{Quality}
         baseName = `${nameStr}_-_${singerStr}_-_${sanitizeFilename(source)}_-_${sanitizeFilename(id)}_-_${sanitizeFilename(q)}`
@@ -626,12 +621,25 @@ const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, 
 
         // The album is part of the simple filename, so different album editions do not collide.
         const conflict = existingItems.find(item => {
-            const itemAlbumValue = item.album || 'Unknown Album'
-            return sanitizeFilename(item.name || 'Unknown').toLowerCase() === normalizedName &&
-                sanitizeFilename(item.singer || 'Unknown').toLowerCase() === normalizedSinger &&
-                sanitizeFilename(item.quality || 'unknown').toLowerCase() === normalizedQuality &&
-                sanitizeFilename(itemAlbumValue).toLowerCase() === normalizedAlbum &&
-                normalizeSongId(item) !== id
+            // 只要不是同一个文件（ID 不同，或者 ID 相同但音质不同），就有可能冲突
+            const isDifferentFile = normalizeSongId(item) !== id || item.quality !== q
+            if (!isDifferentFile) return false
+
+            const itemNormalizedName = sanitizeFilename(item.name || 'Unknown').toLowerCase()
+            const itemNormalizedSinger = sanitizeFilename(item.singer || 'Unknown').toLowerCase()
+
+            if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME || currentNamingPattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
+                // 对于仅包含“歌手-歌名”的模式，只要歌手和歌名一样，必定产生同名文件冲突
+                return itemNormalizedName === normalizedName && itemNormalizedSinger === normalizedSinger
+            } else {
+                // 对于包含音质和专辑的模式，还要判断这些字段是否也完全相同
+                const itemNormalizedQuality = sanitizeFilename(item.quality || 'unknown').toLowerCase()
+                const itemNormalizedAlbum = sanitizeFilename(item.album || 'Unknown Album').toLowerCase()
+                return itemNormalizedName === normalizedName &&
+                    itemNormalizedSinger === normalizedSinger &&
+                    itemNormalizedQuality === normalizedQuality &&
+                    itemNormalizedAlbum === normalizedAlbum
+            }
         })
 
         if (conflict) {
@@ -1965,9 +1973,10 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
     console.log(`[FileCache] Starting download for: ${baseName}`)
 
     return new Promise<void>((resolve, reject) => {
-        const protocol = url.startsWith('https') ? https : http
         let req: http.ClientRequest
         let settled = false
+        let redirectCount = 0
+        const MAX_REDIRECTS = 10
 
         const fail = (err: Error) => {
             if (settled) return
@@ -1992,12 +2001,41 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
         if (signal) signal.addEventListener('abort', abortHandler)
 
-        req = protocol.get(url, (res) => {
-            if (res.statusCode !== 200) {
-                fs.unlink(tempPath, () => { })
-                fail(new Error(`Status: ${res.statusCode}`))
+        // 递归下载，自动跟随 3xx 重定向（浏览器会自动跟随，但 http.get 不会）
+        const downloadFrom = (currentUrl: string) => {
+            if (signal?.aborted) {
+                fail(new Error('Aborted'))
                 return
             }
+            const protocol = currentUrl.startsWith('https') ? https : http
+            req = protocol.get(currentUrl, (res) => {
+                const status = res.statusCode || 0
+                // 处理重定向：301/302/303/307/308
+                if ([301, 302, 303, 307, 308].includes(status)) {
+                    const location = res.headers['location']
+                    res.resume() // 消费响应体，避免连接挂起
+                    if (!location) {
+                        fs.unlink(tempPath, () => { })
+                        fail(new Error(`Status: ${status} (missing Location header)`))
+                        return
+                    }
+                    if (redirectCount >= MAX_REDIRECTS) {
+                        fs.unlink(tempPath, () => { })
+                        fail(new Error(`Too many redirects (${MAX_REDIRECTS})`))
+                        return
+                    }
+                    redirectCount++
+                    const nextUrl = new URL(location, currentUrl).toString()
+                    console.log(`[FileCache] Redirect ${status} -> ${nextUrl} (${redirectCount}/${MAX_REDIRECTS})`)
+                    downloadFrom(nextUrl)
+                    return
+                }
+                if (status !== 200) {
+                    fs.unlink(tempPath, () => { })
+                    fail(new Error(`Status: ${status}`))
+                    return
+                }
+
 
             cacheProgress.set(songKey, { progress: 0, status: 'downloading', total: 0, received: 0, speed: 0, updatedAt: Date.now() })
             const total = parseInt(res.headers['content-length'] || '0', 10)
@@ -2164,6 +2202,9 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
         req.setTimeout(30000, () => {
             req.destroy(new Error('Download request timeout'))
         })
+        }
+
+        downloadFrom(url)
     })
 }
 
@@ -2921,3 +2962,118 @@ export const categorizeFiles = async (filenames: string[], targetSubPath: string
     indexManager.save(normalizedUsername, folder)
     return { successCount, failCount }
 }
+
+/**
+ * [New] Rename a subdirectory and update index entries
+ */
+export const renameSubDirectory = (username: string | undefined, folder: 'cache' | 'music', oldSubPath: string, newSubPath: string) => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const root = getCacheDir(normalizedUsername, folder === 'music')
+    const oldDir = path.join(root, oldSubPath)
+    const newDir = path.join(root, newSubPath)
+
+    if (!fs.existsSync(oldDir)) return { success: false, message: '原分类目录不存在' }
+    if (fs.existsSync(newDir)) return { success: false, message: '目标分类目录名称已存在' }
+
+    try {
+        safeRenameSync(oldDir, newDir)
+    } catch (e: any) {
+        console.error('[FileCache] Rename directory failed:', e)
+        return { success: false, message: e?.message || '重命名目录失败' }
+    }
+
+    // Update indexes
+    const allItems = indexManager.getAll(normalizedUsername, folder)
+    let updatedCount = 0
+    for (const item of allItems) {
+        if (item.subPath === oldSubPath || item.subPath?.startsWith(oldSubPath + '/')) {
+            const relSub = item.subPath === oldSubPath ? '' : item.subPath.slice(oldSubPath.length + 1)
+            const updatedSub = relSub ? `${newSubPath}/${relSub}` : newSubPath
+            item.subPath = updatedSub
+
+            if (item.filename) {
+                const baseName = path.basename(item.filename)
+                item.filename = `${updatedSub}/${baseName}`
+            }
+            if (item.lyricFilename) {
+                const baseLrc = path.basename(item.lyricFilename)
+                item.lyricFilename = `${updatedSub}/${baseLrc}`
+            }
+            updatedCount++
+        }
+    }
+    indexManager.save(normalizedUsername, folder)
+    return { success: true, updatedCount }
+}
+
+/**
+ * [New] Delete a subdirectory. If deleteSongs is true, physically remove files and index. If false, move songs to root directory.
+ */
+export const deleteSubDirectory = (username: string | undefined, folder: 'cache' | 'music', subPath: string, deleteSongs: boolean) => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const root = getCacheDir(normalizedUsername, folder === 'music')
+    const targetDir = path.join(root, subPath)
+
+    if (!fs.existsSync(targetDir)) return { success: false, message: '分类目录不存在' }
+
+    const allItems = indexManager.getAll(normalizedUsername, folder)
+    const affectedItems = allItems.filter(item => item.subPath === subPath || item.subPath?.startsWith(subPath + '/'))
+
+    if (deleteSongs) {
+        // Remove from index
+        for (const item of affectedItems) {
+            indexManager.remove(normalizedUsername, item.id, folder, item.quality)
+        }
+        indexManager.save(normalizedUsername, folder)
+
+        // Remove physically
+        try {
+            fs.rmSync(targetDir, { recursive: true, force: true })
+        } catch (e: any) {
+            console.error('[FileCache] Delete directory physically failed:', e)
+            return { success: false, message: e?.message || '删除物理目录失败' }
+        }
+        return { success: true, affectedCount: affectedItems.length, action: 'deleted' }
+    } else {
+        // Move songs and lyrics to root
+        let movedCount = 0
+        for (const item of affectedItems) {
+            const oldAudioPath = path.join(root, item.filename)
+            const newFilename = path.basename(item.filename)
+            const newAudioPath = path.join(root, newFilename)
+
+            try {
+                if (fs.existsSync(oldAudioPath)) {
+                    if (oldAudioPath !== newAudioPath) {
+                        safeRenameSync(oldAudioPath, newAudioPath)
+                    }
+                }
+                if (item.lyricFilename) {
+                    const oldLrcPath = path.join(root, item.lyricFilename)
+                    const newLrcFilename = path.basename(item.lyricFilename)
+                    const newLrcPath = path.join(root, newLrcFilename)
+                    if (fs.existsSync(oldLrcPath) && oldLrcPath !== newLrcPath) {
+                        safeRenameSync(oldLrcPath, newLrcPath)
+                    }
+                    item.lyricFilename = newLrcFilename
+                }
+
+                item.filename = newFilename
+                item.subPath = ''
+                movedCount++
+            } catch (e: any) {
+                console.error('[FileCache] Move song to root failed:', item.filename, e)
+            }
+        }
+        indexManager.save(normalizedUsername, folder)
+
+        // Remove empty directory (or with leftover unknown files)
+        try {
+            fs.rmSync(targetDir, { recursive: true, force: true })
+        } catch (e: any) {
+            console.warn('[FileCache] Delete emptied dir warning:', e)
+        }
+        return { success: true, affectedCount: movedCount, action: 'moved_to_root' }
+    }
+}
+

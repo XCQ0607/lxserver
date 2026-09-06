@@ -5,7 +5,7 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v2.0.1-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -225,8 +225,8 @@ npm start
 
 ### 3. Access Info
 
-- **Web Player**: `http://your-ip:9527/music` (Default path, configurable via `PLAYER_PATH`)
-- **Sync Dashboard**: `http://your-ip:9527` (Default path, configurable via `ADMIN_PATH`, default password: `123456`)
+- **Web Player**: `http://your-ip:9527` (Default root path, configurable via `PLAYER_PATH`)
+- **Sync Dashboard**: `http://your-ip:9527/admin` (Default path `/admin`, configurable via `ADMIN_PATH`, default password: `123456`)
 
 ---
 
@@ -235,8 +235,8 @@ npm start
 Separated frontend and backend architecture based on Node.js:
 
 - **Backend (Express + WebSocket)**: Core sync logic and WebDAV backup.
-- **Console (Vanilla JS)**: Located in the root directory, handles user and data management.
-- **WebPlayer (Vanilla JS)**: Handles music playback, default access path is `/music`.
+- **WebPlayer (Vanilla JS)**: Handles music playback, default access path is root `/`.
+- **Console (Vanilla JS)**: Located at `/admin` path, handles user and data management.
 
 ---
 
@@ -248,8 +248,8 @@ Edit `config.js` directly. Environment variables take precedence:
 | --- | --- | --- | --- |
 | `PORT` | `port` | Service port | `9527` |
 | `BIND_IP` | `bindIP` | Binding IP | `0.0.0.0` |
-| `ADMIN_PATH` | `admin.path` | Backend management interface path | (empty) |
-| `PLAYER_PATH` | `player.path` | Web player access path | `/music` |
+| `ADMIN_PATH` | `admin.path` | Backend management interface path | `/admin` |
+| `PLAYER_PATH` | `player.path` | Web player access path (default empty, i.e., root `/`) | (empty) |
 | `SUBSONIC_ENABLE` | `subsonic.enable` | Enable Subsonic protocol support | `true` |
 | `SUBSONIC_PATH` | `subsonic.path` | Subsonic access path | `/rest` |
 | `FRONTEND_PASSWORD` | `frontend.password` | Web dashboard password | `123456` |
@@ -274,6 +274,8 @@ Edit `config.js` directly. Environment variables take precedence:
 | `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |
 | `ENABLE_PUBLIC_USER_RESTRICTION` | `user.enablePublicRestriction` | Enable public user permission restriction (restrict upload/delete public sources) | `true` |
 | `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `user.enablePublicNonAdminLocalMusic` | Enable non-admin access to local music (allows non-admin public accounts to access local music) | `false` |
+| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `user.enablePublicNonAdminBrowserDownload` | Enable non-admin browser download (allows non-admin/public accounts to download songs via browser) | `true` |
+| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | Enable non-admin server cache (allows non-admin/public accounts to cache songs on server) | `false` |
 | `ENABLE_PUBLIC_FAVORITES` | `user.enablePublicFavorites` | Enable public favorites and songs (allows guest/public to view and play public favorites) | `false` |
 | `ENABLE_PUBLIC_NON_ADMIN_ACCESS` | `user.enablePublicNonAdminAccess` | Enable non-admin access to public favorites & songs (allows non-admin public accounts to view) | `false` |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | Enable cache settings restriction for logged-in non-admin users | `false` |
@@ -283,22 +285,19 @@ Edit `config.js` directly. Environment variables take precedence:
 | `PROXY_ALL_ENABLED` | `proxy.all.enabled` | Enable outgoing request proxy (for Music SDK) | `false` |
 | `PROXY_ALL_ADDRESS` | `proxy.all.address` | Proxy address (supports http:// or socks5://) | - |
 | `SINGER_SOURCE_PRIORITY` | `singer.sourcePriority` | Singer info retrieval priority (e.g., `tx,wy` or `wy,tx`) | `tx,wy` |
+| `SUBSONIC_ENABLE_DEBUG` | `subsonic.enableDebug` | Enable Subsonic debug log mode | `false` |
+| `SUBSONIC_ONLINE_SEARCH` | `subsonic.onlineSearch` | Enable Subsonic online search | `true` |
+| `SUBSONIC_ONLINE_SEARCH_MODE` | `subsonic.onlineSearchMode` | Subsonic online search mode (`fallback` / `merge` / `local_only`) | `fallback` |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES` | `subsonic.onlineSearchSources` | Subsonic online search default platforms | `wy,tx,kw,kg,mg` |
+| `SUBSONIC_LYRIC_TRANSLATION` | `subsonic.lyricTranslation` | Include translations in Subsonic lyrics | `true` |
+| `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |
+| `CACHE_NAMING_PATTERN` | `cache.namingPattern` | Cache file naming rule (`simple` / `custom`) | `simple` |
+| `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
 | `LX_USER_<username>` | `users` array | Quickly add a user, value is the password (e.g., `LX_USER_test=123`) | - |
 
-### Advanced Config Items (`config.js` Only)
+> **Advanced User Configuration Note**: The environment variable `LX_USER_<username>` is only used to quickly add users and set passwords. If you need to configure independent advanced options for specific users (such as enabling personal custom music directories, assigning operation permissions `allowOperateCustomMusicDir` or write permissions `allowWriteCustomMusicDir`, adjusting snapshot counts, etc.), please manually configure the corresponding fields for that user in the `users` array within `config.js`, or modify them through the GUI in the admin panel's User Management section.
 
-Some advanced options are only configurable by directly editing `config.js`:
-
-| Config Key | Description | Default |
-| --- | --- | --- |
-| `subsonic.enableDebug` | Enable Subsonic debug log mode | `true` |
-| `subsonic.onlineSearch` | Enable Subsonic online global search | `true` |
-| `subsonic.onlineSearchMode` | Subsonic online search mode (`fallback` / `merge` / `local_only`) | `"fallback"` |
-| `subsonic.onlineSearchSources` | Subsonic online search default platforms | `"wy,tx,kw,kg,mg"` |
-| `subsonic.lyricTranslation` | Include translation in Subsonic lyrics | `true` |
-| `artist.maxFetchPages` | Maximum fetch pages for artist songs | `20` |
-| `cache.namingPattern` | Cache file naming rule (`simple` / `custom`) | `"simple"` |
-| `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
+> **Boolean Environment Variable Format**: All boolean env variables support flexible case-insensitive formats: `true`/`1`/`yes`/`y`/`on` for enabled, and `false`/`0`/`no`/`n`/`off` for disabled.
 
 > **Note**: The service currently supports two types of sync connection URLs: `Root Path` (URL configuration is `ip:port`) and `User Path` (URL configuration is `ip:port/username`). If the User Path is disabled, all sync user passwords must be completely unique.
 

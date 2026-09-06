@@ -101,6 +101,29 @@ class App {
         document.getElementById('save-password-btn')?.addEventListener('click', () => this.saveNewPassword());
         document.getElementById('save-rename-user-btn')?.addEventListener('click', () => this.saveRenameUser());
 
+        // 用户配置自定义目录相关事件
+        document.getElementById('user-custom-dir-enable-toggle')?.addEventListener('change', (e) => {
+            const container = document.getElementById('user-custom-dir-container');
+            if (e.target.checked) {
+                container?.classList.remove('hidden');
+                this.validateUserCustomDirState();
+            } else {
+                container?.classList.add('hidden');
+                this.setUserConfigConfirmBtnState(true);
+            }
+        });
+
+        document.getElementById('user-custom-dir-input')?.addEventListener('input', () => {
+            this.setUserConfigConfirmBtnState(false);
+            const statusEl = document.getElementById('user-custom-dir-status');
+            if (statusEl) {
+                statusEl.textContent = '目录路径已修改，请点击右侧「检测」验证可用性';
+                statusEl.style.color = 'var(--text-secondary, #94a3b8)';
+            }
+        });
+
+        document.getElementById('test-user-custom-dir-btn')?.addEventListener('click', () => this.testUserCustomDir());
+
         // 绑定所有模态框关闭按钮
         document.querySelectorAll('.modal-close').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -319,7 +342,7 @@ class App {
                 window.location.href = 'filemanager.html';
                 return;
             case 'music':
-                window.location.href = (window.CONFIG && window.CONFIG['player.path']) || '/music';
+                window.location.href = (window.CONFIG && window.CONFIG['player.path']) || '/';
                 return;
         }
     }
@@ -638,6 +661,8 @@ class App {
         // 特殊处理：如果是数据查看视图，且没有选择用户，stats 区域也需要清空
         if (type === 'data') {
             document.getElementById('data-stats').innerHTML = '';
+            const tabs = document.getElementById('data-tabs-container');
+            if (tabs) tabs.classList.add('hidden');
         }
 
         container.innerHTML = `
@@ -1024,48 +1049,179 @@ class App {
         });
     }
 
-    // 显示修改用户名模态框
+    // 设置用户配置确定按钮禁用状态
+    setUserConfigConfirmBtnState(enabled) {
+        const btn = document.getElementById('save-rename-user-btn');
+        if (btn) {
+            btn.disabled = !enabled;
+            btn.style.opacity = enabled ? '1' : '0.5';
+            btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+        }
+    }
+
+    validateUserCustomDirState() {
+        const toggle = document.getElementById('user-custom-dir-enable-toggle');
+        const input = document.getElementById('user-custom-dir-input');
+        if (toggle && toggle.checked) {
+            // 如果开启了自定义目录，初始判断需包含有效的验证
+            if (!input || !input.value.trim()) {
+                this.setUserConfigConfirmBtnState(false);
+                const statusEl = document.getElementById('user-custom-dir-status');
+                if (statusEl) {
+                    statusEl.textContent = '请输入自定义歌曲目录地址';
+                    statusEl.style.color = '#ef4444';
+                }
+            } else {
+                // 如果已有固定目录，建议先检测或设为需要检测
+                this.setUserConfigConfirmBtnState(false);
+                const statusEl = document.getElementById('user-custom-dir-status');
+                if (statusEl) {
+                    statusEl.textContent = '请点击右侧「检测」按钮进行可用性验证';
+                    statusEl.style.color = 'var(--text-secondary, #94a3b8)';
+                }
+            }
+        } else {
+            this.setUserConfigConfirmBtnState(true);
+            const statusEl = document.getElementById('user-custom-dir-status');
+            if (statusEl) statusEl.textContent = '';
+        }
+    }
+
+    async testUserCustomDir() {
+        const dirInput = document.getElementById('user-custom-dir-input');
+        const statusEl = document.getElementById('user-custom-dir-status');
+        const dirPath = dirInput ? dirInput.value.trim() : '';
+
+        if (!dirPath) {
+            if (statusEl) {
+                statusEl.textContent = '请输入自定义歌曲目录地址';
+                statusEl.style.color = '#ef4444';
+            }
+            this.setUserConfigConfirmBtnState(false);
+            return;
+        }
+
+        if (statusEl) {
+            statusEl.textContent = '正在检测目录可用性...';
+            statusEl.style.color = '#38bdf8';
+        }
+
+        try {
+            const res = await this.request('/api/utils/check-dir', {
+                method: 'POST',
+                body: JSON.stringify({ dirPath })
+            });
+
+            if (res && res.success) {
+                if (statusEl) {
+                    statusEl.textContent = `✓ 目录可用 (${res.path || dirPath})`;
+                    statusEl.style.color = '#10b981';
+                }
+                this.setUserConfigConfirmBtnState(true);
+            } else {
+                if (statusEl) {
+                    statusEl.textContent = `✕ ${res?.message || '目录不可用'}`;
+                    statusEl.style.color = '#ef4444';
+                }
+                this.setUserConfigConfirmBtnState(false);
+            }
+        } catch (err) {
+            if (statusEl) {
+                statusEl.textContent = `✕ 检测失败: ${err.message}`;
+                statusEl.style.color = '#ef4444';
+            }
+            this.setUserConfigConfirmBtnState(false);
+        }
+    }
+
+    // 显示用户配置模态框
     showRenameUserModal(index) {
         const user = this.users[index];
         if (!user) return;
 
         this.editingUser = user.name;
         document.getElementById('rename-user-input').value = user.name;
+
+        const toggle = document.getElementById('user-custom-dir-enable-toggle');
+        const container = document.getElementById('user-custom-dir-container');
+        const dirInput = document.getElementById('user-custom-dir-input');
+        const operateToggle = document.getElementById('user-custom-dir-operate-toggle');
+        const writeToggle = document.getElementById('user-custom-dir-write-toggle');
+        const statusEl = document.getElementById('user-custom-dir-status');
+
+        if (toggle) toggle.checked = user.enableCustomMusicDir === true;
+        if (dirInput) dirInput.value = user.customMusicDir || '';
+        if (operateToggle) operateToggle.checked = user.allowOperateCustomMusicDir === true;
+        if (writeToggle) writeToggle.checked = user.allowWriteCustomMusicDir === true;
+        if (statusEl) statusEl.textContent = '';
+
+        if (user.enableCustomMusicDir) {
+            container?.classList.remove('hidden');
+            // 已保存的正常状态默认允许提交，若修改过则需要重新检测
+            this.setUserConfigConfirmBtnState(true);
+        } else {
+            container?.classList.add('hidden');
+            this.setUserConfigConfirmBtnState(true);
+        }
+
         document.getElementById('rename-user-modal').classList.remove('hidden');
     }
 
-    // 保存新用户名
+    // 保存用户配置
     async saveRenameUser() {
         const newName = document.getElementById('rename-user-input').value.trim();
+        const enableCustomDir = document.getElementById('user-custom-dir-enable-toggle')?.checked || false;
+        const customDir = document.getElementById('user-custom-dir-input')?.value.trim() || '';
+        const allowOperateCustomDir = document.getElementById('user-custom-dir-operate-toggle')?.checked || false;
+        const allowWriteCustomDir = document.getElementById('user-custom-dir-write-toggle')?.checked || false;
+
         if (!newName) {
-            showInfo('请填写新用户名');
-            return;
-        }
-        if (newName === this.editingUser) {
-            document.getElementById('rename-user-modal').classList.add('hidden');
+            showInfo('请填写用户名');
             return;
         }
 
         try {
+            const bodyData = {
+                name: this.editingUser,
+                enableCustomMusicDir: enableCustomDir,
+                customMusicDir: customDir,
+                allowOperateCustomMusicDir: allowOperateCustomDir,
+                allowWriteCustomMusicDir: allowWriteCustomDir
+            };
+            if (newName !== this.editingUser) {
+                bodyData.newName = newName;
+            }
+
             await this.request('/api/users', {
                 method: 'PUT',
-                body: JSON.stringify({
-                    name: this.editingUser,
-                    newName: newName
-                })
+                body: JSON.stringify(bodyData)
             });
 
             document.getElementById('rename-user-modal').classList.add('hidden');
             this.loadUsers();
             this.loadDashboard();
-            showSuccess('用户名修改成功, 请重新在客户端连接');
+            showSuccess(newName !== this.editingUser ? '用户配置及名称修改成功' : '用户配置更新成功');
         } catch (err) {
-            showError('修改失败: ' + err.message);
+            showError('保存失败: ' + err.message);
         }
     }
 
     currentUserData = null;
     currentPlaylistView = null;
+    currentAlbumView = null;
+    currentDataTab = 'all';
+
+    getSourceLabel(source) {
+        const map = {
+            'tx': 'QQ音乐',
+            'wy': '网易云',
+            'kw': '酷我',
+            'kg': '酷狗',
+            'mg': '咪咕',
+            'local': '本地'
+        };
+        return map[source] || source || '';
+    }
 
     async loadUserData() {
         const username = document.getElementById('data-user-select')?.value;
@@ -1090,6 +1246,8 @@ class App {
             const defaultCount = data.defaultList?.length || 0;
             const loveCount = data.loveList?.length || 0;
             const userListCount = data.userList?.length || 0;
+            const albumsCount = data.albums?.length || 0;
+            const artistsCount = data.artists?.length || 0;
 
             data.userList?.forEach(list => {
                 totalSongs += list.list?.length || 0;
@@ -1097,25 +1255,63 @@ class App {
             totalSongs += defaultCount + loveCount;
 
             document.getElementById('data-stats').innerHTML = `
-                <div class="data-stat-card clickable" onclick="app.viewAllSongs()">
-                    <h4>总歌曲数</h4>
+                <div class="data-stat-card clickable" onclick="app.viewAllSongs()" title="点击查看全部歌曲">
+                    <div class="stat-card-header">
+                        <h4>总歌曲数</h4>
+                        <span class="stat-card-icon">🎵</span>
+                    </div>
                     <div class="value">${totalSongs}</div>
                 </div>
-                <div class="data-stat-card clickable" onclick="app.viewSystemList('default')">
-                    <h4>试听列表</h4>
+                <div class="data-stat-card clickable" onclick="app.viewSystemList('default')" title="点击查看试听列表">
+                    <div class="stat-card-header">
+                        <h4>试听列表</h4>
+                        <span class="stat-card-icon">🎧</span>
+                    </div>
                     <div class="value">${defaultCount}</div>
                 </div>
-                <div class="data-stat-card clickable" onclick="app.viewSystemList('love')">
-                    <h4>我的收藏</h4>
+                <div class="data-stat-card clickable" onclick="app.viewSystemList('love')" title="点击查看我的收藏歌曲">
+                    <div class="stat-card-header">
+                        <h4>我的收藏</h4>
+                        <span class="stat-card-icon">❤️</span>
+                    </div>
                     <div class="value">${loveCount}</div>
                 </div>
-                <div class="data-stat-card clickable" onclick="app.renderPlaylists()">
-                    <h4>自定义列表</h4>
+                <div class="data-stat-card clickable ${this.currentDataTab === 'playlists' ? 'active-tab' : ''}" onclick="app.setDataTab('playlists')" title="点击查看播放列表">
+                    <div class="stat-card-header">
+                        <h4>播放列表</h4>
+                        <span class="stat-card-icon">📑</span>
+                    </div>
                     <div class="value">${userListCount}</div>
+                </div>
+                <div class="data-stat-card clickable ${this.currentDataTab === 'albums' ? 'active-tab' : ''}" onclick="app.setDataTab('albums')" title="点击查看收藏专辑">
+                    <div class="stat-card-header">
+                        <h4>收藏专辑</h4>
+                        <span class="stat-card-icon">💿</span>
+                    </div>
+                    <div class="value">${albumsCount}</div>
+                </div>
+                <div class="data-stat-card clickable ${this.currentDataTab === 'artists' ? 'active-tab' : ''}" onclick="app.setDataTab('artists')" title="点击查看收藏歌手">
+                    <div class="stat-card-header">
+                        <h4>收藏歌手</h4>
+                        <span class="stat-card-icon">🎤</span>
+                    </div>
+                    <div class="value">${artistsCount}</div>
                 </div>
             `;
 
-            this.renderPlaylists();
+            // 更新 Tabs 徽章与显示状态
+            const tabsContainer = document.getElementById('data-tabs-container');
+            if (tabsContainer) {
+                tabsContainer.classList.remove('hidden');
+                const pCount = document.getElementById('tab-count-playlists');
+                const aCount = document.getElementById('tab-count-albums');
+                const arCount = document.getElementById('tab-count-artists');
+                if (pCount) pCount.textContent = userListCount;
+                if (aCount) aCount.textContent = albumsCount;
+                if (arCount) arCount.textContent = artistsCount;
+            }
+
+            this.renderCurrentDataTab();
 
             // 移除加载状态并添加淡入动画
             statsContainer.classList.remove('content-loading');
@@ -1136,21 +1332,91 @@ class App {
         }
     }
 
+    setDataTab(tab) {
+        this.currentDataTab = tab;
+        this.currentPlaylistView = null;
+        this.currentAlbumView = null;
+
+        // 更新 tabs 导航按钮高亮
+        document.querySelectorAll('.data-tab-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === tab);
+        });
+
+        // 更新顶部卡片的高亮
+        document.querySelectorAll('.data-stat-card').forEach(card => card.classList.remove('active-tab'));
+
+        const tabsContainer = document.getElementById('data-tabs-container');
+        if (tabsContainer) tabsContainer.classList.remove('hidden');
+
+        this.renderCurrentDataTab();
+    }
+
     renderPlaylists() {
+        this.renderCurrentDataTab();
+    }
+
+    renderCurrentDataTab() {
         const data = this.currentUserData?.data;
-        if (!data) return;
+        const contentContainer = document.getElementById('data-content');
+        if (!data || !contentContainer) return;
 
-        let content = '<div class="playlists-header"><h3>播放列表</h3></div>';
+        this.currentPlaylistView = null;
+        this.currentAlbumView = null;
 
-        if (data.userList && data.userList.length) {
-            content += '<div class="playlists-grid">';
-            data.userList.forEach((list, index) => {
+        const tabsContainer = document.getElementById('data-tabs-container');
+        if (tabsContainer) tabsContainer.classList.remove('hidden');
+
+        let html = '';
+        const tab = this.currentDataTab || 'all';
+
+        if (tab === 'all' || tab === 'playlists') {
+            html += this.getPlaylistsSectionHtml(data.userList || [], tab === 'all');
+        }
+
+        if (tab === 'all' || tab === 'albums') {
+            html += this.getAlbumsSectionHtml(data.albums || [], tab === 'all' && tab !== 'albums');
+        }
+
+        if (tab === 'all' || tab === 'artists') {
+            html += this.getArtistsSectionHtml(data.artists || [], tab === 'all');
+        }
+
+        contentContainer.innerHTML = html;
+        applyMarqueeChecks();
+    }
+
+    getPlaylistsSectionHtml(userList, isAllTab) {
+        const count = userList.length;
+        let html = `
+            <div class="data-section-header">
+                <div class="section-header-title">
+                    <div class="section-icon-box" style="background: linear-gradient(135deg, #3b82f6, #6366f1);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 18V5l12-2v13"/>
+                            <circle cx="6" cy="18" r="3"/>
+                            <circle cx="18" cy="16" r="3"/>
+                        </svg>
+                    </div>
+                    <div class="section-title-group">
+                        <h3>播放列表</h3>
+                        <span class="section-subtitle">共 ${count} 个自定义歌单</span>
+                    </div>
+                </div>
+                <div class="section-header-actions">
+                    <span class="section-badge">${count} 歌单</span>
+                </div>
+            </div>
+        `;
+
+        if (count > 0) {
+            html += '<div class="playlists-grid">';
+            userList.forEach((list, index) => {
                 const songCount = list.list?.length || 0;
-                content += `
+                html += `
                     <div class="playlist-card glass">
                         <div class="playlist-card-header">
                             <div class="playlist-info">
-                                <div class="playlist-name">${this.escapeHtml(list.name)}</div>
+                                <div class="playlist-name" title="${this.escapeHtml(list.name)}">${this.escapeHtml(list.name)}</div>
                                 <div class="playlist-meta">
                                     <span class="playlist-id">ID: ${list.id}</span>
                                     <span class="playlist-count">${songCount} 首</span>
@@ -1175,12 +1441,229 @@ class App {
                     </div>
                 `;
             });
+            html += '</div>';
+        } else {
+            html += '<p style="color: var(--text-secondary); padding: 1.5rem; text-align: center;">暂无自定义列表</p>';
+        }
+
+        return html;
+    }
+
+    getAlbumsSectionHtml(albums, withMarginTop) {
+        const count = albums.length;
+        let html = `
+            <div class="data-section-header ${withMarginTop ? 'with-margin-top' : ''}">
+                <div class="section-header-title">
+                    <div class="section-icon-box" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <circle cx="12" cy="12" r="3"/>
+                        </svg>
+                    </div>
+                    <div class="section-title-group">
+                        <h3>收藏专辑</h3>
+                        <span class="section-subtitle">共 ${count} 张已收藏的音乐专辑</span>
+                    </div>
+                </div>
+                <div class="section-header-actions">
+                    <span class="section-badge">${count} 专辑</span>
+                </div>
+            </div>
+        `;
+
+        if (count > 0) {
+            html += '<div class="albums-grid">';
+            albums.forEach((album, index) => {
+                const songCount = album.list?.length || 0;
+                const picUrl = album.picUrl || album.meta?.picUrl || album.list?.[0]?.img || '';
+                const artist = album.artistName || album.singer || album.list?.[0]?.singer || '未知歌手';
+                const sourceLabel = this.getSourceLabel(album.source);
+                const sourceClass = album.source ? `source-${album.source}` : '';
+
+                html += `
+                    <div class="album-card glass" onclick="app.viewAlbumDetails(${index})" title="点击查看专辑曲目">
+                        <div class="album-cover-box">
+                            ${picUrl ? `<img src="${this.escapeHtml(picUrl)}" alt="${this.escapeHtml(album.name)}" class="album-cover-img" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                            <div class="album-cover-fallback" style="display: ${picUrl ? 'none' : 'flex'};">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <circle cx="12" cy="12" r="10"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </div>
+                            <div class="album-card-overlay">
+                                <div class="album-play-icon">
+                                    <svg viewBox="0 0 24 24" fill="currentColor">
+                                        <polygon points="5 3 19 12 5 21 5 3"/>
+                                    </svg>
+                                </div>
+                                <span class="album-hover-text">查看曲目</span>
+                            </div>
+                            ${sourceLabel ? `<span class="card-source-badge ${sourceClass}">${sourceLabel}</span>` : ''}
+                            <span class="card-count-badge">${songCount} 首</span>
+                        </div>
+                        <div class="album-meta-info">
+                            <div class="album-title" title="${this.escapeHtml(album.name)}">${this.escapeHtml(album.name)}</div>
+                            <div class="album-artist" title="${this.escapeHtml(artist)}">
+                                <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="12" cy="7" r="4"/>
+                                </svg>
+                                <span>${this.escapeHtml(artist)}</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+        } else {
+            html += '<p style="color: var(--text-secondary); padding: 1.5rem; text-align: center;">暂无收藏专辑</p>';
+        }
+
+        return html;
+    }
+
+    getArtistsSectionHtml(artists, withMarginTop) {
+        const count = artists.length;
+        let html = `
+            <div class="data-section-header ${withMarginTop ? 'with-margin-top' : ''}">
+                <div class="section-header-title">
+                    <div class="section-icon-box" style="background: linear-gradient(135deg, #10b981, #06b6d4);">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                            <circle cx="12" cy="7" r="4"/>
+                        </svg>
+                    </div>
+                    <div class="section-title-group">
+                        <h3>收藏歌手</h3>
+                        <span class="section-subtitle">共 ${count} 位已关注的歌手/艺人</span>
+                    </div>
+                </div>
+                <div class="section-header-actions">
+                    <span class="section-badge">${count} 歌手</span>
+                </div>
+            </div>
+        `;
+
+        if (count > 0) {
+            html += '<div class="artists-grid">';
+            artists.forEach((artist) => {
+                const picUrl = artist.picUrl || '';
+                const sourceLabel = this.getSourceLabel(artist.source);
+                const sourceClass = artist.source ? `source-${artist.source}` : '';
+
+                html += `
+                    <div class="artist-card glass">
+                        <div class="artist-avatar-box">
+                            ${picUrl ? `<img src="${this.escapeHtml(picUrl)}" alt="${this.escapeHtml(artist.name)}" class="artist-avatar-img" loading="lazy" referrerpolicy="no-referrer" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">` : ''}
+                            <div class="artist-avatar-fallback" style="display: ${picUrl ? 'none' : 'flex'};">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                    <circle cx="12" cy="7" r="4"/>
+                                </svg>
+                            </div>
+                            ${sourceLabel ? `<span class="artist-source-badge ${sourceClass}">${sourceLabel}</span>` : ''}
+                        </div>
+                        <div class="artist-meta-info">
+                            <div class="artist-name" title="${this.escapeHtml(artist.name)}">${this.escapeHtml(artist.name)}</div>
+                            <div class="artist-sub">${artist.id ? `ID: ${this.escapeHtml(artist.id)}` : (sourceLabel || '关注歌手')}</div>
+                        </div>
+                    </div>
+                `;
+            });
+            html += '</div>';
+        } else {
+            html += '<p style="color: var(--text-secondary); padding: 1.5rem; text-align: center;">暂无收藏歌手</p>';
+        }
+
+        return html;
+    }
+
+    viewAlbumDetails(index) {
+        const album = this.currentUserData?.data?.albums?.[index];
+        if (!album) return;
+
+        this.currentAlbumView = index;
+        const tabsContainer = document.getElementById('data-tabs-container');
+        if (tabsContainer) tabsContainer.classList.add('hidden');
+
+        const picUrl = album.picUrl || album.meta?.picUrl || album.list?.[0]?.img || '';
+        const artist = album.artistName || album.singer || album.list?.[0]?.singer || '未知歌手';
+        const sourceLabel = this.getSourceLabel(album.source);
+        const sourceClass = album.source ? `source-${album.source}` : '';
+        const songCount = album.list?.length || 0;
+
+        let content = `
+            <div class="playlist-detail-header">
+                <button onclick="app.renderCurrentDataTab()" class="btn-back">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
+                    </svg>
+                    返回列表
+                </button>
+            </div>
+            <div class="album-detail-header-card">
+                ${picUrl ? `<img src="${this.escapeHtml(picUrl)}" class="album-detail-cover" referrerpolicy="no-referrer" onerror="this.style.display='none'">` : ''}
+                <div class="album-detail-info">
+                    <h2 class="album-detail-title">${this.escapeHtml(album.name)}</h2>
+                    <div class="album-detail-meta">
+                        <span>歌手: <strong>${this.escapeHtml(artist)}</strong></span>
+                        <span>·</span>
+                        <span>${songCount} 首歌曲</span>
+                        ${sourceLabel ? `<span>·</span><span class="card-source-badge ${sourceClass}" style="position:static;display:inline-block;">${sourceLabel}</span>` : ''}
+                        ${album.id ? `<span>·</span><span style="font-family:monospace;font-size:0.8rem;opacity:0.7;">ID: ${album.id}</span>` : ''}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        if (album.list && album.list.length) {
+            content += `
+                <div class="search-sort-bar">
+                    <div class="search-box">
+                        <input type="text" id="song-search" placeholder="搜索专辑歌曲..." oninput="app.filterSongs()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+                        </svg>
+                    </div>
+                    <select id="song-sort" onchange="app.sortSongs()" class="sort-select">
+                        <option value="">默认排序</option>
+                        <option value="name-asc">歌曲名 ↑</option>
+                        <option value="name-desc">歌曲名 ↓</option>
+                        <option value="artist-asc">歌手 ↑</option>
+                        <option value="artist-desc">歌手 ↓</option>
+                    </select>
+                </div>
+            `;
+            content += '<div class="songs-table">';
+            content += `
+                <div class="songs-table-header">
+                    <div class="song-col-index">#</div>
+                    <div class="song-col-name">歌曲</div>
+                    <div class="song-col-artist">歌手</div>
+                    <div class="song-col-actions" style="text-align:right;">时长</div>
+                </div>
+            `;
+
+            album.list.forEach((song, songIndex) => {
+                content += `
+                    <div class="song-row">
+                        <div class="song-col-index">${songIndex + 1}</div>
+                        ${this.renderSongNameCell(song, picUrl)}
+                        <div class="song-col-artist">${this.escapeHtml(song.singer || artist || '未知歌手')}</div>
+                        <div class="song-col-actions" style="text-align:right; font-size:0.85rem; color:var(--text-secondary); font-family:monospace;">
+                            ${this.escapeHtml(song.interval || '--:--')}
+                        </div>
+                    </div>
+                `;
+            });
+
             content += '</div>';
         } else {
-            content += '<p style="color: var(--text-secondary); padding: 1rem;">暂无自定义列表</p>';
+            content += '<p style="color: var(--text-secondary); padding: 2rem; text-align: center;">此专辑暂无曲目</p>';
         }
 
         document.getElementById('data-content').innerHTML = content;
+        applyMarqueeChecks();
     }
 
     viewPlaylistDetails(index) {
@@ -1188,10 +1671,12 @@ class App {
         if (!playlist) return;
 
         this.currentPlaylistView = index;
+        const tabsContainer = document.getElementById('data-tabs-container');
+        if (tabsContainer) tabsContainer.classList.add('hidden');
 
         let content = `
             <div class="playlist-detail-header">
-                <button onclick="app.renderPlaylists()" class="btn-back">
+                <button onclick="app.renderCurrentDataTab()" class="btn-back">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
                     </svg>
@@ -1367,10 +1852,12 @@ class App {
         if (!systemList) return;
 
         this.currentPlaylistView = listType; // 存储当前查看的系统列表类型
+        const tabsContainer = document.getElementById('data-tabs-container');
+        if (tabsContainer) tabsContainer.classList.add('hidden');
 
         let content = `
             <div class="playlist-detail-header">
-                <button onclick="app.renderPlaylists()" class="btn-back">
+                <button onclick="app.renderCurrentDataTab()" class="btn-back">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
                     </svg>
@@ -1593,6 +2080,8 @@ class App {
         if (!data) return;
 
         this.currentPlaylistView = 'all';
+        const tabsContainer = document.getElementById('data-tabs-container');
+        if (tabsContainer) tabsContainer.classList.add('hidden');
 
         // 收集所有歌曲
         let allSongs = [];
@@ -1624,7 +2113,7 @@ class App {
 
         let content = `
             <div class="playlist-detail-header">
-                <button onclick="app.renderPlaylists()" class="btn-back">
+                <button onclick="app.renderCurrentDataTab()" class="btn-back">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/>
                     </svg>
@@ -1715,6 +2204,12 @@ class App {
             if (form.elements['user.enablePublicNonAdminLocalMusic']) {
                 form.elements['user.enablePublicNonAdminLocalMusic'].checked = config['user.enablePublicNonAdminLocalMusic'] === true;
             }
+            if (form.elements['user.enablePublicNonAdminBrowserDownload']) {
+                form.elements['user.enablePublicNonAdminBrowserDownload'].checked = config['user.enablePublicNonAdminBrowserDownload'] !== false;
+            }
+            if (form.elements['user.enablePublicNonAdminServerCache']) {
+                form.elements['user.enablePublicNonAdminServerCache'].checked = config['user.enablePublicNonAdminServerCache'] === true;
+            }
             this.togglePublicNonAdminLocalMusicVisibility();
             if (form.elements['user.enablePublicFavorites']) {
                 form.elements['user.enablePublicFavorites'].checked = config['user.enablePublicFavorites'] === true;
@@ -1779,13 +2274,13 @@ class App {
                 form.elements['admin.path'].value = config['admin.path'] ?? '';
             }
             if (form.elements['player.path']) {
-                const pPath = config['player.path'] ?? '/music';
+                const pPath = config['player.path'] ?? '/';
                 form.elements['player.path'].value = pPath === '' ? '/' : pPath;
             }
 
             // [新增] 同时更新侧边栏链接
             const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/music'));
+            if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/'));
 
             // Subsonic 配置
             if (form.elements['subsonic.enable']) {
@@ -1808,6 +2303,15 @@ class App {
             }
             if (form.elements['subsonic.lyricTranslation']) {
                 form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
+            }
+
+            // 自定义歌曲目录配置
+            if (form.elements['user.enableCustomMusicDir']) {
+                form.elements['user.enableCustomMusicDir'].checked = config['user.enableCustomMusicDir'] === true;
+            }
+            const configJsPathRef = document.getElementById('config-js-path-ref');
+            if (configJsPathRef && config.configFilePath) {
+                configJsPathRef.textContent = config.configFilePath;
             }
         } catch (err) {
             console.error('Failed to load config:', err);
@@ -1871,8 +2375,11 @@ class App {
             'user.enableRoot': formData.get('user.enableRoot') === 'on',
             'user.enablePublicRestriction': formData.get('user.enablePublicRestriction') === 'on',
             'user.enablePublicNonAdminLocalMusic': formData.get('user.enablePublicNonAdminLocalMusic') === 'on',
+            'user.enablePublicNonAdminBrowserDownload': formData.get('user.enablePublicNonAdminBrowserDownload') === 'on',
+            'user.enablePublicNonAdminServerCache': formData.get('user.enablePublicNonAdminServerCache') === 'on',
             'user.enablePublicFavorites': formData.get('user.enablePublicFavorites') === 'on',
             'user.enablePublicNonAdminAccess': formData.get('user.enablePublicNonAdminAccess') === 'on',
+            'user.enableCustomMusicDir': formData.get('user.enableCustomMusicDir') === 'on',
             'user.enableLoginCacheRestriction': formData.get('user.enableLoginCacheRestriction') === 'on',
             'user.enableCacheSizeLimit': formData.get('user.enableCacheSizeLimit') === 'on',
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,
@@ -1914,7 +2421,7 @@ class App {
 
             // 更新侧边栏播放器链接
             const navPlayerLink = document.getElementById('nav-player-link');
-            if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/music');
+            if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/');
 
             if (!silent) {
                 if (res.warning) {
@@ -2165,13 +2672,10 @@ class App {
     }
 
     // 辅助方法：生成歌曲名称列 HTML（包含封面）
-    renderSongNameCell(song) {
-        const picUrl = song.meta?.picUrl || '';
-        // 使用默认图占位，data-src 用于懒加载 (IntersectionObserver 稍后实现，这里直接用原生 lazy loading)
-        // 注意：Web 原生 loading="lazy" 对 background-image 无效，对 img 标签有效。
-        // 这里使用 img 标签
+    renderSongNameCell(song, defaultCover = '') {
+        const picUrl = song.img || song.picUrl || song.cover || song.meta?.picUrl || defaultCover || '';
         const coverHtml = picUrl
-            ? `<img src="${picUrl}" class="song-cover" loading="lazy" alt="cover" onerror="this.style.opacity=0">`
+            ? `<img src="${this.escapeHtml(picUrl)}" class="song-cover" loading="lazy" referrerpolicy="no-referrer" alt="cover" onerror="this.onerror=null; this.style.display='none'; this.parentElement.insertAdjacentHTML('afterbegin', '<div class=\\'song-cover\\' style=\\'background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center;\\'>🎵</div>');">`
             : `<div class="song-cover" style="background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center;">🎵</div>`;
 
         const singerHtml = song.singer

@@ -128,6 +128,7 @@ function createLxRequest(isUnsafe: boolean = false) {
 
         let requestOptions: any = {
             headers,
+            follow_max: 5,
             response_timeout: typeof timeout === 'number' && timeout > 0 ? Math.min(timeout, 60000) : 60000
         }
 
@@ -385,8 +386,24 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
         if (error.stack && error.message !== 'REQUIRE_UNSAFE_VM') {
             console.error(`[UserApi] [Stack] ${fullApiInfo.name}:`, error.stack)
         }
-        // 返回详细错误信息而不是直接抛出
-        const isRequireUnsafe = !apiInfo.allowUnsafeVM && (error.message === 'REQUIRE_UNSAFE_VM' || error.message.includes('初始化超时') || error.message.includes('timeout'))
+
+        let isRequireUnsafe = !apiInfo.allowUnsafeVM && (error.message === 'REQUIRE_UNSAFE_VM' || error.message.includes('初始化超时') || error.message.includes('timeout'))
+
+        // 如果在 VM2 模式下加载失败，且系统允许 VM 模式，尝试测试原生 VM 模式能否成功加载
+        if (!isRequireUnsafe && !apiInfo.allowUnsafeVM && global.lx.config['system.allowUnsafeVM']) {
+            try {
+                const testUnsafeRes = await loadUserApi({
+                    ...apiInfo,
+                    id: `${apiInfo.id}_test_vm`,
+                    allowUnsafeVM: true
+                })
+                if (testUnsafeRes.success) {
+                    console.log(`[UserApi] ${fullApiInfo.name} 在 VM2 模式下失败，但在原生 VM 模式下成功，标记 requireUnsafe = true`)
+                    isRequireUnsafe = true
+                }
+            } catch (e) { }
+        }
+
         return { success: false, apiInstance: null, error: error.message, requireUnsafe: isRequireUnsafe }
     }
 }
@@ -398,8 +415,9 @@ export async function callUserApiGetMusicUrl(
     quality: string,
     clientUsername?: string,
     onProgress?: (attempt: any) => Promise<void> | void,
-    enableAutoSwitchApiSource?: boolean
-): Promise<{ url: string, type: string, sourceName?: string, attempts?: any[] }> {
+    enableAutoSwitchApiSource?: boolean,
+    excludeApiSources?: string[]
+): Promise<{ url: string, type: string, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean }> {
     // 标准化 songInfo 格式：将 meta 中的字段提升到顶层
     const normalizedSongInfo = { ...songInfo }
     if (songInfo.meta) {
@@ -499,8 +517,8 @@ export async function callUserApiGetMusicUrl(
 
     // 读取当前用户的公开源状态覆盖（启用/禁用）以及私有源 ID 集合
     let userStates: Record<string, any> = {}
+    const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
     if (clientUsername && clientUsername !== 'default') {
-        const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
         const userPath = path.join(dataPath, 'users', 'source', clientUsername)
         const statesPath = path.join(userPath, 'states.json')
         const metaPath = path.join(userPath, 'sources.json')
@@ -515,25 +533,48 @@ export async function callUserApiGetMusicUrl(
                 for (const s of userSources) userApiIds.add(s.id)
             } catch (e) { }
         }
+    } else {
+        const openStatesPath = path.join(dataPath, 'users', 'source', '_open', 'states.json')
+        if (fs.existsSync(openStatesPath)) {
+            try { userStates = JSON.parse(fs.readFileSync(openStatesPath, 'utf-8')) } catch (e) { }
+        }
+    }
+
+    const getSourceState = (id: string) => {
+        return userStates[id] || userStates[decodeURIComponent(id)] || userStates[encodeURIComponent(id)] || {}
     }
 
     // 按 loadedApis 收集所有可用候选源（权限过滤，不强制任何顺序）
     for (const [apiId, api] of loadedApis) {
         if (!api.info.sources || !api.info.sources[source]) continue
 
+        const state = getSourceState(api.info.id)
+
         if (api.info.owner === 'open') {
             // 计算公开源对当前用户的有效启用状态
             let isEnabled = api.info.enabled
-            if (clientUsername && clientUsername !== 'default' && userStates[api.info.id]) {
-                if (typeof userStates[api.info.id].enabled === 'boolean') {
-                    isEnabled = userStates[api.info.id].enabled
+            if (clientUsername && clientUsername !== 'default') {
+                if (typeof state.enabled === 'boolean') {
+                    isEnabled = state.enabled
                 }
             }
             if (!isEnabled) continue
             if (userApiIds.has(api.info.id)) continue  // 被同名私有版本覆盖，跳过
+
+            // 检查平台是否被禁用
+            if (Array.isArray(state.disabledSources) && state.disabledSources.includes(source)) {
+                continue
+            }
+
             candidates.push(api)
         } else if (clientUsername && api.info.owner === clientUsername) {
             if (!api.info.enabled) continue
+
+            // 检查平台是否被禁用
+            if (Array.isArray(state.disabledSources) && state.disabledSources.includes(source)) {
+                continue
+            }
+
             candidates.push(api)
             userApiIds.add(api.info.id) // 兜底：确保后续不重复添加公开同名源
         }
@@ -574,6 +615,16 @@ export async function callUserApiGetMusicUrl(
     }
     // =========================================
 
+    // === 排除已在当前请求中上报失败/失效的自定义源 ===
+    if (Array.isArray(excludeApiSources) && excludeApiSources.length > 0) {
+        const excludeSet = new Set(excludeApiSources.map(s => String(s).trim().toLowerCase()))
+        candidates = candidates.filter(api => {
+            const name = (api.info?.name || '').trim().toLowerCase()
+            const id = (api.info?.id || '').trim().toLowerCase()
+            return !excludeSet.has(name) && !excludeSet.has(id)
+        })
+    }
+
     if (enableAutoSwitchApiSource === false && candidates.length > 1) {
         candidates = [candidates[0]]
     }
@@ -581,9 +632,14 @@ export async function callUserApiGetMusicUrl(
     supportedCount = candidates.length
 
     if (supportedCount === 0) {
-        const errMsg = `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
+        const hasExcluded = Array.isArray(excludeApiSources) && excludeApiSources.length > 0
+        const errMsg = hasExcluded
+            ? `支持 ${source} 平台的自定义源均已尝试且无法播放（已尝试 ${excludeApiSources.length} 个音源）`
+            : `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
         if (onProgress) await onProgress({ name: '系统', status: 'fail', message: errMsg })
-        throw new Error(errMsg)
+        const err: any = new Error(errMsg)
+        err.allSourcesExhausted = true
+        throw err
     }
 
     // 逻辑分歧：
@@ -610,7 +666,7 @@ export async function callUserApiGetMusicUrl(
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
-                return { url, type: quality, sourceName: api.info.name, attempts }
+                return { url, type: quality, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false }
             } catch (error: any) {
                 console.error(`[UserApi] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
                 lastError = error
@@ -625,7 +681,8 @@ export async function callUserApiGetMusicUrl(
         }
     } else {
         // 多个源，轮流尝试
-        for (const api of candidates) {
+        for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
+            const api = candidates[candidateIndex]
             try {
                 console.log(`[UserApi] 尝试 ${api.info.name} 获取 ${source} 音乐链接 (Owner: ${api.info.owner})`)
 
@@ -639,7 +696,14 @@ export async function callUserApiGetMusicUrl(
                 const att = { name: api.info.name, status: 'success' }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
-                return { url, type: quality, sourceName: api.info.name, attempts }
+                return {
+                    url,
+                    type: quality,
+                    sourceName: api.info.name,
+                    sourceId: api.info.id,
+                    attempts,
+                    hasMoreSources: candidateIndex < candidates.length - 1
+                }
             } catch (error: any) {
                 console.error(`[UserApi] ${api.info.name} 失败:`, `音源日志：${error.message}`)
                 lastError = error
@@ -913,8 +977,40 @@ export function getLoadedApis() {
 // 检查某个源是否被支持
 // clientUsername: 调用者的用户名。如果未提供，则只能检查 open 源
 export function isSourceSupported(source: string, clientUsername?: string): boolean {
+    const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
+    let userStates: Record<string, any> = {}
+    if (clientUsername && clientUsername !== 'default') {
+        const statesPath = path.join(dataPath, 'users', 'source', clientUsername, 'states.json')
+        if (fs.existsSync(statesPath)) {
+            try { userStates = JSON.parse(fs.readFileSync(statesPath, 'utf-8')) } catch (e) { }
+        }
+    } else {
+        const openStatesPath = path.join(dataPath, 'users', 'source', '_open', 'states.json')
+        if (fs.existsSync(openStatesPath)) {
+            try { userStates = JSON.parse(fs.readFileSync(openStatesPath, 'utf-8')) } catch (e) { }
+        }
+    }
+
+    const getSourceState = (id: string) => {
+        return userStates[id] || userStates[decodeURIComponent(id)] || userStates[encodeURIComponent(id)] || {}
+    }
+
     for (const [apiId, api] of loadedApis) {
-        if (!api.info.enabled || !api.info.sources || !api.info.sources[source]) {
+        if (!api.info.sources || !api.info.sources[source]) {
+            continue
+        }
+
+        const state = getSourceState(api.info.id)
+        let isEnabled = api.info.enabled
+        if (api.info.owner === 'open' && clientUsername && clientUsername !== 'default') {
+            if (typeof state.enabled === 'boolean') {
+                isEnabled = state.enabled
+            }
+        }
+        if (!isEnabled) continue
+
+        // 检查平台是否被禁用
+        if (Array.isArray(state.disabledSources) && state.disabledSources.includes(source)) {
             continue
         }
 

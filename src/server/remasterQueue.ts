@@ -1,5 +1,6 @@
 import crypto from 'node:crypto'
 import * as fileCache from './fileCache'
+import * as customMusicManager from './customMusicManager'
 
 const MAX_REMASTER_ATTEMPTS = 3
 const QUALITY_ORDER = ['128k', '192k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'atmos_plus', 'master'] as const
@@ -7,6 +8,8 @@ const QUALITY_SET = new Set<string>(QUALITY_ORDER)
 
 type RemasterStatus = 'running' | 'completed' | 'cancelled' | 'error'
 type RemasterResultStatus = 'replaced' | 'downgraded' | 'skipped' | 'failed'
+
+type RemasterableItem = (fileCache.CacheItem | customMusicManager.CustomCacheItem) & { folder: string }
 
 interface ResolveResult {
   url: string
@@ -31,6 +34,7 @@ interface RemasterTask {
   id: string
   username: string
   targetQuality: string
+  isCustomDir: boolean
   status: RemasterStatus
   total: number
   processed: number
@@ -54,7 +58,7 @@ export const initialize = (downloadResolver: RemasterResolver) => {
 
 const qualityRank = (quality: string) => QUALITY_ORDER.indexOf(quality as typeof QUALITY_ORDER[number])
 
-const buildSongInfo = (item: fileCache.CacheItem) => {
+const buildSongInfo = (item: RemasterableItem) => {
   if (!item.source || item.source === 'unknown') return null
   const prefix = `${item.source}_`
   const indexedId = String(item.songmid || item.id || '')
@@ -109,7 +113,7 @@ const waitForRetry = (attempt: number, signal: AbortSignal) => new Promise<void>
   signal.addEventListener('abort', onAbort, { once: true })
 })
 
-const runTask = async (task: RemasterTask, items: fileCache.CacheItem[], allItems: fileCache.CacheItem[]) => {
+const runTask = async (task: RemasterTask, items: RemasterableItem[], allItems: RemasterableItem[]) => {
   if (!resolver) throw new Error('洗版解析器尚未初始化')
   const availableQualities = new Set(allItems.map(item => `${item.id}\0${item.quality}`))
 
@@ -189,14 +193,25 @@ const runTask = async (task: RemasterTask, items: fileCache.CacheItem[], allItem
           continue itemLoop
         }
 
-        await fileCache.replaceDownloadedMusicItem(
-          task.username,
-          item,
-          songInfo,
-          resolved.url,
-          actualQuality,
-          task.controller.signal,
-        )
+        if (task.isCustomDir) {
+          await customMusicManager.replaceCustomMusicItem(
+            task.username,
+            item as customMusicManager.CustomCacheItem,
+            songInfo,
+            resolved.url,
+            actualQuality,
+            task.controller.signal,
+          )
+        } else {
+          await fileCache.replaceDownloadedMusicItem(
+            task.username,
+            item as fileCache.CacheItem,
+            songInfo,
+            resolved.url,
+            actualQuality,
+            task.controller.signal,
+          )
+        }
         availableQualities.delete(`${item.id}\0${item.quality}`)
         availableQualities.add(`${item.id}\0${actualQuality}`)
         const didFallback = actualQuality !== task.targetQuality
@@ -232,7 +247,7 @@ const runTask = async (task: RemasterTask, items: fileCache.CacheItem[], allItem
   task.updatedAt = Date.now()
 }
 
-export const start = async (username: string, targetQuality: string, filenames: unknown) => {
+export const start = async (username: string, targetQuality: string, filenames: unknown, explicitIsCustomDir?: boolean) => {
   if (!resolver) throw new Error('洗版服务尚未就绪')
   if (!QUALITY_SET.has(targetQuality)) throw new Error('不支持该目标音质')
   const current = tasks.get(username)
@@ -246,17 +261,46 @@ export const start = async (username: string, targetQuality: string, filenames: 
   if (selectedFilenames.length > 10000) throw new Error('单次洗版最多选择 10000 首歌曲')
 
   const selectedSet = new Set(selectedFilenames)
-  const allItems = await fileCache.getDownloadedMusicItems(username)
+
+  // 1. 优先根据 explicitIsCustomDir 或从自定义音乐目录中匹配文件
+  let isCustomDir = false
+  let allItems: RemasterableItem[] = []
+  const customDir = customMusicManager.getCustomMusicDir(username)
+
+  if (explicitIsCustomDir === true) {
+    if (!customDir) throw new Error('用户未开启或未配置自定义音乐目录')
+    isCustomDir = true
+    allItems = await customMusicManager.getCustomMusicList(username)
+  } else if (explicitIsCustomDir === false) {
+    allItems = await fileCache.getDownloadedMusicItems(username)
+  } else {
+    if (customDir) {
+      const customList = await customMusicManager.getCustomMusicList(username)
+      const customItems = customList.filter(item => selectedSet.has(item.filename))
+      if (customItems.length === selectedSet.size) {
+        isCustomDir = true
+        allItems = customList
+      }
+    }
+  }
+
+  // 2. 如果不是自定义目录，且尚未获取 items，则走常规音乐下载目录
+  if (!isCustomDir && allItems.length === 0) {
+    allItems = await fileCache.getDownloadedMusicItems(username)
+  }
+
   const items = allItems.filter(item => selectedSet.has(item.filename))
   const matchedFilenames = new Set(items.map(item => item.filename))
   if (matchedFilenames.size !== selectedSet.size) {
     throw new Error('部分所选歌曲已不存在，请刷新本地音乐后重新选择')
   }
+
   const now = Date.now()
   const task: RemasterTask = {
     id: crypto.randomUUID(),
     username,
     targetQuality,
+    isCustomDir,
     status: 'running',
     total: items.length,
     processed: 0,

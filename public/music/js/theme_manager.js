@@ -121,8 +121,17 @@ function switchSettingsTab(tabName) {
         activeTab.classList.add('text-emerald-600', 'border-emerald-600');
         activeTab.classList.remove('text-gray-500', 'border-transparent', 'hover:text-emerald-600');
 
-        // Scroll to the active tab to make sure it's visible (for mobile)
-        activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        // Scroll to the active tab inside its container (for mobile) without scrolling ancestor containers/window
+        const container = activeTab.parentElement;
+        if (container && container.scrollWidth > container.clientWidth) {
+            const tabLeft = activeTab.offsetLeft;
+            const tabWidth = activeTab.offsetWidth;
+            const containerWidth = container.clientWidth;
+            container.scrollTo({
+                left: tabLeft - (containerWidth / 2) + (tabWidth / 2),
+                behavior: 'smooth'
+            });
+        }
     }
 
     // Special logic for logs

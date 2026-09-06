@@ -24,9 +24,9 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 ### 1.2 管理员：用户管理 (`/api/users`)
 
 - **Header Auth**: `x-frontend-auth: <Admin Password>`
-- `GET /api/users`: 获取所有用户列表及密码。
+- `GET /api/users`: 获取所有用户列表及密码、权限配置。
 - `POST /api/users`: 创建新用户 (`{"name": "...", "password": "..."}`)。
-- `PUT /api/users`: 修改用户信息 (重命名或修改密码) (`{"name": "原用户名", "newName": "新用户名", "password": "新密码"}`)。
+- `PUT /api/users`: 修改用户信息 (重命名、修改密码或权限) (`{"name": "...", "newName": "...", "password": "...", "enableCustomMusicDir": false, "customMusicDir": "...", "allowOperateCustomMusicDir": false, "allowWriteCustomMusicDir": false}`)。
 - `DELETE /api/users`: 删除用户 (`{"names": ["..."], "deleteData": true}`)。
 
 ### 1.3 用户：登录获取 Token (`POST /api/user/login`)
@@ -134,6 +134,20 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 - `POST /api/music/cache/clear`: 清理所有音乐缓存。
 - `POST /api/music/cache/lyric`: 保存或读取歌词缓存。
 
+### 5.1 自定义音乐目录与洗版 (`/api/music/custom/*`)
+
+允许配置了 `enableCustomMusicDir` 的用户挂载并管理服务器上的本地音乐文件。
+
+- `GET /api/music/custom/list`: 获取自定义目录歌曲列表。
+- `POST /api/music/custom/sync`: 触发服务器重新扫描同步自定义目录数据。
+- `GET /api/music/custom/file`: 获取单个音频文件流。
+- `GET /api/music/custom/cover`: 获取音频内嵌封面图片流。
+- `POST /api/music/custom/remove`: 删除音频文件及数据（要求用户开启 `allowOperateCustomMusicDir` 权限）。
+- `POST /api/music/custom/link`: 手动关联并重写音频 ID3 标签信息（要求用户开启 `allowWriteCustomMusicDir` 权限）。
+- `POST /api/music/custom/updateMetadata`: 批量抓取网上元数据并覆写本地文件（要求用户开启 `allowWriteCustomMusicDir` 权限）。
+- `POST /api/music/custom/embedLyric`: 批量将歌词写入本地文件 USLT 标签中（要求用户开启 `allowWriteCustomMusicDir` 权限）。
+- `POST /api/music/remaster/start`: 启动音频洗版与降级转码任务（若作用于自定义目录，要求用户开启 `allowOperateCustomMusicDir` 权限）。
+
 ---
 
 ## 6. 自定义源管理 API
@@ -153,8 +167,11 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 
 - `GET /api/config`: 获取服务器当前的所有可配置项（含环境变量覆盖后的最终值）。
 - `POST /api/config`: 增量更新全局配置。
-  - **参数示例**: `{"singer.sourcePriority": ["tx", "wy"], "user.enablePublicRestriction": true}`
-  - **验证**: 某些字段（如 `singer.sourcePriority`）会进行合法性校验。
+  - **支持配置项**: 包括 `admin.path`, `player.path`, `subsonic.enableDebug`, `subsonic.onlineSearch`, `subsonic.onlineSearchMode`, `subsonic.onlineSearchSources`, `subsonic.lyricTranslation`, `artist.maxFetchPages`, `cache.namingPattern`, `system.allowUnsafeVM` 等。
+  - **参数示例**: `{"admin.path": "/admin", "player.path": "", "subsonic.enableDebug": false}`
+  - **路径校验规则**: `admin.path` 与 `player.path` 必须以 `/` 开头或为空字符串，两者不能冲突相同且不能以 `/api` 开头。
+- `POST /api/admin/reload`: 重新加载服务器 `config.js` 与 `users.json` 数据及用户自定义音源 API。
+- `POST /api/admin/restart`: 安全重启服务器进程。
 
 ---
 
@@ -163,8 +180,8 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 专为 Web 播放器前端逻辑设计的接口，支持基于 Session 的访问。
 
 ### 8.1 基础配置与认证
-- `GET /api/music/config`: **公开接口**，获取 Web 播放器的运行状态配置。
-  - **响应**: `{"player.enableAuth": boolean, "user.enablePublicRestriction": boolean}`
+- `GET /api/music/config`: **公开接口**，获取 Web 播放器的运行状态及基础路径配置。
+  - **响应示例**: `{"admin.path": "/admin", "player.path": "", "player.enableAuth": false, "user.enablePublicRestriction": true}`
 - `POST /api/music/auth`: 校验访问密码，成功后下发 `lx_player_session` HttpOnly Cookie。
 - `POST /api/music/auth/logout`: 彻底注销当前的 Session 会话。
 - `GET /api/music/auth/verify`: 检查当前 Session 是否依然有效。

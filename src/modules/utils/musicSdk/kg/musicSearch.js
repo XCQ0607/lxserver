@@ -56,7 +56,7 @@ export default {
       source: 'kg',
       interval: formatPlayTime(rawData.Duration),
       _interval: rawData.Duration,
-      img: rawData.Image ? rawData.Image.replace('{size}', '240') : (rawData.trans_param?.union_cover?.replace('{size}', '240') || null),
+      img: rawData.Image ? rawData.Image.replace('{size}', '1000') : (rawData.trans_param?.union_cover?.replace('{size}', '1000') || null),
       lrc: null,
       otherSource: null,
       hash: rawData.FileHash,

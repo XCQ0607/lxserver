@@ -1,7 +1,7 @@
 import http from 'http'
 import crypto from 'crypto'
 import { URL } from 'url'
-import { getUserSpace, getUserDirname } from '@/user'
+import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
@@ -30,6 +30,9 @@ class SubsonicHandler {
 
     // 在线全网搜索歌曲缓存 (ID -> MusicInfo)，确保后续 getSong / getCoverArt / getLyrics 能精准查到歌曲元数据
     private onlineSongCache = new Map<string, LX.Music.MusicInfo>()
+
+    // 固定同一关键词的在线结果顺序，避免客户端翻页时出现重复或跳项。
+    private onlineSearchCache = new Map<string, { expiresAt: number, results: { music: LX.Music.MusicInfo, listId: string }[] }>()
 
     private cacheOnlineSong(music: LX.Music.MusicInfo) {
         if (!music || !music.id) return
@@ -202,9 +205,10 @@ class SubsonicHandler {
                 })
                 // 合并 URL 参数和 Body 参数
                 const mergedParams = new URLSearchParams(params.toString())
-                bodyParams.forEach((v, k) => {
-                    if (!mergedParams.has(k)) mergedParams.set(k, v)
-                })
+                for (const key of new Set(bodyParams.keys())) {
+                    if (mergedParams.has(key)) continue
+                    for (const value of bodyParams.getAll(key)) mergedParams.append(key, value)
+                }
                 params = mergedParams
             } catch (e) {
                 console.error('[Subsonic] POST body parse error:', e)
@@ -328,6 +332,12 @@ class SubsonicHandler {
                 case 'updatePlaylist':
                     return this.handleUpdatePlaylist(res, username, params, format)
 
+                case 'createPlaylist':
+                    return this.handleCreatePlaylist(res, username, params, format)
+
+                case 'deletePlaylist':
+                    return this.handleDeletePlaylist(res, username, params, format)
+
                 case 'scrobble':
                     return this.sendResponse(res, {}, format)
 
@@ -439,6 +449,7 @@ class SubsonicHandler {
             duration: this.parseDuration(music.interval),
             ...this.getBestQualityMeta(music),
             isVideo: false,
+            isDir: false,
             // 某些客户端 (如 Feishin) 在特定视图下不喜欢非标准字段，可以保留但确保标准字段优先
             type: 'music',
         }
@@ -550,6 +561,23 @@ class SubsonicHandler {
         return null
     }
 
+    private getListParams(params: URLSearchParams, name: string): string[] {
+        return params.getAll(name)
+            .flatMap(value => value.split(','))
+            .map(value => value.trim())
+            .filter(Boolean)
+    }
+
+    private async resolveMusicIds(username: string, ids: string[]): Promise<LX.Music.MusicInfo[] | null> {
+        const musics: LX.Music.MusicInfo[] = []
+        for (const id of ids) {
+            const result = await this.findMusicById(username, id)
+            if (!result) return null
+            musics.push(result.music)
+        }
+        return musics
+    }
+
     // ─────────────────────────────────────────────
     // 端点实现
     // ─────────────────────────────────────────────
@@ -566,13 +594,23 @@ class SubsonicHandler {
     }
 
     private handleGetMusicFolders(res: http.ServerResponse, format: string) {
+        const folders = [
+            { id: '1', name: 'LX Music（按服务器设置）' },
+            { id: 'local', name: '本地曲库' },
+            { id: 'all', name: '全部在线平台' },
+            { id: 'wy', name: '网易云音乐' },
+            { id: 'tx', name: 'QQ 音乐' },
+            { id: 'kw', name: '酷我音乐' },
+            { id: 'kg', name: '酷狗音乐' },
+            { id: 'mg', name: '咪咕音乐' },
+        ]
         if (format === 'json') {
             return this.sendResponse(res, {
-                musicFolders: { musicFolder: [{ id: 1, name: 'LX Music' }] },
+                musicFolders: { musicFolder: folders },
             }, format)
         }
         return this.sendResponse(res, {
-            musicFolders: { children: { musicFolder: [{ attrs: { id: 1, name: 'LX Music' } }] } },
+            musicFolders: { children: { musicFolder: folders.map(folder => ({ attrs: folder })) } },
         }, format)
     }
 
@@ -689,40 +727,128 @@ class SubsonicHandler {
 
     private async handleUpdatePlaylist(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const playlistId = params.get('playlistId')
-        const songIndexToRemove = params.get('songIndexToRemove')
-
         if (!playlistId) return this.sendError(res, 10, 'Required parameter is missing: playlistId', format)
 
-        // 目前 lxserver 下暂时只实现了通过索引删除 (OpenSubsonic 核心规范)
-        if (songIndexToRemove !== null) {
-            const index = parseInt(songIndexToRemove)
-            if (isNaN(index)) return this.sendError(res, 0, 'Invalid songIndexToRemove', format)
-
-            try {
-                const userSpace = getUserSpace(username)
-                const musics = await userSpace.listManage.listDataManage.getListMusics(playlistId)
-
-                if (index < 0 || index >= musics.length) {
-                    return this.sendError(res, 0, 'Index out of bounds', format)
-                }
-
-                const songId = musics[index].id
-                // console.log(`[Subsonic] Removing song at index ${index} (ID: ${songId}) from playlist ${playlistId}`)
-
-                // 执行物理删除
-                await userSpace.listManage.listDataManage.listMusicRemove(playlistId, [songId])
-                // 创建快照持久化
-                await userSpace.listManage.createSnapshot()
-
-                return this.sendResponse(res, {}, format)
-            } catch (err: any) {
-                console.error('[Subsonic] updatePlaylist error:', err)
-                return this.sendError(res, 0, err.message || 'Failed to remove song', format)
+        try {
+            const userSpace = getUserSpace(username)
+            const listData = await userSpace.listManage.getListData()
+            const userList = listData.userList.find(list => list.id === playlistId)
+            if (playlistId !== 'default' && playlistId !== 'love' && !userList) {
+                return this.sendError(res, 70, 'Playlist not found', format)
             }
+
+            const currentMusics = await userSpace.listManage.listDataManage.getListMusics(playlistId)
+            const removeIndexes = this.getListParams(params, 'songIndexToRemove').map(Number)
+            if (removeIndexes.some(index => !Number.isInteger(index) || index < 0 || index >= currentMusics.length)) {
+                return this.sendError(res, 0, 'Invalid songIndexToRemove', format)
+            }
+            // The original Subsonic API removes by zero-based index. A number of
+            // clients use the OpenSubsonic-style songIdToRemove extension instead.
+            const requestedRemoveIds = this.getListParams(params, 'songIdToRemove')
+
+            const addIds = [...new Set(this.getListParams(params, 'songIdToAdd'))]
+            const addMusics = await this.resolveMusicIds(username, addIds)
+            if (addMusics === null) return this.sendError(res, 70, 'Song not found', format)
+
+            const addIndexValues = this.getListParams(params, 'songIndexToAdd')
+            const addIndex = addIndexValues.length ? Number(addIndexValues[0]) : null
+            if (addIndex !== null && (!Number.isInteger(addIndex) || addIndex < 0)) {
+                return this.sendError(res, 0, 'Invalid songIndexToAdd', format)
+            }
+
+            let changed = false
+            const name = params.get('name')
+            if (name !== null) {
+                if (!userList) return this.sendError(res, 0, 'Built-in playlists cannot be renamed', format)
+                if (!name.trim()) return this.sendError(res, 0, 'Playlist name cannot be empty', format)
+                await userSpace.listManage.listDataManage.userListsUpdate([{
+                    ...userList,
+                    name: name.trim(),
+                    locationUpdateTime: Date.now(),
+                }])
+                changed = true
+            }
+
+            const removeIds = [...new Set([
+                ...removeIndexes.map(index => currentMusics[index].id),
+                ...requestedRemoveIds,
+            ])]
+            if (removeIds.length) {
+                await userSpace.listManage.listDataManage.listMusicRemove(playlistId, removeIds)
+                changed = true
+            }
+
+            if (addMusics.length) {
+                const location = getUserConfig(username)['list.addMusicLocationType']
+                await userSpace.listManage.listDataManage.listMusicAdd(playlistId, addMusics, location)
+                if (addIndex !== null) {
+                    await userSpace.listManage.listDataManage.listMusicUpdatePosition(
+                        playlistId,
+                        addIndex,
+                        addMusics.map(music => music.id),
+                    )
+                }
+                changed = true
+            }
+
+            if (changed) await userSpace.listManage.createSnapshot()
+            return this.sendResponse(res, {}, format)
+        } catch (err: any) {
+            console.error('[Subsonic] updatePlaylist error:', err)
+            return this.sendError(res, 0, err.message || 'Failed to update playlist', format)
+        }
+    }
+
+    private async handleCreatePlaylist(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const name = params.get('name')?.trim()
+        if (!name) return this.sendError(res, 10, 'Required parameter is missing: name', format)
+
+        try {
+            const songIds = [...new Set(this.getListParams(params, 'songId'))]
+            const musics = await this.resolveMusicIds(username, songIds)
+            if (musics === null) return this.sendError(res, 70, 'Song not found', format)
+
+            const userSpace = getUserSpace(username)
+            const playlistId = `subsonic_${crypto.randomUUID()}`
+            await userSpace.listManage.listDataManage.userListCreate({
+                id: playlistId,
+                name,
+                position: -1,
+                locationUpdateTime: Date.now(),
+            })
+            if (musics.length) {
+                const location = getUserConfig(username)['list.addMusicLocationType']
+                await userSpace.listManage.listDataManage.listMusicAdd(playlistId, musics, location)
+            }
+            await userSpace.listManage.createSnapshot()
+
+            return this.handleGetPlaylist(res, username, new URLSearchParams({ id: playlistId }), format)
+        } catch (err: any) {
+            console.error('[Subsonic] createPlaylist error:', err)
+            return this.sendError(res, 0, err.message || 'Failed to create playlist', format)
+        }
+    }
+
+    private async handleDeletePlaylist(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        if (id === 'default' || id === 'love') {
+            return this.sendError(res, 0, 'Built-in playlists cannot be deleted', format)
         }
 
-        // TODO: 支持 songIdToAdd 等其他参数
-        return this.sendResponse(res, {}, format)
+        try {
+            const userSpace = getUserSpace(username)
+            const listData = await userSpace.listManage.getListData()
+            if (!listData.userList.some(list => list.id === id)) {
+                return this.sendError(res, 70, 'Playlist not found', format)
+            }
+            await userSpace.listManage.listDataManage.userListsRemove([id])
+            await userSpace.listManage.createSnapshot()
+            return this.sendResponse(res, {}, format)
+        } catch (err: any) {
+            console.error('[Subsonic] deletePlaylist error:', err)
+            return this.sendError(res, 0, err.message || 'Failed to delete playlist', format)
+        }
     }
 
     // getAlbum: 返回 album + song[] 格式（音流等客户端期望的格式）
@@ -1011,7 +1137,8 @@ class SubsonicHandler {
 
         if (id === 'radios') {
             // [新增] 返回官方电台列表
-            const radios = await fetchRadios()
+            // const radios = await fetchRadios()
+            const radios: any[] = []
             const dirs = radios.map(r => ({
                 id: r.id,
                 parent: 'radios',
@@ -1036,9 +1163,10 @@ class SubsonicHandler {
 
         if (id.startsWith('radio_tx_')) {
             // [新增] 返回具体电台内的歌曲
-            const radioId = id.replace('radio_tx_', '')
+            // const radioId = id.replace('radio_tx_', '')
             try {
-                const songs = await fetchRadioSongs(radioId)
+                // const songs = await fetchRadioSongs(radioId)
+                const songs: any[] = []
                 dirName = '电台列表'
                 musics = (songs || []).map((s: any) => ({
                     id: `tx_${s.songmid || s.mid}`,
@@ -1419,7 +1547,8 @@ class SubsonicHandler {
     }
 
     private async handleGetInternetRadioStations(res: http.ServerResponse, format: string) {
-        const radios = await fetchRadios()
+        // const radios = await fetchRadios()
+        const radios: any[] = []
         if (format === 'json') {
             return this.sendResponse(res, { internetRadioStations: { internetRadioStation: radios } }, format)
         }
@@ -1434,12 +1563,18 @@ class SubsonicHandler {
 
     private async fetchOnlineSearchSongs(cleanQuery: string, sources: string[], limit: number = 30): Promise<{ music: LX.Music.MusicInfo, listId: string }[]> {
         if (!cleanQuery) return []
-        const results: { music: LX.Music.MusicInfo, listId: string }[] = []
         const validSources = sources.filter(s => ['wy', 'tx', 'kw', 'kg', 'mg'].includes(s) && musicSdk[s]?.musicSearch?.search)
-        // [限制] 单个平台最大获取数量上限
-        const targetLimit = Math.min(limit, 50)
+        const cacheKey = `${cleanQuery.toLowerCase()}::${validSources.join(',')}`
+        const cached = this.onlineSearchCache.get(cacheKey)
+        if (cached && cached.expiresAt > Date.now()) return cached.results
+
+        const sourceResults = new Map<string, { music: LX.Music.MusicInfo, listId: string }[]>()
+        // 每个平台一次取足上限，后续 songOffset 分页复用同一批稳定结果。
+        const targetLimit = 50
 
         await Promise.all(validSources.map(async source => {
+            const results: { music: LX.Music.MusicInfo, listId: string }[] = []
+            sourceResults.set(source, results)
             try {
                 // 计算需要的页数 (网易云 wy 单页限制 20 条，如需要 50 条则自动抓取前 3 页)
                 const pageSize = source === 'kg' ? Math.min(targetLimit, 100) : source === 'wy' ? 20 : 30
@@ -1496,7 +1631,21 @@ class SubsonicHandler {
                 console.error(`[Subsonic] Online search error for source=${source}:`, err?.message || err)
             }
         }))
-        return results
+
+        const interleaved: { music: LX.Music.MusicInfo, listId: string }[] = []
+        const maxLength = Math.max(0, ...validSources.map(source => sourceResults.get(source)?.length || 0))
+        for (let index = 0; index < maxLength; index++) {
+            for (const source of validSources) {
+                const item = sourceResults.get(source)?.[index]
+                if (item) interleaved.push(item)
+            }
+        }
+        if (this.onlineSearchCache.size >= 100) {
+            const firstKey = this.onlineSearchCache.keys().next().value
+            if (firstKey) this.onlineSearchCache.delete(firstKey)
+        }
+        this.onlineSearchCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60 * 1000, results: interleaved })
+        return interleaved
     }
 
     private async handleSearch(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, method: string = 'search3') {
@@ -1531,13 +1680,27 @@ class SubsonicHandler {
                 targetOnlineSources = [matchedPrefixSource]
                 const colonIdx = rawQuery.indexOf(':') !== -1 ? rawQuery.indexOf(':') : rawQuery.indexOf('：')
                 cleanQuery = rawQuery.slice(colonIdx + 1).trim()
+            } else if (lowerQuery.startsWith('all:') || lowerQuery.startsWith('all：')) {
+                searchMode = 'force_online'
+                const colonIdx = rawQuery.indexOf(':') !== -1 ? rawQuery.indexOf(':') : rawQuery.indexOf('：')
+                cleanQuery = rawQuery.slice(colonIdx + 1).trim()
             } else {
-                // 没有前缀，遵循全局后台配置
-                const isOnlineEnabled = global.lx.config['subsonic.onlineSearch'] !== false
-                if (!isOnlineEnabled) {
+                const requestedSource = (params.get('source') || params.get('musicFolderId') || '').trim().toLowerCase()
+                if (requestedSource === 'local') {
                     searchMode = 'local_only'
+                } else if (requestedSource === 'all') {
+                    searchMode = 'force_online'
+                } else if (knownSources.includes(requestedSource)) {
+                    searchMode = 'force_online'
+                    targetOnlineSources = [requestedSource]
                 } else {
-                    searchMode = (global.lx.config['subsonic.onlineSearchMode'] as any) || 'fallback'
+                    // 没有明确指定音源时，遵循全局后台配置
+                    const isOnlineEnabled = global.lx.config['subsonic.onlineSearch'] !== false
+                    if (!isOnlineEnabled) {
+                        searchMode = 'local_only'
+                    } else {
+                        searchMode = (global.lx.config['subsonic.onlineSearchMode'] as any) || 'fallback'
+                    }
                 }
             }
         }
@@ -1697,14 +1860,15 @@ class SubsonicHandler {
         const albumOffset = parseInt(params.get('albumOffset') || '0')
         const songCount = params.has('songCount') ? parseInt(params.get('songCount') || '20') : 20
         const songOffset = parseInt(params.get('songOffset') || '0')
+        const requestedSongEnd = Math.max(0, songOffset) + Math.max(0, songCount)
 
         // 6. 处理在线 API 搜索与模式融合
         if (cleanQuery && songCount > 0) {
             if (searchMode === 'force_online') {
-                const onlineResults = await this.fetchOnlineSearchSongs(cleanQuery, targetOnlineSources, songCount)
+                const onlineResults = await this.fetchOnlineSearchSongs(cleanQuery, targetOnlineSources, requestedSongEnd)
                 matchedSongs = onlineResults
             } else if (searchMode === 'merge') {
-                const onlineResults = await this.fetchOnlineSearchSongs(cleanQuery, targetOnlineSources, songCount)
+                const onlineResults = await this.fetchOnlineSearchSongs(cleanQuery, targetOnlineSources, requestedSongEnd)
                 const existingIds = new Set(matchedSongs.map(s => s.music.id))
                 for (const item of onlineResults) {
                     if (!existingIds.has(item.music.id)) {
@@ -1713,8 +1877,8 @@ class SubsonicHandler {
                     }
                 }
             } else if (searchMode === 'fallback') {
-                if (matchedSongs.length < songCount) {
-                    const needed = songCount - matchedSongs.length
+                if (matchedSongs.length < requestedSongEnd) {
+                    const needed = requestedSongEnd - matchedSongs.length
                     const onlineResults = await this.fetchOnlineSearchSongs(cleanQuery, targetOnlineSources, needed)
                     const existingIds = new Set(matchedSongs.map(s => s.music.id))
                     for (const item of onlineResults) {

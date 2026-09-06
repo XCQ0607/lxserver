@@ -8,7 +8,7 @@
   <h1>LX Sync Server</h1> -->
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v2.0.1-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -111,7 +111,7 @@
 
 ### 10. Subsonic 协议与全网检索支持
 
-全面适配 Subsonic 协议，支持使用各类 Subsonic 客户端（如音流、Feishin 等）连接并播放本站资源。支持在 Subsonic 客户端中通过 `wy:`, `kg:`, `tx:`, `kw:`, `mg:` 等指定平台前缀，或 `online:` / `local:` 强制指定全网在线或本地搜索。
+全面适配 Subsonic 协议，支持使用各类 Subsonic 客户端（如音流、Feishin 等）连接并播放本站资源。可通过客户端的音乐目录选择本地、全部在线或指定平台，也可在关键词前使用 `wy:`、`kg:`、`tx:`、`kw:`、`mg:` 指定平台，使用 `all:` / `online:` 或 `local:` 强制全部在线或本地搜索。
 
 <p align="center">
   <img src="md/subsonic.png" width="400" alt="Subsonic 支持">
@@ -210,8 +210,8 @@ services:
       # - FRONTEND_PASSWORD=123456
       # - ENABLE_WEBPLAYER_AUTH=true
       # - WEBPLAYER_PASSWORD=yourpassword
-      # - ADMIN_PATH=
-      # - PLAYER_PATH=/music
+      # - ADMIN_PATH=/music
+      # - PLAYER_PATH=/
 ```
 
 ### 方式三：直接运行 (Git Clone)
@@ -235,8 +235,8 @@ npm start
 
 ### 3. 访问说明
 
-- **Web 播放器**: `http://your-ip:9527/music` (默认路径，可通过 `PLAYER_PATH` 修改)
-- **同步管理后台**: `http://your-ip:9527` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+- **Web 播放器**: `http://your-ip:9527` (默认路径，可通过 `PLAYER_PATH` 修改)
+- **同步管理后台**: `http://your-ip:9527/music` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
 
 ---
 
@@ -245,8 +245,8 @@ npm start
 本项目基于 Node.js 采用前后端分离架构：
 
 - **Backend (Express + WebSocket)**: 核心同步逻辑与 WebDAV 备份。
-- **Console (Vanilla JS)**: 位于根目录，负责用户与数据管理。
-- **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为 `/music`。
+- **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为根路径 `/`。
+- **Console (Vanilla JS)**: 位于 `/music` 路径，负责用户与数据管理。
 
 ---
 
@@ -258,8 +258,8 @@ npm start
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
 | `BIND_IP`                             | `bindIP`                           | 绑定 IP                                                            | `0.0.0.0`        |
-| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径 (默认为空，即根路径 `/`)                    | (空)               |
-| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为 `/music`)                             | `/music`         |
+| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
+| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
 | `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持 (服务默认开启)                          | `true`           |
 | `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 访问路径 (默认为 `/rest`)                               | `/rest`          |
 | `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
@@ -284,6 +284,8 @@ npm start
 | `DISABLE_TELEMETRY`                   | `disableTelemetry`                 | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                 | `false`          |
 | `ENABLE_PUBLIC_USER_RESTRICTION`      | `user.enablePublicRestriction`     | 是否启用公开用户权限限制 (限制上传、删除公开源、缓存到服务器等)    | `true`           |
 | `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `user.enablePublicNonAdminLocalMusic` | 是否开启非管理员访问本地音乐 (允许未登录管理员的公开账号访问本地音乐) | `false`          |
+| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `user.enablePublicNonAdminBrowserDownload` | 是否开启非管理员浏览器下载 (允许未登录管理员的公开/普通账号使用浏览器下载歌曲) | `true` |
+| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | 是否开启非管理员服务器缓存 (允许未登录管理员的公开/普通账号将歌曲缓存到服务器) | `false` |
 | `ENABLE_PUBLIC_FAVORITES`             | `user.enablePublicFavorites`       | 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏) | `false`          |
 | `ENABLE_PUBLIC_NON_ADMIN_ACCESS`      | `user.enablePublicNonAdminAccess`  | 是否开启非管理员访问公开收藏和歌曲 (允许未登录管理员的公开账号查看) | `false`          |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)      | `false`          |
@@ -293,22 +295,19 @@ npm start
 | `PROXY_ALL_ENABLED`                   | `proxy.all.enabled`                | 是否启用外发请求代理 (针对 Music SDK)                              | `false`          |
 | `PROXY_ALL_ADDRESS`                   | `proxy.all.address`                | 代理地址 (支持 http:// 或 socks5://)                               | -                  |
 | `SINGER_SOURCE_PRIORITY`              | `singer.sourcePriority`            | 歌手信息获取来源优先级 (如 `tx,wy` 或 `wy,tx`)                 | `tx,wy`          |
+| `SUBSONIC_ENABLE_DEBUG`               | `subsonic.enableDebug`             | 是否开启 Subsonic 调试日志模式                                     | `false`          |
+| `SUBSONIC_ONLINE_SEARCH`              | `subsonic.onlineSearch`            | 是否开启 Subsonic 在线全网搜索                                     | `true`           |
+| `SUBSONIC_ONLINE_SEARCH_MODE`         | `subsonic.onlineSearchMode`        | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)        | `fallback`       |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES`      | `subsonic.onlineSearchSources`     | Subsonic 在线搜索默认音源列表                                      | `wy,tx,kw,kg,mg` |
+| `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
+| `ARTIST_MAX_FETCH_PAGES`              | `artist.maxFetchPages`             | 歌手歌曲最大抓取页数                                               | `20`             |
+| `CACHE_NAMING_PATTERN`                | `cache.namingPattern`              | 缓存文件命名规则 (`simple` / `custom`)                            | `simple`         |
+| `SYSTEM_ALLOW_UNSAFE_VM`              | `system.allowUnsafeVM`             | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                  | `false`          |
 | `LX_USER_<用户名>`                    | `users` 数组                       | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)           | -                  |
 
-### 仅在 `config.js` 中生效的高级配置项
+> **高级用户配置说明**：环境变量 `LX_USER_<用户名>` 仅用于快速添加用户及设置密码。若需为特定用户配置独立的高级选项（如开启个人自定义音乐目录、分配操作权限 `allowOperateCustomMusicDir` 或写入权限 `allowWriteCustomMusicDir`、调整快照数量等），请直接在 `config.js` 的 `users` 数组中手动配置对应字段，或者在后台管理界面的“用户管理”面板中通过图形界面修改。
 
-部分高级选项仅可通过直接修改 `config.js` 进行配置：
-
-| 配置项 | 说明 | 默认值 |
-| --- | --- | --- |
-| `subsonic.enableDebug` | 是否开启 Subsonic 调试日志模式 | `true` |
-| `subsonic.onlineSearch` | 是否开启 Subsonic 在线全网搜索 | `true` |
-| `subsonic.onlineSearchMode` | Subsonic 在线搜索模式 (`fallback` 回退模式 / `merge` 合并模式 / `local_only` 仅本地) | `"fallback"` |
-| `subsonic.onlineSearchSources` | Subsonic 在线搜索默认音源列表 | `"wy,tx,kw,kg,mg"` |
-| `subsonic.lyricTranslation` | Subsonic 歌词中是否包含翻译 | `true` |
-| `artist.maxFetchPages` | 歌手歌曲最大抓取页数 | `20` |
-| `cache.namingPattern` | 缓存文件命名规则 (`simple` / `custom`) | `"simple"` |
-| `system.allowUnsafeVM` | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险) | `false` |
+> **布尔类型环境变量说明**：所有布尔类型的环境变量支持灵活的写法（不区分大小写），开启支持 `true` / `1` / `yes` / `y` / `on`；关闭支持 `false` / `0` / `no` / `n` / `off`。
 
 > **提示**：目前服务支持 `启用根路径` (URL配置为 `ip:port`) 和 `启用用户路径` (URL配置为 `ip:port/username`) 两种数据同步连接方式。如果没有启用用户路径，则必须保证每一个同步用户的鉴权密码不重复。
 

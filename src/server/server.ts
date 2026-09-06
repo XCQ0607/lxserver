@@ -2,6 +2,7 @@ import http, { type IncomingMessage } from 'node:http'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import url from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import { registerLocalSyncEvent, callObj, sync } from './sync'
 import { authCode, authConnect } from './auth'
@@ -12,7 +13,7 @@ import {
   SYNC_CODE,
   SYNC_CLOSE_CODE,
 } from '@/constants'
-import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, migrateUserData, renameUserSpace, finishRenameUserSpace } from '@/user'
+import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace } from '@/user'
 import { createMsg2call } from 'message2call'
 import { ElFinderConnector, getSystemRoot } from './elfinderConnector'
 import formidable from 'formidable'
@@ -22,6 +23,7 @@ const musicSdk = musicSdkRaw as any
 import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis } from './userApi'
 import * as customSourceHandlers from './customSourceHandlers'
 import * as fileCache from './fileCache'
+import * as customMusicManager from './customMusicManager'
 import * as serverDownloadQueue from './serverDownloadQueue'
 import * as remasterQueue from './remasterQueue'
 import { getDownloadQualityCandidates } from './downloadQuality'
@@ -490,6 +492,9 @@ const saveUsers = () => {
       password: u.password,
       maxSnapshotNum: u.maxSnapshotNum,
       'list.addMusicLocationType': u['list.addMusicLocationType'],
+      enableCustomMusicDir: u.enableCustomMusicDir,
+      customMusicDir: u.customMusicDir,
+      allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
     })), null, 2))
     return true
   } catch (err) {
@@ -919,8 +924,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
     // 读取路径配置（每次请求都重新读取，保存后立刻生效）
     const normalizePath = (p: string) => (p || '').replace(/\/+$/, '')
-    const playerPath = global.lx.config['player.path'] ?? '/music'
-    const adminPath = global.lx.config['admin.path'] ?? ''
+    const playerPath = global.lx.config['player.path'] ?? '/'
+    const adminPath = global.lx.config['admin.path'] ?? '/admin'
 
     // 映射播放器逻辑 (无论是自定义路径还是前端硬编码的 /music/)
     const isPlayerRequest = (playerPath === '/' || playerPath === '')
@@ -992,6 +997,32 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [PWA 适配] 动态生成播放器的 manifest.json，自动匹配当前 playerPath
+      if (pathname === `${normalizedPrefix}/manifest.json` || (isLegacyPlayerAsset && pathname === '/music/manifest.json')) {
+        const manifestFilePath = path.join(global.lx.staticPath, 'music', 'manifest.json')
+        try {
+          const raw = fs.readFileSync(manifestFilePath, 'utf-8')
+          const manifest = JSON.parse(raw)
+          // 规范化当前播放器的 base URL（必须以 / 结尾）
+          const effectivePlayerBase = (playerPath === '/' || playerPath === '') ? '/' : `${playerPath.replace(/\/+$/, '')}/`
+          manifest.start_url = effectivePlayerBase
+          manifest.scope = effectivePlayerBase
+          // 图标使用相对于当前有效根路径或者播放器物理路径的地址
+          if (Array.isArray(manifest.icons)) {
+            manifest.icons = manifest.icons.map((icon: any) => ({
+              ...icon,
+              src: icon.src ? (icon.src.startsWith('http') ? icon.src : `${effectivePlayerBase}${icon.src.replace(/^\.\//, '')}`) : icon.src
+            }))
+          }
+          res.writeHead(200, {
+            'Content-Type': 'application/manifest+json; charset=utf-8',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          })
+          res.end(JSON.stringify(manifest, null, 2))
+          return
+        } catch { }
+      }
+
       const subPath = pathname.slice(normalizedPrefix.length)
       if (subPath === '/' || subPath === '') {
         targetPath = 'music/index.html'
@@ -1037,6 +1068,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         'user.enablePath': global.lx.config['user.enablePath'],
         'user.enableRoot': global.lx.config['user.enableRoot'],
         'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
+        'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
+        'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false,
         'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'] || false,
         'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'] || false,
         'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'] || 2000,
@@ -1045,8 +1078,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         'player.enableAuth': global.lx.config['player.enableAuth'] || false,
         port: global.lx.config.port,
         bindIP: global.lx.config.bindIP,
-        'admin.path': global.lx.config['admin.path'] ?? '',
-        'player.path': global.lx.config['player.path'] ?? '/music',
+        'admin.path': global.lx.config['admin.path'] ?? '/admin',
+        'player.path': global.lx.config['player.path'] ?? '/',
       }
 
       const configJs = `window.CONFIG = ${JSON.stringify(frontendConfig, null, 2)};`
@@ -1201,10 +1234,17 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           return
         }
         if (req.method === 'GET') {
-          // 修改：返回包含密码的用户列表
-          const users = global.lx.config.users.map(u => ({ name: u.name, password: u.password }))
+          // 修改：返回包含密码及自定义目录配置的用户列表
+          const users = global.lx.config.users.map(u => ({
+            name: u.name,
+            password: u.password,
+            enableCustomMusicDir: u.enableCustomMusicDir ?? false,
+            customMusicDir: u.customMusicDir || '',
+            allowOperateCustomMusicDir: u.allowOperateCustomMusicDir ?? false,
+            allowWriteCustomMusicDir: u.allowWriteCustomMusicDir ?? false,
+          }))
           if (global.lx.config['user.enablePublicFavorites']) {
-            users.unshift({ name: '_open', password: '' })
+            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false })
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -1252,8 +1292,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         if (req.method === 'PUT') {
           void readBody(req).then(body => {
             try {
-              const { name, newName, password } = JSON.parse(body)
-              if (!name || (!password && !newName)) {
+              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir } = JSON.parse(body)
+              if (!name) {
                 res.writeHead(400)
                 res.end('Missing required fields')
                 return
@@ -1269,6 +1309,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
               const handleFinalUpdate = () => {
                 if (password) user.password = password
+                if (enableCustomMusicDir !== undefined) user.enableCustomMusicDir = !!enableCustomMusicDir
+                if (customMusicDir !== undefined) user.customMusicDir = String(customMusicDir).trim()
+                if (allowOperateCustomMusicDir !== undefined) user.allowOperateCustomMusicDir = !!allowOperateCustomMusicDir
+                if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
                 saveUsers()
                 res.writeHead(200)
                 res.end(JSON.stringify({ success: true }))
@@ -1430,12 +1474,30 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         }
 
         const userSpace = getUserSpace(verifiedUser)
-        void userSpace.listManage.getListData().then(data => {
+        void userSpace.listManage.getListData().then(async data => {
+          let albums = []
+          let artists = []
+          try {
+            const userDirname = getUserDirname(verifiedUser)
+            const libraryPath = path.join(global.lx.userPath, userDirname, 'library')
+            const albumsPath = path.join(libraryPath, 'albums.json')
+            const artistsPath = path.join(libraryPath, 'artists.json')
+            
+            if (await fs.promises.stat(albumsPath).then(()=>true).catch(()=>false)) {
+              albums = JSON.parse(await fs.promises.readFile(albumsPath, 'utf8'))
+            }
+            if (await fs.promises.stat(artistsPath).then(()=>true).catch(()=>false)) {
+              artists = JSON.parse(await fs.promises.readFile(artistsPath, 'utf8'))
+            }
+          } catch(err) {
+             console.error(err)
+          }
+
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
           })
-          res.end(JSON.stringify(data))
+          res.end(JSON.stringify({ ...data, albums, artists }))
         }).catch(err => {
           res.writeHead(500)
           res.end(err.message)
@@ -1641,7 +1703,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
 
         void readBody(req).then(async body => {
           try {
-            const { listId, musicInfos, location = 'bottom' } = JSON.parse(body)
+            const { listId, musicInfos, location } = JSON.parse(body)
 
             if (!listId || !Array.isArray(musicInfos)) {
               res.writeHead(400)
@@ -1654,7 +1716,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const userSpace = getUserSpace(username)
 
             // Add songs to the list
-            await userSpace.listManage.listDataManage.listMusicAdd(listId, musicInfos, location)
+            const addMusicLocationType = location === 'top' || location === 'bottom'
+              ? location
+              : getUserConfig(username)['list.addMusicLocationType']
+            await userSpace.listManage.listDataManage.listMusicAdd(listId, musicInfos, addMusicLocationType)
 
             // Create new snapshot to persist changes
             const newSnapshotKey = await userSpace.listManage.createSnapshot()
@@ -1874,8 +1939,19 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
       if (pathname === '/api/user/auth/verify' && req.method === 'GET') {
         const username = verifyUserAuth(req)
         const valid = !!username
+        let enableCustomMusicDir = false
+        let allowOperateCustomMusicDir = false
+        if (username) {
+          const user = global.lx.config.users.find(u => u.name === username)
+          // 全局总开关 user.enableCustomMusicDir 必须为 true，才读取用户自身配置
+          const globalSwitch = !!global.lx.config['user.enableCustomMusicDir']
+          if (user && globalSwitch) {
+            enableCustomMusicDir = !!user.enableCustomMusicDir
+            allowOperateCustomMusicDir = !!user.allowOperateCustomMusicDir
+          }
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ valid, username: username || null }))
+        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir }))
         return
       }
 
@@ -2468,7 +2544,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         if (pathname === '/api/music/remaster/start' && req.method === 'POST') {
           try {
             const body = JSON.parse(await readBody(req))
-            const data = await remasterQueue.start(username, String(body?.targetQuality || ''), body?.filenames)
+            const explicitIsCustomDir = body?.isCustomDir === undefined ? undefined : Boolean(body?.isCustomDir)
+            
+            if (explicitIsCustomDir) {
+              const userCfg = getUserConfig(username)
+              if (!userCfg?.allowOperateCustomMusicDir) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: '管理员未允许操作自定义目录中的文件' }))
+                return
+              }
+            }
+
+            const data = await remasterQueue.start(username, String(body?.targetQuality || ''), body?.filenames, explicitIsCustomDir)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, data }))
           } catch (err: any) {
@@ -2554,6 +2641,48 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             res.end('Error')
           }
         })
+        return
+      }
+
+      // 1.05 Get Real Cache & Download Directories
+      if (pathname === '/api/music/cache/directories' && req.method === 'GET') {
+        const parsedUrl = url.parse(req.url || '', true)
+        const locationQuery = (parsedUrl.query.location as string) || undefined
+        const onlyDownloadQuery = parsedUrl.query.onlyDownload === 'true' || parsedUrl.query.onlyDownload === '1'
+
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+
+        const effectiveLocation = locationQuery || fileCache.getCacheLocation()
+        const cacheDir = fileCache.getCacheDir(username, false, effectiveLocation)
+        const downloadDir = fileCache.getCacheDir(username, true, effectiveLocation)
+
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({
+          success: true,
+          data: {
+            username,
+            location: effectiveLocation,
+            isOnlyDownloadMode: onlyDownloadQuery,
+            isSameDirectory: !onlyDownloadQuery,
+            cacheDirectory: cacheDir,
+            downloadDirectory: onlyDownloadQuery ? downloadDir : cacheDir,
+            rawDownloadDirectory: downloadDir,
+            rootType: effectiveLocation === 'data' ? 'DATA_PATH (WebDAV同步)' : '运行目录 (仅本地)',
+            isWebDAVSynced: effectiveLocation === 'data'
+          }
+        }))
         return
       }
 
@@ -2674,6 +2803,130 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // 1.1-E Rename Subdirectory
+      if (pathname === '/api/music/cache/subdirs/rename' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const auth = req.headers['x-frontend-auth']
+        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
+
+        if (isPublic) {
+          if (!isAdmin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '权限不足：修改公共本地分类需要验证管理员权限。' }))
+            return
+          }
+        } else {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+
+        void readBody(req).then(body => {
+          try {
+            const { folder = 'music', oldSubPath, newSubPath } = JSON.parse(body)
+            if (!oldSubPath || !newSubPath) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少参数' }))
+              return
+            }
+            const result = fileCache.renameSubDirectory(username, folder, oldSubPath.trim(), newSubPath.trim())
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e?.message || 'Server error' }))
+          }
+        })
+        return
+      }
+
+      // 检查文件夹是否有效
+      if (pathname === '/api/utils/check-dir' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(body => {
+          try {
+            const { dirPath } = JSON.parse(body)
+            if (!dirPath || typeof dirPath !== 'string' || !dirPath.trim()) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '请输入路径' }))
+              return
+            }
+            const absolutePath = path.resolve(dirPath.trim())
+            if (!fs.existsSync(absolutePath)) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '目录不存在，请检查路径是否正确' }))
+              return
+            }
+            const stat = fs.statSync(absolutePath)
+            if (!stat.isDirectory()) {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '指定路径不是一个有效的目录' }))
+              return
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, message: '目录可用', path: absolutePath }))
+          } catch (e: any) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e?.message || '检测目录发生错误' }))
+          }
+        })
+        return
+      }
+
+      // 1.1-F Delete Subdirectory
+      if (pathname === '/api/music/cache/subdirs/delete' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const auth = req.headers['x-frontend-auth']
+        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
+
+        if (isPublic) {
+          if (!isAdmin) {
+            res.writeHead(403, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: '权限不足：删除公共本地分类需要验证管理员权限。' }))
+            return
+          }
+        } else {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+
+        void readBody(req).then(body => {
+          try {
+            const { folder = 'music', subPath, deleteSongs = false } = JSON.parse(body)
+            if (!subPath) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '缺少 subPath 参数' }))
+              return
+            }
+            const result = fileCache.deleteSubDirectory(username, folder, subPath.trim(), !!deleteSongs)
+            res.writeHead(result.success ? 200 : 400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e?.message || 'Server error' }))
+          }
+        })
+        return
+      }
+
       // 1.2 Batch Rename Cache Files
       if (pathname === '/api/music/cache/rename' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
@@ -2763,6 +3016,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
           return
         }
+        const auth = req.headers['x-frontend-auth']
+        const isPublic = username === '_open'
+        const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
+        const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
+        const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
+
+        if (enablePublicRestriction && !isServerCacheAllowed && isPublic && !isAdmin) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '权限限制：非管理员服务器缓存已被禁用' }))
+          return
+        }
+
         void readBody(req).then(body => {
           try {
             const { tasks, namingPattern, concurrency } = JSON.parse(body)
@@ -2770,9 +3035,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             if (concurrency !== undefined) serverDownloadQueue.setConcurrency(username, concurrency)
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth !== global.lx.config['frontend.password']) throw new Error('Unauthorized to change cache naming pattern')
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              if (auth === global.lx.config['frontend.password']) {
+                const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
+                if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              }
             }
             const queued = serverDownloadQueue.enqueue(username, tasks)
             res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -2875,15 +3141,23 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               }
               username = verified
             }
+
+            const auth = req.headers['x-frontend-auth']
+            const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
+            const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
+            const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
+
+            if (enablePublicRestriction && !isServerCacheAllowed && isPublic && !isAdmin) {
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '权限限制：非管理员服务器缓存已被禁用' }))
+              return
+            }
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth !== global.lx.config['frontend.password']) {
-                res.writeHead(403, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ success: false, error: 'Unauthorized to change cache naming pattern' }))
-                return
+              if (auth === global.lx.config['frontend.password']) {
+                const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
+                if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
               }
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
             }
             const songKey = fileCache.normalizeSongId(songInfo) + '_' + (quality || 'unknown')
 
@@ -3255,6 +3529,259 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // ===== [新增] Custom Music APIs (独立于 cache/music) =====
+      // A. 获取自定义目录歌曲列表
+      if (pathname === '/api/music/custom/list' && req.method === 'GET') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const userCfg = getUserConfig(verified)
+        void customMusicManager.getCustomMusicList(verified).then(list => {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+          })
+          res.end(JSON.stringify({
+            success: true,
+            data: list,
+            allowOperateCustomMusicDir: !!userCfg?.allowOperateCustomMusicDir,
+            allowWriteCustomMusicDir: !!userCfg?.allowWriteCustomMusicDir
+          }))
+        }).catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // B. 强制重新同步自定义目录
+      if (pathname === '/api/music/custom/sync' && req.method === 'POST') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void customMusicManager.syncCustomIndex(verified).then(() => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, message: 'Sync completed' }))
+        }).catch(err => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      // C. 流式播放自定义音频文件（支持深层子目录相对路径）
+      if (pathname === '/api/music/custom/file' || pathname.startsWith('/api/music/custom/file/')) {
+        let rawFilename = urlObj.searchParams.get('filename')
+        let reqUsername = urlObj.searchParams.get('user') || ''
+
+        if (!rawFilename && pathname.startsWith('/api/music/custom/file/')) {
+          const rest = pathname.substring('/api/music/custom/file/'.length)
+          try {
+            rawFilename = decodeURIComponent(rest)
+          } catch (e) {
+            rawFilename = rest
+          }
+        }
+
+        if (rawFilename) {
+          const urlToken = urlObj.searchParams.get('token')
+          if (urlToken && !req.headers['x-user-token']) {
+            (req.headers as any)['x-user-token'] = urlToken
+          }
+          if (reqUsername && !req.headers['x-user-name']) {
+            (req.headers as any)['x-user-name'] = reqUsername
+          }
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401)
+            res.end('Unauthorized')
+            return
+          }
+          customMusicManager.serveCustomFile(req, res, rawFilename, verified)
+          return
+        }
+      }
+
+      // D. 获取自定义目录封面
+      if (pathname === '/api/music/custom/cover' && req.method === 'GET') {
+        const reqUsername = (req.headers['x-user-name'] as string) || urlObj.searchParams.get('user') || ''
+        const urlToken = urlObj.searchParams.get('token')
+        if (urlToken && !req.headers['x-user-token']) {
+          (req.headers as any)['x-user-token'] = urlToken
+        }
+        if (reqUsername && !req.headers['x-user-name']) {
+          (req.headers as any)['x-user-name'] = reqUsername
+        }
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401)
+          res.end('Unauthorized')
+          return
+        }
+        const filename = urlObj.searchParams.get('filename')
+        if (!filename) {
+          res.writeHead(400)
+          res.end('Missing filename')
+          return
+        }
+        const cover = await customMusicManager.getCustomCover(filename, verified)
+        if (cover && cover.data) {
+          res.writeHead(200, {
+            'Content-Type': cover.mime || 'image/jpeg',
+            'Cache-Control': 'public, max-age=86400',
+          })
+          res.end(cover.data)
+        } else {
+          res.writeHead(404)
+          res.end('Not Found')
+        }
+        return
+      }
+
+      // E. 删除自定义目录中的歌曲（受 allowOperateCustomMusicDir 限制）
+      if (pathname === '/api/music/custom/remove' && req.method === 'POST') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const userCfg = getUserConfig(verified)
+        if (!userCfg?.allowOperateCustomMusicDir) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '管理员未允许操作或删除自定义目录中的文件' }))
+          return
+        }
+
+        void readBody(req).then(body => {
+          try {
+            const payload = JSON.parse(body)
+            const rawItems = Array.isArray(payload.items)
+              ? payload.items
+              : (payload.filenames ? (Array.isArray(payload.filenames) ? payload.filenames : [payload.filenames]) : [])
+
+            let deletedCount = 0
+            for (const item of rawItems) {
+              const filename = typeof item === 'string' ? item : item?.filename
+              if (filename && customMusicManager.removeCustomFile(filename, verified)) {
+                deletedCount++
+              }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, deletedCount }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message }))
+          }
+        })
+        return
+      }
+
+      // F. 手动关联自定义目录歌曲
+      if (pathname === '/api/music/custom/link' && req.method === 'POST') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        const userCfg = getUserConfig(verified)
+        if (!userCfg?.allowWriteCustomMusicDir) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '管理员未允许操作自定义目录中的文件' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { filename, songInfo } = JSON.parse(body)
+            if (!filename || !songInfo) {
+              res.writeHead(400, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: 'Missing params' }))
+              return
+            }
+
+            const result = await customMusicManager.linkCustomSong(filename, songInfo, verified)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify(result))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Linking failed' }))
+          }
+        })
+        return
+      }
+
+      // G. 批量补全自定义目录元信息（封面与ID3）
+      if (pathname === '/api/music/custom/updateMetadata' && req.method === 'POST') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+
+        const userCfg = getUserConfig(verified)
+        if (!userCfg?.allowWriteCustomMusicDir) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '管理员未允许写入自定义目录中的歌曲文件' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { filenames } = JSON.parse(body)
+            if (!filenames) throw new Error('Missing filenames')
+            const fileList = Array.isArray(filenames) ? filenames : [filenames]
+            const result = await customMusicManager.batchUpdateMetadata(fileList, verified)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...result }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message }))
+          }
+        })
+        return
+      }
+
+      // H. 批量将歌词嵌入自定义目录音频标签 (USLT)
+      if (pathname === '/api/music/custom/embedLyric' && req.method === 'POST') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+
+        const userCfg = getUserConfig(verified)
+        if (!userCfg?.allowWriteCustomMusicDir) {
+          res.writeHead(403, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '管理员未允许写入自定义目录中的歌曲文件' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { filenames } = JSON.parse(body)
+            if (!filenames || !Array.isArray(filenames)) throw new Error('Missing filenames')
+            const result = await customMusicManager.batchEmbedLyric(filenames, verified)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...result }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message }))
+          }
+        })
+        return
+      }
+      // ===== [结束] Custom Music APIs =====
+
       // [New] Batch Move Files between folders
       if (pathname === '/api/music/cache/move' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
@@ -3556,8 +4083,15 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             const { identifyLocalSong } = require('./utils/identify')
             const username = verified
 
-            // Get absolute path - folder can be 'cache' or 'music'
-            const dir = fileCache.getCacheDir(username, folder === 'music')
+            const dir = folder === 'custom'
+              ? customMusicManager.getCustomMusicDir(username)
+              : fileCache.getCacheDir(username, folder === 'music')
+
+            if (!dir) {
+              res.writeHead(404, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: 'Directory not found' }))
+              return
+            }
             const filePath = path.join(dir, filename) // [Fix] Allow subfolders
 
             if (!fs.existsSync(filePath)) {
@@ -3738,7 +4272,16 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               return
             }
 
-            const success = fileCache.saveLyricCache(songInfo, lyricsObj, username, !!enableOnlyDownloadMode)
+            let success = false
+            if (songInfo?.folder === 'custom') {
+              success = customMusicManager.saveCustomLyricCache(songInfo, lyricsObj, username)
+            } else {
+              success = fileCache.saveLyricCache(songInfo, lyricsObj, username, !!enableOnlyDownloadMode)
+              if (!success) {
+                // 如果在常规缓存没找到，尝试在自定义目录匹配
+                success = customMusicManager.saveCustomLyricCache(songInfo, lyricsObj, username)
+              }
+            }
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success }))
           } catch (e: any) {
@@ -4226,7 +4769,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
           'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'] || false,
           'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'] || false,
-          'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'] || false
+          'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'] || false,
+          'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
+          'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false
         }))
         return
       }
@@ -4513,7 +5058,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           }
 
           try {
-            let { songInfo, quality, enableAutoSwitchApiSource } = JSON.parse(body)
+            let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources } = JSON.parse(body)
             songInfo = normalizeSongInfo(songInfo)
             // console.log('[MusicUrl] Song Info:', JSON.stringify(songInfo, null, 2))
             if (!songInfo || !songInfo.source) {
@@ -4531,7 +5076,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const userApiResult = await callUserApiGetMusicUrl(
                   source, songInfo, quality || '128k', verifiedUsername,
                   (attempt) => { void pushProgress(attempt) },
-                  enableAutoSwitchApiSource !== false
+                  enableAutoSwitchApiSource !== false,
+                  excludeApiSources
                 )
                 result = userApiResult
                 attempts = userApiResult.attempts || []
@@ -5000,6 +5546,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
       if (pathname === '/api/custom-source/reorder' && req.method === 'POST') {
         return customSourceHandlers.handleReorder(req, res)
       }
+      if (pathname === '/api/custom-source/update-platforms' && req.method === 'POST') {
+        return customSourceHandlers.handleUpdatePlatforms(req, res)
+      }
 
       // elFinder 文件管理器连接器
       if (pathname === '/api/elfinder/connector') {
@@ -5181,8 +5730,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'user.enableRoot': global.lx.config['user.enableRoot'],
             'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'],
             'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'],
+            'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
+            'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false,
             'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'],
             'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'],
+            'user.enableCustomMusicDir': global.lx.config['user.enableCustomMusicDir'] ?? false,
             'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
             'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
@@ -5199,11 +5751,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'sync.backupInterval': global.lx.config['sync.backupInterval'] || 24,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
-            'admin.path': global.lx.config['admin.path'] ?? '',
-            'player.path': global.lx.config['player.path'] ?? '/music',
+            'admin.path': global.lx.config['admin.path'] ?? '/music',
+            'player.path': global.lx.config['player.path'] ?? '/',
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
             'subsonic.path': global.lx.config['subsonic.path'] ?? '/rest',
-            'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? true,
+            'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? false,
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
@@ -5211,6 +5763,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
+            configFilePath: process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js'),
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -5234,8 +5787,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['user.enableRoot'] !== undefined) global.lx.config['user.enableRoot'] = newConfig['user.enableRoot']
               if (newConfig['user.enablePublicRestriction'] !== undefined) global.lx.config['user.enablePublicRestriction'] = newConfig['user.enablePublicRestriction']
               if (newConfig['user.enablePublicNonAdminLocalMusic'] !== undefined) global.lx.config['user.enablePublicNonAdminLocalMusic'] = newConfig['user.enablePublicNonAdminLocalMusic']
+              if (newConfig['user.enablePublicNonAdminBrowserDownload'] !== undefined) global.lx.config['user.enablePublicNonAdminBrowserDownload'] = newConfig['user.enablePublicNonAdminBrowserDownload']
+              if (newConfig['user.enablePublicNonAdminServerCache'] !== undefined) global.lx.config['user.enablePublicNonAdminServerCache'] = newConfig['user.enablePublicNonAdminServerCache']
               if (newConfig['user.enablePublicFavorites'] !== undefined) global.lx.config['user.enablePublicFavorites'] = newConfig['user.enablePublicFavorites']
               if (newConfig['user.enablePublicNonAdminAccess'] !== undefined) global.lx.config['user.enablePublicNonAdminAccess'] = newConfig['user.enablePublicNonAdminAccess']
+              if (newConfig['user.enableCustomMusicDir'] !== undefined) global.lx.config['user.enableCustomMusicDir'] = newConfig['user.enableCustomMusicDir']
               if (newConfig['user.enableLoginCacheRestriction'] !== undefined) global.lx.config['user.enableLoginCacheRestriction'] = newConfig['user.enableLoginCacheRestriction']
               if (newConfig['user.enableCacheSizeLimit'] !== undefined) global.lx.config['user.enableCacheSizeLimit'] = newConfig['user.enableCacheSizeLimit']
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
@@ -5277,14 +5833,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
-                const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? ''))
-                const playerPath = (newConfig['player.path'] !== undefined ? newConfig['player.path'] : (global.lx.config['player.path'] ?? '/music'))
+                const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
+                const playerPath = (newConfig['player.path'] !== undefined ? newConfig['player.path'] : (global.lx.config['player.path'] ?? '/'))
                 const normalizedAdmin = adminPath.replace(/\/+$/, '')
                 const normalizedPlayer = playerPath.replace(/\/+$/, '')
 
-                if (!playerPath || !playerPath.startsWith('/')) {
+                if (normalizedPlayer !== '' && !normalizedPlayer.startsWith('/')) {
                   res.writeHead(422, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ success: false, error: '播放器路径不能为空且必须以 / 开头' }))
+                  res.end(JSON.stringify({ success: false, error: '播放器路径必须以 / 开头或为空（代表根路径）' }))
                   return
                 }
                 if (normalizedAdmin !== '' && !normalizedAdmin.startsWith('/')) {
@@ -5352,8 +5908,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'user.enableRoot': global.lx.config['user.enableRoot'],
                 'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'],
                 'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'],
+                'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'],
+                'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'],
                 'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'],
                 'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'],
+                'user.enableCustomMusicDir': global.lx.config['user.enableCustomMusicDir'],
                 'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
                 'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
                 'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
@@ -5373,8 +5932,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'sync.backupInterval': global.lx.config['sync.backupInterval'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
-                'admin.path': global.lx.config['admin.path'] ?? '',
-                'player.path': global.lx.config['player.path'] ?? '/music',
+                'admin.path': global.lx.config['admin.path'] ?? '/admin',
+                'player.path': global.lx.config['player.path'] ?? '/',
                 'subsonic.enable': global.lx.config['subsonic.enable'],
                 'subsonic.path': global.lx.config['subsonic.path'],
                 'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'],
@@ -5391,6 +5950,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                   password: u.password,
                   maxSnapshotNum: u.maxSnapshotNum,
                   'list.addMusicLocationType': u['list.addMusicLocationType'],
+                  enableCustomMusicDir: u.enableCustomMusicDir,
+                  customMusicDir: u.customMusicDir,
+                  allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
                 })),
               }, null, 2)}`
               fs.writeFileSync(configPath, configContent)
@@ -6076,7 +6638,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
   wss = new WebSocketServer({
     noServer: true,
     perMessageDeflate: false,
-  })
+  }) as unknown as LX.SocketServer
 
   // WebDAV Sync Progress Broadcast
   if (global.lx.webdavSync) {
@@ -6093,14 +6655,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         }
       }
       // Broadcast to SSE clients
-      const sseMsg = `data: ${JSON.stringify(data)}\\n\\n`
+      const sseMsg = `data: ${JSON.stringify(data)}\n\n`
       for (const client of sseClients) {
         client.write(sseMsg)
       }
     })
   }
 
-  wss.on('connection', function (socket, request) {
+  wss.on('connection', function (socket: any, request) {
     socket.isReady = false
     socket.moduleReadys = {
       list: false,
@@ -6149,7 +6711,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     socket.remote = msg2call.remote
     socket.remoteQueueList = msg2call.createQueueRemote('list')
     socket.remoteQueueDislike = msg2call.createQueueRemote('dislike')
-    socket.addEventListener('message', ({ data }) => {
+    socket.addEventListener('message', ({ data }: any) => {
       if (typeof data != 'string') return
       void decryptMsg(socket.keyInfo, data).then((data) => {
         let syncData: any
@@ -6192,7 +6754,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         closeEvents.splice(closeEvents.indexOf(handler), 1)
       }
     }
-    socket.broadcast = function (handler) {
+    socket.broadcast = function (handler: any) {
       if (!wss) return
       for (const client of wss.clients) handler(client)
     }
@@ -6238,7 +6800,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     })
   }, 30000)
 
-  wss.on('close', function close() {
+  wss?.on('close', function close() {
     clearInterval(interval)
   })
 

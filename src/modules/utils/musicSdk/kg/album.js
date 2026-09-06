@@ -26,7 +26,7 @@ export default {
 
     return {
       name: albumInfo.album_name,
-      image: albumInfo.sizable_cover.replace('{size}', 240),
+      image: albumInfo.sizable_cover.replace('{size}', '1000'),
       desc: albumInfo.intro,
       authorName: albumInfo.author_name,
       // play_count: this.formatPlayCount(info.count),

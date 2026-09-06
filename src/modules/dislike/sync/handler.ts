@@ -1,5 +1,5 @@
 // 这个文件导出的方法将暴露给客户端调用，第一个参数固定为当前 socket 对象
-// import { throttle } from '@common/utils/common'
+
 // import { sendSyncActionList } from '@main/modules/winMain'
 // import { SYNC_CLOSE_CODE } from '@/constants'
 import { SYNC_CLOSE_CODE } from '@/constants'

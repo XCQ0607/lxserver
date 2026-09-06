@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
     <title>LX Music Sync Server - 管理控制台</title>
     <!-- Config MUST be loaded before PostHog -->
     <script>
@@ -541,6 +542,44 @@
                         </button>
                     </div>
                     <div id="data-stats" class="data-stats"></div>
+                    <div id="data-tabs-container" class="data-tabs-container hidden">
+                        <div class="data-tabs-nav" id="data-tabs-nav">
+                            <button class="data-tab-btn active" data-tab="all" onclick="app.setDataTab('all')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="3" width="7" height="7"></rect>
+                                    <rect x="14" y="14" width="7" height="7"></rect>
+                                    <rect x="3" y="14" width="7" height="7"></rect>
+                                </svg>
+                                <span>全部</span>
+                            </button>
+                            <button class="data-tab-btn" data-tab="playlists" onclick="app.setDataTab('playlists')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9 18V5l12-2v13"></path>
+                                    <circle cx="6" cy="18" r="3"></circle>
+                                    <circle cx="18" cy="16" r="3"></circle>
+                                </svg>
+                                <span>播放列表</span>
+                                <span class="data-tab-count" id="tab-count-playlists">0</span>
+                            </button>
+                            <button class="data-tab-btn" data-tab="albums" onclick="app.setDataTab('albums')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="12" cy="12" r="10"></circle>
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                </svg>
+                                <span>收藏专辑</span>
+                                <span class="data-tab-count" id="tab-count-albums">0</span>
+                            </button>
+                            <button class="data-tab-btn" data-tab="artists" onclick="app.setDataTab('artists')">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
+                                    <circle cx="12" cy="7" r="4"></circle>
+                                </svg>
+                                <span>收藏歌手</span>
+                                <span class="data-tab-count" id="tab-count-artists">0</span>
+                            </button>
+                        </div>
+                    </div>
                     <div id="data-content" class="data-content"></div>
                 </div>
 
@@ -687,6 +726,49 @@
                             </div>
                         </div>
 
+                        <!-- 自定义歌曲目录卡片 -->
+                        <div class="config-card glass">
+                            <div class="config-card-header">
+                                <div class="config-card-icon"
+                                    style="background: linear-gradient(135deg, #ec4899, #db2777);">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                        <path d="M9 14l2 2 4-4"></path>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="config-card-title">自定义歌曲目录</h3>
+                                    <p class="config-card-desc">配置服务器存放本地音频文件的目录</p>
+                                </div>
+                            </div>
+                            <div class="config-card-body">
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">启用自定义歌曲目录</span>
+                                        <span class="config-toggle-desc">开启后将优先使用自定义目录加载与存放歌曲</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="user.enableCustomMusicDir" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div style="font-size: 0.825rem; color: var(--text-secondary, #94a3b8); line-height: 1.6;">
+                                    <div style="font-weight: 600; margin-bottom: 0.35rem; color: var(--text-primary, #f8fafc);">💡 目录配置说明</div>
+                                    <p style="margin: 0 0 0.5rem 0;">不同系统路径结构参考：</p>
+                                    <ul style="margin: 0 0 0.75rem 1.2rem; padding: 0;">
+                                        <li><b>Windows:</b> <code>D:/Music</code> 或 <code>C:\Users\Username\Music</code></li>
+                                        <li><b>Linux / macOS:</b> <code>/home/user/music</code> 或 <code>/var/music</code></li>
+                                        <li><b>Docker:</b> 需先挂载容器目录，如 <code>/app/music</code></li>
+                                    </ul>
+                                    <div style="padding: 0.5rem 0.75rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px dashed rgba(255, 255, 255, 0.15); word-break: break-all;">
+                                        配置文件参考路径 (config.js): <br/>
+                                        <code id="config-js-path-ref" style="color: #38bdf8;">--</code>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
                         <!-- WebDAV 配置卡片 -->
                         <div id="config-card-webdav" class="config-card glass">
                             <div class="config-card-header">
@@ -756,8 +838,8 @@
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">全量备份间隔（小时）</label>
-                                    <input type="number" name="sync.backupInterval" class="form-input config-input" value="24"
-                                        min="1" />
+                                    <input type="number" name="sync.backupInterval" class="form-input config-input"
+                                        value="24" min="1" />
                                     <small class="config-hint">用于定时自动创建 ZIP 全量备份包并上传至云端</small>
                                 </div>
                             </div>
@@ -864,7 +946,8 @@
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div id="public-non-admin-local-music-wrapper" style="display: none; margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 8px;">
+                                <div id="public-non-admin-local-music-wrapper"
+                                    style="display: none; margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 8px;">
                                     <div class="config-divider" style="margin: 8px 0;"></div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
@@ -876,19 +959,43 @@
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
+                                    <div class="config-divider" style="margin: 8px 0;"></div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">开启非管理员浏览器下载</span>
+                                            <span class="config-toggle-desc">允许未登录管理员的公开账号使用浏览器下载歌曲</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="user.enablePublicNonAdminBrowserDownload" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="config-divider" style="margin: 8px 0;"></div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">开启非管理员服务器缓存</span>
+                                            <span class="config-toggle-desc">允许未登录管理员的公开账号将歌曲缓存或写入服务器存储</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="user.enablePublicNonAdminServerCache" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
                                 </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">开启公开收藏和歌曲</span>
-                                        <span class="config-toggle-desc">开启后允许登陆管理员的情况下对公开用户创建公开收藏与本地音乐歌单文件（说明：只有登录管理员后才可以管理收藏歌单和本地歌单）</span>
+                                        <span
+                                            class="config-toggle-desc">开启后允许登陆管理员的情况下对公开用户创建公开收藏与本地音乐歌单文件（说明：只有登录管理员后才可以管理收藏歌单和本地歌单）</span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="user.enablePublicFavorites" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div id="public-non-admin-access-wrapper" style="display: none; margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 8px;">
+                                <div id="public-non-admin-access-wrapper"
+                                    style="display: none; margin-left: 20px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 8px;">
                                     <div class="config-divider" style="margin: 8px 0;"></div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
@@ -932,7 +1039,9 @@
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">允许 VM 模式运行脚本</span>
-                                        <span class="config-toggle-desc">允许某些需要原生 VM 模式运行以突破沙盒限制的自定义音源脚本（如部分混淆脚本）。<strong style="color: #ef4444;">警告：原生 VM 模式不具备沙盒安全性，可能导致服务器被执行任意系统命令，请仅在信任脚本来源时开启。</strong></span>
+                                        <span class="config-toggle-desc">允许某些需要原生 VM
+                                            模式运行以突破沙盒限制的自定义音源脚本（如部分混淆脚本）。<strong style="color: #ef4444;">警告：原生 VM
+                                                模式不具备沙盒安全性，可能导致服务器被执行任意系统命令，请仅在信任脚本来源时开启。</strong></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="system.allowUnsafeVM" />
@@ -972,7 +1081,8 @@
                                 <div class="config-toggle-row" style="margin-top: 12px;">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">Subsonic 调试日志模式</span>
-                                        <span class="config-toggle-desc">开启后将在服务器控制台中实时打印所有客户端发起的 Subsonic 请求与缺失接口提示</span>
+                                        <span class="config-toggle-desc">开启后将在服务器控制台中实时打印所有客户端发起的 Subsonic
+                                            请求与缺失接口提示</span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.enableDebug" />
@@ -1006,8 +1116,8 @@
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">默认在线搜索平台</label>
-                                    <input type="text" name="subsonic.onlineSearchSources" class="form-input config-input"
-                                        placeholder="wy,tx,kw,kg,mg" />
+                                    <input type="text" name="subsonic.onlineSearchSources"
+                                        class="form-input config-input" placeholder="wy,tx,kw,kg,mg" />
                                     <small class="config-hint">可选 wy,tx,kw,kg,mg，用英文逗号分隔</small>
                                 </div>
                                 <div class="config-toggle-row">
@@ -1021,9 +1131,14 @@
                                     </label>
                                 </div>
                                 <div class="config-divider"></div>
-                                <div class="config-hint" style="background: rgba(244, 63, 94, 0.06); padding: 8px 12px; border-radius: 6px; color: var(--text-secondary); line-height: 1.5;">
-                                    💡 <strong>客户端搜索与歌词提示：</strong>同时间戳歌词顺序为<strong>原文在上，翻译在下</strong>。<br/>
-                                    • <code>wy:歌名</code> / <code>tx:歌名</code> ➔ 客户端搜索框输入前缀可强制在线搜索平台
+                                <div class="config-hint"
+                                    style="background: rgba(244, 63, 94, 0.06); padding: 8px 12px; border-radius: 6px; color: var(--text-secondary); line-height: 1.5;">
+                                    💡 <strong>Subsonic 客户端搜索：</strong>直接输入歌曲名时使用上方“默认在线搜索模式”。也可在搜索框中使用以下前缀：<br />
+                                    • <code>all:歌名</code> / <code>online:歌名</code>：搜索全部已启用在线平台<br />
+                                    • <code>local:歌名</code>：只搜索本地歌单<br />
+                                    •
+                                    <code>wy:歌名</code>、<code>tx:歌名</code>、<code>kw:歌名</code>、<code>kg:歌名</code>、<code>mg:歌名</code>：指定网易、QQ、酷我、酷狗或咪咕<br />
+                                    客户端支持音乐目录时，也可选择“全部在线平台”或单个平台目录后再搜索。同时间戳歌词顺序为<strong>原文在上，翻译在下</strong>。
                                 </div>
                                 <div class="config-divider"></div>
                                 <div class="config-field">
@@ -1362,21 +1477,59 @@
     <div id="rename-user-modal" class="modal hidden">
         <div class="modal-content glass">
             <div class="modal-header">
-                <h3>修改用户名</h3>
+                <h3>用户配置</h3>
                 <button class="modal-close">×</button>
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>新用户名</label>
-                    <input type="text" id="rename-user-input" class="form-input" placeholder="请输入新用户名">
+                    <label>用户名</label>
+                    <input type="text" id="rename-user-input" class="form-input" placeholder="请输入用户名">
                 </div>
-                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 10px;">
+                <div class="config-toggle-row" style="margin-top: 15px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                    <div class="config-toggle-info">
+                        <span class="config-toggle-label" style="font-weight: 500;">启用此用户自定义歌曲目录</span>
+                        <span class="config-toggle-desc" style="font-size: 0.75rem; color: var(--text-secondary);">为该用户指定独立的本地音乐存储目录</span>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" id="user-custom-dir-enable-toggle" />
+                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                    </label>
+                </div>
+                <div id="user-custom-dir-container" class="form-group hidden" style="margin-top: 15px;">
+                    <label>自定义歌曲目录地址</label>
+                    <div class="config-input-group">
+                        <input type="text" id="user-custom-dir-input" class="form-input" placeholder="例如 D:/Music 或 /var/music">
+                        <button type="button" id="test-user-custom-dir-btn" class="btn-secondary config-inline-btn">检测</button>
+                    </div>
+                    <div id="user-custom-dir-status" style="font-size: 0.75rem; margin-top: 6px; min-height: 1.1em;"></div>
+                    <div class="config-toggle-row" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">
+                        <div class="config-toggle-info">
+                            <span class="config-toggle-label" style="font-weight: 500;">允许操作目录歌曲</span>
+                            <span class="config-toggle-desc" style="font-size: 0.75rem; color: var(--text-secondary);">允许该用户对自定义目录中的歌曲/分类进行添加、编辑与删除操作</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="user-custom-dir-operate-toggle" />
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </label>
+                    </div>
+                    <div class="config-toggle-row" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">
+                        <div class="config-toggle-info">
+                            <span class="config-toggle-label" style="font-weight: 500;">允许写入歌曲文件</span>
+                            <span class="config-toggle-desc" style="font-size: 0.75rem; color: var(--text-secondary);">允许该用户对自定义目录中的歌曲手动关联、批量更新元数据及批量嵌入歌词</span>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="user-custom-dir-write-toggle" />
+                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                        </label>
+                    </div>
+                </div>
+                <p style="font-size: 0.8rem; color: var(--text-secondary); margin-top: 15px;">
                     ⚠️ 修改用户名将导致所有已连接设备断开，且文件夹名会随之更改，同步过程数据将短暂离线。
                 </p>
             </div>
             <div class="modal-footer">
                 <button class="btn-secondary modal-close">取消</button>
-                <button id="save-rename-user-btn" class="btn-primary">保存</button>
+                <button id="save-rename-user-btn" class="btn-primary">确定</button>
             </div>
         </div>
     </div>

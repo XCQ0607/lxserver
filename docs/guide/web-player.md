@@ -1,6 +1,6 @@
 # Web 播放器使用指南
 
-LX Music Sync Server 在路由 `/music` 提供了一个现代化的 Web 音乐播放器。可以实现远程播放、搜索和多端同步交互。
+LX Music Sync Server 默认在服务根路由 `/` 提供了一个现代化的 Web 音乐播放器（也可通过 `PLAYER_PATH` 自定义为 `/music` 等路径）。可以实现远程播放、搜索和多端同步交互。
 
 ## 核心功能清单
 
@@ -18,8 +18,8 @@ LX Music Sync Server 在路由 `/music` 提供了一个现代化的 Web 音乐�
 
 ## 访问播放器
 
-默认访问地址：
-**示例**：`http://IP:9527/music`
+默认访问地址（根路径）：
+**示例**：`http://IP:9527` (或根据配置 `http://IP:9527/music`)
 
 如果管理员在服务器环境变量中设置了 `ENABLE_WEBPLAYER_AUTH = true`，则每次打开该页面时必须输入设定的 `WEBPLAYER_PASSWORD` 才能进入播放界面。
 

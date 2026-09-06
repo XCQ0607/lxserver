@@ -21,6 +21,26 @@ declare namespace LX {
      * 添加歌曲到我的列表时的方式
      */
     'list.addMusicLocationType'?: AddMusicLocationType
+
+    /**
+     * 是否启用此用户自定义歌曲目录
+     */
+    enableCustomMusicDir?: boolean
+
+    /**
+     * 自定义歌曲目录路径
+     */
+    customMusicDir?: string
+
+    /**
+     * 是否允许操作目录歌曲（如添加、修改、删除歌曲或分类）
+     */
+    allowOperateCustomMusicDir?: boolean
+
+    /**
+     * 是否允许写入歌曲文件（如手动关联、批量更新元数据、批量嵌入歌词）
+     */
+    allowWriteCustomMusicDir?: boolean
   }
 
   interface UserConfig extends User {
@@ -76,6 +96,16 @@ declare namespace LX {
      * 是否开启非管理员访问本地音乐
      */
     'user.enablePublicNonAdminLocalMusic'?: boolean
+
+    /**
+     * 是否开启非管理员浏览器下载
+     */
+    'user.enablePublicNonAdminBrowserDownload'?: boolean
+
+    /**
+     * 是否开启非管理员服务器缓存
+     */
+    'user.enablePublicNonAdminServerCache'?: boolean
 
     /**
      * 是否开启公开收藏和歌曲
@@ -171,6 +201,11 @@ declare namespace LX {
     'player.password'?: string
 
     /**
+     * 是否启用自定义歌曲目录
+     */
+    'user.enableCustomMusicDir'?: boolean
+
+    /**
      * 是否启用针对所有外发请求的代理 (目前主要用于 Music SDK)
      */
     'proxy.all.enabled'?: boolean
@@ -186,12 +221,12 @@ declare namespace LX {
     disableTelemetry?: boolean
 
     /**
-     * 后台管理界面访问路径，默认为空字符串（表示根路径 /）
+     * 后台管理界面访问路径，默认为 /admin
      */
     'admin.path'?: string
 
     /**
-     * Web播放器访问路径，默认为 /music
+     * Web播放器访问路径，默认为空字符串（表示根路径 /）
      */
     'player.path'?: string
 
@@ -206,7 +241,7 @@ declare namespace LX {
     'subsonic.path'?: string
 
     /**
-     * 是否开启 Subsonic 调试日志模式 (默认 false/true)
+     * 是否开启 Subsonic 调试日志模式 (默认 false)
      */
     'subsonic.enableDebug'?: boolean
 

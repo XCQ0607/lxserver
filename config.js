@@ -45,9 +45,21 @@ module.exports = {
   // 环境变量: ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC (true/false)
   "user.enablePublicNonAdminLocalMusic": false,
 
+  // 是否开启非管理员浏览器下载 (开启后允许未登录管理员的公开/普通账号使用浏览器下载歌曲)
+  // 环境变量: ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD (true/false)
+  "user.enablePublicNonAdminBrowserDownload": true,
+
+  // 是否开启非管理员服务器缓存 (开启后允许未登录管理员的公开/普通账号将歌曲缓存或写入服务器存储)
+  // 环境变量: ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE (true/false)
+  "user.enablePublicNonAdminServerCache": false,
+
   // 是否开启非管理员访问公开收藏和歌曲 (开启后允许未登录管理员的公开账号查看公开收藏和歌曲)
   // 环境变量: ENABLE_PUBLIC_NON_ADMIN_ACCESS (true/false)
   "user.enablePublicNonAdminAccess": false,
+
+  // 是否启用自定义歌曲目录 (开启后使用自定义歌曲目录)
+  // 环境变量: ENABLE_CUSTOM_MUSIC_DIR (true/false)
+  "user.enableCustomMusicDir": false,
 
   // 是否启用登录用户缓存限制 (开启后将限制非管理员登录用户的核心缓存设置)
   // 环境变量: ENABLE_LOGIN_USER_CACHE_RESTRICTION (true/false)
@@ -65,7 +77,7 @@ module.exports = {
   // 环境变量: MAX_SNAPSHOT_NUM
   "maxSnapshotNum": 10,
 
-  // 添加歌曲到列表时的位置 (top: 顶部, bottom: 底部)
+  // 添加歌曲到列表时的位置，Web 播放器与 Subsonic API 均使用此配置 (top: 顶部, bottom: 底部)
   // 环境变量: LIST_ADD_MUSIC_LOCATION_TYPE
   "list.addMusicLocationType": "top",
 
@@ -80,6 +92,13 @@ module.exports = {
 
   // 用户列表
   // 环境变量: LX_USER_<用户名>=<密码> (例如: LX_USER_user1=123456)
+  // 也可以在这里为特定用户配置独立的高级选项，例如：
+  // "enableCustomMusicDir": false, // 是否启用此用户自定义歌曲目录
+  // "customMusicDir": "", // 自定义歌曲目录绝对路径
+  // "allowOperateCustomMusicDir": false, // 允许操作目录歌曲（如删除歌曲、洗版）
+  // "allowWriteCustomMusicDir": false, // 允许写入歌曲文件（如手动关联、批量更新元数据、批量嵌入歌词）
+  // "maxSnapshotNum": 10, // 最大备份快照数
+  // "list.addMusicLocationType": "top" // 添加歌曲到列表时的位置 (top | bottom)
   "users": [
     {
       "name": "admin",
@@ -136,13 +155,13 @@ module.exports = {
   // 环境变量: PROXY_ALL_ADDRESS (例如: http://127.0.0.1:7890)
   "proxy.all.address": "",
 
-  // 后台管理界面访问路径（默认为空，即根路径 /）
+  // 后台管理界面访问路径（默认为 /admin）
   // 环境变量: ADMIN_PATH
-  "admin.path": "",
+  "admin.path": "/admin",
 
-  // Web播放器访问路径（默认为 /music）
+  // Web播放器访问路径（默认为根路径 /）
   // 环境变量: PLAYER_PATH
-  "player.path": "/music",
+  "player.path": "/",
 
   // Subsonic 协议配置
   // 是否启用 Subsonic 协议支持 (服务默认开启)
@@ -153,24 +172,24 @@ module.exports = {
   // 环境变量: SUBSONIC_PATH
   "subsonic.path": "/rest",
 
-  // 是否开启 Subsonic 调试日志模式
-  // 环境变量: 无
-  "subsonic.enableDebug": true,
+  // 是否开启 Subsonic 调试日志模式 (默认关闭)
+  // 环境变量: SUBSONIC_ENABLE_DEBUG
+  "subsonic.enableDebug": false,
 
   // 是否开启 Subsonic 在线全网搜索
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_ONLINE_SEARCH
   "subsonic.onlineSearch": true,
 
   // Subsonic 在线搜索模式 (fallback: 回退模式, merge: 合并模式, local_only: 仅本地)
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_ONLINE_SEARCH_MODE
   "subsonic.onlineSearchMode": "fallback",
 
   // Subsonic 在线搜索默认平台
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_ONLINE_SEARCH_SOURCES
   "subsonic.onlineSearchSources": "wy,tx,kw,kg,mg",
 
   // 是否在 Subsonic 歌词中包含翻译
-  // 环境变量: 无
+  // 环境变量: SUBSONIC_LYRIC_TRANSLATION
   "subsonic.lyricTranslation": true,
 
   // 歌手信息源优先级 (多个源用逗号分隔，如 tx,wy)
@@ -181,14 +200,14 @@ module.exports = {
   ],
 
   // 歌手歌曲最大抓取页数
-  // 环境变量: 无
+  // 环境变量: ARTIST_MAX_FETCH_PAGES
   "artist.maxFetchPages": 20,
 
   // 缓存文件命名规则 (simple / custom)
-  // 环境变量: 无
+  // 环境变量: CACHE_NAMING_PATTERN
   "cache.namingPattern": "simple",
 
   // 是否允许运行 VM 模式自定义源脚本 (默认关闭)
-  // 环境变量: 无
+  // 环境变量: SYSTEM_ALLOW_UNSAFE_VM
   "system.allowUnsafeVM": false
 }

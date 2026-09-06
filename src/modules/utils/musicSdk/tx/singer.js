@@ -22,8 +22,8 @@ export const filterMusicInfoItem = item => {
     songmid: item.mid,
     strMediaMid: item.file.media_mid,
     img: (albumId === '' || albumId === '空')
-      ? item.singer?.length ? `https://y.gtimg.cn/music/photo_new/T001R500x500M000${item.singer[0].mid}.jpg` : ''
-      : `https://y.gtimg.cn/music/photo_new/T002R500x500M000${albumMid}.jpg`,
+      ? item.singer?.length ? `https://y.gtimg.cn/music/photo_new/T001R800x800M000${item.singer[0].mid}.jpg` : ''
+      : `https://y.gtimg.cn/music/photo_new/T002R800x800M000${albumMid}.jpg`,
     types,
     _types,
     typeUrl: {},
@@ -189,7 +189,7 @@ export default {
         info: {
           name: item.album_name || item.albumName,
           author: item.singer_name || item.singerName,
-          img: `https://y.gtimg.cn/music/photo_new/T002R500x500M000${item.album_mid || item.albumMid}.jpg`,
+          img: `https://y.gtimg.cn/music/photo_new/T002R800x800M000${item.album_mid || item.albumMid}.jpg`,
           desc: null,
           publishTime: item.pub_time || '',
         },

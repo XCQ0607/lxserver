@@ -43,9 +43,18 @@ window.LocalMusicManager = {
     remasterSelectionEventsBound: false,
     remasterQualityEventsBound: false,
     remasterTaskRunning: false,
+    remasterSource: 'local', // 'local' | 'custom' — 洗版模态框内部数据源，与外部 toggle 解耦
     authExpired: false,
     authExpiredNotified: false,
     coverRenderTimer: null,
+    isCustomDirMode: false,
+
+    toggleCustomDirMode(enable) {
+        this.isCustomDirMode = !!enable;
+        if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
+            window.CustomDirManager.setActive(enable);
+        }
+    },
 
     escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -524,6 +533,7 @@ window.LocalMusicManager = {
 
     getSearchValues(item, includeQuality = false) {
         const values = [item.name, item.singer, item.album, item.filename];
+        if (item.subPath) values.push(item.subPath);
         if (includeQuality) values.push(item.quality);
         return values;
     },
@@ -546,6 +556,7 @@ window.LocalMusicManager = {
         if (!container) return;
         this.listEventsBound = true;
         container.addEventListener('click', (event) => {
+            if (this.isCustomDirMode) return;
             const target = event.target.closest('[data-lm-action]');
             if (!target || !container.contains(target)) return;
             const index = parseInt(target.dataset.lmIndex || '', 10);
@@ -555,6 +566,9 @@ window.LocalMusicManager = {
                     break;
                 case 'download':
                     this.downloadSingle(index);
+                    break;
+                case 'playlist':
+                    this.addItemToPlaylist(index);
                     break;
                 case 'delete':
                     this.deleteSingle(index);
@@ -568,6 +582,7 @@ window.LocalMusicManager = {
             }
         });
         container.addEventListener('change', (event) => {
+            if (this.isCustomDirMode) return;
             const target = event.target;
             if (!target.matches('[data-lm-action="select"]')) return;
             this.toggleSelect(parseInt(target.dataset.lmIndex || '', 10), target.checked);
@@ -609,12 +624,19 @@ window.LocalMusicManager = {
 
                 // Update UI elements
                 if (document.getElementById('lm-search-input')) this.setRichInputValue(document.getElementById('lm-search-input'), this.searchKeyword);
-                if (document.getElementById('lm-sort-by')) document.getElementById('lm-sort-by').value = this.sortBy;
-                if (document.getElementById('lm-sort-order')) document.getElementById('lm-sort-order').value = this.sortOrder;
-                if (document.getElementById('lm-folder-select')) {
-                    document.getElementById('lm-folder-select').value = this.filterFolder;
-                    this._syncSelectActive('lm-folder-select');
-                }
+                
+                ['lm-sort-by', 'lm-sort-order', 'lm-folder-select'].forEach(id => {
+                    const el = document.getElementById(id);
+                    if (!el) return;
+                    if (id === 'lm-sort-by') el.value = this.sortBy;
+                    if (id === 'lm-sort-order') el.value = this.sortOrder;
+                    if (id === 'lm-folder-select') el.value = this.filterFolder;
+                    this._syncSelectActive(id);
+                    if (window.CustomSelectManager && typeof window.CustomSelectManager.syncUI === 'function') {
+                        window.CustomSelectManager.syncUI(el);
+                    }
+                });
+
                 // 标签按钮 UI 更新
                 this._syncTagUI('lm-quality-tags', this.filterQuality);
                 this._syncTagUI('lm-source-tags', this.filterSource);
@@ -686,6 +708,10 @@ window.LocalMusicManager = {
 
     isViewingPublicSongs: false,
 
+    getCurrentUsername() {
+        return this.isViewingPublicSongs ? '_open' : ((window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open');
+    },
+
     togglePublicSongs() {
         this.isViewingPublicSongs = !this.isViewingPublicSongs;
         this.syncPublicSongsBtn();
@@ -704,12 +730,15 @@ window.LocalMusicManager = {
         const isLoggedIn = typeof window.isUserLoggedIn === 'function' ? window.isUserLoggedIn() : false;
         if (enablePublicFavorites && (isLoggedIn || isAdmin || enablePublicNonAdminAccess)) {
             btn.classList.remove('hidden');
+            const label = this.isViewingPublicSongs ? '公开歌曲 (已开启)' : '公开歌曲';
+            btn.title = label;
+            const baseClass = 'text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg transition-all inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit';
             if (this.isViewingPublicSongs) {
-                btn.className = 'text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-emerald-500 text-white shadow-sm transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer';
-                btn.innerHTML = '<i class="fas fa-globe text-[10px]"></i><span>公开歌曲 (已开启)</span>';
+                btn.className = `${baseClass} bg-emerald-500 text-white shadow-sm`;
+                btn.innerHTML = `<i class="fas fa-globe text-[10px]"></i><span class="hidden sm:inline md:hidden 2xl:inline">${label}</span>`;
             } else {
-                btn.className = 'text-[9px] md:text-[10px] font-bold px-2 py-0.5 rounded-lg bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500 transition-all flex items-center gap-1 order-4 md:order-3 cursor-pointer';
-                btn.innerHTML = '<i class="fas fa-globe text-[10px]"></i><span>公开歌曲</span>';
+                btn.className = `${baseClass} bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500`;
+                btn.innerHTML = `<i class="fas fa-globe text-[10px]"></i><span class="hidden sm:inline md:hidden 2xl:inline">${label}</span>`;
             }
         } else {
             btn.classList.add('hidden');
@@ -720,7 +749,7 @@ window.LocalMusicManager = {
         // Initialization can run when the tab is clicked, or immediately.
         // Try reading global cache location to sync the selector.
         this.syncLocationSelector();
-        this.resetFilters(false);
+        this.loadFilters();
         this.bindListEvents();
         this.syncPublicSongsBtn();
         this.fetchData();
@@ -729,10 +758,12 @@ window.LocalMusicManager = {
         // Listen to tab switch to trigger refresh if we are on this tab
         const origSwitchTab = window.switchTab;
         window.switchTab = function (tabId) {
-            origSwitchTab(tabId);
+            if (typeof origSwitchTab === 'function') {
+                origSwitchTab(tabId);
+            }
             if (tabId === 'localmusic') {
                 window.LocalMusicManager.syncLocationSelector();
-                window.LocalMusicManager.resetFilters();
+                window.LocalMusicManager.loadFilters();
                 window.LocalMusicManager.syncPublicSongsBtn();
                 window.LocalMusicManager.fetchData(true); // silent fetch
             } else {
@@ -1167,8 +1198,12 @@ window.LocalMusicManager = {
     },
 
     changePage(delta) {
+        this.goToPage(this.currentPage + delta);
+    },
+
+    goToPage(page) {
         const totalPages = this.getTotalPages();
-        const nextPage = Math.min(totalPages, Math.max(1, this.currentPage + delta));
+        const nextPage = page === 'last' ? totalPages : Math.min(totalPages, Math.max(1, Number(page) || 1));
         if (nextPage === this.currentPage) return;
         this.currentPage = nextPage;
         this.render();
@@ -1179,8 +1214,10 @@ window.LocalMusicManager = {
     updatePagination() {
         const pagination = document.getElementById('lm-pagination');
         const info = document.getElementById('lm-page-info');
+        const first = document.getElementById('lm-page-first');
         const prev = document.getElementById('lm-page-prev');
         const next = document.getElementById('lm-page-next');
+        const last = document.getElementById('lm-page-last');
         if (!pagination) return;
 
         const total = this.displayData.length;
@@ -1194,8 +1231,10 @@ window.LocalMusicManager = {
         }
 
         if (info) info.textContent = `第 ${this.currentPage} / ${totalPages} 页 (${total} 首)`;
+        if (first) first.disabled = this.currentPage <= 1;
         if (prev) prev.disabled = this.currentPage <= 1;
         if (next) next.disabled = this.currentPage >= totalPages;
+        if (last) last.disabled = this.currentPage >= totalPages;
     },
 
     render() {
@@ -1233,7 +1272,7 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = this.isViewingPublicSongs ? '_open' : ((window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open');
+        const username = this.getCurrentUsername();
         const page = this.getPageSlice();
         this.updatePagination();
 
@@ -1315,47 +1354,56 @@ window.LocalMusicManager = {
                 </div>
 
                 <!-- Song & Cover -->
-                <div class="col-span-8 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0 pr-2">
+                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0 pr-2">
                     ${coverHtml}
-                    <div class="min-w-0 flex-1 truncate">
+                    <div class="min-w-0 flex-1">
+                        <!-- Song Name -->
                         <div class="font-bold text-sm md:text-base t-text-main truncate group-hover:text-emerald-500 transition-colors cursor-pointer" data-lm-action="play" data-lm-index="${index}">
                             ${safeName}
                         </div>
-                        <div class="text-[10px] md:text-xs t-text-muted mt-0.5 truncate flex items-center gap-1.5 flex-wrap">
-                            <span class="sm:hidden font-medium text-emerald-600/70 mr-0.5">${safeSinger}</span>
-                            <span class="px-1.5 py-[1px] rounded-md border t-border-main ${qualityClass} scale-90 origin-left inline-block">${this.escapeHtml(qualityName || '标准')}</span>
-                            ${item.bitrate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block">${Math.round(item.bitrate)}kbps</span>` : ''}
-                            ${item.sampleRate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block">${(item.sampleRate / 1000).toFixed(1)}kHz</span>` : ''}
-                            ${item.bitDepth && item.bitDepth > 16 ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block">${item.bitDepth}bit</span>` : ''}
+                        
+                        <!-- Row 2: Singer (mobile only) + Quality badge + Audio specs (desktop only) + Lyric/Cover badges (desktop only) -->
+                        <div class="text-[11px] md:text-xs t-text-muted mt-0.5 flex items-center gap-1.5 min-w-0 flex-nowrap">
+                            <span class="sm:hidden font-medium text-emerald-600/80 truncate max-w-[105px] xs:max-w-[140px] shrink min-w-0" title="${safeSinger}">${safeSinger}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[9px] border t-border-main ${qualityClass} shrink-0 leading-none font-medium">${this.escapeHtml(qualityName || '标准')}</span>
+                            ${item.bitrate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${Math.round(item.bitrate)}kbps</span>` : ''}
+                            ${item.sampleRate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${(item.sampleRate / 1000).toFixed(1)}kHz</span>` : ''}
+                            ${item.bitDepth && item.bitDepth > 16 ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${item.bitDepth}bit</span>` : ''}
                             ${lyricStatusBadge}
-                            ${item.hasCover ? `<span class="text-[10px] text-emerald-500 border border-gray-400/40 dark:border-gray-600/50 rounded px-1 scale-90 hidden sm:inline-block" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
+                            ${item.hasCover ? `<span class="text-[10px] text-emerald-500 border border-gray-400/40 dark:border-gray-600/50 rounded px-1 scale-90 hidden sm:inline-block shrink-0" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
                         </div>
-                        <!-- Mobile extra info (second row) -->
-                        <div class="sm:hidden text-[9px] mt-1.5 flex items-center gap-1.5 flex-wrap">
-                            <div class="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100/80 dark:bg-gray-800/80 rounded-full t-text-muted">
+
+                        <!-- Row 3: Mobile & Tablet extra info (hidden on md/lg desktop where dedicated column exists) -->
+                        <div class="md:hidden text-[9px] mt-1 flex items-center gap-1 min-w-0 flex-nowrap overflow-x-auto no-scrollbar">
+                            <!-- Source Tag -->
+                            <div class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-100/90 dark:bg-gray-800/90 rounded-full t-text-muted shrink-0 leading-none">
                                 ${folderIcon}
-                                <span class="font-bold uppercase tracking-tighter" title="${safeSourceTitle}">${safeSource}</span>
+                                <span class="font-bold uppercase tracking-tight text-[9px]" title="${safeSourceTitle}">${safeSource}</span>
                             </div>
                             
-                            ${item.subPath ? `<span class="t-text-muted opacity-50 truncate max-w-[60px] italic">${safeSubPath}</span>` : ''}
+                            <!-- SubPath (if any) -->
+                            ${item.subPath ? `<span class="t-text-muted opacity-50 truncate max-w-[50px] sm:max-w-[80px] italic text-[9px] shrink min-w-0" title="${safeSubPath}">${safeSubPath}</span>` : ''}
                             
-                            <div class="flex items-center gap-1">
-                                ${missingID3 ? '<span class="px-1 py-0 bg-red-50 text-red-500 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30 rounded-sm font-medium">缺标签</span>' : ''}
-                                ${missingCover ? '<span class="px-1 py-0 bg-orange-50 text-orange-500 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30 rounded-sm font-medium">缺封面</span>' : ''}
-                                ${missingLyric ? '<span class="px-1 py-0 bg-yellow-50 text-yellow-600 border border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-900/30 rounded-sm font-medium">缺词</span>' : ''}
-                                ${(!missingID3 && !missingCover && !missingLyric) ? '<span class="px-1 py-0 bg-emerald-50 text-emerald-600 border border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded-sm font-medium">完整</span>' : ''}
+                            <!-- Status Badges -->
+                            <div class="flex items-center gap-1 shrink-0">
+                                ${missingID3 ? '<span class="px-1.5 py-0.5 bg-red-50 text-red-500 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30 rounded text-[9px] font-medium leading-none shrink-0">缺标签</span>' : ''}
+                                ${missingCover ? '<span class="px-1.5 py-0.5 bg-orange-50 text-orange-500 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30 rounded text-[9px] font-medium leading-none shrink-0">缺封面</span>' : ''}
+                                ${missingLyric ? '<span class="px-1.5 py-0.5 bg-yellow-50 text-yellow-600 border border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-900/30 rounded text-[9px] font-medium leading-none shrink-0">缺词</span>' : ''}
+                                ${(!missingID3 && !missingCover && !missingLyric) ? '<span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded text-[9px] font-medium leading-none shrink-0">完整</span>' : ''}
                             </div>
 
+                            <!-- Manual Link Button -->
                             ${(isUnindexed || this.enableReMapping) ? `
                                 <button data-lm-action="manual" data-lm-index="${index}"
-                                        class="px-1.5 py-0.5 bg-emerald-500 text-white rounded-md font-bold shadow-sm shadow-emerald-500/20 active:scale-95 transition-all flex items-center gap-1">
-                                    <i class="fas fa-link text-[8px]"></i>关联
+                                        class="px-1.5 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded font-bold shadow-sm shadow-emerald-500/20 active:scale-95 transition-all inline-flex items-center gap-0.5 shrink-0 text-[9px] leading-none" title="手动关联">
+                                    <i class="fas fa-link text-[7px]"></i>关联
                                 </button>
                             ` : ''}
                             
-                            <div class="ml-auto flex items-center gap-1">
-                                ${item.hasEmbedLyric ? '<span class="w-4 h-4 flex items-center justify-center bg-emerald-500 text-white rounded text-[8px] font-bold shadow-sm shadow-emerald-500/20" title="已嵌入歌词标签">词</span>' : (metadataUnsupported && item.hasLyric ? `<span class="h-4 px-1 flex items-center justify-center bg-amber-500 text-white rounded text-[8px] font-bold" title="${this.escapeAttr(item.embedLyricError || item.metadataError || '音频容器不支持嵌入歌词，已保留外置歌词')}">外置词</span>` : '')}
-                                ${item.hasCover ? `<span class="w-4 h-4 flex items-center justify-center bg-blue-500 text-white rounded text-[8px] font-bold shadow-sm shadow-blue-500/20" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
+                            <!-- Embed Lyric & Cover Badges -->
+                            <div class="flex items-center gap-1 shrink-0">
+                                ${item.hasEmbedLyric ? '<span class="w-3.5 h-3.5 inline-flex items-center justify-center bg-emerald-500 text-white rounded text-[8px] font-bold shadow-sm shadow-emerald-500/20 shrink-0 leading-none" title="已嵌入歌词标签">词</span>' : (metadataUnsupported && item.hasLyric ? `<span class="h-3.5 px-1 inline-flex items-center justify-center bg-amber-500 text-white rounded text-[8px] font-bold shrink-0 leading-none" title="${this.escapeAttr(item.embedLyricError || item.metadataError || '音频容器不支持嵌入歌词，已保留外置歌词')}">外置词</span>` : '')}
+                                ${item.hasCover ? `<span class="w-3.5 h-3.5 inline-flex items-center justify-center bg-blue-500 text-white rounded text-[8px] font-bold shadow-sm shadow-blue-500/20 shrink-0 leading-none" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
                             </div>
                         </div>
                     </div>
@@ -1389,7 +1437,7 @@ window.LocalMusicManager = {
                 </div>
 
                 <!-- Action Button -->
-                <div class="col-span-3 sm:col-span-2 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 md:gap-2">
+                <div class="col-span-4 sm:col-span-2 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 md:gap-2">
                     <div class="hidden lg:block text-xs text-right pr-2 font-mono t-text-muted shrink-0 mr-1">
                         ${formatSize(item.size)}
                     </div>
@@ -1400,19 +1448,25 @@ window.LocalMusicManager = {
                         </button>
                     ` : ''}
                     <button data-lm-action="play" data-lm-index="${index}"
-                            class="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-emerald-500 hover:border-emerald-300 transition-all shadow-sm shrink-0" title="播放">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-emerald-500 hover:border-emerald-300 transition-all shadow-sm shrink-0" title="播放">
                         <i class="fas fa-play text-[10px] ml-0.5"></i>
                     </button>
                     <!-- Download -->
                     <button data-lm-action="download" data-lm-index="${index}"
-                            class="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-blue-500 hover:border-blue-300 transition-all shadow-sm shrink-0" title="保存到设备">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-blue-500 hover:border-blue-300 transition-all shadow-sm shrink-0" title="保存到设备">
                         <i class="fas fa-download text-[10px]"></i>
                     </button>
+                    <button data-lm-action="playlist" data-lm-index="${index}"
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main text-emerald-500 hover:bg-emerald-50 hover:border-emerald-300 transition-all shadow-sm shrink-0" title="添加到歌单">
+                        <i class="fas fa-plus text-[10px]"></i>
+                    </button>
                     <!-- Deletion from single operations -->
+                    ${(!this.isCustomDirMode || !!window.userAllowOperateCustomDir) ? `
                     <button data-lm-action="delete" data-lm-index="${index}"
-                            class="w-8 h-8 md:w-7 md:h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-muted hover:text-red-500 hover:border-red-300 transition-all shadow-sm shrink-0" title="删除">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-muted hover:text-red-500 hover:border-red-300 transition-all shadow-sm shrink-0" title="删除">
                         <i class="far fa-trash-alt text-[10px]"></i>
                     </button>
+                    ` : ''}
                 </div>
             </div>
             `;
@@ -1652,12 +1706,27 @@ window.LocalMusicManager = {
         window.openPlaylistAddModal(collectableTargets.map(item => this.buildPlaylistSong(item)).filter(Boolean));
     },
 
+    addItemToPlaylist(index) {
+        const item = this.displayData[index];
+        if (!item) return;
+        if (!this.isPlaylistCollectable(item)) {
+            if (typeof showError === 'function') {
+                showError('歌曲不在曲库中，无法收藏到歌单。请先使用“手动关联”绑定平台歌曲 ID。');
+            }
+            return;
+        }
+        const song = this.buildPlaylistSong(item);
+        if (song && typeof window.openPlaylistAddModalForSongObject === 'function') {
+            window.openPlaylistAddModalForSongObject(song);
+        }
+    },
+
     playItem(index) {
         const item = this.displayData[index];
         if (!item) return;
 
         // Transform into songInfo for global player
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Important: Use existing checkCache via global logic if possible, 
@@ -2028,7 +2097,7 @@ window.LocalMusicManager = {
     downloadSingle(index) {
         const item = this.displayData[index];
         if (!item) return;
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
         const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
 
@@ -2048,7 +2117,7 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+        const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
         // Use a slight delay to prevent browser from blocking multiple downloads
@@ -2068,11 +2137,14 @@ window.LocalMusicManager = {
         this.deselectAll();
     },
 
-    async openManualIndexModal(index) {
-        console.log('[ManualIndex] Opening modal for index:', index);
-        const item = this.displayData[index];
+    async openManualIndexModal(indexOrItem) {
+        console.log('[ManualIndex] Opening modal for:', indexOrItem);
+        let item = (indexOrItem && typeof indexOrItem === 'object') ? indexOrItem : this.displayData[indexOrItem];
+        if (!item && window.CustomDirManager && window.CustomDirManager.isActive && typeof indexOrItem === 'number') {
+            item = window.CustomDirManager.displayData[indexOrItem];
+        }
         if (!item) {
-            console.error('[ManualIndex] Item not found at index:', index);
+            console.error('[ManualIndex] Item not found:', indexOrItem);
             return;
         }
 
@@ -2187,7 +2259,7 @@ window.LocalMusicManager = {
         }
 
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = this.getCurrentUsername();
             const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             const resp = await fetch('/api/music/identify', {
@@ -2355,15 +2427,28 @@ window.LocalMusicManager = {
                         <div class="text-[10px] uppercase font-black t-text-muted opacity-30 tracking-widest mb-0.5">${item.source}</div>
                         <div class="text-[11px] font-mono font-bold ${isMatch ? 'text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded-lg' : 't-text-main'}">${item.interval || '--:--'}</div>
                     </div>
-                    <button onclick="window.LocalMusicManager.linkItem(${originalIdx})"
-                        class="px-6 py-2.5 ${isMatch ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 't-bg-track hover:t-bg-item-hover t-text-main border t-border-main'} font-bold text-xs rounded-xl shadow-lg transition-all active:scale-95">
-                        关联
-                    </button>
+                    <div class="flex items-center gap-2 flex-shrink-0">
+                        <button onclick="window.LocalMusicManager.addManualResultToPlaylist(${originalIdx})"
+                            class="w-10 h-10 flex items-center justify-center rounded-xl bg-emerald-50 text-emerald-500 hover:bg-emerald-100 border border-emerald-100 transition-all active:scale-95" title="添加到歌单">
+                            <i class="fas fa-plus text-xs"></i>
+                        </button>
+                        <button onclick="window.LocalMusicManager.linkItem(${originalIdx})"
+                            class="px-6 py-2.5 ${isMatch ? 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20' : 't-bg-track hover:t-bg-item-hover t-text-main border t-border-main'} font-bold text-xs rounded-xl shadow-lg transition-all active:scale-95">
+                            关联
+                        </button>
+                    </div>
                 </div>
             `;
         });
 
         container.innerHTML = html || `<div class="text-center py-20 opacity-50 font-bold">未找到搜索结果</div>`;
+    },
+
+    addManualResultToPlaylist(index) {
+        const song = this.currentManualResults?.[index];
+        if (song && typeof window.openPlaylistAddModalForSongObject === 'function') {
+            window.openPlaylistAddModalForSongObject(song);
+        }
     },
 
     async linkItem(idx) {
@@ -2384,7 +2469,10 @@ window.LocalMusicManager = {
 
         try {
             if (typeof showInfo === 'function') showInfo('正在关联并同步元数据...');
-            const res = await fetch('/api/music/cache/link', {
+            const isCustom = this.manualIndexTargetItem?.folder === 'custom' || (window.CustomDirManager && window.CustomDirManager.isActive);
+            const linkApi = isCustom ? '/api/music/custom/link' : '/api/music/cache/link';
+
+            const res = await fetch(linkApi, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2400,7 +2488,11 @@ window.LocalMusicManager = {
             if (result.success) {
                 if (typeof showInfo === 'function') showInfo('关联成功！文件名及标签已更新');
                 this.closeManualIndexModal();
-                this.refresh();
+                if (isCustom && window.CustomDirManager) {
+                    window.CustomDirManager.refresh();
+                } else {
+                    this.refresh();
+                }
             } else {
                 throw new Error(result.message || 'Server error');
             }
@@ -2475,7 +2567,7 @@ window.LocalMusicManager = {
         // 1. 优先：使用 AcoustID 指纹识别
         console.log('[AutoLink] Using AcoustID first for:', localItem.filename);
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = this.getCurrentUsername();
             const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
 
             const resp = await fetch('/api/music/identify', {
@@ -2645,11 +2737,27 @@ window.LocalMusicManager = {
 
         dirs.forEach(dir => {
             const isActive = this.selectedSubPath === dir;
+            const safeDir = dir.replace(/'/g, "\\'");
             html += `
-                <button onclick="window.LocalMusicManager.selectSubPath('${dir.replace(/'/g, "\\'")}')" class="p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${isActive ? 'subpath-btn-active' : 'subpath-btn-inactive'}">
-                    <i class="fas fa-folder text-xl"></i>
-                    <span class="text-xs font-bold truncate w-full text-center" title="${dir}">${dir}</span>
-                </button>
+                <div class="relative group">
+                    <button onclick="window.LocalMusicManager.selectSubPath('${safeDir}')" class="w-full p-4 rounded-xl border-2 transition-all flex flex-col items-center gap-2 group ${isActive ? 'subpath-btn-active' : 'subpath-btn-inactive'}">
+                        <i class="fas fa-folder text-xl"></i>
+                        <span class="text-xs font-bold truncate w-full text-center" title="${dir}">${dir}</span>
+                    </button>
+                    <!-- Action buttons on top right -->
+                    <div class="absolute top-2 right-2 flex items-center gap-1 opacity-80 md:opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                        <button onclick="event.stopPropagation(); window.LocalMusicManager.renameSubFolder('${safeDir}')"
+                            class="w-6 h-6 rounded-md bg-white/80 dark:bg-gray-800/80 hover:bg-emerald-500 hover:text-white t-text-muted transition-colors flex items-center justify-center text-xs shadow-sm"
+                            title="重命名分类">
+                            <i class="fas fa-pencil-alt text-[10px]"></i>
+                        </button>
+                        <button onclick="event.stopPropagation(); window.LocalMusicManager.deleteSubFolder('${safeDir}')"
+                            class="w-6 h-6 rounded-md bg-white/80 dark:bg-gray-800/80 hover:bg-red-500 hover:text-white t-text-muted transition-colors flex items-center justify-center text-xs shadow-sm"
+                            title="删除分类">
+                            <i class="fas fa-trash-alt text-[10px]"></i>
+                        </button>
+                    </div>
+                </div>
             `;
         });
 
@@ -2679,7 +2787,7 @@ window.LocalMusicManager = {
         if (typeof showMsg === 'function') showMsg(`正在移动 ${filenames.length} 首歌曲到 ${targetSubPath || '根目录'}...`, 'info');
 
         try {
-            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '_open';
+            const username = this.getCurrentUsername();
             const res = await fetch(`/api/music/cache/categorize?user=${encodeURIComponent(username)}`, {
                 method: 'POST',
                 headers: {
@@ -2709,13 +2817,36 @@ window.LocalMusicManager = {
         this.openSubPathModal('categorize');
     },
 
+    // 同步洗版模态框副标题与底部提示（根据当前 remasterSource 更新文字）
+    syncRemasterSourceUI() {
+        const isCustom = this.remasterSource === 'custom';
+
+        // 副标题
+        const subtitleEl = document.getElementById('lm-remaster-modal-subtitle');
+        if (subtitleEl) {
+            subtitleEl.textContent = isCustom
+                ? '处理用户自定义音乐目录歌曲（替换同名音频及元数据）'
+                : '仅处理服务器下载目录，不处理缓存目录';
+        }
+
+        // 底部提示
+        const hintEl = document.getElementById('lm-remaster-source-hint');
+        if (hintEl) {
+            hintEl.textContent = isCustom ? '自定义目录中的歌曲' : '仅列出下载目录中的歌曲';
+        }
+    },
+
     syncRemasterVisibility() {
-        const enabled = !!window.settings?.enableRemaster;
+        const isCustomDir = window.CustomDirManager && window.CustomDirManager.isActive;
+        const enabled = isCustomDir
+            ? (!!window.settings?.enableRemaster && !!window.userAllowOperateCustomDir)
+            : !!window.settings?.enableRemaster;
         ['lm-remaster-btn', 'lm-remaster-btn-mobile'].forEach(id => {
             const button = document.getElementById(id);
             if (!button) return;
             button.classList.toggle('hidden', !enabled);
             button.classList.toggle('flex', enabled);
+            button.style.display = enabled ? '' : 'none';
         });
         if (!enabled) this.closeRemasterModal();
     },
@@ -2766,6 +2897,9 @@ window.LocalMusicManager = {
     },
 
     getRemasterSelectableItems() {
+        if (this.remasterSource === 'custom' && window.CustomDirManager && Array.isArray(window.CustomDirManager.originalData)) {
+            return window.CustomDirManager.originalData;
+        }
         return this.originalData.filter(item => item.folder === 'music');
     },
 
@@ -2861,18 +2995,23 @@ window.LocalMusicManager = {
         const disabled = this.remasterTaskRunning;
 
         if (!pageItems.length) {
-            container.innerHTML = '<div class="h-36 flex items-center justify-center text-xs t-text-muted">没有可选择的下载歌曲</div>';
+            const emptyText = this.remasterSource === 'custom'
+                ? '没有可选择的自定义目录歌曲'
+                : '没有可选择的下载歌曲';
+            container.innerHTML = `<div class="h-36 flex items-center justify-center text-xs t-text-muted">${emptyText}</div>`;
         } else {
+            const isCustomDir = this.remasterSource === 'custom';
             container.innerHTML = pageItems.map(item => {
                 const selected = this.remasterSelectedItems.has(item.filename);
                 const qualityName = window.QualityManager?.getQualityDisplayName(item.quality) || item.quality || '未知音质';
+                const subPathBadge = item.subPath ? `<span class="text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 rounded px-1 mr-1 inline-block font-mono" title="${this.escapeAttr(item.subPath)}">${this.escapeHtml(item.subPath)}</span>` : '';
                 return `
                     <label class="min-h-12 px-3 py-2 flex items-center gap-3 border-b last:border-b-0 t-border-main ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:t-bg-track'}">
                         <input type="checkbox" data-remaster-filename="${this.escapeAttr(item.filename)}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}
                             class="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 shrink-0">
                         <span class="min-w-0 flex-1">
                             <span class="block text-xs font-bold t-text-main truncate">${this.escapeHtml(item.name || item.filename)}</span>
-                            <span class="block text-[10px] t-text-muted truncate">${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span>
+                            <span class="block text-[10px] t-text-muted truncate mt-0.5">${subPathBadge}${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span>
                         </span>
                         <span class="shrink-0 text-[10px] t-text-muted">${this.escapeHtml(qualityName)}</span>
                     </label>`;
@@ -2901,14 +3040,41 @@ window.LocalMusicManager = {
             if (typeof showError === 'function') showError('请先在设置中启用歌曲洗版');
             return;
         }
+        // 初始化数据源：默认跟随当前视图模式，但可在模态框内独立切换
+        const isCustomDirActive = !!(window.CustomDirManager && window.CustomDirManager.isActive);
+        if (isCustomDirActive && !window.userAllowOperateCustomDir) {
+            // 自定义目录无权限时，降级到本地模式而非拒绝打开
+            this.remasterSource = 'local';
+        } else {
+            this.remasterSource = isCustomDirActive ? 'custom' : 'local';
+        }
         try {
             const modal = document.getElementById('lm-remaster-modal');
             if (!modal) return;
+
+            // 同步当前主列表的勾选项目到洗版选择列表中
+            this.remasterSelectedItems.clear();
+            if (this.remasterSource === 'custom') {
+                if (window.CustomDirManager && window.CustomDirManager.selectedItems && window.CustomDirManager.selectedItems.size > 0) {
+                    window.CustomDirManager.selectedItems.forEach(filename => this.remasterSelectedItems.add(filename));
+                }
+            } else {
+                if (this.selectedItems && this.selectedItems.size > 0) {
+                    const musicSelected = this.getSelectedEntries().filter(item => item.folder === 'music');
+                    musicSelected.forEach(item => this.remasterSelectedItems.add(item.filename));
+                }
+            }
+
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             document.body.style.overflow = 'hidden';
             this.bindRemasterSelectionEvents();
             this.restoreRemasterTargetQuality();
+            this.remasterSearchKeyword = '';
+            this.remasterSelectionPage = 1;
+            const searchInput = document.getElementById('lm-remaster-search');
+            if (searchInput) this.setRichInputValue(searchInput, '');
+            this.syncRemasterSourceUI();
             this.renderRemasterSelection();
             await this.loadRemasterStatus(true);
         } catch (e) {
@@ -2930,6 +3096,7 @@ window.LocalMusicManager = {
     },
 
     async startRemaster() {
+        const isCustomDir = this.remasterSource === 'custom';
         const quality = document.getElementById('lm-remaster-quality')?.value || 'flac';
         this.saveRemasterTargetQuality(quality);
         const qualityName = window.QualityManager?.getQualityDisplayName(quality) || quality;
@@ -2938,9 +3105,10 @@ window.LocalMusicManager = {
             if (typeof showError === 'function') showError('请至少选择一首需要洗版的歌曲');
             return;
         }
+        const locationDesc = isCustomDir ? '自定义音乐目录' : '本地下载目录';
         const confirmed = await showSelect(
             '确认开始洗版',
-            `即将把已选择的 ${filenames.length} 首歌曲洗版为“${qualityName}”。此操作会替换原音频文件，建议先备份。确定继续吗？`,
+            `即将把【${locationDesc}】中已选择的 ${filenames.length} 首歌曲洗版为“${qualityName}”。此操作会替换原音频文件，建议先备份。确定继续吗？`,
             { danger: true, confirmText: '开始洗版' }
         );
         if (!confirmed) return;
@@ -2953,7 +3121,7 @@ window.LocalMusicManager = {
             this.renderRemasterResults();
             await this.remasterRequest('/api/music/remaster/start', {
                 method: 'POST',
-                body: JSON.stringify({ targetQuality: quality, filenames })
+                body: JSON.stringify({ targetQuality: quality, filenames, isCustomDir })
             });
             if (typeof showInfo === 'function') showInfo('洗版任务已启动，关闭页面后服务端仍会继续处理');
             await this.loadRemasterStatus(true);
@@ -3013,7 +3181,11 @@ window.LocalMusicManager = {
             }), 1000);
         } else if (status.id && status.status !== 'idle' && this.remasterLastTerminalTaskId !== status.id) {
             this.remasterLastTerminalTaskId = status.id;
-            await this.fetchData(true);
+            if (window.CustomDirManager && window.CustomDirManager.isActive) {
+                await window.CustomDirManager.fetchData(true);
+            } else {
+                await this.fetchData(true);
+            }
             if (status.status === 'completed' && typeof showSuccess === 'function') showSuccess('洗版任务已完成');
             if (status.status === 'error' && typeof showError === 'function') showError(status.errorMsg || '洗版任务异常终止');
         }
@@ -3156,10 +3328,169 @@ window.LocalMusicManager = {
         } catch (e) {
             console.error('Failed to create subdir:', e);
         }
+    },
+
+    async renameSubFolder(oldSubPath) {
+        if (!oldSubPath) return;
+        const newName = prompt(`请输入分类【${oldSubPath}】的新名称：`, oldSubPath);
+        if (!newName || newName.trim() === '' || newName.trim() === oldSubPath) return;
+
+        try {
+            const res = await fetch('/api/music/cache/subdirs/rename', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {})
+                },
+                body: JSON.stringify({ folder: 'music', oldSubPath, newSubPath: newName.trim() })
+            });
+            const data = await res.json();
+            if (data.success) {
+                if (typeof showMsg === 'function') showMsg(`分类已重命名为【${newName.trim()}】`, 'success');
+                if (this.selectedSubPath === oldSubPath) {
+                    this.selectedSubPath = newName.trim();
+                    const text = document.getElementById('lm-subpath-text');
+                    if (text) text.innerText = newName.trim();
+                }
+                // Refresh subpath modal and list data
+                this.openSubPathModal(this.subPathModalMode || 'filter');
+                await this.fetchData(true);
+            } else {
+                if (typeof showError === 'function') showError(data.message || '重命名分类失败');
+            }
+        } catch (e) {
+            console.error('Rename subfolder error:', e);
+            if (typeof showError === 'function') showError('网络请求失败');
+        }
+    },
+
+    deleteSubFolder(subPath) {
+        if (!subPath) return;
+        this.pendingDeleteSubPath = subPath;
+        this.pendingDeleteSongs = false;
+
+        const modal = document.getElementById('subpath-delete-modal');
+        const content = document.getElementById('subpath-delete-modal-content');
+        const targetNameEl = document.getElementById('subpath-delete-target-name');
+        const step1 = document.getElementById('subpath-delete-step1');
+        const step2 = document.getElementById('subpath-delete-step2');
+
+        if (!modal || !content) return;
+        if (targetNameEl) targetNameEl.innerText = subPath;
+
+        if (step1) step1.classList.remove('hidden');
+        if (step2) step2.classList.add('hidden');
+
+        modal.classList.remove('hidden');
+        modal.classList.add('flex');
+        setTimeout(() => {
+            content.classList.remove('scale-95', 'opacity-0');
+            content.classList.add('scale-100', 'opacity-100');
+        }, 10);
+    },
+
+    closeSubPathDeleteModal() {
+        const modal = document.getElementById('subpath-delete-modal');
+        const content = document.getElementById('subpath-delete-modal-content');
+        if (!modal || !content) return;
+
+        content.classList.remove('scale-100', 'opacity-100');
+        content.classList.add('scale-95', 'opacity-0');
+        setTimeout(() => {
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+            this.pendingDeleteSubPath = null;
+        }, 300);
+    },
+
+    confirmDeleteStep(deleteSongs) {
+        this.pendingDeleteSongs = deleteSongs;
+        const step1 = document.getElementById('subpath-delete-step1');
+        const step2 = document.getElementById('subpath-delete-step2');
+        const notice = document.getElementById('subpath-delete-step2-notice');
+        const executeBtn = document.getElementById('subpath-delete-execute-btn');
+
+        if (step1) step1.classList.add('hidden');
+        if (step2) step2.classList.remove('hidden');
+
+        if (notice) {
+            if (deleteSongs) {
+                notice.innerHTML = `⚠️ <b>危险操作警告：</b>您即将永久删除分类【<b>${this.escapeHtml(this.pendingDeleteSubPath)}</b>】以及分类目录下的<b>所有歌曲和歌词文件</b>。此操作无法撤销，确认继续？`;
+            } else {
+                notice.innerHTML = `ℹ️ <b>操作确认：</b>您即将删除分类【<b>${this.escapeHtml(this.pendingDeleteSubPath)}</b>】。分类下的所有歌曲和歌词将<b>安全转移至根目录</b>，不会丢失文件。确认继续？`;
+            }
+        }
+
+        if (executeBtn) {
+            executeBtn.innerText = deleteSongs ? '彻底删除分类及歌曲' : '移到根目录并删除分类';
+        }
+    },
+
+    backToDeleteStep1() {
+        const step1 = document.getElementById('subpath-delete-step1');
+        const step2 = document.getElementById('subpath-delete-step2');
+        if (step1) step1.classList.remove('hidden');
+        if (step2) step2.classList.add('hidden');
+    },
+
+    async executeDeleteSubFolder() {
+        const subPath = this.pendingDeleteSubPath;
+        const deleteSongs = !!this.pendingDeleteSongs;
+        if (!subPath) return;
+
+        try {
+            const res = await fetch('/api/music/cache/subdirs/delete', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {})
+                },
+                body: JSON.stringify({ folder: 'music', subPath, deleteSongs })
+            });
+            const data = await res.json();
+            if (data.success) {
+                const actionText = deleteSongs ? '分类及歌曲已彻底删除' : '分类已删除，歌曲已全部移入根目录';
+                if (typeof showMsg === 'function') showMsg(actionText, 'success');
+                this.closeSubPathDeleteModal();
+
+                if (this.selectedSubPath === subPath) {
+                    this.selectedSubPath = '';
+                    const text = document.getElementById('lm-subpath-text');
+                    if (text) text.innerText = '全部';
+                }
+                // Refresh subpath modal and list data
+                this.openSubPathModal(this.subPathModalMode || 'filter');
+                await this.fetchData(true);
+            } else {
+                if (typeof showError === 'function') showError(data.message || '删除分类失败');
+            }
+        } catch (e) {
+            console.error('Delete subfolder error:', e);
+            if (typeof showError === 'function') showError('网络请求失败');
+        }
     }
 };
 
-window.toggleLmBatchMode = () => window.LocalMusicManager.toggleBatchMode();
+window.toggleLmBatchMode = () => {
+    if (window.CustomDirManager && window.CustomDirManager.isActive) {
+        window.CustomDirManager.toggleBatchMode();
+    } else if (window.LocalMusicManager) {
+        window.LocalMusicManager.toggleBatchMode();
+    }
+};
+
+// 当处于自定义目录模式时，将通用动作自动转发给 CustomDirManager
+['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters'].forEach(method => {
+    if (window.LocalMusicManager && typeof window.LocalMusicManager[method] === 'function') {
+        const orig = window.LocalMusicManager[method];
+        window.LocalMusicManager[method] = function(...args) {
+            if (window.CustomDirManager && window.CustomDirManager.isActive && typeof window.CustomDirManager[method] === 'function') {
+                return window.CustomDirManager[method].apply(window.CustomDirManager, args);
+            }
+            return orig.apply(this, args);
+        };
+    }
+});
 
 // Auto init when script loads (if in scope), else done manually
 setTimeout(() => {

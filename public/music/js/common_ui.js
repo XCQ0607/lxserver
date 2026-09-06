@@ -4,6 +4,38 @@
 
 (function () {
     // --- Setting Tooltips Mobile Support ---
+
+    /**
+     * After a tooltip becomes visible, clamp it so it never overflows the viewport.
+     * Applies a corrective margin-left to the .setting-tooltip-content element.
+     */
+    function clampTooltipPosition(trigger) {
+        const tooltip = trigger.querySelector('.setting-tooltip-content');
+        if (!tooltip) return;
+
+        // Reset any previous correction first
+        tooltip.style.marginLeft = '';
+
+        // Use rAF to ensure the browser has rendered the tooltip at its natural position
+        requestAnimationFrame(() => {
+            const rect = tooltip.getBoundingClientRect();
+            const padding = 8; // min distance from viewport edge (px)
+            let correction = 0;
+
+            if (rect.left < padding) {
+                // Overflows left edge → push right
+                correction = padding - rect.left;
+            } else if (rect.right > window.innerWidth - padding) {
+                // Overflows right edge → push left
+                correction = (window.innerWidth - padding) - rect.right;
+            }
+
+            if (correction !== 0) {
+                tooltip.style.marginLeft = correction + 'px';
+            }
+        });
+    }
+
     document.addEventListener('click', function (e) {
         const trigger = e.target.closest('.setting-tooltip-trigger');
 
@@ -11,6 +43,8 @@
         document.querySelectorAll('.setting-tooltip-trigger.is-active').forEach(activeTrigger => {
             if (activeTrigger !== trigger) {
                 activeTrigger.classList.remove('is-active');
+                const t = activeTrigger.querySelector('.setting-tooltip-content');
+                if (t) t.style.marginLeft = '';
             }
         });
 
@@ -18,6 +52,12 @@
             // If it's a mobile device (or doesn't support hover)
             if (window.matchMedia('(hover: none)').matches) {
                 trigger.classList.toggle('is-active');
+                if (trigger.classList.contains('is-active')) {
+                    clampTooltipPosition(trigger);
+                } else {
+                    const t = trigger.querySelector('.setting-tooltip-content');
+                    if (t) t.style.marginLeft = '';
+                }
                 e.stopPropagation();
             }
         }
@@ -28,17 +68,20 @@
         if (!e.target.closest('.setting-tooltip-trigger')) {
             document.querySelectorAll('.setting-tooltip-trigger.is-active').forEach(trigger => {
                 trigger.classList.remove('is-active');
+                const t = trigger.querySelector('.setting-tooltip-content');
+                if (t) t.style.marginLeft = '';
             });
         }
     }, { passive: true });
 })();
 
+
 /**
  * 跳转至管理后台
  */
 function goToAdmin() {
-    var adminPath = (window.CONFIG && window.CONFIG['admin.path']) || '';
-    location.href = adminPath || '/';
+    var adminPath = (window.CONFIG && window.CONFIG['admin.path']) || '/music';
+    location.href = adminPath;
 }
 
 /**

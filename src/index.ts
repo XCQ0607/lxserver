@@ -6,7 +6,6 @@ import crypto from 'crypto'
 import moduleAlias from 'module-alias'
 // @ts-ignore
 moduleAlias.addAliases({
-  '@common': path.join(__dirname, 'common'),
   '@renderer': path.join(__dirname, 'modules'),
   '@': __dirname
 })
@@ -35,6 +34,20 @@ process.on('unhandledRejection', (reason, p) => {
 let envParams: Partial<Record<Exclude<ENV_PARAMS_Value_Type, 'LX_USER_'>, string>> = {}
 let envUsers: LX.User[] = []
 const envParamKeys = Object.values(ENV_PARAMS).filter(v => v != 'LX_USER_')
+const parseBool = (val?: string): boolean | undefined => {
+  if (val === undefined || val === null || val === '') return undefined
+  const str = String(val).trim().toLowerCase()
+  if (['true', '1', 'yes', 'y', 'on'].includes(str)) return true
+  if (['false', '0', 'no', 'n', 'off'].includes(str)) return false
+  return undefined
+}
+const setBoolConfig = <K extends keyof LX.Config>(key: K, val?: string) => {
+  const parsed = parseBool(val)
+  if (parsed !== undefined) {
+    // @ts-expect-error
+    global.lx.config[key] = parsed
+  }
+}
 
 {
   const envLog = [
@@ -174,8 +187,8 @@ if (envParams.LIST_ADD_MUSIC_LOCATION_TYPE) {
 if (envParams.FRONTEND_PASSWORD) {
   global.lx.config['frontend.password'] = envParams.FRONTEND_PASSWORD
 }
-if (envParams.WEBDAV_ENABLE) {
-  global.lx.config['webdav.enable'] = envParams.WEBDAV_ENABLE === 'true'
+if (envParams.WEBDAV_ENABLE !== undefined) {
+  setBoolConfig('webdav.enable', envParams.WEBDAV_ENABLE)
 }
 if (envParams.WEBDAV_URL) {
   global.lx.config['webdav.url'] = envParams.WEBDAV_URL
@@ -200,11 +213,11 @@ if (envParams.BACKUP_INTERVAL) {
   const backupInterval = parseInt(envParams.BACKUP_INTERVAL)
   if (!isNaN(backupInterval)) global.lx.config['sync.backupInterval'] = backupInterval
 }
-if (envParams.USER_ENABLE_PATH) {
-  global.lx.config['user.enablePath'] = envParams.USER_ENABLE_PATH === 'true'
+if (envParams.USER_ENABLE_PATH !== undefined) {
+  setBoolConfig('user.enablePath', envParams.USER_ENABLE_PATH)
 }
-if (envParams.USER_ENABLE_ROOT) {
-  global.lx.config['user.enableRoot'] = envParams.USER_ENABLE_ROOT === 'true'
+if (envParams.USER_ENABLE_ROOT !== undefined) {
+  setBoolConfig('user.enableRoot', envParams.USER_ENABLE_ROOT)
 }
 if (envParams.PORT) {
   const port = parseInt(envParams.PORT, 10)
@@ -213,38 +226,47 @@ if (envParams.PORT) {
 if (envParams.BIND_IP) {
   global.lx.config.bindIP = envParams.BIND_IP
 }
-if (envParams.ENABLE_WEBPLAYER_AUTH) {
-  global.lx.config['player.enableAuth'] = envParams.ENABLE_WEBPLAYER_AUTH === 'true'
+if (envParams.ENABLE_WEBPLAYER_AUTH !== undefined) {
+  setBoolConfig('player.enableAuth', envParams.ENABLE_WEBPLAYER_AUTH)
 }
 if (envParams.WEBPLAYER_PASSWORD) {
   global.lx.config['player.password'] = envParams.WEBPLAYER_PASSWORD
 }
-if (envParams.DISABLE_TELEMETRY) {
-  global.lx.config.disableTelemetry = envParams.DISABLE_TELEMETRY === 'true'
+if (envParams.DISABLE_TELEMETRY !== undefined) {
+  setBoolConfig('disableTelemetry', envParams.DISABLE_TELEMETRY)
 }
-if (envParams.ENABLE_PUBLIC_USER_RESTRICTION) {
-  global.lx.config['user.enablePublicRestriction'] = envParams.ENABLE_PUBLIC_USER_RESTRICTION === 'true'
+if (envParams.ENABLE_PUBLIC_USER_RESTRICTION !== undefined) {
+  setBoolConfig('user.enablePublicRestriction', envParams.ENABLE_PUBLIC_USER_RESTRICTION)
 }
-if (envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC) {
-  global.lx.config['user.enablePublicNonAdminLocalMusic'] = envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC === 'true'
+if (envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC !== undefined) {
+  setBoolConfig('user.enablePublicNonAdminLocalMusic', envParams.ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC)
 }
-if (envParams.ENABLE_PUBLIC_FAVORITES) {
-  global.lx.config['user.enablePublicFavorites'] = envParams.ENABLE_PUBLIC_FAVORITES === 'true'
+if (envParams.ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD !== undefined) {
+  setBoolConfig('user.enablePublicNonAdminBrowserDownload', envParams.ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD)
 }
-if (envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS) {
-  global.lx.config['user.enablePublicNonAdminAccess'] = envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS === 'true'
+if (envParams.ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE !== undefined) {
+  setBoolConfig('user.enablePublicNonAdminServerCache', envParams.ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE)
 }
-if (envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION) {
-  global.lx.config['user.enableLoginCacheRestriction'] = envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION === 'true'
+if (envParams.ENABLE_PUBLIC_FAVORITES !== undefined) {
+  setBoolConfig('user.enablePublicFavorites', envParams.ENABLE_PUBLIC_FAVORITES)
 }
-if (envParams.ENABLE_CACHE_SIZE_LIMIT) {
-  global.lx.config['user.enableCacheSizeLimit'] = envParams.ENABLE_CACHE_SIZE_LIMIT === 'true'
+if (envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS !== undefined) {
+  setBoolConfig('user.enablePublicNonAdminAccess', envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS)
+}
+if (envParams.ENABLE_CUSTOM_MUSIC_DIR !== undefined) {
+  setBoolConfig('user.enableCustomMusicDir', envParams.ENABLE_CUSTOM_MUSIC_DIR)
+}
+if (envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION !== undefined) {
+  setBoolConfig('user.enableLoginCacheRestriction', envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION)
+}
+if (envParams.ENABLE_CACHE_SIZE_LIMIT !== undefined) {
+  setBoolConfig('user.enableCacheSizeLimit', envParams.ENABLE_CACHE_SIZE_LIMIT)
 }
 if (envParams.CACHE_SIZE_LIMIT) {
   global.lx.config['user.cacheSizeLimit'] = parseInt(envParams.CACHE_SIZE_LIMIT) || 2000
 }
-if (envParams.PROXY_ALL_ENABLED) {
-  global.lx.config['proxy.all.enabled'] = envParams.PROXY_ALL_ENABLED === 'true'
+if (envParams.PROXY_ALL_ENABLED !== undefined) {
+  setBoolConfig('proxy.all.enabled', envParams.PROXY_ALL_ENABLED)
 }
 if (envParams.PROXY_ALL_ADDRESS) {
   global.lx.config['proxy.all.address'] = envParams.PROXY_ALL_ADDRESS
@@ -256,10 +278,38 @@ if (envParams.PLAYER_PATH !== undefined) {
   global.lx.config['player.path'] = envParams.PLAYER_PATH
 }
 if (envParams.SUBSONIC_ENABLE !== undefined) {
-  global.lx.config['subsonic.enable'] = envParams.SUBSONIC_ENABLE === 'true'
+  setBoolConfig('subsonic.enable', envParams.SUBSONIC_ENABLE)
 }
 if (envParams.SUBSONIC_PATH !== undefined) {
   global.lx.config['subsonic.path'] = envParams.SUBSONIC_PATH
+}
+if (envParams.SUBSONIC_ENABLE_DEBUG !== undefined) {
+  setBoolConfig('subsonic.enableDebug', envParams.SUBSONIC_ENABLE_DEBUG)
+}
+if (envParams.SUBSONIC_ONLINE_SEARCH !== undefined) {
+  setBoolConfig('subsonic.onlineSearch', envParams.SUBSONIC_ONLINE_SEARCH)
+}
+if (envParams.SUBSONIC_ONLINE_SEARCH_MODE) {
+  const mode = envParams.SUBSONIC_ONLINE_SEARCH_MODE as any
+  if (['fallback', 'merge', 'local_only'].includes(mode)) {
+    global.lx.config['subsonic.onlineSearchMode'] = mode
+  }
+}
+if (envParams.SUBSONIC_ONLINE_SEARCH_SOURCES) {
+  global.lx.config['subsonic.onlineSearchSources'] = envParams.SUBSONIC_ONLINE_SEARCH_SOURCES
+}
+if (envParams.SUBSONIC_LYRIC_TRANSLATION !== undefined) {
+  setBoolConfig('subsonic.lyricTranslation', envParams.SUBSONIC_LYRIC_TRANSLATION)
+}
+if (envParams.ARTIST_MAX_FETCH_PAGES) {
+  const pages = parseInt(envParams.ARTIST_MAX_FETCH_PAGES, 10)
+  if (!isNaN(pages) && pages > 0) global.lx.config['artist.maxFetchPages'] = pages
+}
+if (envParams.CACHE_NAMING_PATTERN) {
+  global.lx.config['cache.namingPattern'] = envParams.CACHE_NAMING_PATTERN
+}
+if (envParams.SYSTEM_ALLOW_UNSAFE_VM !== undefined) {
+  setBoolConfig('system.allowUnsafeVM', envParams.SYSTEM_ALLOW_UNSAFE_VM)
 }
 if (envParams.SINGER_SOURCE_PRIORITY !== undefined) {
   const priority = envParams.SINGER_SOURCE_PRIORITY.split(',').filter(s => s === 'tx' || s === 'wy') as Array<'tx' | 'wy'>
@@ -363,10 +413,49 @@ ${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getUserDirname } = require('@/user')
+let hasUserCustomDirModified = false
 for (const user of global.lx.config.users) {
   const dataPath = path.join(global.lx.userPath, getUserDirname(user.name))
   checkAndCreateDir(dataPath)
   user.dataPath = dataPath
+
+  if (user.enableCustomMusicDir) {
+    let isValid = false
+    if (user.customMusicDir && typeof user.customMusicDir === 'string' && user.customMusicDir.trim()) {
+      const resolvedDir = path.resolve(user.customMusicDir.trim())
+      try {
+        if (fs.existsSync(resolvedDir) && fs.statSync(resolvedDir).isDirectory()) {
+          isValid = true
+        }
+      } catch {
+        isValid = false
+      }
+    }
+    if (!isValid) {
+      console.warn(`[StartupCheck] 用户 ${user.name} 的自定义歌曲目录 [${user.customMusicDir || ''}] 无效，已自动关闭自定义目录功能并清除路径`)
+      user.enableCustomMusicDir = false
+      user.customMusicDir = ''
+      hasUserCustomDirModified = true
+    }
+  }
+}
+
+if (hasUserCustomDirModified) {
+  saveConfigToFile()
+  try {
+    fs.writeFileSync(usersJsonPath, JSON.stringify(global.lx.config.users.map(u => ({
+      name: u.name,
+      password: u.password,
+      maxSnapshotNum: u.maxSnapshotNum,
+      'list.addMusicLocationType': u['list.addMusicLocationType'],
+      enableCustomMusicDir: u.enableCustomMusicDir,
+      customMusicDir: u.customMusicDir,
+      allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
+      allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
+    })), null, 2))
+  } catch (err) {
+    console.error('Failed to update users.json after custom dir cleanup', err)
+  }
 }
 
 initLogger()

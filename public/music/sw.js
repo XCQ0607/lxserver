@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v25';
+const CACHE_NAME = 'lx-music-web-v26';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -12,6 +12,7 @@ const ASSETS_TO_CACHE = [
     './js/lyric-utils.js',
     './js/lyric-card.js',
     './js/quality.js',
+    './js/idb_store.js',
     './js/user_sync.js',
     './js/batch_pagination.js',
     './js/single_song_ops.js',
@@ -20,6 +21,7 @@ const ASSETS_TO_CACHE = [
     './js/leaderboard_manager.js',
     './js/local_music.js',
     './js/download_manager.js',
+    './js/common_ui.js',
     './js/pwa.js',
     './js/theme_manager.js',
     './js/tailwind_setup.js',
@@ -58,9 +60,11 @@ self.addEventListener('fetch', (event) => {
     // 1. 过滤非 http(s) 协议 (如 chrome-extension://)，避免 cache.put 报错
     if (!url.protocol.startsWith('http')) return;
 
-    // 2. 忽略所有音频请求、下载请求和 API 请求，让浏览器直接处理
+    // 2. 忽略所有音频请求、下载请求、API 请求以及动态配置接口，让浏览器直接处理
     // 拦截下载会导致大文件占用 Cache 且单个失败可能引起 SW state 不良
     const isApiOrAudio = url.pathname.includes('/api/') ||
+        url.pathname === '/js/config.js' ||
+        url.pathname.endsWith('/manifest.json') ||
         url.href.match(/\.(mp3|flac|m4a|ogg|aac)(\?.*)?$/i);
 
     if (isApiOrAudio) {

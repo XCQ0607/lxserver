@@ -49,6 +49,7 @@ icon: electron/icons/icon.png
 
 # ── Windows ──────────────────────────────────────────────────────────────────
 win:
+  icon: electron/icons/icon.ico
   # 统一命名：文件名会根据架构自动变化，例如：LX Music Server 1.8.0 x64.exe
   artifactName: "${productName} ${version} ${arch}.${ext}"
   target:
@@ -62,6 +63,8 @@ win:
 
 nsis:
   artifactName: "${productName} ${version} ${arch} Setup.${ext}"
+  installerIcon: electron/icons/icon.ico
+  uninstallerIcon: electron/icons/icon.ico
   oneClick: false
   perMachine: false
   allowToChangeInstallationDirectory: true

@@ -2,7 +2,7 @@
 import { SYNC_CLOSE_CODE, TRANS_MODE } from '@/constants'
 import { getUserSpace } from '@/user'
 import { filterRules } from '../utils'
-// import { LIST_IDS } from '@common/constants'
+
 
 // type ListInfoType = LX.List.UserListInfoFull | LX.List.MyDefaultListInfoFull | LX.List.MyLoveListInfoFull
 
