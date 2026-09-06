@@ -1356,45 +1356,54 @@ window.LocalMusicManager = {
                 <!-- Song & Cover -->
                 <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0 pr-2">
                     ${coverHtml}
-                    <div class="min-w-0 flex-1 truncate">
+                    <div class="min-w-0 flex-1">
+                        <!-- Song Name -->
                         <div class="font-bold text-sm md:text-base t-text-main truncate group-hover:text-emerald-500 transition-colors cursor-pointer" data-lm-action="play" data-lm-index="${index}">
                             ${safeName}
                         </div>
-                        <div class="text-[10px] md:text-xs t-text-muted mt-0.5 truncate flex items-center gap-1.5 flex-wrap">
-                            <span class="sm:hidden font-medium text-emerald-600/70 mr-0.5">${safeSinger}</span>
-                            <span class="px-1.5 py-[1px] rounded-md border t-border-main ${qualityClass} scale-90 origin-left inline-block">${this.escapeHtml(qualityName || '标准')}</span>
-                            ${item.bitrate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block">${Math.round(item.bitrate)}kbps</span>` : ''}
-                            ${item.sampleRate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block">${(item.sampleRate / 1000).toFixed(1)}kHz</span>` : ''}
-                            ${item.bitDepth && item.bitDepth > 16 ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block">${item.bitDepth}bit</span>` : ''}
+                        
+                        <!-- Row 2: Singer (mobile only) + Quality badge + Audio specs (desktop only) + Lyric/Cover badges (desktop only) -->
+                        <div class="text-[11px] md:text-xs t-text-muted mt-0.5 flex items-center gap-1.5 min-w-0 flex-nowrap">
+                            <span class="sm:hidden font-medium text-emerald-600/80 truncate max-w-[105px] xs:max-w-[140px] shrink min-w-0" title="${safeSinger}">${safeSinger}</span>
+                            <span class="px-1.5 py-0.5 rounded text-[9px] border t-border-main ${qualityClass} shrink-0 leading-none font-medium">${this.escapeHtml(qualityName || '标准')}</span>
+                            ${item.bitrate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${Math.round(item.bitrate)}kbps</span>` : ''}
+                            ${item.sampleRate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${(item.sampleRate / 1000).toFixed(1)}kHz</span>` : ''}
+                            ${item.bitDepth && item.bitDepth > 16 ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${item.bitDepth}bit</span>` : ''}
                             ${lyricStatusBadge}
-                            ${item.hasCover ? `<span class="text-[10px] text-emerald-500 border border-gray-400/40 dark:border-gray-600/50 rounded px-1 scale-90 hidden sm:inline-block" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
+                            ${item.hasCover ? `<span class="text-[10px] text-emerald-500 border border-gray-400/40 dark:border-gray-600/50 rounded px-1 scale-90 hidden sm:inline-block shrink-0" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
                         </div>
-                        <!-- Mobile extra info (second row) -->
-                        <div class="sm:hidden text-[9px] mt-1.5 flex items-center gap-1.5 flex-wrap">
-                            <div class="flex items-center gap-1 px-1.5 py-0.5 bg-gray-100/80 dark:bg-gray-800/80 rounded-full t-text-muted">
+
+                        <!-- Row 3: Mobile & Tablet extra info (hidden on md/lg desktop where dedicated column exists) -->
+                        <div class="md:hidden text-[9px] mt-1 flex items-center gap-1 min-w-0 flex-nowrap overflow-x-auto no-scrollbar">
+                            <!-- Source Tag -->
+                            <div class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-100/90 dark:bg-gray-800/90 rounded-full t-text-muted shrink-0 leading-none">
                                 ${folderIcon}
-                                <span class="font-bold uppercase tracking-tighter" title="${safeSourceTitle}">${safeSource}</span>
+                                <span class="font-bold uppercase tracking-tight text-[9px]" title="${safeSourceTitle}">${safeSource}</span>
                             </div>
                             
-                            ${item.subPath ? `<span class="t-text-muted opacity-50 truncate max-w-[60px] italic">${safeSubPath}</span>` : ''}
+                            <!-- SubPath (if any) -->
+                            ${item.subPath ? `<span class="t-text-muted opacity-50 truncate max-w-[50px] sm:max-w-[80px] italic text-[9px] shrink min-w-0" title="${safeSubPath}">${safeSubPath}</span>` : ''}
                             
-                            <div class="flex items-center gap-1">
-                                ${missingID3 ? '<span class="px-1 py-0 bg-red-50 text-red-500 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30 rounded-sm font-medium">缺标签</span>' : ''}
-                                ${missingCover ? '<span class="px-1 py-0 bg-orange-50 text-orange-500 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30 rounded-sm font-medium">缺封面</span>' : ''}
-                                ${missingLyric ? '<span class="px-1 py-0 bg-yellow-50 text-yellow-600 border border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-900/30 rounded-sm font-medium">缺词</span>' : ''}
-                                ${(!missingID3 && !missingCover && !missingLyric) ? '<span class="px-1 py-0 bg-emerald-50 text-emerald-600 border border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded-sm font-medium">完整</span>' : ''}
+                            <!-- Status Badges -->
+                            <div class="flex items-center gap-1 shrink-0">
+                                ${missingID3 ? '<span class="px-1.5 py-0.5 bg-red-50 text-red-500 border border-red-100 dark:bg-red-900/20 dark:text-red-400 dark:border-red-900/30 rounded text-[9px] font-medium leading-none shrink-0">缺标签</span>' : ''}
+                                ${missingCover ? '<span class="px-1.5 py-0.5 bg-orange-50 text-orange-500 border border-orange-100 dark:bg-orange-900/20 dark:text-orange-400 dark:border-orange-900/30 rounded text-[9px] font-medium leading-none shrink-0">缺封面</span>' : ''}
+                                ${missingLyric ? '<span class="px-1.5 py-0.5 bg-yellow-50 text-yellow-600 border border-yellow-100 dark:bg-yellow-900/20 dark:text-yellow-400 dark:border-yellow-900/30 rounded text-[9px] font-medium leading-none shrink-0">缺词</span>' : ''}
+                                ${(!missingID3 && !missingCover && !missingLyric) ? '<span class="px-1.5 py-0.5 bg-emerald-50 text-emerald-600 border border-emerald-100 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-900/30 rounded text-[9px] font-medium leading-none shrink-0">完整</span>' : ''}
                             </div>
 
+                            <!-- Manual Link Button -->
                             ${(isUnindexed || this.enableReMapping) ? `
                                 <button data-lm-action="manual" data-lm-index="${index}"
-                                        class="px-1.5 py-0.5 bg-emerald-500 text-white rounded-md font-bold shadow-sm shadow-emerald-500/20 active:scale-95 transition-all flex items-center gap-1">
-                                    <i class="fas fa-link text-[8px]"></i>关联
+                                        class="px-1.5 py-0.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded font-bold shadow-sm shadow-emerald-500/20 active:scale-95 transition-all inline-flex items-center gap-0.5 shrink-0 text-[9px] leading-none" title="手动关联">
+                                    <i class="fas fa-link text-[7px]"></i>关联
                                 </button>
                             ` : ''}
                             
-                            <div class="ml-auto flex items-center gap-1">
-                                ${item.hasEmbedLyric ? '<span class="w-4 h-4 flex items-center justify-center bg-emerald-500 text-white rounded text-[8px] font-bold shadow-sm shadow-emerald-500/20" title="已嵌入歌词标签">词</span>' : (metadataUnsupported && item.hasLyric ? `<span class="h-4 px-1 flex items-center justify-center bg-amber-500 text-white rounded text-[8px] font-bold" title="${this.escapeAttr(item.embedLyricError || item.metadataError || '音频容器不支持嵌入歌词，已保留外置歌词')}">外置词</span>` : '')}
-                                ${item.hasCover ? `<span class="w-4 h-4 flex items-center justify-center bg-blue-500 text-white rounded text-[8px] font-bold shadow-sm shadow-blue-500/20" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
+                            <!-- Embed Lyric & Cover Badges -->
+                            <div class="flex items-center gap-1 shrink-0">
+                                ${item.hasEmbedLyric ? '<span class="w-3.5 h-3.5 inline-flex items-center justify-center bg-emerald-500 text-white rounded text-[8px] font-bold shadow-sm shadow-emerald-500/20 shrink-0 leading-none" title="已嵌入歌词标签">词</span>' : (metadataUnsupported && item.hasLyric ? `<span class="h-3.5 px-1 inline-flex items-center justify-center bg-amber-500 text-white rounded text-[8px] font-bold shrink-0 leading-none" title="${this.escapeAttr(item.embedLyricError || item.metadataError || '音频容器不支持嵌入歌词，已保留外置歌词')}">外置词</span>` : '')}
+                                ${item.hasCover ? `<span class="w-3.5 h-3.5 inline-flex items-center justify-center bg-blue-500 text-white rounded text-[8px] font-bold shadow-sm shadow-blue-500/20 shrink-0 leading-none" title="${this.escapeAttr(coverStatusTitle)}">封</span>` : ''}
                             </div>
                         </div>
                     </div>

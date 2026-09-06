@@ -14,16 +14,20 @@ import { formatPlayTime } from '../utils/common'
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
     STANDARD: 'standard',       // {Name}_-_{Singer}_-_{Source}_-_{ID}_-_{Quality}
-    SIMPLE: 'simple'            // {Name} - {Singer} - {Quality} - {Album}
+    SIMPLE: 'simple',            // {Name} - {Singer} - {Quality} - {Album}
+    SINGER_NAME_QUALITY_ALBUM: 'singer_name_quality_album', // {Singer} - {Name} - {Quality} - {Album}
+    SINGER_NAME: 'singer_name', // {Singer} - {Name}
+    NAME_SINGER: 'name_singer'  // {Name} - {Singer}
 }
 
 let currentNamingPattern = CACHE_NAMING_PATTERNS.SIMPLE
 
-export const normalizeNamingPattern = (pattern: unknown) => (
-    pattern === CACHE_NAMING_PATTERNS.STANDARD
-        ? CACHE_NAMING_PATTERNS.STANDARD
-        : CACHE_NAMING_PATTERNS.SIMPLE
-)
+export const normalizeNamingPattern = (pattern: unknown) => {
+    if (Object.values(CACHE_NAMING_PATTERNS).includes(pattern as string)) {
+        return pattern as string
+    }
+    return CACHE_NAMING_PATTERNS.SIMPLE
+}
 
 export const setNamingPattern = (pattern: unknown) => {
     currentNamingPattern = normalizeNamingPattern(pattern)
@@ -592,6 +596,12 @@ const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, 
     let baseName = ''
     if (currentNamingPattern === CACHE_NAMING_PATTERNS.SIMPLE) {
         baseName = `${nameStr} - ${singerStr} - ${sanitizeFilename(q)} - ${albumStr}`
+    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME_QUALITY_ALBUM) {
+        baseName = `${singerStr} - ${nameStr} - ${sanitizeFilename(q)} - ${albumStr}`
+    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME) {
+        baseName = `${singerStr} - ${nameStr}`
+    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
+        baseName = `${nameStr} - ${singerStr}`
     } else {
         // Default/Standard: {Name}_-_{Singer}_-_{Source}_-_{ID}_-_{Quality}
         baseName = `${nameStr}_-_${singerStr}_-_${sanitizeFilename(source)}_-_${sanitizeFilename(id)}_-_${sanitizeFilename(q)}`
@@ -611,12 +621,25 @@ const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, 
 
         // The album is part of the simple filename, so different album editions do not collide.
         const conflict = existingItems.find(item => {
-            const itemAlbumValue = item.album || 'Unknown Album'
-            return sanitizeFilename(item.name || 'Unknown').toLowerCase() === normalizedName &&
-                sanitizeFilename(item.singer || 'Unknown').toLowerCase() === normalizedSinger &&
-                sanitizeFilename(item.quality || 'unknown').toLowerCase() === normalizedQuality &&
-                sanitizeFilename(itemAlbumValue).toLowerCase() === normalizedAlbum &&
-                normalizeSongId(item) !== id
+            // 只要不是同一个文件（ID 不同，或者 ID 相同但音质不同），就有可能冲突
+            const isDifferentFile = normalizeSongId(item) !== id || item.quality !== q
+            if (!isDifferentFile) return false
+
+            const itemNormalizedName = sanitizeFilename(item.name || 'Unknown').toLowerCase()
+            const itemNormalizedSinger = sanitizeFilename(item.singer || 'Unknown').toLowerCase()
+
+            if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME || currentNamingPattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
+                // 对于仅包含“歌手-歌名”的模式，只要歌手和歌名一样，必定产生同名文件冲突
+                return itemNormalizedName === normalizedName && itemNormalizedSinger === normalizedSinger
+            } else {
+                // 对于包含音质和专辑的模式，还要判断这些字段是否也完全相同
+                const itemNormalizedQuality = sanitizeFilename(item.quality || 'unknown').toLowerCase()
+                const itemNormalizedAlbum = sanitizeFilename(item.album || 'Unknown Album').toLowerCase()
+                return itemNormalizedName === normalizedName &&
+                    itemNormalizedSinger === normalizedSinger &&
+                    itemNormalizedQuality === normalizedQuality &&
+                    itemNormalizedAlbum === normalizedAlbum
+            }
         })
 
         if (conflict) {

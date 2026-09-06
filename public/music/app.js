@@ -140,8 +140,9 @@ function normalizeStoredSettings(nextSettings) {
     if (nextSettings.downloadConcurrency !== undefined) {
         nextSettings.downloadConcurrency = normalizeDownloadConcurrency(nextSettings.downloadConcurrency);
     }
-    nextSettings.serverCacheNamingPattern = nextSettings.serverCacheNamingPattern === 'standard'
-        ? 'standard'
+    const validPatterns = ['standard', 'simple', 'singer_name_quality_album', 'singer_name', 'name_singer'];
+    nextSettings.serverCacheNamingPattern = validPatterns.includes(nextSettings.serverCacheNamingPattern)
+        ? nextSettings.serverCacheNamingPattern
         : 'simple';
     return nextSettings;
 }
@@ -594,8 +595,82 @@ function updateUserUI() {
         userDisplay.classList.add('hidden');
         userDisplay.classList.remove('flex');
     }
+
+    // 更新自定义目录开关显示状态
+    if (typeof checkAndUpdateCustomDirUI === 'function') {
+        checkAndUpdateCustomDirUI();
+    }
 }
 window.updateUserUI = updateUserUI;
+
+/**
+ * 检查并更新「本地音乐」Tab 旁的自定义目录开关状态
+ */
+async function checkAndUpdateCustomDirUI() {
+    let userEnableCustomDir = false;
+    let localUserToken = typeof userToken !== 'undefined' ? userToken : localStorage.getItem('lx_user_token');
+    
+    if (localUserToken) {
+        try {
+            const vRes = await fetch('/api/user/auth/verify', {
+                headers: { 'x-user-token': localUserToken }
+            });
+            const vData = await vRes.json();
+            if (!vData.valid) {
+                if (typeof ensureUserAuthToken === 'function') {
+                    const refreshed = await ensureUserAuthToken({ force: true });
+                    if (refreshed) {
+                        console.log('[Auth] 用户 Token 已失效，已自动续签。');
+                    }
+                }
+            } else {
+                userEnableCustomDir = !!vData.enableCustomMusicDir;
+                window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
+            }
+        } catch (e) {
+            console.warn('[Auth] Token 验证失败:', e);
+        }
+    }
+
+    const switchContainer = document.getElementById('custom-dir-switch-container');
+    const customDirSwitch = document.getElementById('user-custom-dir-switch');
+    if (switchContainer) {
+        const isUser = !!localUserToken;
+        if (isUser && userEnableCustomDir) {
+            switchContainer.classList.remove('hidden');
+            switchContainer.classList.add('flex');
+
+            const cachedActive = localStorage.getItem('lx_custom_dir_active') === 'true';
+            if (customDirSwitch) {
+                customDirSwitch.checked = cachedActive;
+                if (cachedActive) {
+                    if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
+                        window.CustomDirManager.setActive(true);
+                    } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
+                        window.LocalMusicManager.toggleCustomDirMode(true);
+                    }
+                }
+            }
+        } else {
+            switchContainer.classList.add('hidden');
+            switchContainer.classList.remove('flex');
+            
+            // 如果用户注销，则取消激活状态
+            if (!isUser || !userEnableCustomDir) {
+                if (customDirSwitch && customDirSwitch.checked) {
+                    customDirSwitch.checked = false;
+                    localStorage.setItem('lx_custom_dir_active', 'false');
+                    if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
+                        window.CustomDirManager.setActive(false);
+                    } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
+                        window.LocalMusicManager.toggleCustomDirMode(false);
+                    }
+                }
+            }
+        }
+    }
+}
+window.checkAndUpdateCustomDirUI = checkAndUpdateCustomDirUI;
 
 /**
  * 顶部栏退出登录处理 (带确认弹窗与全量缓存清理)
@@ -649,56 +724,10 @@ window.handleHeaderLogout = handleHeaderLogout;
         if (typeof syncSettingsUI === 'function') syncSettingsUI();
         else if (typeof updateAdminUI === 'function') updateAdminUI();
 
-        // [新增] 有 Token 时验证其有效性及用户自定义目录配置
-        let userEnableCustomDir = false;
-        if (userToken) {
-            try {
-                const vRes = await fetch('/api/user/auth/verify', {
-                    headers: { 'x-user-token': userToken }
-                });
-                const vData = await vRes.json();
-                if (!vData.valid) {
-                    const refreshed = await ensureUserAuthToken({ force: true });
-                    if (refreshed) {
-                        console.log('[Auth] 用户 Token 已失效，已自动续签。');
-                    } else {
-                        console.log('[Auth] 用户 Token 已失效且无法自动续签，请重新登录。');
-                    }
-                } else {
-                    userEnableCustomDir = !!vData.enableCustomMusicDir;
-                    window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
-                }
-            } catch (e) {
-                console.warn('[Auth] Token 验证失败:', e);
-            }
-        }
+        // 更新自定义目录开关显示状态
+        await checkAndUpdateCustomDirUI();
 
-        // 控制「本地音乐」Tab 旁的自定义目录开关显示
-        const switchContainer = document.getElementById('custom-dir-switch-container');
         const customDirSwitch = document.getElementById('user-custom-dir-switch');
-        if (switchContainer) {
-            const isUser = !!userToken;
-            if (isUser && userEnableCustomDir) {
-                switchContainer.classList.remove('hidden');
-                switchContainer.classList.add('flex');
-
-                // 读取自定义目录模式缓存状态
-                const cachedActive = localStorage.getItem('lx_custom_dir_active') === 'true';
-                if (customDirSwitch) {
-                    customDirSwitch.checked = cachedActive;
-                    if (cachedActive) {
-                        if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
-                            window.CustomDirManager.setActive(true);
-                        } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
-                            window.LocalMusicManager.toggleCustomDirMode(true);
-                        }
-                    }
-                }
-            } else {
-                switchContainer.classList.add('hidden');
-                switchContainer.classList.remove('flex');
-            }
-        }
 
         if (customDirSwitch) {
             customDirSwitch.addEventListener('change', (e) => {
@@ -14629,6 +14658,7 @@ window.CustomSelectManager = {
         optionsList.className = 'cs-options';
 
         Array.from(select.options).forEach(opt => {
+            if (opt.disabled) return;
             const li = document.createElement('li');
             li.className = 'cs-option' + (opt.selected ? ' selected' : '');
             li.innerHTML = `<span>${opt.text}</span><i class="fas fa-check"></i>`;
