@@ -317,6 +317,12 @@ class SubsonicHandler {
                 case 'getStarred2':
                     return this.handleGetStarred(res, username, format, true)
 
+                case 'star':
+                    return this.handleStar(res, username, params, format, true)
+
+                case 'unstar':
+                    return this.handleStar(res, username, params, format, false)
+
                 case 'getRandomSongs':
                 case 'getSongsByGenre':
                 case 'getSongsByGenre2':
@@ -1915,6 +1921,68 @@ class SubsonicHandler {
                 },
             },
         }, format)
+    }
+
+    /**
+     * star / unstar：歌曲 → 「我的收藏(love)」列表
+     * （github/dev 移植自 feat/subsonic 的精简版：仅支持歌曲，专辑/歌手星标暂跳过）
+     */
+    private async handleStar(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, isStar: boolean) {
+        // 收集 id / albumId / artistId（均允许逗号分隔的多个值）
+        const ids: string[] = []
+        for (const key of ['id', 'albumId', 'artistId']) {
+            for (const value of params.getAll(key)) {
+                for (const one of value.split(',')) {
+                    const trimmed = one.trim()
+                    if (trimmed) ids.push(trimmed)
+                }
+            }
+        }
+        if (!ids.length) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+
+        const userSpace = getUserSpace(username)
+        const location = (global.lx.config['list.addMusicLocationType'] || 'bottom') as 'top' | 'bottom'
+        let loveChanged = false
+        const action = isStar ? 'star' : 'unstar'
+        const debug = !!global.lx.config['subsonic.enableDebug']
+        const debugLog = (msg: string) => { if (debug) console.log(msg) }
+
+        for (const id of ids) {
+            if (id.startsWith('alb_') || id.startsWith('art_')) {
+                // github/dev 未实现专辑/歌手星标元数据，跳过
+                debugLog(`[Subsonic Debug] ${action} 专辑/歌手 ${id} 暂不支持，已跳过 (user=${username})`)
+                continue
+            }
+            try {
+                const hit = await this.findMusicById(username, id)
+                const resolved = hit?.music || null
+                if (!resolved) {
+                    console.warn(`[Subsonic] ${action} 歌曲 ${id} 跳过：findMusicById 未命中，未做任何改动 (user=${username})`)
+                    continue
+                }
+                if (isStar) {
+                    await userSpace.listManage.listDataManage.listMusicAdd('love', [resolved], location)
+                } else {
+                    await userSpace.listManage.listDataManage.listMusicRemove('love', [resolved.id])
+                }
+                debugLog(`[Subsonic Debug] ${action} 歌曲 ${id} -> ${isStar ? '已加入' : '已移出'}我的收藏(love) 《${resolved.name}》(user=${username})`)
+                this.cacheOnlineSong(resolved)
+                loveChanged = true
+            } catch (e) {
+                console.error(`[Subsonic] ${action} song error (${id}):`, e)
+            }
+        }
+
+        if (loveChanged) {
+            try {
+                await userSpace.listManage.createSnapshot()
+            } catch (e) {
+                console.error('[Subsonic] createSnapshot error:', e)
+            }
+        }
+
+        debugLog(`[Subsonic Debug] ${action} 完成: id 数=${ids.length}, 收藏变更=${loveChanged} (user=${username})`)
+        return this.sendResponse(res, {}, format)
     }
 
     private async handleGetStarred(res: http.ServerResponse, username: string, format: string, isV2 = true) {
