@@ -16,6 +16,111 @@ import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musi
 import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
+// ─────────────────────────────────────────────
+// 图片字段提取助手（星标写回原生收藏时，从源头补齐歌手头像 / 专辑封面）
+// ─────────────────────────────────────────────
+
+/** 从歌手详情对象中提取头像地址，兼容各音源字段（wy/tx 均返回 avatar） */
+function extractArtistImage(info: any): string {
+    if (!info || typeof info !== 'object') return ''
+    return info.avatar || info.img || info.pic || info.picUrl || info.imageUrl || info.cover || info.coverUrl || ''
+}
+
+/** 从专辑歌曲列表返回中提取专辑封面（best-effort：取首曲 img），兼容各音源字段 */
+function extractAlbumImage(data: any): string {
+    const first = data?.list?.[0]
+    const candidates = [first?.img, first?.meta?.img, data?.info?.img, data?.img, data?.pic, data?.cover, data?.coverUrl]
+    for (const v of candidates) {
+        if (typeof v === 'string' && v) return v
+    }
+    return ''
+}
+
+// ─────────────────────────────────────────────
+// 模块级：Subsonic 元数据 I/O 与双向同步
+// 供 SubsonicHandler 与 server.ts 的媒体库收藏接口共用，
+// 实现「音流星标 ↔ 网页前端原生收藏」双向互通。
+// ─────────────────────────────────────────────
+
+export interface SubsonicMeta {
+    starredAlbums: string[]
+    starredArtists: string[]
+    starredArtistNames: string[]
+    ratings: Record<string, number>
+}
+
+function normalizeSubsonicName(name: string): string {
+    return (name || '').trim().toLowerCase()
+}
+
+export function getSubsonicMetaFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-meta.json')
+}
+
+export function readSubsonicMeta(username: string): SubsonicMeta {
+    try {
+        const filePath = getSubsonicMetaFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            return {
+                starredAlbums: Array.isArray(data.starredAlbums) ? data.starredAlbums : [],
+                starredArtists: Array.isArray(data.starredArtists) ? data.starredArtists : [],
+                // 兼容旧版元数据：starredArtistNames 可能为 undefined
+                starredArtistNames: Array.isArray(data.starredArtistNames) ? data.starredArtistNames : [],
+                ratings: data.ratings && typeof data.ratings === 'object' ? data.ratings : {},
+            }
+        }
+    } catch (e) {
+        console.error('[Subsonic] Failed to read subsonic-meta.json:', e)
+    }
+    return { starredAlbums: [], starredArtists: [], starredArtistNames: [], ratings: {} }
+}
+
+export function writeSubsonicMeta(username: string, meta: SubsonicMeta) {
+    try {
+        const filePath = getSubsonicMetaFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        fs.writeFileSync(filePath, JSON.stringify(meta), 'utf8')
+    } catch (e) {
+        console.error('[Subsonic] Failed to write subsonic-meta.json:', e)
+    }
+}
+
+/**
+ * 反向同步：网页前端原生收藏(媒体库 artists/albums)变更 -> Subsonic 星标。
+ * added/removed 为原生条目 {id, source, name}。
+ */
+export function syncNativeLibraryToSubsonic(
+    username: string,
+    type: 'artists' | 'albums',
+    added: { id: string, source: string, name?: string }[],
+    removed: { id: string, source: string, name?: string }[],
+) {
+    const meta = readSubsonicMeta(username)
+    const artistNames = new Set(meta.starredArtistNames)
+    if (type === 'artists') {
+        const set = new Set(meta.starredArtists)
+        for (const a of added) {
+            set.add(`art_${a.source}_${a.id}`)
+            if (a.name) artistNames.add(normalizeSubsonicName(a.name))
+        }
+        for (const a of removed) {
+            set.delete(`art_${a.source}_${a.id}`)
+            if (a.name) artistNames.delete(normalizeSubsonicName(a.name))
+        }
+        meta.starredArtists = Array.from(set)
+    } else {
+        const set = new Set(meta.starredAlbums)
+        for (const a of added) set.add(`alb_${a.source}_${a.id}`)
+        for (const a of removed) set.delete(`alb_${a.source}_${a.id}`)
+        meta.starredAlbums = Array.from(set)
+    }
+    meta.starredArtistNames = Array.from(artistNames)
+    writeSubsonicMeta(username, meta)
+    console.log(`[Subsonic] 原生收藏(${type}) -> 星标 同步完成: +${added.length} / -${removed.length} (user=${username})`)
+}
+
 /**
  * Subsonic 协议处理器
  * 实现了 OpenSubsonic 核心 API 集成
@@ -37,6 +142,9 @@ class SubsonicHandler {
 
     // 固定同一关键词的在线结果顺序，避免客户端翻页时出现重复或跳项。
     private onlineSearchCache = new Map<string, { expiresAt: number, results: { music: LX.Music.MusicInfo, listId: string }[] }>()
+
+    // 当前用户 love 列表歌曲 id 集合缓存，用于歌曲序列化时标记 starred（按用户名隔离，避免并发串号）
+    private loveIdSets = new Map<string, Set<string>>()
 
     private cacheOnlineSong(music: LX.Music.MusicInfo) {
         if (!music || !music.id) return
@@ -228,6 +336,17 @@ class SubsonicHandler {
 
         const { pathname } = urlObj
         const method = pathname.split('/').pop()?.split('.')[0] || ''
+
+        // [starred] 预先计算当前用户 love 列表歌曲 id 集合，供歌曲序列化标记 starred（排除热路径方法）
+        if (!['ping', 'getLicense', 'stream', 'download', 'getCoverArt'].includes(method)) {
+            try {
+                const listData = await getUserSpace(username).listManage.getListData()
+                this.loveIdSets.set(username, new Set((listData.loveList || []).map((m: any) => m.id)))
+            } catch (e) {
+                console.error('[Subsonic] 计算 love 列表失败:', e)
+            }
+        }
+
         const logId = params.get('id')
         const logQuery = params.get('query')
         const logArtist = params.get('artist')
@@ -386,6 +505,41 @@ class SubsonicHandler {
             console.error(`[Subsonic] Error reading library ${type}:`, e)
             return []
         }
+    }
+
+    /** 写回原生媒体库收藏文件（artists.json / albums.json），用于双向同步 */
+    private async writeLibraryData(username: string, type: 'artists' | 'albums', data: any[]): Promise<void> {
+        const userDir = path.join(global.lx.userPath, getUserDirname(username))
+        const libPath = path.join(userDir, 'library', `${type}.json`)
+        const dir = path.dirname(libPath)
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+        fs.writeFileSync(libPath, JSON.stringify(data, null, 2), 'utf8')
+    }
+
+    /** 解析专辑信息（Subsonic 星标写回原生收藏时填充名称与封面；失败返回 name:null 不阻断星标） */
+    private async resolveAlbumInfo(source: string, realId: string): Promise<{ name: string | null, picUrl: string }> {
+        try {
+            const sdk = (musicSdk as any)[source]
+            if (sdk?.extendDetail?.getAlbumSongs) {
+                const data = await sdk.extendDetail.getAlbumSongs(realId)
+                const name = data?.name || data?.list?.[0]?.albumName || data?.list?.[0]?.meta?.albumName || null
+                const picUrl = extractAlbumImage(data)
+                return { name, picUrl }
+            }
+        } catch { /* 解析失败不阻断主流程 */ }
+        return { name: null, picUrl: '' }
+    }
+
+    /** 星标写回原生收藏时取歌手头像；失败返回 '' 不阻断星标 */
+    private async resolveArtistPicUrl(source: string, realId: string): Promise<string> {
+        try {
+            const sdk = (musicSdk as any)[source]
+            if (sdk?.extendDetail?.getArtistDetail) {
+                const info = await sdk.extendDetail.getArtistDetail(realId)
+                return extractArtistImage(info)
+            }
+        } catch { /* 取图失败不阻断主流程 */ }
+        return ''
     }
 
     private parseDuration(interval: any): number {
@@ -1314,14 +1468,23 @@ class SubsonicHandler {
     private async handleGetArtists(res: http.ServerResponse, username: string, format: string) {
         // [修改] 歌手列表首选来自收藏的歌手库
         const libArtists = await this.getLibraryData(username, 'artists')
+        // [修复] 标记已收藏歌手，让 Subsonic 客户端（音流/Ultrasonic 等）能显示爱心高亮
+        const meta = await this.getUserSubsonicMeta(username)
+        const starredArtistSet = new Set(meta.starredArtists)
+        const starredArtistNameSet = new Set(meta.starredArtistNames)
+        const isArtistStarred = (source: string, id: string, name: string) =>
+            starredArtistSet.has(`art_${source || 'wy'}_${id}`) ||
+            starredArtistNameSet.has(this.normalizeArtistName(name))
         const artists = libArtists.map(artist => {
             const id = `art_${artist.source || 'wy'}_${artist.id}`
+            const starred = isArtistStarred(artist.source, artist.id, artist.name)
             return {
                 id: id,
                 name: artist.name,
                 albumCount: 0,
                 coverArt: id,
                 artistImageUrl: artist.picUrl || artist.img,
+                ...(starred ? { starred: new Date().toISOString() } : {}),
             }
         })
 
@@ -1364,6 +1527,11 @@ class SubsonicHandler {
     private async handleGetArtist(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+
+        // [修复] 收藏元数据：用于判断当前歌手是否已收藏（客户端爱心高亮）
+        const meta = await this.getUserSubsonicMeta(username)
+        const starredArtistSet = new Set(meta.starredArtists)
+        const starredArtistNameSet = new Set(meta.starredArtistNames)
 
         let source = 'wy'
         let artistId = ''
@@ -1477,13 +1645,16 @@ class SubsonicHandler {
         }
         */
 
+        const artistStarred = starredArtistSet.has(resolvedId) ||
+            starredArtistNameSet.has(this.normalizeArtistName(singerName))
         const artistInfo = {
             id,
             name: singerName,
             albumCount: albums.length,
             songCount: hotSongs.length,
             coverArt: resolvedId,
-            artistImageUrl: artistPic || resolvedId
+            artistImageUrl: artistPic || resolvedId,
+            ...(artistStarred ? { starred: new Date().toISOString() } : {}),
         }
 
         // 这里的关键：Subsonic getArtist 响应中可以包含 album 和 song
@@ -2007,37 +2178,45 @@ class SubsonicHandler {
      * star / unstar：歌曲 → 「我的收藏(love)」列表
      * （github/dev 移植自 feat/subsonic：歌曲经 resolveSongMeta 解析，支持在线回源）
      */
-    private getUserMetaFilePath(username: string): string {
-        return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-meta.json')
+    /** 用户维度 Subsonic 扩展元数据：星标专辑 / 星标歌手（委托模块级函数，便于 server.ts 反向同步共用） */
+    private async getUserSubsonicMeta(username: string): Promise<{ starredAlbums: string[], starredArtists: string[], starredArtistNames: string[], ratings: Record<string, number> }> {
+        return readSubsonicMeta(username)
     }
 
-    /** 用户维度 Subsonic 扩展元数据：星标专辑 / 星标歌手 */
-    private async getUserSubsonicMeta(username: string): Promise<{ starredAlbums: string[], starredArtists: string[], ratings: Record<string, number> }> {
-        try {
-            const filePath = this.getUserMetaFilePath(username)
-            if (fs.existsSync(filePath)) {
-                const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-                return {
-                    starredAlbums: Array.isArray(data.starredAlbums) ? data.starredAlbums : [],
-                    starredArtists: Array.isArray(data.starredArtists) ? data.starredArtists : [],
-                    ratings: data.ratings && typeof data.ratings === 'object' ? data.ratings : {},
-                }
-            }
-        } catch (e) {
-            console.error('[Subsonic] Failed to read subsonic-meta.json:', e)
-        }
-        return { starredAlbums: [], starredArtists: [], ratings: {} }
+    private async saveUserSubsonicMeta(username: string, meta: { starredAlbums: string[], starredArtists: string[], starredArtistNames: string[], ratings: Record<string, number> }) {
+        writeSubsonicMeta(username, meta)
     }
 
-    private async saveUserSubsonicMeta(username: string, meta: { starredAlbums: string[], starredArtists: string[], ratings: Record<string, number> }) {
-        try {
-            const filePath = this.getUserMetaFilePath(username)
-            const dirPath = path.dirname(filePath)
-            if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
-            fs.writeFileSync(filePath, JSON.stringify(meta), 'utf8')
-        } catch (e) {
-            console.error('[Subsonic] Failed to write subsonic-meta.json:', e)
+    /** 歌手名归一化：去空格 + 小写，用于跨大小写/音源匹配 */
+    private normalizeArtistName(name: string): string {
+        return (name || '').trim().toLowerCase()
+    }
+
+    /**
+     * 将歌手 id 解析为 (规范 art_ id, 歌手名) 两件套，供 star / getStarred 统一使用。
+     * - art_源_id：规范 id，直接返回 id；并尽量从本地歌手库反查名字（保证 unstar 时名字集合一致）。
+     * - artist_名字：兜底 id（歌曲/专辑映射在无 singerId 时生成），用 getSingerMid 寻址归一为 art_tx_mid；
+     *   寻址失败时退回原名（artist_名字），仍按名字匹配。
+     */
+    private async resolveArtistKey(username: string, id: string): Promise<{ canonical: string | null, name?: string }> {
+        if (id.startsWith('art_')) {
+            let name: string | undefined
+            try {
+                const libArtists = await this.getLibraryData(username, 'artists')
+                const found = libArtists.find((a: any) => `art_${a.source || 'wy'}_${a.id}` === id)
+                if (found?.name) name = found.name
+            } catch { /* 忽略，反查名字非必须 */ }
+            return { canonical: id, name }
         }
+        if (id.startsWith('artist_')) {
+            const name = decodeURIComponent(id.slice(7))
+            try {
+                const mid = await getSingerMid(name)
+                if (mid) return { canonical: `art_tx_${mid}`, name }
+            } catch { /* 寻址失败，退回原名 */ }
+            return { canonical: id, name }
+        }
+        return { canonical: id, name: undefined }
     }
 
     private async handleStar(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, isStar: boolean) {
@@ -2057,6 +2236,8 @@ class SubsonicHandler {
         const meta = await this.getUserSubsonicMeta(username)
         const starredAlbums = new Set(meta.starredAlbums)
         const starredArtists = new Set(meta.starredArtists)
+        // 歌手名集合：用于跨音源 / artist_名字 兜底 id 的星标匹配
+        const starredArtistNames = new Set(meta.starredArtistNames)
         const location = (global.lx.config['list.addMusicLocationType'] || 'bottom') as 'top' | 'bottom'
         let loveChanged = false
         let metaChanged = false
@@ -2064,17 +2245,71 @@ class SubsonicHandler {
         const debug = !!global.lx.config['subsonic.enableDebug']
         const debugLog = (msg: string) => { if (debug) console.log(msg) }
 
+        // 原生媒体库收藏（用于双向同步：音流星标 -> 网页前端收藏）
+        const nativeArtists = await this.getLibraryData(username, 'artists')
+        const nativeAlbums = await this.getLibraryData(username, 'albums')
+        let nativeArtistsDirty = false
+        let nativeAlbumsDirty = false
+
         for (const id of ids) {
             if (id.startsWith('alb_')) {
                 isStar ? starredAlbums.add(id) : starredAlbums.delete(id)
                 metaChanged = true
+                console.log(`[Subsonic] ${action} 专辑 ${id} (user=${username})`)
                 debugLog(`[Subsonic Debug] ${action} 专辑 ${id} -> ${isStar ? '已星标' : '已取消星标'} (user=${username})`)
+                // 双向同步：写回原生媒体库收藏
+                const m = id.match(/^alb_([a-zA-Z0-9]+)_(.+)$/)
+                if (m) {
+                    const source = m[1]
+                    const realId = m[2]
+                    if (isStar) {
+                        if (!nativeAlbums.some((a: any) => String(a.id) === realId && a.source === source)) {
+                            const { name, picUrl } = await this.resolveAlbumInfo(source, realId)
+                            if (name) {
+                                nativeAlbums.push({ id: realId, source, name, picUrl, artistName: '' })
+                                nativeAlbumsDirty = true
+                            } else {
+                                console.warn(`[Subsonic] ${action} 专辑 ${id} 跳过原生同步：无法解析专辑名 (user=${username})`)
+                            }
+                        }
+                    } else {
+                        const idx = nativeAlbums.findIndex((a: any) => String(a.id) === realId && a.source === source)
+                        if (idx >= 0) { nativeAlbums.splice(idx, 1); nativeAlbumsDirty = true }
+                    }
+                }
                 continue
             }
-            if (id.startsWith('art_')) {
-                isStar ? starredArtists.add(id) : starredArtists.delete(id)
+            if (id.startsWith('art_') || id.startsWith('artist_')) {
+                // 统一解析：art_规范id 或 artist_名字兜底id -> 规范id + 歌手名
+                const { canonical, name } = await this.resolveArtistKey(username, id)
+                if (!canonical) {
+                    console.warn(`[Subsonic] ${action} 歌手 ${id} 跳过：无法解析歌手标识，未做任何改动 (user=${username})`)
+                    continue
+                }
+                isStar ? starredArtists.add(canonical) : starredArtists.delete(canonical)
+                if (name) {
+                    const nk = this.normalizeArtistName(name)
+                    isStar ? starredArtistNames.add(nk) : starredArtistNames.delete(nk)
+                }
                 metaChanged = true
-                debugLog(`[Subsonic Debug] ${action} 歌手 ${id} -> ${isStar ? '已星标' : '已取消星标'} (user=${username})`)
+                console.log(`[Subsonic] ${action} 歌手 ${id} -> 规范=${canonical}${name ? `, 名=${name}` : ''} (user=${username})`)
+                debugLog(`[Subsonic Debug] ${action} 歌手 ${id} -> ${isStar ? '已星标' : '已取消星标'} (规范=${canonical}${name ? `, 名=${name}` : ''}) (user=${username})`)
+                // 双向同步：写回原生媒体库收藏（仅规范 art_ 前缀可映射回原生 id）
+                const m = canonical.match(/^art_([a-zA-Z0-9]+)_(.+)$/)
+                if (m) {
+                    const source = m[1]
+                    const realId = m[2]
+                    if (isStar) {
+                        if (!nativeArtists.some((a: any) => String(a.id) === realId && a.source === source)) {
+                            const picUrl = await this.resolveArtistPicUrl(source, realId)
+                            nativeArtists.push({ id: realId, source, name: name || '', picUrl })
+                            nativeArtistsDirty = true
+                        }
+                    } else {
+                        const idx = nativeArtists.findIndex((a: any) => String(a.id) === realId && a.source === source)
+                        if (idx >= 0) { nativeArtists.splice(idx, 1); nativeArtistsDirty = true }
+                    }
+                }
                 continue
             }
             try {
@@ -2102,9 +2337,12 @@ class SubsonicHandler {
             await this.saveUserSubsonicMeta(username, {
                 starredAlbums: Array.from(starredAlbums),
                 starredArtists: Array.from(starredArtists),
+                starredArtistNames: Array.from(starredArtistNames),
                 ratings: meta.ratings,
             })
         }
+        if (nativeArtistsDirty) await this.writeLibraryData(username, 'artists', nativeArtists)
+        if (nativeAlbumsDirty) await this.writeLibraryData(username, 'albums', nativeAlbums)
         if (loveChanged) {
             try {
                 await userSpace.listManage.createSnapshot()
@@ -2123,6 +2361,7 @@ class SubsonicHandler {
         const meta = await this.getUserSubsonicMeta(username)
         const starredAlbumSet = new Set(meta.starredAlbums)
         const starredArtistSet = new Set(meta.starredArtists)
+        const starredArtistNameSet = new Set(meta.starredArtistNames)
 
         // [汇总所有歌单歌曲]
         const allSongsMap = new Map<string, { music: LX.Music.MusicInfo, listId: string }>()
@@ -2144,16 +2383,27 @@ class SubsonicHandler {
         const libArtists = await this.getLibraryData(username, 'artists')
         const libAlbums = await this.getLibraryData(username, 'albums')
 
-        const mappedArtists = libArtists
-            .filter(a => starredArtistSet.has(`art_${a.source || 'wy'}_${a.id}`))
-            .map(a => {
-                const id = `art_${a.source || 'wy'}_${a.id}`
-                return {
-                    id,
-                    name: a.name,
-                    coverArt: id
-                }
-            })
+        // [已星标歌手] 优先来自本地歌手库匹配；库为空或歌手不在库中时，用已存名字兜底合成条目
+        const seenArtistNames = new Set<string>()
+        const mappedArtists: Array<{ id: string, name: string, coverArt: string }> = []
+        const pushArtist = (id: string, name: string) => {
+            const nk = this.normalizeArtistName(name)
+            if (seenArtistNames.has(nk)) return
+            seenArtistNames.add(nk)
+            mappedArtists.push({ id, name, coverArt: id })
+        }
+
+        for (const a of libArtists) {
+            const canonical = `art_${a.source || 'wy'}_${a.id}`
+            // 兼容：art_规范id 命中，或 artist_名字 兜底 / 跨音源按歌手名命中
+            if (starredArtistSet.has(canonical) || starredArtistNameSet.has(this.normalizeArtistName(a.name))) {
+                pushArtist(canonical, a.name)
+            }
+        }
+        // 兜底：已星标但根本不在本地歌手库（例如从歌曲点星标、库为空）的歌手，用名字合成
+        for (const name of meta.starredArtistNames) {
+            pushArtist(`artist_${encodeURIComponent(name)}`, name)
+        }
 
         const mappedAlbums = libAlbums
             .filter(a => starredAlbumSet.has(`alb_${(a.source || 'wy')}_${a.id}`))
@@ -2439,6 +2689,7 @@ class SubsonicHandler {
             return res.end()
         }
 
+        try {
         // 0. 剥离前缀 (al-, ar-, tr-, sg-, mg-) 并处理 URL
         id = id.replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
         if (id === 'logo') {
@@ -2536,18 +2787,22 @@ class SubsonicHandler {
             if (sdkPic) return this.proxyCoverImage(res, sdkPic)
             // console.log(`[CoverArt] SDK also returned nothing for song ${id}`)
         } else if (id.startsWith('alb_')) {
-            // [新增] 处理 SDK 专辑封面
+            // [修复] 专辑封面：绝不能直接调歌曲 getPic（专辑对象无 songmid/hash，会读取 undefined.length 崩溃）。
+            // 优先用本地专辑库的 picUrl；没有则落到函数末尾的 204 兜底。
             const parts = id.split('_')
             const source = parts[1]
             const realId = parts.slice(2).join('_')
-            // console.log(`[CoverArt] Album Route Parse: source=${source}, realId=${realId}`)
-            if (musicSdk[source]?.getPic) {
-                const pic = await musicSdk[source].getPic({ source, albumId: realId, albumMid: realId } as any)
-                if (pic && typeof pic === 'string') {
-                    // console.log(`[CoverArt] ✓ SDK Album Pic Success: ${pic}`)
-                    return this.proxyCoverImage(res, pic)
-                }
+            try {
+                const libAlbums = await this.getLibraryData(username, 'albums')
+                const alb = libAlbums.find((a: any) =>
+                    `${(a.source || 'wy')}_${a.id}` === id || String(a.id) === realId)
+                const localPic = alb?.picUrl || alb?.img
+                if (localPic) return this.proxyCoverImage(res, localPic)
+            } catch (e) {
+                console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
             }
+            // 注：musicSdk 各源未统一暴露专辑封面接口（kg 的 getAlbumInfo 未挂到 SDK 对象上），
+            // 此处不再强行调用歌曲 getPic，避免崩溃；专辑库有 picUrl 时才会返回封面。
         } else if (id.startsWith('art_')) {
             // [修改] 歌手封面逻辑优化：先查本地库，再查歌手图助手
             const parts = id.split('_')
@@ -2621,6 +2876,11 @@ class SubsonicHandler {
         // console.log(`[CoverArt] No cover found for id=${id}, returning 204`)
         res.writeHead(204)
         res.end()
+        } catch (e: any) {
+            console.error('[Subsonic] handleGetCoverArt error:', e?.message || e)
+            if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
+            if (!res.writableEnded) res.end(JSON.stringify({ error: 'cover art error' }))
+        }
     }
 
     private async handleGetTopSongs(
