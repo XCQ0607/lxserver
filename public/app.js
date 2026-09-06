@@ -101,6 +101,29 @@ class App {
         document.getElementById('save-password-btn')?.addEventListener('click', () => this.saveNewPassword());
         document.getElementById('save-rename-user-btn')?.addEventListener('click', () => this.saveRenameUser());
 
+        // 用户配置自定义目录相关事件
+        document.getElementById('user-custom-dir-enable-toggle')?.addEventListener('change', (e) => {
+            const container = document.getElementById('user-custom-dir-container');
+            if (e.target.checked) {
+                container?.classList.remove('hidden');
+                this.validateUserCustomDirState();
+            } else {
+                container?.classList.add('hidden');
+                this.setUserConfigConfirmBtnState(true);
+            }
+        });
+
+        document.getElementById('user-custom-dir-input')?.addEventListener('input', () => {
+            this.setUserConfigConfirmBtnState(false);
+            const statusEl = document.getElementById('user-custom-dir-status');
+            if (statusEl) {
+                statusEl.textContent = '目录路径已修改，请点击右侧「检测」验证可用性';
+                statusEl.style.color = 'var(--text-secondary, #94a3b8)';
+            }
+        });
+
+        document.getElementById('test-user-custom-dir-btn')?.addEventListener('click', () => this.testUserCustomDir());
+
         // 绑定所有模态框关闭按钮
         document.querySelectorAll('.modal-close').forEach(btn => {
             btn.addEventListener('click', () => {
@@ -1024,43 +1047,160 @@ class App {
         });
     }
 
-    // 显示修改用户名模态框
+    // 设置用户配置确定按钮禁用状态
+    setUserConfigConfirmBtnState(enabled) {
+        const btn = document.getElementById('save-rename-user-btn');
+        if (btn) {
+            btn.disabled = !enabled;
+            btn.style.opacity = enabled ? '1' : '0.5';
+            btn.style.cursor = enabled ? 'pointer' : 'not-allowed';
+        }
+    }
+
+    validateUserCustomDirState() {
+        const toggle = document.getElementById('user-custom-dir-enable-toggle');
+        const input = document.getElementById('user-custom-dir-input');
+        if (toggle && toggle.checked) {
+            // 如果开启了自定义目录，初始判断需包含有效的验证
+            if (!input || !input.value.trim()) {
+                this.setUserConfigConfirmBtnState(false);
+                const statusEl = document.getElementById('user-custom-dir-status');
+                if (statusEl) {
+                    statusEl.textContent = '请输入自定义歌曲目录地址';
+                    statusEl.style.color = '#ef4444';
+                }
+            } else {
+                // 如果已有固定目录，建议先检测或设为需要检测
+                this.setUserConfigConfirmBtnState(false);
+                const statusEl = document.getElementById('user-custom-dir-status');
+                if (statusEl) {
+                    statusEl.textContent = '请点击右侧「检测」按钮进行可用性验证';
+                    statusEl.style.color = 'var(--text-secondary, #94a3b8)';
+                }
+            }
+        } else {
+            this.setUserConfigConfirmBtnState(true);
+            const statusEl = document.getElementById('user-custom-dir-status');
+            if (statusEl) statusEl.textContent = '';
+        }
+    }
+
+    async testUserCustomDir() {
+        const dirInput = document.getElementById('user-custom-dir-input');
+        const statusEl = document.getElementById('user-custom-dir-status');
+        const dirPath = dirInput ? dirInput.value.trim() : '';
+
+        if (!dirPath) {
+            if (statusEl) {
+                statusEl.textContent = '请输入自定义歌曲目录地址';
+                statusEl.style.color = '#ef4444';
+            }
+            this.setUserConfigConfirmBtnState(false);
+            return;
+        }
+
+        if (statusEl) {
+            statusEl.textContent = '正在检测目录可用性...';
+            statusEl.style.color = '#38bdf8';
+        }
+
+        try {
+            const res = await this.request('/api/utils/check-dir', {
+                method: 'POST',
+                body: JSON.stringify({ dirPath })
+            });
+
+            if (res && res.success) {
+                if (statusEl) {
+                    statusEl.textContent = `✓ 目录可用 (${res.path || dirPath})`;
+                    statusEl.style.color = '#10b981';
+                }
+                this.setUserConfigConfirmBtnState(true);
+            } else {
+                if (statusEl) {
+                    statusEl.textContent = `✕ ${res?.message || '目录不可用'}`;
+                    statusEl.style.color = '#ef4444';
+                }
+                this.setUserConfigConfirmBtnState(false);
+            }
+        } catch (err) {
+            if (statusEl) {
+                statusEl.textContent = `✕ 检测失败: ${err.message}`;
+                statusEl.style.color = '#ef4444';
+            }
+            this.setUserConfigConfirmBtnState(false);
+        }
+    }
+
+    // 显示用户配置模态框
     showRenameUserModal(index) {
         const user = this.users[index];
         if (!user) return;
 
         this.editingUser = user.name;
         document.getElementById('rename-user-input').value = user.name;
+
+        const toggle = document.getElementById('user-custom-dir-enable-toggle');
+        const container = document.getElementById('user-custom-dir-container');
+        const dirInput = document.getElementById('user-custom-dir-input');
+        const operateToggle = document.getElementById('user-custom-dir-operate-toggle');
+        const writeToggle = document.getElementById('user-custom-dir-write-toggle');
+        const statusEl = document.getElementById('user-custom-dir-status');
+
+        if (toggle) toggle.checked = user.enableCustomMusicDir === true;
+        if (dirInput) dirInput.value = user.customMusicDir || '';
+        if (operateToggle) operateToggle.checked = user.allowOperateCustomMusicDir === true;
+        if (writeToggle) writeToggle.checked = user.allowWriteCustomMusicDir === true;
+        if (statusEl) statusEl.textContent = '';
+
+        if (user.enableCustomMusicDir) {
+            container?.classList.remove('hidden');
+            // 已保存的正常状态默认允许提交，若修改过则需要重新检测
+            this.setUserConfigConfirmBtnState(true);
+        } else {
+            container?.classList.add('hidden');
+            this.setUserConfigConfirmBtnState(true);
+        }
+
         document.getElementById('rename-user-modal').classList.remove('hidden');
     }
 
-    // 保存新用户名
+    // 保存用户配置
     async saveRenameUser() {
         const newName = document.getElementById('rename-user-input').value.trim();
+        const enableCustomDir = document.getElementById('user-custom-dir-enable-toggle')?.checked || false;
+        const customDir = document.getElementById('user-custom-dir-input')?.value.trim() || '';
+        const allowOperateCustomDir = document.getElementById('user-custom-dir-operate-toggle')?.checked || false;
+        const allowWriteCustomDir = document.getElementById('user-custom-dir-write-toggle')?.checked || false;
+
         if (!newName) {
-            showInfo('请填写新用户名');
-            return;
-        }
-        if (newName === this.editingUser) {
-            document.getElementById('rename-user-modal').classList.add('hidden');
+            showInfo('请填写用户名');
             return;
         }
 
         try {
+            const bodyData = {
+                name: this.editingUser,
+                enableCustomMusicDir: enableCustomDir,
+                customMusicDir: customDir,
+                allowOperateCustomMusicDir: allowOperateCustomDir,
+                allowWriteCustomMusicDir: allowWriteCustomDir
+            };
+            if (newName !== this.editingUser) {
+                bodyData.newName = newName;
+            }
+
             await this.request('/api/users', {
                 method: 'PUT',
-                body: JSON.stringify({
-                    name: this.editingUser,
-                    newName: newName
-                })
+                body: JSON.stringify(bodyData)
             });
 
             document.getElementById('rename-user-modal').classList.add('hidden');
             this.loadUsers();
             this.loadDashboard();
-            showSuccess('用户名修改成功, 请重新在客户端连接');
+            showSuccess(newName !== this.editingUser ? '用户配置及名称修改成功' : '用户配置更新成功');
         } catch (err) {
-            showError('修改失败: ' + err.message);
+            showError('保存失败: ' + err.message);
         }
     }
 
@@ -1815,6 +1955,15 @@ class App {
             if (form.elements['subsonic.lyricTranslation']) {
                 form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
             }
+
+            // 自定义歌曲目录配置
+            if (form.elements['user.enableCustomMusicDir']) {
+                form.elements['user.enableCustomMusicDir'].checked = config['user.enableCustomMusicDir'] === true;
+            }
+            const configJsPathRef = document.getElementById('config-js-path-ref');
+            if (configJsPathRef && config.configFilePath) {
+                configJsPathRef.textContent = config.configFilePath;
+            }
         } catch (err) {
             console.error('Failed to load config:', err);
         }
@@ -1881,6 +2030,7 @@ class App {
             'user.enablePublicNonAdminServerCache': formData.get('user.enablePublicNonAdminServerCache') === 'on',
             'user.enablePublicFavorites': formData.get('user.enablePublicFavorites') === 'on',
             'user.enablePublicNonAdminAccess': formData.get('user.enablePublicNonAdminAccess') === 'on',
+            'user.enableCustomMusicDir': formData.get('user.enableCustomMusicDir') === 'on',
             'user.enableLoginCacheRestriction': formData.get('user.enableLoginCacheRestriction') === 'on',
             'user.enableCacheSizeLimit': formData.get('user.enableCacheSizeLimit') === 'on',
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,

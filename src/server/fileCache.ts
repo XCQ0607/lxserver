@@ -54,6 +54,8 @@ let _lyricFetcher: LyricFetcher | null = null
 export const setLyricFetcher = (fn: LyricFetcher) => { _lyricFetcher = fn }
 
 export const getCacheDir = (username?: string, isOnlyDownload?: boolean, location?: string) => {
+    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
+
     const folderName = isOnlyDownload ? 'music' : 'cache'
     const loc = location || currentCacheLocation
     let baseDir = ''
@@ -62,9 +64,6 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
     } else {
         baseDir = path.join(process.cwd(), folderName)
     }
-
-    // [New] Segment cache by username
-    const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
     const fullPath = path.join(baseDir, userDirName)
     if (!fs.existsSync(fullPath)) {
@@ -138,21 +137,7 @@ class CacheIndexManager {
     private indexes: Map<string, Map<string, CacheItem>> = new Map() // "location:username:folder" -> (songId -> CacheItem)
 
     private getIndexFile(username: string, folder: 'cache' | 'music', location?: string) {
-        const loc = location || currentCacheLocation
-        const folderName = folder === 'music' ? 'music' : 'cache'
-        let baseDir = ''
-        if (loc === CACHE_ROOTS.DATA) {
-            baseDir = path.join(global.lx.dataPath, folderName)
-        } else {
-            baseDir = path.join(process.cwd(), folderName)
-        }
-
-        const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
-        const userDir = path.join(baseDir, userDirName)
-
-        if (!fs.existsSync(userDir)) {
-            fs.mkdirSync(userDir, { recursive: true })
-        }
+        const userDir = getCacheDir(username, folder === 'music', location)
         const fileName = folder === 'music' ? 'music_index.json' : 'cache_index.json'
         return path.join(userDir, fileName)
     }

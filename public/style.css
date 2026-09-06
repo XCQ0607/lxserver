@@ -768,10 +768,13 @@ body {
 
 /* =============== 现代化配置面板系统 =============== */
 .config-panels-layout {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 1.25rem;
-    align-items: start;
+    columns: 2;
+    column-gap: 1.25rem;
+}
+
+.config-panels-layout > .config-card {
+    break-inside: avoid;
+    margin-bottom: 1.25rem;
 }
 
 /* 卡片主体 */

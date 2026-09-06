@@ -5,7 +5,7 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.0.0-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/version-v2.0.1-blue?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -294,6 +294,8 @@ Edit `config.js` directly. Environment variables take precedence:
 | `CACHE_NAMING_PATTERN` | `cache.namingPattern` | Cache file naming rule (`simple` / `custom`) | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
 | `LX_USER_<username>` | `users` array | Quickly add a user, value is the password (e.g., `LX_USER_test=123`) | - |
+
+> **Advanced User Configuration Note**: The environment variable `LX_USER_<username>` is only used to quickly add users and set passwords. If you need to configure independent advanced options for specific users (such as enabling personal custom music directories, assigning operation permissions `allowOperateCustomMusicDir` or write permissions `allowWriteCustomMusicDir`, adjusting snapshot counts, etc.), please manually configure the corresponding fields for that user in the `users` array within `config.js`, or modify them through the GUI in the admin panel's User Management section.
 
 > **Boolean Environment Variable Format**: All boolean env variables support flexible case-insensitive formats: `true`/`1`/`yes`/`y`/`on` for enabled, and `false`/`0`/`no`/`n`/`off` for disabled.
 

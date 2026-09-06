@@ -43,9 +43,19 @@ window.LocalMusicManager = {
     remasterSelectionEventsBound: false,
     remasterQualityEventsBound: false,
     remasterTaskRunning: false,
+    remasterSource: 'local', // 'local' | 'custom' — 洗版模态框内部数据源，与外部 toggle 解耦
     authExpired: false,
     authExpiredNotified: false,
     coverRenderTimer: null,
+    isCustomDirMode: false,
+
+    toggleCustomDirMode(enable) {
+        if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
+            window.CustomDirManager.setActive(enable);
+            return;
+        }
+        this.isCustomDirMode = !!enable;
+    },
 
     escapeHtml(value) {
         return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -524,6 +534,7 @@ window.LocalMusicManager = {
 
     getSearchValues(item, includeQuality = false) {
         const values = [item.name, item.singer, item.album, item.filename];
+        if (item.subPath) values.push(item.subPath);
         if (includeQuality) values.push(item.quality);
         return values;
     },
@@ -1440,10 +1451,12 @@ window.LocalMusicManager = {
                         <i class="fas fa-plus text-[10px]"></i>
                     </button>
                     <!-- Deletion from single operations -->
+                    ${(!this.isCustomDirMode || !!window.userAllowOperateCustomDir) ? `
                     <button data-lm-action="delete" data-lm-index="${index}"
                             class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-muted hover:text-red-500 hover:border-red-300 transition-all shadow-sm shrink-0" title="删除">
                         <i class="far fa-trash-alt text-[10px]"></i>
                     </button>
+                    ` : ''}
                 </div>
             </div>
             `;
@@ -2114,11 +2127,14 @@ window.LocalMusicManager = {
         this.deselectAll();
     },
 
-    async openManualIndexModal(index) {
-        console.log('[ManualIndex] Opening modal for index:', index);
-        const item = this.displayData[index];
+    async openManualIndexModal(indexOrItem) {
+        console.log('[ManualIndex] Opening modal for:', indexOrItem);
+        let item = (indexOrItem && typeof indexOrItem === 'object') ? indexOrItem : this.displayData[indexOrItem];
+        if (!item && window.CustomDirManager && window.CustomDirManager.isActive && typeof indexOrItem === 'number') {
+            item = window.CustomDirManager.displayData[indexOrItem];
+        }
         if (!item) {
-            console.error('[ManualIndex] Item not found at index:', index);
+            console.error('[ManualIndex] Item not found:', indexOrItem);
             return;
         }
 
@@ -2443,7 +2459,10 @@ window.LocalMusicManager = {
 
         try {
             if (typeof showInfo === 'function') showInfo('正在关联并同步元数据...');
-            const res = await fetch('/api/music/cache/link', {
+            const isCustom = this.manualIndexTargetItem?.folder === 'custom' || (window.CustomDirManager && window.CustomDirManager.isActive);
+            const linkApi = isCustom ? '/api/music/custom/link' : '/api/music/cache/link';
+
+            const res = await fetch(linkApi, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -2459,7 +2478,11 @@ window.LocalMusicManager = {
             if (result.success) {
                 if (typeof showInfo === 'function') showInfo('关联成功！文件名及标签已更新');
                 this.closeManualIndexModal();
-                this.refresh();
+                if (isCustom && window.CustomDirManager) {
+                    window.CustomDirManager.refresh();
+                } else {
+                    this.refresh();
+                }
             } else {
                 throw new Error(result.message || 'Server error');
             }
@@ -2784,13 +2807,36 @@ window.LocalMusicManager = {
         this.openSubPathModal('categorize');
     },
 
+    // 同步洗版模态框副标题与底部提示（根据当前 remasterSource 更新文字）
+    syncRemasterSourceUI() {
+        const isCustom = this.remasterSource === 'custom';
+
+        // 副标题
+        const subtitleEl = document.getElementById('lm-remaster-modal-subtitle');
+        if (subtitleEl) {
+            subtitleEl.textContent = isCustom
+                ? '处理用户自定义音乐目录歌曲（替换同名音频及元数据）'
+                : '仅处理服务器下载目录，不处理缓存目录';
+        }
+
+        // 底部提示
+        const hintEl = document.getElementById('lm-remaster-source-hint');
+        if (hintEl) {
+            hintEl.textContent = isCustom ? '自定义目录中的歌曲' : '仅列出下载目录中的歌曲';
+        }
+    },
+
     syncRemasterVisibility() {
-        const enabled = !!window.settings?.enableRemaster;
+        const isCustomDir = window.CustomDirManager && window.CustomDirManager.isActive;
+        const enabled = isCustomDir
+            ? (!!window.settings?.enableRemaster && !!window.userAllowOperateCustomDir)
+            : !!window.settings?.enableRemaster;
         ['lm-remaster-btn', 'lm-remaster-btn-mobile'].forEach(id => {
             const button = document.getElementById(id);
             if (!button) return;
             button.classList.toggle('hidden', !enabled);
             button.classList.toggle('flex', enabled);
+            button.style.display = enabled ? '' : 'none';
         });
         if (!enabled) this.closeRemasterModal();
     },
@@ -2841,6 +2887,9 @@ window.LocalMusicManager = {
     },
 
     getRemasterSelectableItems() {
+        if (this.remasterSource === 'custom' && window.CustomDirManager && Array.isArray(window.CustomDirManager.originalData)) {
+            return window.CustomDirManager.originalData;
+        }
         return this.originalData.filter(item => item.folder === 'music');
     },
 
@@ -2936,18 +2985,23 @@ window.LocalMusicManager = {
         const disabled = this.remasterTaskRunning;
 
         if (!pageItems.length) {
-            container.innerHTML = '<div class="h-36 flex items-center justify-center text-xs t-text-muted">没有可选择的下载歌曲</div>';
+            const emptyText = this.remasterSource === 'custom'
+                ? '没有可选择的自定义目录歌曲'
+                : '没有可选择的下载歌曲';
+            container.innerHTML = `<div class="h-36 flex items-center justify-center text-xs t-text-muted">${emptyText}</div>`;
         } else {
+            const isCustomDir = this.remasterSource === 'custom';
             container.innerHTML = pageItems.map(item => {
                 const selected = this.remasterSelectedItems.has(item.filename);
                 const qualityName = window.QualityManager?.getQualityDisplayName(item.quality) || item.quality || '未知音质';
+                const subPathBadge = item.subPath ? `<span class="text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 rounded px-1 mr-1 inline-block font-mono" title="${this.escapeAttr(item.subPath)}">${this.escapeHtml(item.subPath)}</span>` : '';
                 return `
                     <label class="min-h-12 px-3 py-2 flex items-center gap-3 border-b last:border-b-0 t-border-main ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:t-bg-track'}">
                         <input type="checkbox" data-remaster-filename="${this.escapeAttr(item.filename)}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}
                             class="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 shrink-0">
                         <span class="min-w-0 flex-1">
                             <span class="block text-xs font-bold t-text-main truncate">${this.escapeHtml(item.name || item.filename)}</span>
-                            <span class="block text-[10px] t-text-muted truncate">${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span>
+                            <span class="block text-[10px] t-text-muted truncate mt-0.5">${subPathBadge}${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span>
                         </span>
                         <span class="shrink-0 text-[10px] t-text-muted">${this.escapeHtml(qualityName)}</span>
                     </label>`;
@@ -2976,14 +3030,41 @@ window.LocalMusicManager = {
             if (typeof showError === 'function') showError('请先在设置中启用歌曲洗版');
             return;
         }
+        // 初始化数据源：默认跟随当前视图模式，但可在模态框内独立切换
+        const isCustomDirActive = !!(window.CustomDirManager && window.CustomDirManager.isActive);
+        if (isCustomDirActive && !window.userAllowOperateCustomDir) {
+            // 自定义目录无权限时，降级到本地模式而非拒绝打开
+            this.remasterSource = 'local';
+        } else {
+            this.remasterSource = isCustomDirActive ? 'custom' : 'local';
+        }
         try {
             const modal = document.getElementById('lm-remaster-modal');
             if (!modal) return;
+
+            // 同步当前主列表的勾选项目到洗版选择列表中
+            this.remasterSelectedItems.clear();
+            if (this.remasterSource === 'custom') {
+                if (window.CustomDirManager && window.CustomDirManager.selectedItems && window.CustomDirManager.selectedItems.size > 0) {
+                    window.CustomDirManager.selectedItems.forEach(filename => this.remasterSelectedItems.add(filename));
+                }
+            } else {
+                if (this.selectedItems && this.selectedItems.size > 0) {
+                    const musicSelected = this.getSelectedEntries().filter(item => item.folder === 'music');
+                    musicSelected.forEach(item => this.remasterSelectedItems.add(item.filename));
+                }
+            }
+
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             document.body.style.overflow = 'hidden';
             this.bindRemasterSelectionEvents();
             this.restoreRemasterTargetQuality();
+            this.remasterSearchKeyword = '';
+            this.remasterSelectionPage = 1;
+            const searchInput = document.getElementById('lm-remaster-search');
+            if (searchInput) this.setRichInputValue(searchInput, '');
+            this.syncRemasterSourceUI();
             this.renderRemasterSelection();
             await this.loadRemasterStatus(true);
         } catch (e) {
@@ -3005,6 +3086,7 @@ window.LocalMusicManager = {
     },
 
     async startRemaster() {
+        const isCustomDir = this.remasterSource === 'custom';
         const quality = document.getElementById('lm-remaster-quality')?.value || 'flac';
         this.saveRemasterTargetQuality(quality);
         const qualityName = window.QualityManager?.getQualityDisplayName(quality) || quality;
@@ -3013,9 +3095,10 @@ window.LocalMusicManager = {
             if (typeof showError === 'function') showError('请至少选择一首需要洗版的歌曲');
             return;
         }
+        const locationDesc = isCustomDir ? '自定义音乐目录' : '本地下载目录';
         const confirmed = await showSelect(
             '确认开始洗版',
-            `即将把已选择的 ${filenames.length} 首歌曲洗版为“${qualityName}”。此操作会替换原音频文件，建议先备份。确定继续吗？`,
+            `即将把【${locationDesc}】中已选择的 ${filenames.length} 首歌曲洗版为“${qualityName}”。此操作会替换原音频文件，建议先备份。确定继续吗？`,
             { danger: true, confirmText: '开始洗版' }
         );
         if (!confirmed) return;
@@ -3028,7 +3111,7 @@ window.LocalMusicManager = {
             this.renderRemasterResults();
             await this.remasterRequest('/api/music/remaster/start', {
                 method: 'POST',
-                body: JSON.stringify({ targetQuality: quality, filenames })
+                body: JSON.stringify({ targetQuality: quality, filenames, isCustomDir })
             });
             if (typeof showInfo === 'function') showInfo('洗版任务已启动，关闭页面后服务端仍会继续处理');
             await this.loadRemasterStatus(true);
@@ -3088,7 +3171,11 @@ window.LocalMusicManager = {
             }), 1000);
         } else if (status.id && status.status !== 'idle' && this.remasterLastTerminalTaskId !== status.id) {
             this.remasterLastTerminalTaskId = status.id;
-            await this.fetchData(true);
+            if (window.CustomDirManager && window.CustomDirManager.isActive) {
+                await window.CustomDirManager.fetchData(true);
+            } else {
+                await this.fetchData(true);
+            }
             if (status.status === 'completed' && typeof showSuccess === 'function') showSuccess('洗版任务已完成');
             if (status.status === 'error' && typeof showError === 'function') showError(status.errorMsg || '洗版任务异常终止');
         }
@@ -3374,7 +3461,26 @@ window.LocalMusicManager = {
     }
 };
 
-window.toggleLmBatchMode = () => window.LocalMusicManager.toggleBatchMode();
+window.toggleLmBatchMode = () => {
+    if (window.CustomDirManager && window.CustomDirManager.isActive) {
+        window.CustomDirManager.toggleBatchMode();
+    } else if (window.LocalMusicManager) {
+        window.LocalMusicManager.toggleBatchMode();
+    }
+};
+
+// 当处于自定义目录模式时，将通用动作自动转发给 CustomDirManager
+['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters'].forEach(method => {
+    if (window.LocalMusicManager && typeof window.LocalMusicManager[method] === 'function') {
+        const orig = window.LocalMusicManager[method];
+        window.LocalMusicManager[method] = function(...args) {
+            if (window.CustomDirManager && window.CustomDirManager.isActive && typeof window.CustomDirManager[method] === 'function') {
+                return window.CustomDirManager[method].apply(window.CustomDirManager, args);
+            }
+            return orig.apply(this, args);
+        };
+    }
+});
 
 // Auto init when script loads (if in scope), else done manually
 setTimeout(() => {

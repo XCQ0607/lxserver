@@ -57,6 +57,10 @@ module.exports = {
   // 环境变量: ENABLE_PUBLIC_NON_ADMIN_ACCESS (true/false)
   "user.enablePublicNonAdminAccess": false,
 
+  // 是否启用自定义歌曲目录 (开启后使用自定义歌曲目录)
+  // 环境变量: ENABLE_CUSTOM_MUSIC_DIR (true/false)
+  "user.enableCustomMusicDir": false,
+
   // 是否启用登录用户缓存限制 (开启后将限制非管理员登录用户的核心缓存设置)
   // 环境变量: ENABLE_LOGIN_USER_CACHE_RESTRICTION (true/false)
   "user.enableLoginCacheRestriction": false,
@@ -88,6 +92,13 @@ module.exports = {
 
   // 用户列表
   // 环境变量: LX_USER_<用户名>=<密码> (例如: LX_USER_user1=123456)
+  // 也可以在这里为特定用户配置独立的高级选项，例如：
+  // "enableCustomMusicDir": false, // 是否启用此用户自定义歌曲目录
+  // "customMusicDir": "", // 自定义歌曲目录绝对路径
+  // "allowOperateCustomMusicDir": false, // 允许操作目录歌曲（如删除歌曲、洗版）
+  // "allowWriteCustomMusicDir": false, // 允许写入歌曲文件（如手动关联、批量更新元数据、批量嵌入歌词）
+  // "maxSnapshotNum": 10, // 最大备份快照数
+  // "list.addMusicLocationType": "top" // 添加歌曲到列表时的位置 (top | bottom)
   "users": [
     {
       "name": "admin",

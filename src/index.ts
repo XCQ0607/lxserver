@@ -253,6 +253,9 @@ if (envParams.ENABLE_PUBLIC_FAVORITES !== undefined) {
 if (envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS !== undefined) {
   setBoolConfig('user.enablePublicNonAdminAccess', envParams.ENABLE_PUBLIC_NON_ADMIN_ACCESS)
 }
+if (envParams.ENABLE_CUSTOM_MUSIC_DIR !== undefined) {
+  setBoolConfig('user.enableCustomMusicDir', envParams.ENABLE_CUSTOM_MUSIC_DIR)
+}
 if (envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION !== undefined) {
   setBoolConfig('user.enableLoginCacheRestriction', envParams.ENABLE_LOGIN_USER_CACHE_RESTRICTION)
 }
@@ -410,10 +413,49 @@ ${global.lx.config.users.map(user => `  ${user.name}: ${user.password}`).join('\
 `)
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const { getUserDirname } = require('@/user')
+let hasUserCustomDirModified = false
 for (const user of global.lx.config.users) {
   const dataPath = path.join(global.lx.userPath, getUserDirname(user.name))
   checkAndCreateDir(dataPath)
   user.dataPath = dataPath
+
+  if (user.enableCustomMusicDir) {
+    let isValid = false
+    if (user.customMusicDir && typeof user.customMusicDir === 'string' && user.customMusicDir.trim()) {
+      const resolvedDir = path.resolve(user.customMusicDir.trim())
+      try {
+        if (fs.existsSync(resolvedDir) && fs.statSync(resolvedDir).isDirectory()) {
+          isValid = true
+        }
+      } catch {
+        isValid = false
+      }
+    }
+    if (!isValid) {
+      console.warn(`[StartupCheck] 用户 ${user.name} 的自定义歌曲目录 [${user.customMusicDir || ''}] 无效，已自动关闭自定义目录功能并清除路径`)
+      user.enableCustomMusicDir = false
+      user.customMusicDir = ''
+      hasUserCustomDirModified = true
+    }
+  }
+}
+
+if (hasUserCustomDirModified) {
+  saveConfigToFile()
+  try {
+    fs.writeFileSync(usersJsonPath, JSON.stringify(global.lx.config.users.map(u => ({
+      name: u.name,
+      password: u.password,
+      maxSnapshotNum: u.maxSnapshotNum,
+      'list.addMusicLocationType': u['list.addMusicLocationType'],
+      enableCustomMusicDir: u.enableCustomMusicDir,
+      customMusicDir: u.customMusicDir,
+      allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
+      allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
+    })), null, 2))
+  } catch (err) {
+    console.error('Failed to update users.json after custom dir cleanup', err)
+  }
 }
 
 initLogger()

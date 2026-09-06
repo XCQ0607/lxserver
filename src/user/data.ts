@@ -52,6 +52,10 @@ export const getUserConfig = (userName: string): Required<LX.User> => {
   return {
     maxSnapshotNum: global.lx.config.maxSnapshotNum,
     'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
+    enableCustomMusicDir: false,
+    customMusicDir: '',
+    allowOperateCustomMusicDir: false,
+    allowWriteCustomMusicDir: false,
     ...user,
   }
 }

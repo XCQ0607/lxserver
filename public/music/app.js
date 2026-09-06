@@ -649,7 +649,8 @@ window.handleHeaderLogout = handleHeaderLogout;
         if (typeof syncSettingsUI === 'function') syncSettingsUI();
         else if (typeof updateAdminUI === 'function') updateAdminUI();
 
-        // [新增] 有 Token 时验证其有效性
+        // [新增] 有 Token 时验证其有效性及用户自定义目录配置
+        let userEnableCustomDir = false;
         if (userToken) {
             try {
                 const vRes = await fetch('/api/user/auth/verify', {
@@ -663,10 +664,51 @@ window.handleHeaderLogout = handleHeaderLogout;
                     } else {
                         console.log('[Auth] 用户 Token 已失效且无法自动续签，请重新登录。');
                     }
+                } else {
+                    userEnableCustomDir = !!vData.enableCustomMusicDir;
+                    window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
                 }
             } catch (e) {
                 console.warn('[Auth] Token 验证失败:', e);
             }
+        }
+
+        // 控制「本地音乐」Tab 旁的自定义目录开关显示
+        const switchContainer = document.getElementById('custom-dir-switch-container');
+        const customDirSwitch = document.getElementById('user-custom-dir-switch');
+        if (switchContainer) {
+            const isUser = !!userToken;
+            if (isUser && userEnableCustomDir) {
+                switchContainer.classList.remove('hidden');
+                switchContainer.classList.add('flex');
+
+                // 读取自定义目录模式缓存状态
+                const cachedActive = localStorage.getItem('lx_custom_dir_active') === 'true';
+                if (customDirSwitch) {
+                    customDirSwitch.checked = cachedActive;
+                    if (cachedActive) {
+                        if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
+                            window.CustomDirManager.setActive(true);
+                        } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
+                            window.LocalMusicManager.toggleCustomDirMode(true);
+                        }
+                    }
+                }
+            } else {
+                switchContainer.classList.add('hidden');
+                switchContainer.classList.remove('flex');
+            }
+        }
+
+        if (customDirSwitch) {
+            customDirSwitch.addEventListener('change', (e) => {
+                const isChecked = e.target.checked;
+                if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
+                    window.CustomDirManager.setActive(isChecked);
+                } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
+                    window.LocalMusicManager.toggleCustomDirMode(isChecked);
+                }
+            });
         }
 
         // [新增] 公开受限用户自动尝试从服务器拉取配置 (_open)
@@ -3761,8 +3803,17 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 
                 // 若处于换源试错常驻提示中，将进度同步至常驻卡片，避免底层露出绿色普通 Toast
                 if (typeof RecoveryToast !== 'undefined' && RecoveryToast.isActive()) {
-                    if (attempt.status === 'success') {
-                        RecoveryToast.updateStatusText(`[${attempt.sourceName || '备选源'}] 解析成功，准备播放...`);
+                    const sourceName = attempt.sourceName || attempt.name;
+                    if (sourceName && sourceName !== song.name) {
+                        RecoveryToast.show(song, `[${sourceName}] ${attempt.status === 'success' ? '解析成功' : '尝试失败'}...`, {
+                            triedPlatform: sourceName,
+                            quality: quality,
+                            status: attempt.status === 'success' ? 'success' : (attempt.status === 'fail' ? 'failed' : 'trying')
+                        });
+                    } else if (attempt.status === 'success') {
+                        RecoveryToast.updateStatusText(`[${sourceName || '备选源'}] 解析成功，准备播放...`);
+                    } else if (attempt.status === 'fail') {
+                        RecoveryToast.updateStatusText(`[${sourceName || '备选源'}] 解析失败`);
                     }
                     return;
                 }
@@ -4481,71 +4532,88 @@ function playFromView(index) {
 }
 window.playFromView = playFromView;
 
-async function runRecoveryFlow(error) {
-    if (!currentRecoveryState) return;
+async function runRecoveryFlow(error, state = currentRecoveryState) {
+    if (!state) return;
 
-    // 标记上一尝试失败
-    if (currentRecoveryState.currentSong) {
-        RecoveryToast.markStepFailed(currentRecoveryState.currentSong.source, currentRecoveryState.currentQuality);
+    if (state !== currentRecoveryState) {
+        console.log('[Recovery] Aborted because user played another song.');
+        return;
     }
 
-    const currentPlatform = currentRecoveryState.currentSong?.source || currentRecoveryState.originalSong?.source;
+    const currentPlatform = state.currentSong?.source || state.originalSong?.source;
 
     // 1. 记录当前失败的音源脚本
-    if (!currentRecoveryState.triedApiSourcesByPlatform) {
-        currentRecoveryState.triedApiSourcesByPlatform = {};
+    if (!state.triedApiSourcesByPlatform) {
+        state.triedApiSourcesByPlatform = {};
     }
-    if (!currentRecoveryState.triedApiSourcesByPlatform[currentPlatform]) {
-        currentRecoveryState.triedApiSourcesByPlatform[currentPlatform] = [];
+    if (!state.triedApiSourcesByPlatform[currentPlatform]) {
+        state.triedApiSourcesByPlatform[currentPlatform] = [];
     }
-    if (currentRecoveryState.currentApiSourceName && !currentRecoveryState.triedApiSourcesByPlatform[currentPlatform].includes(currentRecoveryState.currentApiSourceName)) {
-        currentRecoveryState.triedApiSourcesByPlatform[currentPlatform].push(currentRecoveryState.currentApiSourceName);
+    if (state.currentApiSourceName && !state.triedApiSourcesByPlatform[currentPlatform].includes(state.currentApiSourceName)) {
+        state.triedApiSourcesByPlatform[currentPlatform].push(state.currentApiSourceName);
+    }
+
+    // 把第一个失败的源（无论是自定义源还是平台名）加到尝试轨迹里
+    const firstFailedName = state.currentApiSourceName || currentPlatform;
+    if (firstFailedName) {
+        RecoveryToast.show(state.currentSong, '播放失败，启动智能换源...', {
+            triedPlatform: firstFailedName,
+            quality: state.currentQuality,
+            status: 'failed'
+        });
+    }
+
+    // 标记上一尝试失败 (兜底)
+    if (state.currentSong) {
+        RecoveryToast.markStepFailed(state.currentSong.source, state.currentQuality);
     }
 
     // 2. 优先尝试当前平台下的其它备选自定义源 (需开启「自动切换自定义源」设置)
-    if (settings.enableAutoSwitchApiSource !== false && !currentRecoveryState.samePlatformExhausted) {
-        const triedSources = currentRecoveryState.triedApiSourcesByPlatform[currentPlatform] || [];
+    if (settings.enableAutoSwitchApiSource !== false && !state.samePlatformExhausted) {
+        const triedSources = state.triedApiSourcesByPlatform[currentPlatform] || [];
         const platformName = typeof getSourceName === 'function' ? getSourceName(currentPlatform) : currentPlatform.toUpperCase();
-        const failedName = currentRecoveryState.currentApiSourceName || '当前自定义源';
+        const failedName = state.currentApiSourceName || '当前自定义源';
 
         console.log(`[Recovery] [${platformName}] 音源 [${failedName}] 播放失败，尝试同平台其他备选源... 已排除:`, triedSources);
-        RecoveryToast.show(currentRecoveryState.currentSong, `[${platformName}] ${failedName} 链接失效，正在尝试同平台其他备选源...`, {
-            triedPlatform: currentPlatform,
-            quality: currentRecoveryState.currentQuality,
-            status: 'trying'
-        });
+        // 这里不再传入 details 参数，避免将 QQ 作为多余的一项强行加入轨迹
+        RecoveryToast.show(state.currentSong, `[${platformName}] ${failedName} 链接失效，正在尝试同平台其他备选源...`);
 
         try {
             const nextResult = await fetchSongUrl(
-                currentRecoveryState.currentSong,
-                currentRecoveryState.currentQuality,
+                state.currentSong,
+                state.currentQuality,
                 true, // isRetry
                 false, // isSilent
                 { excludeApiSources: triedSources }
             );
 
+            if (state !== currentRecoveryState) {
+                console.log('[Recovery] Aborted because user played another song during fetchSongUrl.');
+                return;
+            }
+
             if (nextResult && nextResult.url && !nextResult.errorMsg) {
                 console.log(`[Recovery] ✓ 命中同平台备选源 [${nextResult.sourceName}]，准备重新缓冲播放`);
-                currentRecoveryState.currentApiSourceName = nextResult.sourceName || '';
-                currentRecoveryState.currentApiSourceId = nextResult.sourceId || '';
-                currentRecoveryState.currentHasMoreSources = !!nextResult.hasMoreSources;
+                state.currentApiSourceName = nextResult.sourceName || '';
+                state.currentApiSourceId = nextResult.sourceId || '';
+                state.currentHasMoreSources = !!nextResult.hasMoreSources;
 
-                RecoveryToast.show(currentRecoveryState.currentSong, `已切换至备选源 [${nextResult.sourceName || '备选源'}]，重新缓冲播放...`, {
+                RecoveryToast.show(state.currentSong, `已切换至备选源 [${nextResult.sourceName || '备选源'}]，重新缓冲播放...`, {
                     triedPlatform: currentPlatform,
-                    quality: currentRecoveryState.currentQuality,
+                    quality: state.currentQuality,
                     status: 'trying'
                 });
 
-                playSong(currentRecoveryState.currentSong, currentRecoveryState.currentIndex, currentRecoveryState.currentQuality, false, true);
+                playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
                 return;
             }
         } catch (candidateErr) {
             console.warn(`[Recovery] [${platformName}] 所有备选自定义源均已尝试完毕:`, candidateErr.message || candidateErr);
-            currentRecoveryState.samePlatformExhausted = true;
+            state.samePlatformExhausted = true;
         }
     }
 
-    const { steps, currentStepIndex } = currentRecoveryState;
+    const { steps, currentStepIndex } = state;
     if (currentStepIndex >= steps.length) {
         // All recovery steps exhausted
         setPlayerStatus('播放失败');
@@ -4558,42 +4626,48 @@ async function runRecoveryFlow(error) {
     console.log(`[Recovery] Executing recovery step: ${currentStep} (${currentStepIndex + 1}/${steps.length})`);
 
     if (currentStep === 'degrade') {
-        const nextQuality = window.QualityManager.getNextLowerQuality(currentRecoveryState.currentQuality, currentRecoveryState.currentSong);
-        if (nextQuality && !currentRecoveryState.triedQualities.includes(nextQuality)) {
-            currentRecoveryState.currentQuality = nextQuality;
-            currentRecoveryState.triedQualities.push(nextQuality);
-            currentRecoveryState.samePlatformExhausted = false; // 新音质重新允许探测可用源
+        const nextQuality = window.QualityManager.getNextLowerQuality(state.currentQuality, state.currentSong);
+        if (nextQuality && !state.triedQualities.includes(nextQuality)) {
+            state.currentQuality = nextQuality;
+            state.triedQualities.push(nextQuality);
+            state.samePlatformExhausted = false; // 新音质重新允许探测可用源
 
-            const fromName = window.QualityManager.getQualityDisplayName(currentRecoveryState.triedQualities[currentRecoveryState.triedQualities.length - 2]);
+            const fromName = window.QualityManager.getQualityDisplayName(state.triedQualities[state.triedQualities.length - 2]);
             const toName = window.QualityManager.getQualityDisplayName(nextQuality);
-            RecoveryToast.show(currentRecoveryState.currentSong, `音质从 ${fromName} 降级至 ${toName} 播放...`, {
-                triedPlatform: currentRecoveryState.currentSong.source,
+            RecoveryToast.show(state.currentSong, `音质从 ${fromName} 降级至 ${toName} 播放...`, {
+                triedPlatform: state.currentSong.source,
                 quality: nextQuality,
                 status: 'trying'
             });
 
             // Re-invoke playSong with isRetry = true so we don't reset recovery state
-            playSong(currentRecoveryState.currentSong, currentRecoveryState.currentIndex, nextQuality, false, true);
+            playSong(state.currentSong, state.currentIndex, nextQuality, false, true);
         } else {
             // Quality degradation failed/exhausted, move to next recovery step
-            currentRecoveryState.currentStepIndex++;
-            await runRecoveryFlow(error);
+            state.currentStepIndex++;
+            await runRecoveryFlow(error, state);
         }
     } else if (currentStep === 'switch_platform') {
-        RecoveryToast.show(currentRecoveryState.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
-        const matches = await findOtherSourceMatches(currentRecoveryState.originalSong);
-        const matchedSong = matches.find(song => !currentRecoveryState.triedPlatforms.includes(song.source));
+        RecoveryToast.show(state.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
+        const matches = await findOtherSourceMatches(state.originalSong);
+        
+        if (state !== currentRecoveryState) {
+            console.log('[Recovery] Aborted because user played another song during findOtherSourceMatches.');
+            return;
+        }
+        
+        const matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
         if (matchedSong) {
-            currentRecoveryState.currentSong = matchedSong;
-            currentRecoveryState.triedPlatforms.push(matchedSong.source);
-            if (!currentRecoveryState.triedApiSourcesByPlatform[matchedSong.source]) {
-                currentRecoveryState.triedApiSourcesByPlatform[matchedSong.source] = [];
+            state.currentSong = matchedSong;
+            state.triedPlatforms.push(matchedSong.source);
+            if (!state.triedApiSourcesByPlatform[matchedSong.source]) {
+                state.triedApiSourcesByPlatform[matchedSong.source] = [];
             }
-            currentRecoveryState.currentApiSourceName = '';
-            currentRecoveryState.samePlatformExhausted = false; // 新平台重置源耗尽状态
+            state.currentApiSourceName = '';
+            state.samePlatformExhausted = false; // 新平台重置源耗尽状态
             const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
-            currentRecoveryState.currentQuality = bestNextQuality;
-            currentRecoveryState.triedQualities = [bestNextQuality];
+            state.currentQuality = bestNextQuality;
+            state.triedQualities = [bestNextQuality];
 
             const platformName = getSourceName(matchedSong.source);
             const qualityName = window.QualityManager.getQualityDisplayName(bestNextQuality);
@@ -4603,11 +4677,11 @@ async function runRecoveryFlow(error) {
                 status: 'trying'
             });
             // Keep this recovery step active so another platform can be tried if needed.
-            playSong(matchedSong, currentRecoveryState.currentIndex, bestNextQuality, false, true);
+            playSong(matchedSong, state.currentIndex, bestNextQuality, false, true);
         } else {
             // No untried source remains, move to the next recovery strategy.
-            currentRecoveryState.currentStepIndex++;
-            await runRecoveryFlow(error);
+            state.currentStepIndex++;
+            await runRecoveryFlow(error, state);
         }
     } else if (currentStep === 'skip_next') {
         const isPlatformNotSupported = error && error.message && (
@@ -11762,6 +11836,7 @@ async function openPlaylistAddModal(batchSongs = null) {
     renderPlaylistAddGrid();
 
     // Show Modal
+    modal.style.zIndex = '10005';
     modal.classList.remove('hidden');
     setTimeout(() => {
         content.classList.remove('scale-95', 'opacity-0');

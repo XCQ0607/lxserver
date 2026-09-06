@@ -24,9 +24,9 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 ### 1.2 管理员：用户管理 (`/api/users`)
 
 - **Header Auth**: `x-frontend-auth: <Admin Password>`
-- `GET /api/users`: 获取所有用户列表及密码。
+- `GET /api/users`: 获取所有用户列表及密码、权限配置。
 - `POST /api/users`: 创建新用户 (`{"name": "...", "password": "..."}`)。
-- `PUT /api/users`: 修改用户信息 (重命名或修改密码) (`{"name": "原用户名", "newName": "新用户名", "password": "新密码"}`)。
+- `PUT /api/users`: 修改用户信息 (重命名、修改密码或权限) (`{"name": "...", "newName": "...", "password": "...", "enableCustomMusicDir": false, "customMusicDir": "...", "allowOperateCustomMusicDir": false, "allowWriteCustomMusicDir": false}`)。
 - `DELETE /api/users`: 删除用户 (`{"names": ["..."], "deleteData": true}`)。
 
 ### 1.3 用户：登录获取 Token (`POST /api/user/login`)
@@ -133,6 +133,20 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 - `POST /api/music/cache/remove`: 删除指定的缓存文件。
 - `POST /api/music/cache/clear`: 清理所有音乐缓存。
 - `POST /api/music/cache/lyric`: 保存或读取歌词缓存。
+
+### 5.1 自定义音乐目录与洗版 (`/api/music/custom/*`)
+
+允许配置了 `enableCustomMusicDir` 的用户挂载并管理服务器上的本地音乐文件。
+
+- `GET /api/music/custom/list`: 获取自定义目录歌曲列表。
+- `POST /api/music/custom/sync`: 触发服务器重新扫描同步自定义目录数据。
+- `GET /api/music/custom/file`: 获取单个音频文件流。
+- `GET /api/music/custom/cover`: 获取音频内嵌封面图片流。
+- `POST /api/music/custom/remove`: 删除音频文件及数据（要求用户开启 `allowOperateCustomMusicDir` 权限）。
+- `POST /api/music/custom/link`: 手动关联并重写音频 ID3 标签信息（要求用户开启 `allowWriteCustomMusicDir` 权限）。
+- `POST /api/music/custom/updateMetadata`: 批量抓取网上元数据并覆写本地文件（要求用户开启 `allowWriteCustomMusicDir` 权限）。
+- `POST /api/music/custom/embedLyric`: 批量将歌词写入本地文件 USLT 标签中（要求用户开启 `allowWriteCustomMusicDir` 权限）。
+- `POST /api/music/remaster/start`: 启动音频洗版与降级转码任务（若作用于自定义目录，要求用户开启 `allowOperateCustomMusicDir` 权限）。
 
 ---
 
