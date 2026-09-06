@@ -266,6 +266,13 @@ declare namespace LX {
     'subsonic.lyricTranslation'?: boolean
 
     /**
+     * 是否在 Subsonic 播放音乐时触发服务器缓存保存 (默认 false)
+     * 开启后,每次通过 Subsonic 协议播放的曲目会在后台落盘到该用户的缓存目录,
+     * 已缓存的曲目会被 downloadAndCache 自动跳过,不会重复下载。
+     */
+    'subsonic.cacheOnPlay'?: boolean
+
+    /**
      * 歌手信息源优先级
      */
     'singer.sourcePriority': Array<'tx' | 'wy'>
