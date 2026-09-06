@@ -1474,12 +1474,30 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         }
 
         const userSpace = getUserSpace(verifiedUser)
-        void userSpace.listManage.getListData().then(data => {
+        void userSpace.listManage.getListData().then(async data => {
+          let albums = []
+          let artists = []
+          try {
+            const userDirname = getUserDirname(verifiedUser)
+            const libraryPath = path.join(global.lx.userPath, userDirname, 'library')
+            const albumsPath = path.join(libraryPath, 'albums.json')
+            const artistsPath = path.join(libraryPath, 'artists.json')
+            
+            if (await fs.promises.stat(albumsPath).then(()=>true).catch(()=>false)) {
+              albums = JSON.parse(await fs.promises.readFile(albumsPath, 'utf8'))
+            }
+            if (await fs.promises.stat(artistsPath).then(()=>true).catch(()=>false)) {
+              artists = JSON.parse(await fs.promises.readFile(artistsPath, 'utf8'))
+            }
+          } catch(err) {
+             console.error(err)
+          }
+
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
           })
-          res.end(JSON.stringify(data))
+          res.end(JSON.stringify({ ...data, albums, artists }))
         }).catch(err => {
           res.writeHead(500)
           res.end(err.message)
