@@ -10,6 +10,10 @@ import fs from 'fs'
 import path from 'path'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
+import txMusicInfo from '@/modules/utils/musicSdk/tx/musicInfo.js'
+import wyMusicInfo from '@/modules/utils/musicSdk/wy/musicInfo.js'
+import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musicInfo.js'
+import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
 /**
@@ -1924,8 +1928,84 @@ class SubsonicHandler {
     }
 
     /**
+     * 按歌曲 id 从各音源在线回源取单曲信息（github/dev 移植自 feat/subsonic）
+     * 支持 tx / wy / kg / mg；其它源（kw/bd/xm 等）无可靠「按 id 取单曲」接口，直接放弃。
+     */
+    private async resolveMusicById(id: string): Promise<LX.Music.MusicInfo | null> {
+        const idx = id.indexOf('_')
+        if (idx <= 0) return null
+        const source = id.slice(0, idx)
+        const songId = id.slice(idx + 1)
+        if (!songId) return null
+        try {
+            let music: any = null
+            switch (source) {
+                case 'tx':
+                    music = await txMusicInfo(songId)
+                    break
+                case 'wy': {
+                    // wy/musicInfo.js 返回的是 requestObj，真实数据在 .promise 里
+                    const raw: any = await (wyMusicInfo(songId) as any).promise
+                    if (raw) {
+                        music = {
+                            id: `wy_${songId}`,
+                            name: raw.name,
+                            singer: raw.artists ? raw.artists.map((a: any) => a.name).join('、') : '',
+                            source: 'wy',
+                            songmid: songId,
+                            interval: raw.dt ? String(Math.round(raw.dt / 1000)) : '0',
+                            img: raw.album?.picUrl ?? null,
+                            meta: {
+                                albumName: raw.album?.name,
+                                albumId: raw.album?.id,
+                                picUrl: raw.album?.picUrl,
+                            },
+                        }
+                    }
+                    break
+                }
+                case 'kg':
+                    music = await kgGetMusicInfo(songId)
+                    break
+                case 'mg':
+                    music = await mgGetMusicInfo(songId)
+                    break
+                default:
+                    return null
+            }
+            if (!music) return null
+            if (!music.source) music.source = source
+            if (!music.id) music.id = `${source}_${music.songmid || music.songId || songId}`
+            if (!music.songmid) music.songmid = music.songId || songId
+            if (!music.name) {
+                console.warn(`[Subsonic] resolveMusicById ${id} 取回结果缺少歌名，已放弃（不写入收藏）`)
+                return null
+            }
+            return music as LX.Music.MusicInfo
+        } catch (e) {
+            console.warn(`[Subsonic] resolveMusicById ${id} 失败:`, (e as Error).message)
+            return null
+        }
+    }
+
+    /** 统一元数据解析原语：本地/缓存 -> 在线回源；命中即回写 onlineSongCache */
+    private async resolveSongMeta(username: string, id: string): Promise<{ music: LX.Music.MusicInfo, listId: string } | null> {
+        const found = await this.findMusicById(username, id)
+        if (found) {
+            this.cacheOnlineSong(found.music)
+            return found
+        }
+        const resolved = await this.resolveMusicById(id)
+        if (resolved) {
+            this.cacheOnlineSong(resolved)
+            return { music: resolved, listId: 'online' }
+        }
+        return null
+    }
+
+    /**
      * star / unstar：歌曲 → 「我的收藏(love)」列表
-     * （github/dev 移植自 feat/subsonic 的精简版：仅支持歌曲，专辑/歌手星标暂跳过）
+     * （github/dev 移植自 feat/subsonic：歌曲经 resolveSongMeta 解析，支持在线回源）
      */
     private async handleStar(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, isStar: boolean) {
         // 收集 id / albumId / artistId（均允许逗号分隔的多个值）
@@ -1954,10 +2034,10 @@ class SubsonicHandler {
                 continue
             }
             try {
-                const hit = await this.findMusicById(username, id)
+                const hit = await this.resolveSongMeta(username, id)
                 const resolved = hit?.music || null
                 if (!resolved) {
-                    console.warn(`[Subsonic] ${action} 歌曲 ${id} 跳过：findMusicById 未命中，未做任何改动 (user=${username})`)
+                    console.warn(`[Subsonic] ${action} 歌曲 ${id} 跳过：findMusicById 未命中 且 resolveMusicById 失败，未做任何改动 (user=${username})`)
                     continue
                 }
                 if (isStar) {
@@ -1965,7 +2045,8 @@ class SubsonicHandler {
                 } else {
                     await userSpace.listManage.listDataManage.listMusicRemove('love', [resolved.id])
                 }
-                debugLog(`[Subsonic Debug] ${action} 歌曲 ${id} -> ${isStar ? '已加入' : '已移出'}我的收藏(love) 《${resolved.name}》(user=${username})`)
+                const fromSource = hit!.listId === 'online'
+                debugLog(`[Subsonic Debug] ${action} 歌曲 ${id} -> ${isStar ? '已加入' : '已移出'}我的收藏(love) 《${resolved.name}》${fromSource ? ' (从源取回)' : ''}(user=${username})`)
                 this.cacheOnlineSong(resolved)
                 loveChanged = true
             } catch (e) {
