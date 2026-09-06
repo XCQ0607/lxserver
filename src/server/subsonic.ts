@@ -449,6 +449,7 @@ class SubsonicHandler {
             duration: this.parseDuration(music.interval),
             ...this.getBestQualityMeta(music),
             isVideo: false,
+            isDir: false,
             // 某些客户端 (如 Feishin) 在特定视图下不喜欢非标准字段，可以保留但确保标准字段优先
             type: 'music',
         }
