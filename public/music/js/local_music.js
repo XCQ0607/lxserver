@@ -50,11 +50,10 @@ window.LocalMusicManager = {
     isCustomDirMode: false,
 
     toggleCustomDirMode(enable) {
+        this.isCustomDirMode = !!enable;
         if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
             window.CustomDirManager.setActive(enable);
-            return;
         }
-        this.isCustomDirMode = !!enable;
     },
 
     escapeHtml(value) {
@@ -557,6 +556,7 @@ window.LocalMusicManager = {
         if (!container) return;
         this.listEventsBound = true;
         container.addEventListener('click', (event) => {
+            if (this.isCustomDirMode) return;
             const target = event.target.closest('[data-lm-action]');
             if (!target || !container.contains(target)) return;
             const index = parseInt(target.dataset.lmIndex || '', 10);
@@ -582,6 +582,7 @@ window.LocalMusicManager = {
             }
         });
         container.addEventListener('change', (event) => {
+            if (this.isCustomDirMode) return;
             const target = event.target;
             if (!target.matches('[data-lm-action="select"]')) return;
             this.toggleSelect(parseInt(target.dataset.lmIndex || '', 10), target.checked);
