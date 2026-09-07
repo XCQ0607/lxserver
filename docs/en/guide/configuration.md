@@ -9,9 +9,9 @@ LX Music Sync Server has built a unified basic model skeleton (located in `src/d
 The loading and merging of configurations follow the priority sequence from high to low below. High-priority options will **hardly override** the corresponding keys of low-priority ones:
 
 1. **Runtime Environment Variables (Environment Variables)**: Has very high priority. For example, `PORT=9527`.
-2. **WebDAV Cloud Data (WebDAV Cloud Data)**: If WebDAV is configured, the system will try to restore from the cloud on startup. **Restored cloud content will overwrite the local `config.js` and trigger a hot-reload**.
-3. **Explicit Custom Configuration File Path (Custom Config File)**: Static JSON file specified via `CONFIG_PATH`.
-4. **Global Default Entry Configuration (Global Config.js)**: The `config.js` file in the project's root directory.
+2. **WebDAV Cloud Data (WebDAV Cloud Data)**: If WebDAV is configured, the system will try to restore from the cloud on startup. **Restored cloud content will overwrite persistent `data/config.js` and trigger a hot-reload**.
+3. **Explicit Custom Configuration File Path (Custom Config File)**: Path specified via `CONFIG_PATH` (defaults to persistent `data/config.js` inside the data directory).
+4. **Persistent Configuration (Persistent Config)**: The `data/config.js` in the data directory (if absent on first launch, will smoothly migrate from legacy root `config.js`).
 5. **System-level Default Constants (Default Consts)**: Defaults in `src/defaultConfig.ts`.
 
 ---
@@ -74,8 +74,8 @@ The underlying periodic polling asynchronous daemon of the service will only be 
 | `SYNC_INTERVAL` | `60` | Integer | Cold shrinking timed parameters (unit: minutes) that trigger full thermal backup and pull comparison synchronization flow periods. |
 
 > 🔖 **Stateful Resurrection and Initialization Mechanism**:
-> 1. **Cloud-First Restore**: If the variables are detected on startup, the system prioritizes pulling archives from the cloud.
-> 2. **Environment-Driven Persistence**: If the cloud config is empty (e.g., first deployment in Docker/Cloud), the system will **automatically persist the current effective configuration (such as ports, passwords set via environment variables) into the local `config.js` and upload it to the cloud** for initialization. This ensures you can establish the initial cloud data solely through environment variables.
+> 1. **Cloud-First Restoration**: If this set of variables is detected at startup, the system will prioritize attempting to pull archives from the cloud.
+> 2. **Environment-Driven Persistence**: If the cloud config is empty (e.g., first deployment in Docker/Cloud), the system will **automatically persist the current effective configuration (such as ports, passwords set via environment variables) into `data/config.js` in the data directory and upload it to the cloud** for initialization. This ensures you can establish the initial cloud data solely through environment variables.
 
 ### IV. Web-side Composite Media Playback Space Protection Logic
 

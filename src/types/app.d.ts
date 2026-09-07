@@ -9,6 +9,7 @@ declare global {
     config: LX.Config
     webdavSync?: any  // WebDAVSync instance
     staticPath: string
+    configPath: string
     saveConfig: () => void
     lastCpuSample?: { idle: number, total: number }
     lastProcessSample?: { cpu: NodeJS.CpuUsage, time: number }

@@ -252,7 +252,7 @@ npm start
 
 ## 🛠️ 配置说明
 
-可以直接编辑 `config.js`。环境变量优先级最高：
+系统配置文件已默认持久化在数据目录中的 `data/config.js`（Docker 部署只需挂载 `./data` 卷即可在容器更新、重启后永久保留配置，若根目录下存在旧 `config.js` 会自动平滑迁移）。环境变量优先级最高：
 
 | 环境变量                                | 对应配置项                           | 说明                                                               | 默认值             |
 | --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
@@ -265,7 +265,7 @@ npm start
 | `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
 | `SERVER_NAME`                         | `serverName`                       | 同步服务名称                                                       | `lxserver`       |
 | `MAX_SNAPSHOT_NUM`                    | `maxSnapshotNum`                   | 保留的最大快照数量                                                 | `10`             |
-| `CONFIG_PATH`                         | -                                    | 指定外部配置文件的绝对路径                                         | -                  |
+| `CONFIG_PATH`                         | -                                    | 指定外部配置文件的绝对路径 (默认使用 `data/config.js`)             | -                  |
 | `DATA_PATH`                           | -                                    | 指定数据存储目录的绝对路径                                         | `./data`         |
 | `LOG_PATH`                            | -                                    | 指定日志输出目录的绝对路径                                         | `./logs`         |
 | `PROXY_HEADER`                        | `proxy.header`                     | 代理转发 IP 头 (如 `x-real-ip`)                                  | -                  |

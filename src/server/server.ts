@@ -610,8 +610,8 @@ const saveUsers = () => {
 const reloadServerData = async () => {
   startupLog.info('Hot-reloading server data (users and config)...')
 
-  // 1. 重新加载 config.js (必须先加载基础配置)
-  const configPath = process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js')
+  // 1. 重新加载配置文件 (必须先加载基础配置)
+  const configPath = global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js')
   if (fs.existsSync(configPath)) {
     try {
       delete require.cache[require.resolve(configPath)]
@@ -636,9 +636,9 @@ const reloadServerData = async () => {
           backupInterval: global.lx.config['sync.backupInterval'],
         })
       }
-      startupLog.info('Config.js re-loaded and merged.')
+      startupLog.info(`Config re-loaded and merged from ${configPath}.`)
     } catch (err: any) {
-      startupLog.error('Failed to reload config.js:', err.message)
+      startupLog.error('Failed to reload config file:', err.message)
     }
   }
 
@@ -5934,7 +5934,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
-            configFilePath: process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js'),
+            configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -6070,7 +6070,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 })
               }
 
-              const configPath = process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js')
+              const configPath = global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js')
               const configContent = `module.exports = ${JSON.stringify({
                 serverName: global.lx.config.serverName,
                 bindIP: global.lx.config.bindIP,

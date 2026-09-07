@@ -242,7 +242,7 @@ Separated frontend and backend architecture based on Node.js:
 
 ## 🛠️ Configuration
 
-Edit `config.js` directly. Environment variables take precedence:
+The configuration file is persisted by default in the data directory at `data/config.js` (Docker deployments only need to mount the `./data` volume to retain all settings across container updates and restarts; existing legacy `config.js` in root will be migrated automatically). Environment variables take precedence:
 
 | Env Variable | Config Key | Description | Default |
 | --- | --- | --- | --- |
@@ -255,7 +255,7 @@ Edit `config.js` directly. Environment variables take precedence:
 | `FRONTEND_PASSWORD` | `frontend.password` | Web dashboard password | `123456` |
 | `SERVER_NAME` | `serverName` | Sync service name | `lxserver` |
 | `MAX_SNAPSHOT_NUM` | `maxSnapshotNum` | Max snapshots to keep | `10` |
-| `CONFIG_PATH` | - | Absolute path to external config file | - |
+| `CONFIG_PATH` | - | Absolute path to external config file (defaults to `data/config.js`) | - |
 | `DATA_PATH` | - | Absolute path to data storage directory | `./data` |
 | `LOG_PATH` | - | Absolute path to log output directory | `./logs` |
 | `PROXY_HEADER` | `proxy.header` | Proxy IP header (e.g., `x-real-ip`) | - |

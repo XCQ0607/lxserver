@@ -135,13 +135,6 @@ class WebDAVSync extends EventEmitter {
             }
         }
         scanDir(this.dataPath)
-
-        // [新增] 扫描根目录下的 config.js
-        const rootConfigPath = path.join(process.cwd(), 'config.js')
-        if (fs.existsSync(rootConfigPath)) {
-            files.set('config.js', this.getFileHash(rootConfigPath))
-        }
-
         return files
     }
 
@@ -225,8 +218,7 @@ class WebDAVSync extends EventEmitter {
         if (!this.client) return false
 
         try {
-            const isRootConfig = relativePath === 'config.js'
-            const localPath = isRootConfig ? path.join(process.cwd(), 'config.js') : path.join(this.dataPath, relativePath)
+            const localPath = path.join(this.dataPath, relativePath)
             if (!fs.existsSync(localPath)) return false
 
             const stat = fs.statSync(localPath)
@@ -301,8 +293,7 @@ class WebDAVSync extends EventEmitter {
 
         try {
             const remotePath = `${this.syncPath}/${relativePath.replace(/\\/g, '/')}`
-            const isRootConfig = relativePath === 'config.js'
-            const localPath = isRootConfig ? path.join(process.cwd(), 'config.js') : path.join(this.dataPath, relativePath)
+            const localPath = path.join(this.dataPath, relativePath)
 
             // 确保本地目录存在
             const localDir = path.dirname(localPath)
@@ -326,9 +317,8 @@ class WebDAVSync extends EventEmitter {
 
             fs.writeFileSync(localPath, content)
 
-            if (isRootConfig) {
-                console.log('config.js restored from WebDAV, content changed.')
-                // 这里可以发出事件提醒主进程，不过由于用户是手动触发恢复或启动时恢复，已经有重启逻辑覆盖
+            if (relativePath === 'config.js') {
+                console.log('config.js restored from WebDAV, content updated in data directory.')
             }
 
             this.addLog({
@@ -382,12 +372,6 @@ class WebDAVSync extends EventEmitter {
                     cwd: this.dataPath,
                     ignore: ['temp-*.zip', '*.log', 'lx-sync-backup-*.zip'],
                 })
-
-                // [新增] 将根目录下的 config.js 也打包进去
-                const rootConfigPath = path.join(process.cwd(), 'config.js')
-                if (fs.existsSync(rootConfigPath)) {
-                    archive.file(rootConfigPath, { name: 'config.js' })
-                }
 
                 archive.finalize()
             })
@@ -638,19 +622,6 @@ class WebDAVSync extends EventEmitter {
                 .on('close', () => resolve())
                 .on('error', (err) => reject(err))
         })
-
-        const extractedConfig = path.join(targetPath, 'config.js')
-        const rootConfig = path.join(process.cwd(), 'config.js')
-
-        if (fs.existsSync(extractedConfig) && path.resolve(extractedConfig) !== path.resolve(rootConfig)) {
-            console.log(`[Restore] Moving extracted config.js from ${extractedConfig} to ${rootConfig}`)
-            try {
-                fs.copyFileSync(extractedConfig, rootConfig)
-                fs.unlinkSync(extractedConfig)
-            } catch (err: any) {
-                console.error('[Restore] Failed to move config.js to root:', err.message)
-            }
-        }
     }
 
     async syncChangedFiles() {
@@ -752,10 +723,10 @@ class WebDAVSync extends EventEmitter {
             this.emit('progress', { type: 'restore', status: 'start', message: '正在从云端下载备份...' })
             const result = await this.downloadLatestBackup()
             if (result) {
-                // 检查解压后根目录是否确实有了 config.js
-                const rootConfigPath = path.join(process.cwd(), 'config.js')
-                if (!fs.existsSync(rootConfigPath)) {
-                    console.log('Backup restored but config.js is missing, saving current config and uploading...')
+                // 检查解压后数据目录是否确实有了 config.js
+                const targetConfigPath = global.lx?.configPath || path.join(this.dataPath, 'config.js')
+                if (!fs.existsSync(targetConfigPath)) {
+                    console.log('Backup restored but config.js is missing in data dir, saving current config and uploading...')
                     if (global.lx && global.lx.saveConfig) {
                         global.lx.saveConfig()
                     }
