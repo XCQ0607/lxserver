@@ -1500,9 +1500,9 @@ class SubsonicHandler {
         const type = params.get('type') || 'newest'
         const size = Math.min(parseInt(params.get('size') || '10'), 500)
         const offset = parseInt(params.get('offset') || '0')
-
-        console.error(`[DEBUG-AlbumList] type=${type} offset=${offset} size=${size}`)
-
+        if (global.lx.config['subsonic.enableDebug']) {
+            console.log(`[Subsonic Debug] [AlbumList] type=${type} offset=${offset} size=${size}`)
+        }
         let albums: any[] = []
 
         // [推荐逻辑] 根据 type 处理推荐。只有 offset=0 时才展示推荐，便于发现
