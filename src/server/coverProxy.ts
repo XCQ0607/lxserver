@@ -3,6 +3,10 @@ import http from 'http'
 /**
  * 封面图片代理与缓存（图片显示核心实现）
  *
+ * 崩溃防护（本模块核心目标之一）：
+ * - handleGetCoverArt / proxyCoverImage 全链路 try/catch，fetch 异常不会冒泡到事件循环导致 worker 崩溃。
+ * - 缓存带容量上限（COVER_CACHE_MAX），避免长期运行 Buffer 堆积引发 OOM 崩溃。
+ *
  * - 内存缓存：按图片 URL 缓存抓取到的字节。客户端刷新时会并发重抓几十张 QQ 封面，
  *   若每次都回源易被图片 CDN 限流导致大量 204（封面空白）。缓存后刷新直接命中，规避限流。
  * - 并发信号量：QQ 图片 CDN 对服务端并发抓取限流极严（12 并发约 9 张失败）。
@@ -12,6 +16,15 @@ import http from 'http'
 
 const coverImageCache = new Map<string, { ts: number, buf: Buffer, ct: string }>()
 const COVER_CACHE_TTL = 7 * 24 * 60 * 60 * 1000
+const COVER_CACHE_MAX = 3000
+function coverCacheSet(key: string, val: { ts: number, buf: Buffer, ct: string }) {
+    coverImageCache.set(key, val)
+    // 容量上限：超出时淘汰最旧条目，避免长期运行 Buffer 堆积导致 OOM 崩溃
+    if (coverImageCache.size > COVER_CACHE_MAX) {
+        const oldest = coverImageCache.keys().next().value
+        if (oldest !== undefined) coverImageCache.delete(oldest)
+    }
+}
 
 // 并发信号量：限制同时回源抓取数量
 const coverSem = { active: 0, max: 2, waiters: [] as Array<() => void> }
@@ -84,7 +97,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
 
     if (buf) {
         const ct = 'image/jpeg'
-        coverImageCache.set(picUrl, { ts: Date.now(), buf, ct })
+        coverCacheSet(picUrl, { ts: Date.now(), buf, ct })
         res.writeHead(200, {
             'Content-Type': ct,
             'Cache-Control': 'public, max-age=1800',
