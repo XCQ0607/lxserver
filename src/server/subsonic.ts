@@ -3,7 +3,7 @@ import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
-import { downloadAndCache } from '@/server/fileCache'
+import { downloadAndCache, checkCache, serveCacheFile } from '@/server/fileCache'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
@@ -2756,6 +2756,13 @@ class SubsonicHandler {
                     console.warn(`[Subsonic] Radio ${id} returned empty song list`)
                 }
                 return this.sendError(res, 0, 'Could not resolve radio track', format)
+            }
+
+            // [新增] 本地缓存优先播放：若该歌曲已存在于用户的 cache 或 music 目录，直接流式回传本地文件，避免请求源站
+            const cacheCheck = checkCache({ source, songmid, id, quality }, username, false)
+            if (cacheCheck.exists && cacheCheck.filename) {
+                console.log(`[Subsonic] Stream hit local cache for ${id} (${cacheCheck.quality || quality}): ${cacheCheck.filename} (${cacheCheck.folder})`)
+                return serveCacheFile(req, res, cacheCheck.filename, username)
             }
 
             // [修复] 像 star 一样：先用 findMusicById 查本地/缓存，查不到再在线回源补全真实元数据
