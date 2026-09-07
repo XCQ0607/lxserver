@@ -1515,7 +1515,7 @@ class SubsonicHandler {
                     artist: album.artistName || 'LX Music',
                     artistId: artistId,
                     isDir: true,
-                    coverArt: album.picUrl || album.meta?.picUrl || `alb_${source}_${album.id}`,
+                    coverArt: album.picUrl || album.meta?.picUrl || this.buildAlbumCoverUrl(source, String(album.id)) || `alb_${source}_${album.id}`,
                     songCount: (album.list || []).length,
                     duration: (album.list || []).reduce((s: number, m: any) => s + this.parseDuration(m.interval), 0),
                     created: new Date().toISOString(),
@@ -3047,8 +3047,26 @@ class SubsonicHandler {
             } catch (e) {
                 console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
             }
+            // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
+            const cloudCover = this.buildAlbumCoverUrl(source, realId)
+            if (cloudCover) return this.proxyCoverImage(res, cloudCover)
+            // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl
+            const getAlbumSongs = musicSdk[source]?.extendDetail?.getAlbumSongs
+            if (getAlbumSongs) {
+                try {
+                    const data = await getAlbumSongs(realId)
+                    const firstSong = (data?.list || [])[0]
+                    const albumCover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
+                    if (albumCover) {
+                        this.songPicUrlCache.set(id, albumCover)
+                        return this.proxyCoverImage(res, albumCover)
+                    }
+                } catch (e) {
+                    console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
+                }
+            }
             // 注：musicSdk 各源未统一暴露专辑封面接口（kg 的 getAlbumInfo 未挂到 SDK 对象上），
-            // 此处不再强行调用歌曲 getPic，避免崩溃；专辑库有 picUrl 时才会返回封面。
+            // 此处不再强行调用歌曲 getPic，避免崩溃；专辑库有 picUrl 或可按 mid 构造时才返回封面。
         } else if (id.startsWith('art_')) {
             // [修改] 歌手封面逻辑优化：先查本地库，再查歌手图助手
             const parts = id.split('_')
@@ -3209,6 +3227,16 @@ class SubsonicHandler {
      * 将 Location 重定向到图片 URL
      * 减轻服务器负担，让客户端自行下载
      */
+    private buildAlbumCoverUrl(source: string, mid: string): string | null {
+        if (!mid) return null
+        switch (source) {
+            case 'tx':
+                return `https://y.gtimg.cn/music/photo_new/T002R300x300M000${mid}.jpg?max_age=2592000`
+            default:
+                return null
+        }
+    }
+
     private async proxyCoverImage(res: http.ServerResponse, picUrl: string) {
         res.writeHead(302, {
             'Location': picUrl,
