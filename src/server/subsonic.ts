@@ -152,6 +152,7 @@ class SubsonicHandler {
 
     // 当前用户 love 列表歌曲 id 集合缓存，用于歌曲序列化时标记 starred（按用户名隔离，避免并发串号）
     private loveIdSets = new Map<string, Set<string>>()
+    private currentUsername = ''
 
     private getOnlineSongCachePath(): string {
         return path.join(global.lx.dataPath, 'subsonic-online-cache.json')
@@ -402,6 +403,7 @@ class SubsonicHandler {
         if (!username) {
             return this.sendError(res, 40, 'Wrong username or password', format)
         }
+        this.currentUsername = username
 
         const { pathname } = urlObj
         const method = pathname.split('/').pop()?.split('.')[0] || ''
@@ -686,6 +688,7 @@ class SubsonicHandler {
             ...(starred ? { starred } : {}),
             isVideo: false,
             isDir: false,
+            ...(isStarred ? { starred: new Date().toISOString() } : {}),
             // 某些客户端 (如 Feishin) 在特定视图下不喜欢非标准字段，可以保留但确保标准字段优先
             type: 'music',
         }
