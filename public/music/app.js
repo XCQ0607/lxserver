@@ -6623,7 +6623,7 @@ const SETTINGS_UI_MAP = {
     serverCacheNamingPattern: {
         id: 'setting-server-cache-naming',
         type: 'value',
-        normalize: value => value === 'standard' ? 'standard' : 'simple'
+        normalize: value => ['standard', 'simple', 'singer_name_quality_album', 'singer_name', 'name_singer'].includes(value) ? value : 'simple'
     },
     enableProxyPlayback: { id: 'toggle-proxy-playback', type: 'checkbox' },
     enableProxyDownload: { id: 'toggle-proxy-download', type: 'checkbox' },
