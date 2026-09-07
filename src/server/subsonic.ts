@@ -6,6 +6,7 @@ import { callUserApiGetMusicUrl } from '@/server/userApi'
 import { downloadAndCache, checkCache, serveCacheFile } from '@/server/fileCache'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
+import { proxyCoverImage } from '@/server/coverProxy'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
 import fs from 'fs'
 import path from 'path'
@@ -17,6 +18,36 @@ import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musi
 import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
+
+// 推荐结果缓存：同一类型短时间内共享一次 QQ 抓取结果，避免客户端并发请求（启动瞬间
+// newest/recent/random 同时打来）重复访问。缓存成功后保留较长时间，并在 QQ 失败时
+// 回退到上次成功结果，确保刷新/限流时每日推荐不消失。
+const recommendCache = new Map<string, { ts: number, data: any[] }>()
+const RECOMMEND_CACHE_TTL = 60 * 60 * 1000
+async function cachedRecommend(type: string, size: number): Promise<any[]> {
+    const key = `${type}:${size}`
+    const cached = recommendCache.get(key)
+    const now = Date.now()
+    // 新鲜且非空的结果直接返回
+    if (cached && cached.data.length > 0 && now - cached.ts < RECOMMEND_CACHE_TTL) {
+        return cached.data
+    }
+    // 抓取最新结果（内部已有重试）
+    const fresh = await fetchRecommendedAlbums(type, size).catch(() => [] as any[])
+    if (fresh.length > 0) {
+        recommendCache.set(key, { ts: now, data: fresh })
+        return fresh
+    }
+    // 抓取失败：若有上次成功结果（即便已过期），回退返回，避免每日推荐空白
+    if (cached && cached.data.length > 0) {
+        console.warn(`[Subsonic] recommend(${type}) 刷新失败，回退到上次缓存的 ${cached.data.length} 条`)
+        return cached.data
+    }
+    return []
+}
+
+// 封面图片的缓存 / 并发限流 / 重试逻辑已抽到 @/server/coverProxy，
+// 由 handleGetCoverArt 通过 proxyCoverImage(res, url) 调用。
 
 // ─────────────────────────────────────────────
 // 图片字段提取助手（星标写回原生收藏时，从源头补齐歌手头像 / 专辑封面）
@@ -688,7 +719,6 @@ class SubsonicHandler {
             ...(starred ? { starred } : {}),
             isVideo: false,
             isDir: false,
-            ...(isStarred ? { starred: new Date().toISOString() } : {}),
             // 某些客户端 (如 Feishin) 在特定视图下不喜欢非标准字段，可以保留但确保标准字段优先
             type: 'music',
         }
@@ -1471,10 +1501,13 @@ class SubsonicHandler {
         const size = Math.min(parseInt(params.get('size') || '10'), 500)
         const offset = parseInt(params.get('offset') || '0')
 
+        console.error(`[DEBUG-AlbumList] type=${type} offset=${offset} size=${size}`)
+
         let albums: any[] = []
 
         // [推荐逻辑] 根据 type 处理推荐。只有 offset=0 时才展示推荐，便于发现
-        if ((type === 'recent' || type === 'random' || type === 'byGenre') && offset === 0) {
+        // newest/recent/random/byGenre 均走推荐（新专辑/随机推荐），让首页/每日推荐有封面
+        if ((type === 'recent' || type === 'newest' || type === 'random' || type === 'byGenre') && offset === 0) {
             try {
                 if (type === 'byGenre') {
                     const genreNameOrId = params.get('genre') || ''
@@ -1489,7 +1522,21 @@ class SubsonicHandler {
                         albums = await fetchPlaylistsByGenre(categoryId, size)
                     }
                 } else {
-                    const recommendations = await fetchRecommendedAlbums(type, size)
+                    // recent/newest 取新专辑；random 取随机推荐。recent/newest 取不到(空或抛错)时回退到 random
+                    const rType = (type === 'random') ? 'random' : 'recent'
+                    let recommendations: any[] = []
+                    try {
+                        recommendations = await cachedRecommend(rType, size)
+                    } catch (e) {
+                        console.error(`[Subsonic] recommend (${rType}) failed:`, e)
+                    }
+                    if (recommendations.length === 0 && rType === 'recent') {
+                        try {
+                            recommendations = await cachedRecommend('random', size)
+                        } catch (e) {
+                            console.error(`[Subsonic] recommend fallback (random) failed:`, e)
+                        }
+                    }
                     if (recommendations.length > 0) {
                         albums = recommendations
                     }
@@ -2945,8 +2992,12 @@ class SubsonicHandler {
                 return fs.createReadStream(logoPath).pipe(res)
             }
         }
-        if (id.startsWith('http')) return this.proxyCoverImage(res, id)
-        // console.log(`[CoverArt] Received Request: id=${id}, user=${username}`)
+        // 处理作为 coverArt 传入的直链 URL（客户端可能对其做 percent-encode 后再作为 id 传回）
+        let coverUrl = id
+        if (!coverUrl.startsWith('http') && (coverUrl.startsWith('https%3A') || coverUrl.startsWith('http%3A'))) {
+          try { coverUrl = decodeURIComponent(coverUrl) } catch { /* 解码失败保持原值 */ }
+        }
+        if (coverUrl.startsWith('http')) return proxyCoverImage(res, coverUrl)
 
         // [新增] 兼容逻辑：处理不规范的 ID（如原始 albumMid）
         if (!id.includes('_')) {
@@ -2957,8 +3008,7 @@ class SubsonicHandler {
             if (matched) {
                 const picUrl = (matched as any).meta?.picUrl || (matched as any).img
                 if (picUrl) {
-                    // console.log(`[CoverArt] Found cover via library cross-match for raw ID: ${id}`)
-                    return this.proxyCoverImage(res, picUrl)
+                                return proxyCoverImage(res, picUrl)
                 }
             }
         }
@@ -2968,8 +3018,7 @@ class SubsonicHandler {
             const source = music.source as string
             const sdk = musicSdk[source]
             if (!sdk?.getPic) {
-                // console.log(`[CoverArt] SDK not found or no getPic for source=${source}`)
-                return null
+                        return null
             }
             try {
                 const meta = (music as any).meta || {}
@@ -2985,13 +3034,11 @@ class SubsonicHandler {
                     source,
                     songmid: meta.songId || rawSongId,
                 }
-                // console.log(`[CoverArt] SDK getPic: source=${source}, songmid=${songInfo.songmid}, name=${music.name}`)
-                const picUrl = await Promise.race([
+                        const picUrl = await Promise.race([
                     sdk.getPic(songInfo),
                     new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
                 ])
-                // console.log(`[CoverArt] SDK getPic result: ${picUrl}`)
-                return typeof picUrl === 'string' && picUrl.startsWith('http') ? picUrl : null
+                        return typeof picUrl === 'string' && picUrl.startsWith('http') ? picUrl : null
             } catch (e: any) {
                 console.error(`[CoverArt] SDK getPic error:`, e?.message)
                 return null
@@ -3004,8 +3051,7 @@ class SubsonicHandler {
         if (this.songPicUrlCache.has(id)) {
             const cachedUrl = this.songPicUrlCache.get(id)
             if (cachedUrl) {
-                // console.log(`[CoverArt] ✓ Cache Hit: ${id} -> ${cachedUrl}`)
-                return this.proxyCoverImage(res, cachedUrl)
+                        return proxyCoverImage(res, cachedUrl)
             }
         }
 
@@ -3027,12 +3073,10 @@ class SubsonicHandler {
 
         if (found) {
             const picUrl = (found.music as any)?.meta?.picUrl || (found.music as any)?.img || null
-            // console.log(`[CoverArt] ✓ Library Match: ${found.music.name}, picUrl=${picUrl}`)
-            if (picUrl) return this.proxyCoverImage(res, picUrl)
+                if (picUrl) return proxyCoverImage(res, picUrl)
             const sdkPic = await getPicViaSDK(found.music)
-            if (sdkPic) return this.proxyCoverImage(res, sdkPic)
-            // console.log(`[CoverArt] SDK also returned nothing for song ${id}`)
-        } else if (id.startsWith('alb_')) {
+            if (sdkPic) return proxyCoverImage(res, sdkPic)
+            } else if (id.startsWith('alb_')) {
             // [修复] 专辑封面：绝不能直接调歌曲 getPic（专辑对象无 songmid/hash，会读取 undefined.length 崩溃）。
             // 优先用本地专辑库的 picUrl；没有则落到函数末尾的 204 兜底。
             const parts = id.split('_')
@@ -3043,13 +3087,13 @@ class SubsonicHandler {
                 const alb = libAlbums.find((a: any) =>
                     `${(a.source || 'wy')}_${a.id}` === id || String(a.id) === realId)
                 const localPic = alb?.picUrl || alb?.img
-                if (localPic) return this.proxyCoverImage(res, localPic)
+                if (localPic) return proxyCoverImage(res, localPic)
             } catch (e) {
                 console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
             }
             // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
             const cloudCover = this.buildAlbumCoverUrl(source, realId)
-            if (cloudCover) return this.proxyCoverImage(res, cloudCover)
+            if (cloudCover) return proxyCoverImage(res, cloudCover)
             // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl
             const getAlbumSongs = musicSdk[source]?.extendDetail?.getAlbumSongs
             if (getAlbumSongs) {
@@ -3059,7 +3103,7 @@ class SubsonicHandler {
                     const albumCover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
                     if (albumCover) {
                         this.songPicUrlCache.set(id, albumCover)
-                        return this.proxyCoverImage(res, albumCover)
+                        return proxyCoverImage(res, albumCover)
                     }
                 } catch (e) {
                     console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
@@ -3077,16 +3121,15 @@ class SubsonicHandler {
             const libArtists = await this.getLibraryData(username, 'artists')
             const localArt = libArtists.find(a => (a.source === source && a.id === realId) || a.name === realId)
             if (localArt && (localArt.picUrl || localArt.img)) {
-                return this.proxyCoverImage(res, localArt.picUrl || localArt.img)
+                return proxyCoverImage(res, localArt.picUrl || localArt.img)
             }
 
             // 2. 兜底尝试使用歌手名搜索照片
             const cover = await getSingerPic(localArt?.name || realId)
-            if (cover) return this.proxyCoverImage(res, cover)
+            if (cover) return proxyCoverImage(res, cover)
         } else if (id.includes('_')) {
             // 1.5 歌曲不在已加载的库中，解析 ID 直接尝试 SDK
-            // console.log(`[CoverArt] Song ${id} not found in library, parsing for SDK...`)
-            const parts = id.split('_')
+                const parts = id.split('_')
             // 排除特殊前缀，获取真正的 source
             const source = ['alb', 'art', 'hot-songs'].includes(parts[0]) ? parts[1] : parts[0]
             const songmid = ['alb', 'art', 'hot-songs'].includes(parts[0]) ? parts.slice(2).join('_') : parts.slice(1).join('_')
@@ -3094,18 +3137,17 @@ class SubsonicHandler {
             if (musicSdk[source]) {
                 const music: any = { source, id, songmid, name: '', singer: '' }
                 const sdkPic = await getPicViaSDK(music as any)
-                if (sdkPic) return this.proxyCoverImage(res, sdkPic)
+                if (sdkPic) return proxyCoverImage(res, sdkPic)
             }
         } else {
-            // console.log(`[CoverArt] Path fallback for id: ${id}`)
-        }
+            }
 
         // 2. 尝试作为歌手 ID 处理 (artist_歌手名)
         if (id.startsWith('artist_')) {
             const singerName = id.slice(7)
             if (singerName) {
                 const cover = await getSingerPic(singerName)
-                if (cover) return this.proxyCoverImage(res, cover)
+                if (cover) return proxyCoverImage(res, cover)
             }
         }
 
@@ -3121,23 +3163,21 @@ class SubsonicHandler {
         } else {
             const list = listData.userList.find((l: any) => l.id === id)
             if (list) {
-                if ((list as any).Album) return this.proxyCoverImage(res, (list as any).Album)
+                if ((list as any).Album) return proxyCoverImage(res, (list as any).Album)
                 listMusics = (list.list || []) as LX.Music.MusicInfo[]
             }
         }
 
         if (listMusics.length > 0) {
-            // console.log(`[CoverArt] Treating as list, ${listMusics.length} songs`)
-            for (const music of listMusics) {
+                for (const music of listMusics) {
                 const picUrl = (music as any)?.meta?.picUrl || (music as any)?.img
-                if (picUrl) return this.proxyCoverImage(res, picUrl)
+                if (picUrl) return proxyCoverImage(res, picUrl)
             }
             const sdkPic = await getPicViaSDK(listMusics[0])
-            if (sdkPic) return this.proxyCoverImage(res, sdkPic)
+            if (sdkPic) return proxyCoverImage(res, sdkPic)
         }
 
         // 4. 兜底
-        // console.log(`[CoverArt] No cover found for id=${id}, returning 204`)
         res.writeHead(204)
         res.end()
         } catch (e: any) {
@@ -3235,14 +3275,6 @@ class SubsonicHandler {
             default:
                 return null
         }
-    }
-
-    private async proxyCoverImage(res: http.ServerResponse, picUrl: string) {
-        res.writeHead(302, {
-            'Location': picUrl,
-            'Cache-Control': 'public, max-age=1800'
-        })
-        res.end()
     }
 
     private handleGetOpenSubsonicExtensions(res: http.ServerResponse, format: string) {

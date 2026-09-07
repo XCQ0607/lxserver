@@ -2184,22 +2184,31 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           let arr: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
           if (!Array.isArray(arr)) arr = []
           // [修复] 对没有可用 picUrl 的专辑，实时从音源拉取封面并补全（best-effort，带内存缓存，单条失败不影响整体）
+          // [稳健] 限制并发拉取数量，避免一次性对音源发起大量请求导致限流/超时；复用 albumPicCache 且只补全一次后持久化
           const needFetch = arr.filter((a: any) => a && a.id != null && a.source &&
             !(a.picUrl && /^https?:\/\//.test(String(a.picUrl))))
           let changed = false
           if (needFetch.length) {
-            await Promise.all(needFetch.map(async (a: any) => {
-              const key = `${a.source}::${a.id}`
-              try {
-                let pic: string | null = albumPicCache.get(key) ?? null
-                if (!pic) {
-                  const detail = await musicSdk[a.source]?.extendDetail?.getAlbumSongs?.(String(a.id))
-                  pic = extractAlbumPic(detail) || null
-                  if (pic) albumPicCache.set(key, pic)
-                }
-                if (pic) { a.picUrl = pic; changed = true }
-              } catch (e) { /* 忽略单个专辑的拉取失败 */ }
-            }))
+            const CONCURRENCY = 5
+            let cursor = 0
+            const worker = async () => {
+              while (cursor < needFetch.length) {
+                const a = needFetch[cursor++]
+                const key = `${a.source}::${a.id}`
+                try {
+                  let pic: string | null = albumPicCache.get(key) ?? null
+                  if (!pic) {
+                    const detail = await musicSdk[a.source]?.extendDetail?.getAlbumSongs?.(String(a.id))
+                    pic = extractAlbumPic(detail) || null
+                    if (pic) albumPicCache.set(key, pic)
+                  }
+                  if (pic) { a.picUrl = pic; changed = true }
+                } catch (e) { /* 忽略单个专辑的拉取失败 */ }
+              }
+            }
+            await Promise.all(
+              Array.from({ length: Math.min(CONCURRENCY, needFetch.length) }, () => worker())
+            )
             // 将补全后的 picUrl 持久化回文件：每个专辑最多实时查一次，之后永久生效（重启也不再查询）
             if (changed) {
               try { fs.writeFileSync(filePath, JSON.stringify(arr, null, 2), 'utf-8') } catch { /* ignore */ }
