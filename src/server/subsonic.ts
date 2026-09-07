@@ -169,6 +169,8 @@ class SubsonicHandler {
 
     // 预缓存歌曲 ID -> 封面 URL，避免 getCoverArt 重新请求 SDK
     private songPicUrlCache = new Map<string, string>()
+    // In-flight Promise 复用：避免客户端并发请求同一未缓存专辑封面时重复调用 SDK
+    private albumSongFetchInFlight = new Map<string, Promise<string | null>>()
 
     // 在线全网搜索歌曲缓存 (ID -> MusicInfo)，确保后续 getSong / getCoverArt / getLyrics 能精准查到歌曲元数据
     private onlineSongCache = new Map<string, LX.Music.MusicInfo>()
@@ -3094,19 +3096,34 @@ class SubsonicHandler {
             // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
             const cloudCover = this.buildAlbumCoverUrl(source, realId)
             if (cloudCover) return proxyCoverImage(res, cloudCover)
-            // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl
+            // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl（带 In-flight 复用）
             const getAlbumSongs = musicSdk[source]?.extendDetail?.getAlbumSongs
             if (getAlbumSongs) {
                 try {
-                    const data = await getAlbumSongs(realId)
-                    const firstSong = (data?.list || [])[0]
-                    const albumCover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
+                    let fetchPromise = this.albumSongFetchInFlight.get(id)
+                    if (!fetchPromise) {
+                        fetchPromise = (async () => {
+                            try {
+                                const data = await getAlbumSongs(realId)
+                                const firstSong = (data?.list || [])[0]
+                                const cover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
+                                return cover || null
+                            } catch (e) {
+                                console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
+                                return null
+                            } finally {
+                                this.albumSongFetchInFlight.delete(id)
+                            }
+                        })()
+                        this.albumSongFetchInFlight.set(id, fetchPromise)
+                    }
+                    const albumCover = await fetchPromise
                     if (albumCover) {
                         this.songPicUrlCache.set(id, albumCover)
                         return proxyCoverImage(res, albumCover)
                     }
                 } catch (e) {
-                    console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
+                    console.error(`[CoverArt] resolve albumCover failed for ${id}:`, (e as Error)?.message)
                 }
             }
             // 注：musicSdk 各源未统一暴露专辑封面接口（kg 的 getAlbumInfo 未挂到 SDK 对象上），

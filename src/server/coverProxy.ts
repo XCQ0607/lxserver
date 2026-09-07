@@ -66,9 +66,11 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
         return res.end(cached.buf)
     }
 
-    const doFetch = async (): Promise<Buffer | null> => {
+    const doFetch = async (): Promise<{ buf: Buffer, ct: string } | null> => {
+        if (res.destroyed || res.writableEnded) return null
         await coverAcquire()
         try {
+            if (res.destroyed || res.writableEnded) return null
             const controller = new AbortController()
             const timer = setTimeout(() => controller.abort(), 20000)
             const imgResp = await fetch(picUrl, {
@@ -79,7 +81,10 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
             if (!imgResp.ok) return null
             const buf = Buffer.from(await imgResp.arrayBuffer())
             if (buf.length === 0) return null
-            return buf
+            // 读取上游真实的 Content-Type，兼容 jpeg、png、webp 等格式
+            const upstreamCt = imgResp.headers.get('content-type')
+            const ct = (upstreamCt && upstreamCt.startsWith('image/')) ? upstreamCt.split(';')[0].trim() : 'image/jpeg'
+            return { buf, ct }
         } catch (e) {
             console.error('[CoverArt] proxy fetch failed:', picUrl, (e as Error)?.message)
             return null
@@ -89,24 +94,26 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
     }
 
     // 失败重试两次（限流常有短暂性），降低空白封面概率
-    let buf: Buffer | null = null
-    for (let attempt = 0; attempt < 3 && !buf; attempt++) {
+    let result: { buf: Buffer, ct: string } | null = null
+    for (let attempt = 0; attempt < 3 && !result; attempt++) {
+        if (res.destroyed || res.writableEnded) return
         if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt))
-        buf = await doFetch()
+        result = await doFetch()
     }
 
-    if (buf) {
-        const ct = 'image/jpeg'
-        coverCacheSet(picUrl, { ts: Date.now(), buf, ct })
+    if (result) {
+        coverCacheSet(picUrl, { ts: Date.now(), buf: result.buf, ct: result.ct })
+        if (res.destroyed || res.writableEnded) return
         res.writeHead(200, {
-            'Content-Type': ct,
+            'Content-Type': result.ct,
             'Cache-Control': 'public, max-age=1800',
         })
-        return res.end(buf)
+        return res.end(result.buf)
     }
 
     // 回源彻底失败：若有过期缓存，降级返回避免封面彻底消失
     if (cached) {
+        if (res.destroyed || res.writableEnded) return
         res.writeHead(200, {
             'Content-Type': cached.ct,
             'Cache-Control': 'public, max-age=300',
@@ -115,6 +122,8 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
         return res.end(cached.buf)
     }
 
-    res.writeHead(204)
-    return res.end()
+    if (!res.headersSent && !res.destroyed) {
+        res.writeHead(204)
+        res.end()
+    }
 }
