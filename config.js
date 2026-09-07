@@ -192,6 +192,14 @@ module.exports = {
   // 环境变量: SUBSONIC_LYRIC_TRANSLATION
   "subsonic.lyricTranslation": true,
 
+  // 是否在 Subsonic 播放音乐时触发服务器缓存保存 (落盘到该用户缓存目录，已缓存自动跳过)
+  // 环境变量: SUBSONIC_CACHE_ON_PLAY (true/false)
+  "subsonic.cacheOnPlay": false,
+
+  // 是否在 Subsonic 播放音乐时优先使用本地缓存/下载文件直接流式传输 (默认开启)
+  // 环境变量: SUBSONIC_PLAY_CACHE_FIRST (true/false)
+  "subsonic.playCacheFirst": true,
+
   // 歌手信息源优先级 (多个源用逗号分隔，如 tx,wy)
   // 环境变量: SINGER_SOURCE_PRIORITY
   "singer.sourcePriority": [

@@ -1140,6 +1140,16 @@
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">服务器存在缓存优先播放</span>
+                                        <span class="config-toggle-desc">通过 Subsonic 播放曲目时，若服务器已存在该歌曲缓存或下载文件，直接通过本地传输，避免请求源站</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.playCacheFirst" checked />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
                                 <div class="config-divider"></div>
                                 <div class="config-hint"
                                     style="background: rgba(244, 63, 94, 0.06); padding: 8px 12px; border-radius: 6px; color: var(--text-secondary); line-height: 1.5;">

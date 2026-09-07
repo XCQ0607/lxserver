@@ -300,6 +300,8 @@ npm start
 | `SUBSONIC_ONLINE_SEARCH_MODE`         | `subsonic.onlineSearchMode`        | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)        | `fallback`       |
 | `SUBSONIC_ONLINE_SEARCH_SOURCES`      | `subsonic.onlineSearchSources`     | Subsonic 在线搜索默认音源列表                                      | `wy,tx,kw,kg,mg` |
 | `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
+| `SUBSONIC_CACHE_ON_PLAY`            | `subsonic.cacheOnPlay`             | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)          | `false`          |
+| `SUBSONIC_PLAY_CACHE_FIRST`          | `subsonic.playCacheFirst`          | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输      | `true`           |
 | `ARTIST_MAX_FETCH_PAGES`              | `artist.maxFetchPages`             | 歌手歌曲最大抓取页数                                               | `20`             |
 | `CACHE_NAMING_PATTERN`                | `cache.namingPattern`              | 缓存文件命名规则 (`simple` / `custom`)                            | `simple`         |
 | `SYSTEM_ALLOW_UNSAFE_VM`              | `system.allowUnsafeVM`             | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                  | `false`          |
