@@ -3,11 +3,6 @@ import { httpFetch } from '../../modules/utils/request'
 const MUSICU_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
 
 /**
- * 获取 QQ 音乐专辑封面 URL
- */
-const getPicUrl = (mid: string) => mid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${mid}.jpg?max_age=2592000` : ''
-
-/**
  * 获取推荐专辑列表
  * @param type 推荐类型: recent, newest, random, frequent
  * @param size 获取数量
@@ -45,7 +40,14 @@ export const fetchRecommendedAlbums = async (type: string, size: number = 20) =>
         url.searchParams.set('format', 'json')
         url.searchParams.set('data', JSON.stringify(payload))
 
-        const { body } = await (httpFetch(url.toString()) as any).promise
+        // 重试：QQ 推荐接口冷启动/瞬时抖动可能返回空 {}，重试几次可恢复
+        let body: any = null
+        for (let attempt = 0; attempt < 3; attempt++) {
+            if (attempt > 0) await new Promise(r => setTimeout(r, 500 * attempt))
+            body = (await (httpFetch(url.toString()) as any).promise).body
+            const hasData = [1, 2, 3, 4, 5, 6].some(i => (body as any)?.[`area_${i}`]?.data?.albums?.length)
+            if (hasData) break
+        }
 
         let rawList: any[] = []
         // 提取组合结果 (area_1 到 area_6)
@@ -86,7 +88,7 @@ export const fetchRecommendedAlbums = async (type: string, size: number = 20) =>
                 artist: artist,
                 artistId: `artist_${artist}`,
                 isDir: true,
-                coverArt: getPicUrl(mid),
+                coverArt: `alb_tx_${mid}`,
                 songCount: 10,
                 duration: 3000,
                 created: new Date().toISOString(),
