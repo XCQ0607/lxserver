@@ -301,6 +301,12 @@ if (envParams.SUBSONIC_ONLINE_SEARCH_SOURCES) {
 if (envParams.SUBSONIC_LYRIC_TRANSLATION !== undefined) {
   setBoolConfig('subsonic.lyricTranslation', envParams.SUBSONIC_LYRIC_TRANSLATION)
 }
+if (envParams.SUBSONIC_CACHE_ON_PLAY !== undefined) {
+  setBoolConfig('subsonic.cacheOnPlay', envParams.SUBSONIC_CACHE_ON_PLAY)
+}
+if (envParams.SUBSONIC_PLAY_CACHE_FIRST !== undefined) {
+  setBoolConfig('subsonic.playCacheFirst', envParams.SUBSONIC_PLAY_CACHE_FIRST)
+}
 if (envParams.ARTIST_MAX_FETCH_PAGES) {
   const pages = parseInt(envParams.ARTIST_MAX_FETCH_PAGES, 10)
   if (!isNaN(pages) && pages > 0) global.lx.config['artist.maxFetchPages'] = pages

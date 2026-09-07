@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
+import { downloadAndCache, checkCache, serveCacheFile } from '@/server/fileCache'
 import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
@@ -14,6 +15,7 @@ import txMusicInfo from '@/modules/utils/musicSdk/tx/musicInfo.js'
 import wyMusicInfo from '@/modules/utils/musicSdk/wy/musicInfo.js'
 import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musicInfo.js'
 import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
+import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
 
 // ─────────────────────────────────────────────
@@ -139,6 +141,11 @@ class SubsonicHandler {
 
     // 在线全网搜索歌曲缓存 (ID -> MusicInfo)，确保后续 getSong / getCoverArt / getLyrics 能精准查到歌曲元数据
     private onlineSongCache = new Map<string, LX.Music.MusicInfo>()
+    // [修复] onlineSongCache 真正落盘持久化：之前只是内存 Map，重启即丢，导致 kw 等回源结果无法复用
+    private onlineSongCacheLoaded = false
+
+    // Subsonic 播放缓存后台任务跟踪：username -> { songKey, controller }，用于切歌时自动取消上一首未完成的下载
+    private subsonicActiveTasks = new Map<string, { songKey: string, controller: AbortController }>()
 
     // 固定同一关键词的在线结果顺序，避免客户端翻页时出现重复或跳项。
     private onlineSearchCache = new Map<string, { expiresAt: number, results: { music: LX.Music.MusicInfo, listId: string }[] }>()
@@ -147,13 +154,75 @@ class SubsonicHandler {
     private loveIdSets = new Map<string, Set<string>>()
     private currentUsername = ''
 
+    private getOnlineSongCachePath(): string {
+        return path.join(global.lx.dataPath, 'subsonic-online-cache.json')
+    }
+
+    // [日志] 音源(在线回源)类错误统一写独立文件，控制台只打精简一行
+    private getSourceErrorLogPath(): string {
+        return path.join(global.lx.dataPath, 'subsonic-source-errors.log')
+    }
+
+    private logSourceError(tag: string, detail: string, err?: any) {
+        const ts = new Date().toISOString()
+        const errMsg = err?.message ?? String(err ?? '')
+        const errStack = err?.stack ?? ''
+        const block = `[${ts}] [${tag}] ${detail}\n  message: ${errMsg}\n${errStack ? `  stack: ${errStack}\n` : ''}---\n`
+        try {
+            fs.appendFileSync(this.getSourceErrorLogPath(), block)
+        } catch { /* 写错误日志失败不阻塞主流程 */ }
+        // 控制台精简显示
+        console.warn(`[Subsonic] 音源错误 ${tag}: ${detail} (详见 subsonic-source-errors.log)`)
+    }
+
+    private loadOnlineSongCache() {
+        if (this.onlineSongCacheLoaded) return
+        this.onlineSongCacheLoaded = true
+        try {
+            const p = this.getOnlineSongCachePath()
+            if (fs.existsSync(p)) {
+                const arr = JSON.parse(fs.readFileSync(p, 'utf8'))
+                if (Array.isArray(arr)) {
+                    for (const m of arr) if (m && m.id) this.onlineSongCache.set(m.id, m)
+                    console.log(`[Subsonic] onlineSongCache 已从磁盘加载 ${this.onlineSongCache.size} 条`)
+                }
+            }
+        } catch (e) {
+            console.error('[Subsonic] 加载 onlineSongCache 失败:', e)
+        }
+    }
+
+    private saveOnlineSongCacheTimer: NodeJS.Timeout | null = null
+
+    // 磁盘持久化：使用 1 秒防抖批量落盘，避免搜索/加载大专辑时并发重复写盘
+    // 采用「临时文件 + rename」做原子写：避免进程在写入中途被强杀导致文件损坏
+    private saveOnlineSongCache() {
+        if (this.saveOnlineSongCacheTimer) return
+        this.saveOnlineSongCacheTimer = setTimeout(() => {
+            this.saveOnlineSongCacheTimer = null
+            try {
+                const p = this.getOnlineSongCachePath()
+                const dir = path.dirname(p)
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true })
+                const arr = Array.from(this.onlineSongCache.values())
+                const tmp = `${p}.${process.pid}.tmp`
+                fs.writeFileSync(tmp, JSON.stringify(arr), 'utf8')
+                fs.renameSync(tmp, p)
+            } catch (e) {
+                console.error('[Subsonic] 保存 onlineSongCache 失败:', e)
+            }
+        }, 1000)
+    }
+
     private cacheOnlineSong(music: LX.Music.MusicInfo) {
         if (!music || !music.id) return
+        this.loadOnlineSongCache()
         if (this.onlineSongCache.size > 5000) {
             const firstKey = this.onlineSongCache.keys().next().value
             if (firstKey) this.onlineSongCache.delete(firstKey)
         }
         this.onlineSongCache.set(music.id, music)
+        this.saveOnlineSongCache()
     }
 
     // ─────────────────────────────────────────────
@@ -561,7 +630,7 @@ class SubsonicHandler {
     /**
      * 将 MusicInfo 映射为 Subsonic child/song 的平铺 JS 对象（适用于 JSON 响应）
      */
-    private musicToSongFlat(music: LX.Music.MusicInfo, parentId: string, artistIdOverride?: string) {
+    private musicToSongFlat(music: LX.Music.MusicInfo, parentId: string, artistIdOverride?: string, username?: string) {
         const meta = (music as any).meta || {}
 
         const id = music.id
@@ -599,7 +668,7 @@ class SubsonicHandler {
         const defaultArtistId = (music as any).singerId ? `art_${source}_${(music as any).singerId}` : `artist_${primarySinger}`
         const finalArtistId = artistIdOverride || defaultArtistId
 
-        const isStarred = (this.loveIdSets.get(this.currentUsername)?.has(id)) || parentId === 'love'
+        const starred = (username && this.loveIdSets.get(username)?.has(id)) ? new Date().toISOString() : undefined
 
         return {
             id,
@@ -616,6 +685,7 @@ class SubsonicHandler {
             coverArt: (picUrl && typeof picUrl === 'string' && picUrl.startsWith('http')) ? picUrl : id,
             duration: this.parseDuration(music.interval),
             ...this.getBestQualityMeta(music),
+            ...(starred ? { starred } : {}),
             isVideo: false,
             isDir: false,
             ...(isStarred ? { starred: new Date().toISOString() } : {}),
@@ -671,12 +741,15 @@ class SubsonicHandler {
     /**
      * 将 MusicInfo 映射为 XML 渲染格式 {attrs, children?}
      */
-    private musicToSongXml(music: LX.Music.MusicInfo, parentId: string, artistIdOverride?: string) {
-        return { attrs: this.musicToSongFlat(music, parentId, artistIdOverride) }
+    private musicToSongXml(music: LX.Music.MusicInfo, parentId: string, artistIdOverride?: string, username?: string) {
+        return { attrs: this.musicToSongFlat(music, parentId, artistIdOverride, username) }
     }
 
     /** 查找某个用户下所有列表中的某首歌 */
     private async findMusicById(username: string, id: string): Promise<{ music: LX.Music.MusicInfo, listId: string } | null> {
+        // [修复] 读取前确保磁盘上的 onlineSongCache 已加载（之前只在 cacheOnlineSong 写入时触发，
+        // 导致重启后首次读取发生在任何写入之前，落盘数据永远读不进来 -> 重启即丢）
+        this.loadOnlineSongCache()
         const userSpace = getUserSpace(username)
         const listData = await userSpace.listManage.getListData()
 
@@ -879,7 +952,7 @@ class SubsonicHandler {
             return this.sendResponse(res, {
                 playlist: {
                     ...playlistMeta,
-                    entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id)),
+                    entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, undefined, username)),
                 },
             }, format)
         }
@@ -888,7 +961,7 @@ class SubsonicHandler {
             playlist: {
                 attrs: playlistMeta,
                 children: {
-                    entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id)),
+                    entry: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, undefined, username)),
                 },
             },
         }, format)
@@ -1219,7 +1292,7 @@ class SubsonicHandler {
             return this.sendResponse(res, {
                 album: {
                     ...albumMeta,
-                    song: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, albumMeta.artistId)),
+                    song: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, albumMeta.artistId, username)),
                 },
             }, format)
         }
@@ -1228,7 +1301,7 @@ class SubsonicHandler {
             album: {
                 attrs: albumMeta,
                 children: {
-                    song: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, albumMeta.artistId)),
+                    song: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, albumMeta.artistId, username)),
                 },
             },
         }, format)
@@ -1268,9 +1341,9 @@ class SubsonicHandler {
         if (!music) return this.sendError(res, 70, 'Song not found: ' + id, format)
 
         if (format === 'json') {
-            return this.sendResponse(res, { song: this.musicToSongFlat(music, listId) }, format)
+            return this.sendResponse(res, { song: this.musicToSongFlat(music, listId, undefined, username) }, format)
         }
-        return this.sendResponse(res, { song: this.musicToSongXml(music, listId) }, format)
+        return this.sendResponse(res, { song: this.musicToSongXml(music, listId, undefined, username) }, format)
     }
 
     private async handleGetMusicDirectory(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
@@ -1373,7 +1446,7 @@ class SubsonicHandler {
                 directory: {
                     id,
                     name: dirName,
-                    child: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id)),
+                    child: musics.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, undefined, username)),
                 },
             }, format)
         }
@@ -1381,7 +1454,7 @@ class SubsonicHandler {
             directory: {
                 attrs: { id, name: dirName },
                 children: {
-                    child: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id)),
+                    child: musics.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, undefined, username)),
                 },
             },
         }, format)
@@ -1672,7 +1745,7 @@ class SubsonicHandler {
                 artist: {
                     ...artistInfo,
                     album: albums,
-                    song: hotSongs.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, id))
+                    song: hotSongs.map((m: LX.Music.MusicInfo) => this.musicToSongFlat(m, id, id, username))
                 },
             }, format)
         }
@@ -1681,7 +1754,7 @@ class SubsonicHandler {
                 attrs: artistInfo,
                 children: {
                     album: albums.map(a => ({ attrs: a })),
-                    song: hotSongs.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, id))
+                    song: hotSongs.map((m: LX.Music.MusicInfo) => this.musicToSongXml(m, id, id, username))
                 },
             },
         }, format)
@@ -2088,7 +2161,7 @@ class SubsonicHandler {
                 [wrapKey]: {
                     artist: pagedArtists,
                     album: pagedAlbums,
-                    song: pagedSongs.map(({ music, listId }) => this.musicToSongFlat(music, listId)),
+                    song: pagedSongs.map(({ music, listId }) => this.musicToSongFlat(music, listId, undefined, username)),
                 },
             }, format)
         }
@@ -2097,7 +2170,7 @@ class SubsonicHandler {
                 children: {
                     artist: pagedArtists.map(a => ({ attrs: a })),
                     album: pagedAlbums.map(a => ({ attrs: a })),
-                    song: pagedSongs.map(({ music, listId }) => this.musicToSongXml(music, listId)),
+                    song: pagedSongs.map(({ music, listId }) => this.musicToSongXml(music, listId, undefined, username)),
                 },
             },
         }, format)
@@ -2105,7 +2178,7 @@ class SubsonicHandler {
 
     /**
      * 按歌曲 id 从各音源在线回源取单曲信息（github/dev 移植自 feat/subsonic）
-     * 支持 tx / wy / kg / mg；其它源（kw/bd/xm 等）无可靠「按 id 取单曲」接口，直接放弃。
+     * 支持 tx / wy / kg / mg / kw / bd；xm 等无「按 id 取单曲」接口的源返回 null 降级。
      */
     private async resolveMusicById(id: string): Promise<LX.Music.MusicInfo | null> {
         const idx = id.indexOf('_')
@@ -2146,10 +2219,66 @@ class SubsonicHandler {
                 case 'mg':
                     music = await mgGetMusicInfo(songId)
                     break
+                case 'kw': {
+                    // kw 有 getMusicInfo(songInfo)：www.kuwo.cn/api/www/music/musicInfo?mid=<songmid>
+                    // 返回 data 含 name / artist / album / pic / duration
+                    const info: any = await musicSdk.kw.getMusicInfo({ songmid: songId }).catch((e: any) => {
+                        this.logSourceError('kw', `getMusicInfo kw_${songId}`, e)
+                        return null
+                    })
+                    if (info && info.name) {
+                        const artist = info.artist
+                        const singer = Array.isArray(artist)
+                            ? artist.map((a: any) => a?.name || a).join('、')
+                            : (typeof artist === 'string' ? artist : (artist?.name || ''))
+                        music = {
+                            id: `kw_${songId}`,
+                            name: info.name,
+                            singer,
+                            source: 'kw',
+                            songmid: songId,
+                            interval: info.duration ? String(Math.round(Number(info.duration) > 100000 ? Number(info.duration) / 1000 : Number(info.duration))) : '0',
+                            img: info.pic || null,
+                            meta: {
+                                albumName: info.album || '',
+                                albumId: info.albumid ?? '',
+                                picUrl: info.pic || null,
+                            },
+                        }
+                    }
+                    break
+                }
+                case 'bd': {
+                    // bd 有 getMusicInfo(songmid)：baidu.ting.song.getSongLink -> result.songinfo
+                    const info: any = await (bdMusicInfo.getMusicInfo(songId) as any).promise.catch((e: any) => {
+                        this.logSourceError('bd', `getMusicInfo bd_${songId}`, e)
+                        return null
+                    })
+                    if (info && info.title) {
+                        music = {
+                            id: `bd_${songId}`,
+                            name: info.title,
+                            singer: info.author || '',
+                            source: 'bd',
+                            songmid: songId,
+                            interval: info.file_duration ? String(Math.round(Number(info.file_duration))) : '0',
+                            img: info.pic_big || info.pic_small || null,
+                            meta: {
+                                albumName: info.album_title || '',
+                                albumId: info.album_id || '',
+                                picUrl: info.pic_big || info.pic_small || null,
+                            },
+                        }
+                    }
+                    break
+                }
                 default:
                     return null
             }
-            if (!music) return null
+            if (!music) {
+                console.log(`[Subsonic][trace] resolveMusicById ${id}: 回源未取到音乐信息(source=${source})`)
+                return null
+            }
             if (!music.source) music.source = source
             if (!music.id) music.id = `${source}_${music.songmid || music.songId || songId}`
             if (!music.songmid) music.songmid = music.songId || songId
@@ -2157,25 +2286,32 @@ class SubsonicHandler {
                 console.warn(`[Subsonic] resolveMusicById ${id} 取回结果缺少歌名，已放弃（不写入收藏）`)
                 return null
             }
+            console.log(`[Subsonic][trace] resolveMusicById ${id}: 成功取到 name=${music.name}, singer=${music.singer || '(空)'}`)
             return music as LX.Music.MusicInfo
         } catch (e) {
-            console.warn(`[Subsonic] resolveMusicById ${id} 失败:`, (e as Error).message)
+            this.logSourceError('resolveMusicById', `回源 ${id}`, e)
             return null
         }
     }
 
     /** 统一元数据解析原语：本地/缓存 -> 在线回源；命中即回写 onlineSongCache */
     private async resolveSongMeta(username: string, id: string): Promise<{ music: LX.Music.MusicInfo, listId: string } | null> {
+        const debug = !!global.lx.config['subsonic.enableDebug']
+        if (debug) console.log(`[Subsonic][trace] resolveSongMeta ${id}: 第1步 查持久化(歌单/专辑库) + 内存/磁盘 onlineSongCache`)
         const found = await this.findMusicById(username, id)
         if (found) {
             this.cacheOnlineSong(found.music)
+            if (debug) console.log(`[Subsonic][trace] resolveSongMeta ${id}: 第1步命中 listId=${found.listId}, name=${found.music.name || '(空)'}`)
             return found
         }
+        if (debug) console.log(`[Subsonic][trace] resolveSongMeta ${id}: 第1步未命中 -> 第2步 在线回源(network)`)
         const resolved = await this.resolveMusicById(id)
         if (resolved) {
             this.cacheOnlineSong(resolved)
+            if (debug) console.log(`[Subsonic][trace] resolveSongMeta ${id}: 第2步回源成功 name=${resolved.name}, 已写 onlineSongCache(内存+磁盘)`)
             return { music: resolved, listId: 'online' }
         }
+        if (debug) console.log(`[Subsonic][trace] resolveSongMeta ${id}: 第2步回源失败 -> 返回 null(将在 stream 中降级为 Unknown)`)
         return null
     }
 
@@ -2324,12 +2460,13 @@ class SubsonicHandler {
                     console.warn(`[Subsonic] ${action} 歌曲 ${id} 跳过：findMusicById 未命中 且 resolveMusicById 失败，未做任何改动 (user=${username})`)
                     continue
                 }
+                if (!this.loveIdSets.has(username)) this.loveIdSets.set(username, new Set())
                 if (isStar) {
                     await userSpace.listManage.listDataManage.listMusicAdd('love', [resolved], location)
-                    this.loveIdSets.get(username)?.add(resolved.id)
+                    this.loveIdSets.get(username)!.add(resolved.id)
                 } else {
                     await userSpace.listManage.listDataManage.listMusicRemove('love', [resolved.id])
-                    this.loveIdSets.get(username)?.delete(resolved.id)
+                    this.loveIdSets.get(username)!.delete(resolved.id)
                 }
                 const fromSource = hit!.listId === 'online'
                 debugLog(`[Subsonic Debug] ${action} 歌曲 ${id} -> ${isStar ? '已加入' : '已移出'}我的收藏(love) 《${resolved.name}》${fromSource ? ' (从源取回)' : ''}(user=${username})`)
@@ -2380,9 +2517,7 @@ class SubsonicHandler {
             }
         }
         collect(listData.loveList, 'love')
-        for (const list of listData.userList) {
-            collect((list.list || []) as LX.Music.MusicInfo[], list.id)
-        }
+        // 只返回我的收藏里的歌，不再汇总其他歌单
         const allSongs = Array.from(allSongsMap.values())
 
         // [新增] 包含收藏的歌手和专辑
@@ -2431,7 +2566,7 @@ class SubsonicHandler {
         if (format === 'json') {
             return this.sendResponse(res, {
                 [wrapKey]: {
-                    song: allSongs.map(item => this.musicToSongFlat(item.music, item.listId)),
+                    song: allSongs.map(item => this.musicToSongFlat(item.music, item.listId, undefined, username)),
                     album: mappedAlbums,
                     artist: mappedArtists,
                 },
@@ -2440,7 +2575,7 @@ class SubsonicHandler {
         return this.sendResponse(res, {
             [wrapKey]: {
                 children: {
-                    song: allSongs.map(item => this.musicToSongXml(item.music, item.listId)),
+                    song: allSongs.map(item => this.musicToSongXml(item.music, item.listId, undefined, username)),
                     album: mappedAlbums.map(a => ({ attrs: a })),
                     artist: mappedArtists.map(a => ({ attrs: a })),
                 },
@@ -2479,7 +2614,7 @@ class SubsonicHandler {
                 if (cloudSongs.length > 0) {
                     const parentId = `genre_${genreNameOrId}`
                     const picked = cloudSongs.map((s: any) => ({ music: s, listId: parentId }))
-                    return this.renderRandomSongs(res, picked, format, rootKey)
+                    return this.renderRandomSongs(res, picked, format, rootKey, username)
                 }
             } catch (e) {
                 console.error(`[Subsonic] fetchSongsByGenre failed:`, e)
@@ -2501,21 +2636,21 @@ class SubsonicHandler {
             [all[i], all[j]] = [all[j], all[i]]
         }
         const picked = all.slice(0, size)
-        return this.renderRandomSongs(res, picked, format, rootKey)
+        return this.renderRandomSongs(res, picked, format, rootKey, username)
     }
 
-    private renderRandomSongs(res: http.ServerResponse, picked: { music: LX.Music.MusicInfo, listId: string }[], format: string, rootKey: string = 'randomSongs') {
+    private renderRandomSongs(res: http.ServerResponse, picked: { music: LX.Music.MusicInfo, listId: string }[], format: string, rootKey: string = 'randomSongs', username?: string) {
         if (format === 'json') {
             return this.sendResponse(res, {
                 [rootKey]: {
-                    song: picked.map(({ music, listId }) => this.musicToSongFlat(music, listId)),
+                    song: picked.map(({ music, listId }) => this.musicToSongFlat(music, listId, undefined, username)),
                 },
             }, format)
         }
         return this.sendResponse(res, {
             [rootKey]: {
                 children: {
-                    song: picked.map(({ music, listId }) => this.musicToSongXml(music, listId)),
+                    song: picked.map(({ music, listId }) => this.musicToSongXml(music, listId, undefined, username)),
                 },
             },
         }, format)
@@ -2566,14 +2701,14 @@ class SubsonicHandler {
         if (format === 'json') {
             return this.sendResponse(res, {
                 [wrapKey]: {
-                    song: picked.map(({ music, listId }) => this.musicToSongFlat(music, listId)),
+                    song: picked.map(({ music, listId }) => this.musicToSongFlat(music, listId, undefined, username)),
                 },
             }, format)
         }
         return this.sendResponse(res, {
             [wrapKey]: {
                 children: {
-                    song: picked.map(({ music, listId }) => this.musicToSongXml(music, listId)),
+                    song: picked.map(({ music, listId }) => this.musicToSongXml(music, listId, undefined, username)),
                 },
             },
         }, format)
@@ -2627,7 +2762,31 @@ class SubsonicHandler {
                     const result = await callUserApiGetMusicUrl('tx', musicInfo, quality, username)
 
                     if (result && result.url) {
-                        // console.log(`[Subsonic] Radio ${id} resolved URL: ${result.url.slice(0, 50)}...`)
+                        if (global.lx.config['subsonic.cacheOnPlay'] && username) {
+                            const songKey = `tx_${songmid}_${quality}`
+                            const previous = this.subsonicActiveTasks.get(username)
+                            if (previous && previous.songKey !== songKey) {
+                                console.log(`[Subsonic] User ${username} switched radio track, aborting previous background cache task: ${previous.songKey}`)
+                                previous.controller.abort()
+                            }
+
+                            const controller = new AbortController()
+                            this.subsonicActiveTasks.set(username, { songKey, controller })
+
+                            void downloadAndCache(musicInfo, result.url, quality, username, controller.signal, false, true, true, {
+                                requestedSource: 'tx',
+                                downloadSource: 'tx',
+                                sourceName: 'tx',
+                            }).catch((err: any) => {
+                                if (err?.message !== 'Aborted') {
+                                    console.error('[Subsonic] radio cacheOnPlay failed:', err?.message || err)
+                                }
+                            }).finally(() => {
+                                if (this.subsonicActiveTasks.get(username)?.controller === controller) {
+                                    this.subsonicActiveTasks.delete(username)
+                                }
+                            })
+                        }
                         res.writeHead(302, { Location: result.url })
                         return res.end()
                     } else {
@@ -2639,8 +2798,58 @@ class SubsonicHandler {
                 return this.sendError(res, 0, 'Could not resolve radio track', format)
             }
 
-            const found = await this.findMusicById(username, id)
-            let musicInfo: any = found?.music || { source, songmid, id, meta: { songId: songmid } }
+            // [新增] 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)，若该歌曲已存在于用户的 cache 或 music 目录，直接流式回传本地文件，避免请求源站
+            if (global.lx.config['subsonic.playCacheFirst'] !== false) {
+                const cacheCheck = checkCache({ source, songmid, id, quality }, username, false)
+                if (cacheCheck.exists && cacheCheck.filename) {
+                    console.log(`[Subsonic] Stream hit local cache for ${id} (${cacheCheck.quality || quality}): ${cacheCheck.filename} (${cacheCheck.folder})`)
+                    return serveCacheFile(req, res, cacheCheck.filename, username)
+                }
+            }
+
+            // [修复] 像 star 一样：先用 findMusicById 查本地/缓存，查不到再在线回源补全真实元数据
+            // （否则仅用 Subsonic 的不完整信息会导致缓存文件名为 Unknown - Unknown - ...）
+            let musicInfo: any
+            try {
+                const hit = await this.resolveSongMeta(username, id)
+                musicInfo = hit?.music || null
+            } catch (e) {
+                this.logSourceError('resolveSongMeta', `stream ${id}`, e)
+                musicInfo = null
+            }
+            if (!musicInfo) {
+                musicInfo = { source, songmid, id, meta: { songId: songmid } }
+            }
+            // [诊断] 打印回源结果与客户端的歌曲元数据参数，便于排查 kw 等源仍为 Unknown 的问题
+            if (global.lx.config['subsonic.enableDebug']) {
+                console.log(`[Subsonic] stream resolve ${id}: name=${musicInfo.name || '(空)'} singer=${musicInfo.singer || '(空)'} album=${musicInfo.meta?.albumName || '(空)'}`)
+                console.log(`[Subsonic] stream params: name=${params.get('name') || ''} title=${params.get('title') || ''} artist=${params.get('artist') || ''} album=${params.get('album') || ''}`)
+            }
+            // [修复] 客户端（音流）通常在 stream 请求里附带真实元数据（name/artist/album），
+            // 用于补充 Subsonic 自身不完整的歌曲信息（kw 等无 getMusicInfo 的源尤其依赖它）
+            if (!musicInfo.name) {
+                const cName = params.get('name') || params.get('title') || ''
+                if (cName) {
+                    musicInfo = {
+                        ...musicInfo,
+                        name: cName,
+                        singer: params.get('artist') || musicInfo.singer || '',
+                        source,
+                        songmid,
+                        id,
+                        img: musicInfo.img || null,
+                        meta: {
+                            ...(musicInfo.meta || {}),
+                            songId: songmid,
+                            albumName: params.get('album') || musicInfo.meta?.albumName || '',
+                        },
+                    }
+                    console.log(`[Subsonic] stream ${id}: 已用客户端参数补全 name=${cName}`)
+                    // [修复] 把客户端补全后的结果也落盘，否则重启后还得再靠客户端参数补全一次，
+                    // 一旦客户端未带参数就会再次缺失
+                    this.cacheOnlineSong(musicInfo)
+                }
+            }
 
             let hash = musicInfo.hash || musicInfo.meta?.hash || ''
             if (source === 'kg' && !hash) {
@@ -2652,7 +2861,7 @@ class SubsonicHandler {
                         hash = match.hash || match.meta?.hash || match.types?.[0]?.hash || ''
                     }
                 } catch (e) {
-                    console.error('[Subsonic] Auto-resolve kg hash for stream failed:', e)
+                    this.logSourceError('kg-hash', `auto-resolve hash kw_${songmid}`, e)
                 }
             }
 
@@ -2672,6 +2881,37 @@ class SubsonicHandler {
             const result = await callUserApiGetMusicUrl(source as any, musicInfo as any, quality, username)
 
             if (result && result.url) {
+                // [诊断] 打印缓存触发决策，便于排查 Subsonic 播放不缓存问题
+                console.log(`[Subsonic] stream cacheOnPlay: enabled=${global.lx.config['subsonic.cacheOnPlay']} user=${username} url=${String(result.url).slice(0, 90)}`)
+                // [新增] 播放时触发服务器缓存保存：受 subsonic.cacheOnPlay 开关控制
+                // 后台落盘到该用户缓存目录；已在播放的上一首若未下载完成，在切换新歌曲时自动 abort 中断，避免连切刷歌堆积带宽
+                if (global.lx.config['subsonic.cacheOnPlay'] && username) {
+                    const songKey = `${source}_${songmid}_${quality}`
+                    const previous = this.subsonicActiveTasks.get(username)
+                    if (previous && previous.songKey !== songKey) {
+                        console.log(`[Subsonic] User ${username} switched track, aborting previous background cache task: ${previous.songKey}`)
+                        previous.controller.abort()
+                    }
+
+                    const controller = new AbortController()
+                    this.subsonicActiveTasks.set(username, { songKey, controller })
+
+                    void downloadAndCache(musicInfo, result.url, quality, username, controller.signal, false, true, true, {
+                        requestedSource: source,
+                        downloadSource: source,
+                        sourceName: source,
+                    }).then(() => {
+                        console.log(`[Subsonic] cacheOnPlay: cache task done for ${musicInfo.id} (${quality})`)
+                    }).catch((err: any) => {
+                        if (err?.message !== 'Aborted') {
+                            console.error('[Subsonic] cacheOnPlay failed:', err?.message || err)
+                        }
+                    }).finally(() => {
+                        if (this.subsonicActiveTasks.get(username)?.controller === controller) {
+                            this.subsonicActiveTasks.delete(username)
+                        }
+                    })
+                }
                 res.writeHead(302, { Location: result.url })
                 res.end()
             } else {
@@ -2952,14 +3192,14 @@ class SubsonicHandler {
         if (format === 'json') {
             return this.sendResponse(res, {
                 topSongs: {
-                    song: picked.map(({ music, listId }) => this.musicToSongFlat(music, listId)),
+                    song: picked.map(({ music, listId }) => this.musicToSongFlat(music, listId, undefined, username)),
                 },
             }, format)
         }
         return this.sendResponse(res, {
             topSongs: {
                 children: {
-                    song: picked.map(({ music, listId }) => this.musicToSongXml(music, listId)),
+                    song: picked.map(({ music, listId }) => this.musicToSongXml(music, listId, undefined, username)),
                 },
             },
         }, format)

@@ -2304,6 +2304,12 @@ class App {
             if (form.elements['subsonic.lyricTranslation']) {
                 form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
             }
+            if (form.elements['subsonic.cacheOnPlay']) {
+                form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
+            }
+            if (form.elements['subsonic.playCacheFirst']) {
+                form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] !== false;
+            }
 
             // 自定义歌曲目录配置
             if (form.elements['user.enableCustomMusicDir']) {
@@ -2403,6 +2409,8 @@ class App {
             'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
             'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
             'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
+            'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
+            'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
             'singer.sourcePriority': formData.get('singer.sourcePriority'),
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };
