@@ -5928,6 +5928,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
+            'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
+            'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? true,
@@ -6042,6 +6044,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
+              if (newConfig['subsonic.publicLeaderboards'] !== undefined) global.lx.config['subsonic.publicLeaderboards'] = newConfig['subsonic.publicLeaderboards']
+              if (newConfig['subsonic.leaderboardSource'] !== undefined) {
+                const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
+                if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(s)) global.lx.config['subsonic.leaderboardSource'] = s
+              }
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
@@ -6113,6 +6120,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'],
                 'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'],
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
+                'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
+                'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
                 'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
                 'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
                 'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],

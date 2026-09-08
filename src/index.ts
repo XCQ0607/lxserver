@@ -334,6 +334,15 @@ if (envParams.SUBSONIC_ONLINE_SEARCH_MODE) {
 if (envParams.SUBSONIC_ONLINE_SEARCH_SOURCES) {
   global.lx.config['subsonic.onlineSearchSources'] = envParams.SUBSONIC_ONLINE_SEARCH_SOURCES
 }
+if (envParams.SUBSONIC_PUBLIC_LEADERBOARDS !== undefined) {
+  setBoolConfig('subsonic.publicLeaderboards', envParams.SUBSONIC_PUBLIC_LEADERBOARDS)
+}
+if (envParams.SUBSONIC_LEADERBOARD_SOURCE) {
+  const src = envParams.SUBSONIC_LEADERBOARD_SOURCE.trim().toLowerCase()
+  if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(src)) {
+    global.lx.config['subsonic.leaderboardSource'] = src
+  }
+}
 if (envParams.SUBSONIC_LYRIC_TRANSLATION !== undefined) {
   setBoolConfig('subsonic.lyricTranslation', envParams.SUBSONIC_LYRIC_TRANSLATION)
 }

@@ -939,13 +939,15 @@ class SubsonicHandler {
             ))
         }
 
-        // [新增] 将 QQ 音乐排行榜(榜单)作为只读播放列表暴露，仅在音流「全部歌单」中出现
-        // （owner 设为系统名而非当前用户，使其被「我的歌单」的 owner 过滤排除，但仍留在「全部歌单」）
-        try {
-            const lbPlaylists = await this.getLeaderboardPlaylists()
-            playlists.push(...lbPlaylists)
-        } catch (err) {
-            console.error('[Subsonic] Append leaderboard playlists failed:', err)
+        // [新增] 排行榜(榜单)作为只读虚拟播放列表暴露
+        // 仅在配置开启 subsonic.publicLeaderboards 时生效
+        if (global.lx.config['subsonic.publicLeaderboards']) {
+            try {
+                const lbPlaylists = await this.getLeaderboardPlaylists()
+                playlists.push(...lbPlaylists)
+            } catch (err) {
+                console.error('[Subsonic] Append leaderboard playlists failed:', err)
+            }
         }
 
         if (format === 'json') {
@@ -1151,14 +1153,16 @@ class SubsonicHandler {
 
     // ─────────────────────────────────────────────
     // [新增] 排行榜(榜单) → 只读 Subsonic 播放列表
-    // 将 QQ 音乐榜单(含热歌榜)暴露为 Subsonic 播放列表，
+    // 将指定平台榜单(含热歌榜)暴露为 Subsonic 播放列表，
     // 音流等客户端无需 web 页面即可浏览/播放榜单。榜单为只读，不可增删改。
     // ─────────────────────────────────────────────
-    private readonly leaderboardSource = 'tx'
+    private getLeaderboardSource(): string {
+        return global.lx.config['subsonic.leaderboardSource'] || 'tx'
+    }
 
     private async getLeaderboardPlaylists(): Promise<any[]> {
-        const source = this.leaderboardSource
-        // 系统级 owner：不属于任何用户，使其在音流「我的歌单」(owner==我) 过滤中被排除，
+        const source = this.getLeaderboardSource()
+        // 系统级 owner：不属于任何具体用户，使其在音流「我的歌单」(owner==我) 过滤中被排除，
         // 但保留在「全部歌单」中；public:true 确保跨用户可见。
         const owner = 'lxserver'
         try {
@@ -1202,7 +1206,11 @@ class SubsonicHandler {
             const listName = board ? `榜单·${board.name}` : '排行榜'
 
             const data = await lb.getList(bangid, 1)
-            const musics = (data?.list || []).map((s: any) => this.normalizeLeaderboardSong(s, source))
+            const musics = (data?.list || []).map((s: any) => {
+                const m = this.normalizeLeaderboardSong(s, source)
+                this.cacheOnlineSong(m)
+                return m
+            })
 
             const coverArt = (musics[0] as any)?.img || 'logo'
             const playlistMeta = {
@@ -1222,7 +1230,7 @@ class SubsonicHandler {
                 return this.sendResponse(res, {
                     playlist: {
                         ...playlistMeta,
-                        entry: musics.map((m: any) => this.musicToSongFlat(m, id)),
+                        entry: musics.map((m: any) => this.musicToSongFlat(m, id, undefined, username)),
                     },
                 }, format)
             }
@@ -1230,7 +1238,7 @@ class SubsonicHandler {
                 playlist: {
                     attrs: playlistMeta,
                     children: {
-                        entry: musics.map((m: any) => this.musicToSongXml(m, id)),
+                        entry: musics.map((m: any) => this.musicToSongXml(m, id, undefined, username)),
                     },
                 },
             }, format)
