@@ -299,6 +299,8 @@ npm start
 | `SUBSONIC_ONLINE_SEARCH`              | `subsonic.onlineSearch`            | 是否开启 Subsonic 在线全网搜索                                     | `true`           |
 | `SUBSONIC_ONLINE_SEARCH_MODE`         | `subsonic.onlineSearchMode`        | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)        | `fallback`       |
 | `SUBSONIC_ONLINE_SEARCH_SOURCES`      | `subsonic.onlineSearchSources`     | Subsonic 在线搜索默认音源列表                                      | `wy,tx,kw,kg,mg` |
+| `SUBSONIC_PUBLIC_LEADERBOARDS`        | `subsonic.publicLeaderboards`      | 是否开启 Subsonic 公开排行榜 (将在线排行榜映射为只读歌单)          | `true`           |
+| `SUBSONIC_LEADERBOARD_SOURCE`         | `subsonic.leaderboardSource`       | Subsonic 公开排行榜默认音源平台 (仅支持单选, 如 `tx`, `wy` 等)     | `tx`             |
 | `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
 | `SUBSONIC_CACHE_ON_PLAY`            | `subsonic.cacheOnPlay`             | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)          | `false`          |
 | `SUBSONIC_PLAY_CACHE_FIRST`          | `subsonic.playCacheFirst`          | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输      | `true`           |
