@@ -5026,23 +5026,35 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 // - 歌单/排行榜(songlist/leaderboard)：updatePlaylist 已把队列设为歌单/排行榜，
                 //   开启设置=保持歌单/排行榜队列(do nothing)，关闭设置=退回 defaultList
                 const isSongListOrLeaderboard = currentPlayingScope === 'songlist' || currentPlayingScope === 'leaderboard';
+                
+                let fallbackTriggered = false;
                 if (isSongListOrLeaderboard) {
                     // 歌单/排行榜：关闭"切换歌单"时，才退回 defaultList
                     const shouldFallback = settings.switchPlaylistOnSongListPlay === false;
                     if (shouldFallback && typeof currentListData !== 'undefined' && currentListData.defaultList) {
                         currentPlaylist = currentListData.defaultList;
-                        currentIndex = 0;
-                        currentPlayingScope = 'local_list';
-                        window.currentViewingListId = 'default';
+                        fallbackTriggered = true;
                     }
                 } else {
                     // 搜索结果：关闭"切换歌单"时，才退回 defaultList
                     const shouldSearchFallback = settings.switchPlaylistOnSearchPlay === false;
                     if (shouldSearchFallback && typeof currentListData !== 'undefined' && currentListData.defaultList) {
                         currentPlaylist = currentListData.defaultList;
-                        currentIndex = 0;
-                        currentPlayingScope = 'local_list';
-                        window.currentViewingListId = 'default';
+                        fallbackTriggered = true;
+                    }
+                }
+
+                if (fallbackTriggered) {
+                    const targetId = (typeof cleanSongData === 'function') ? cleanSongData(playbackSong).id : (playbackSong.id || playbackSong.songmid);
+                    const newIdx = currentPlaylist.findIndex(s => s.id === targetId);
+                    currentIndex = newIdx !== -1 ? newIdx : 0;
+                    currentPlayingScope = 'local_list';
+                    window.currentViewingListId = 'default';
+                    if (typeof renderQueue === 'function' && document.getElementById('queue-list')) {
+                        renderQueue();
+                        if (typeof scrollToCurrentSongInQueue === 'function') {
+                            setTimeout(() => scrollToCurrentSongInQueue(false), 100);
+                        }
                     }
                 }
             }
@@ -6623,7 +6635,7 @@ const SETTINGS_UI_MAP = {
     serverCacheNamingPattern: {
         id: 'setting-server-cache-naming',
         type: 'value',
-        normalize: value => value === 'standard' ? 'standard' : 'simple'
+        normalize: value => ['standard', 'simple', 'singer_name_quality_album', 'singer_name', 'name_singer'].includes(value) ? value : 'simple'
     },
     enableProxyPlayback: { id: 'toggle-proxy-playback', type: 'checkbox' },
     enableProxyDownload: { id: 'toggle-proxy-download', type: 'checkbox' },

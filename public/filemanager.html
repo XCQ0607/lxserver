@@ -17,7 +17,8 @@
     <!-- elFinder CSS -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/elfinder/2.1.62/css/elfinder.min.css">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/elfinder/2.1.62/css/theme.min.css">
-
+    <!-- elFinder Material Modern Theme -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/elfinder-material-theme@3.0.0/Material/css/theme.min.css">
 
     <!-- elFinder JS -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/elfinder/2.1.62/js/elfinder.min.js"></script>
@@ -93,10 +94,7 @@
         /* elFinder 样式优化 */
         .elfinder {
             font-family: inherit !important;
-        }
-
-        .elfinder-toolbar {
-            background: #f8f9fa !important;
+            border: none !important;
         }
     </style>
     <style>
@@ -136,6 +134,7 @@
             console.log('[FileManager] Base href set to:', baseHref);
         })();
     </script>
+    <script src="/js/config.js"></script>
 </head>
 
 <body>
@@ -154,12 +153,12 @@
                 </svg>
                 <span>数据文件夹</span>
             </button>
-            <a href="./" class="btn-quick" title="返回主页">
+            <a href="#" onclick="event.preventDefault(); goToAdmin();" class="btn-quick" title="返回后台">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <line x1="19" y1="12" x2="5" y2="12" />
                     <polyline points="12 19 5 12 12 5" />
                 </svg>
-                <span>返回主页</span>
+                <span>返回后台</span>
             </a>
         </div>
     </div>
@@ -238,6 +237,11 @@
             if (window.elFinderInstance) {
                 window.elFinderInstance.exec('reload');
             }
+        }
+
+        function goToAdmin() {
+            var adminPath = (window.CONFIG && window.CONFIG['admin.path']) || '/admin';
+            location.href = adminPath;
         }
     </script>
 </body>

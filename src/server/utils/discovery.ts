@@ -82,7 +82,7 @@ export const fetchPlaylistsByGenre = async (categoryId: string, size: number = 2
             artist: item.creator?.name || 'QQ音乐歌单',
             artistId: `artist_tx_playlist`,
             isDir: true,
-            coverArt: item.imgurl || `alb_tx_playlist_${item.dissid}`,
+            coverArt: item.imgurl || (item.dissid ? `https://y.gtimg.cn/music/photo_new/T002R300x300M000${item.dissid}.jpg?max_age=2592000` : `alb_tx_playlist_${item.dissid}`),
             songCount: 50,
             duration: 3600,
             created: item.createtime || new Date().toISOString(),

@@ -156,6 +156,10 @@ class App {
         document.querySelector('input[name="user.enablePublicRestriction"]')?.addEventListener('change', () => {
             this.togglePublicNonAdminLocalMusicVisibility();
         });
+        document.querySelector('input[name="subsonic.publicLeaderboards"]')?.addEventListener('change', () => {
+            this.toggleSubsonicLeaderboardVisibility();
+        });
+        this.initTagSelectors();
 
         // 日志查看
         document.getElementById('refresh-logs-btn')?.addEventListener('click', () => this.loadLogs());
@@ -2299,10 +2303,27 @@ class App {
                 form.elements['subsonic.onlineSearchMode'].value = config['subsonic.onlineSearchMode'] || 'fallback';
             }
             if (form.elements['subsonic.onlineSearchSources']) {
-                form.elements['subsonic.onlineSearchSources'].value = config['subsonic.onlineSearchSources'] || 'wy,tx,kw,kg,mg';
+                const searchSources = config['subsonic.onlineSearchSources'] || 'wy,tx,kw,kg,mg';
+                form.elements['subsonic.onlineSearchSources'].value = searchSources;
+                this.updateSearchSourcesTagUI(searchSources);
             }
+            if (form.elements['subsonic.publicLeaderboards']) {
+                form.elements['subsonic.publicLeaderboards'].checked = config['subsonic.publicLeaderboards'] === true;
+            }
+            if (form.elements['subsonic.leaderboardSource']) {
+                const lbSource = config['subsonic.leaderboardSource'] || 'tx';
+                form.elements['subsonic.leaderboardSource'].value = lbSource;
+                this.updateLeaderboardSourceTagUI(lbSource);
+            }
+            this.toggleSubsonicLeaderboardVisibility();
             if (form.elements['subsonic.lyricTranslation']) {
                 form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
+            }
+            if (form.elements['subsonic.cacheOnPlay']) {
+                form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
+            }
+            if (form.elements['subsonic.playCacheFirst']) {
+                form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] !== false;
             }
 
             // 自定义歌曲目录配置
@@ -2316,6 +2337,80 @@ class App {
         } catch (err) {
             console.error('Failed to load config:', err);
         }
+    }
+
+    toggleSubsonicLeaderboardVisibility() {
+        const lbCb = document.querySelector('input[name="subsonic.publicLeaderboards"]');
+        const childWrapper = document.getElementById('subsonic-leaderboard-options');
+        if (lbCb && childWrapper) {
+            childWrapper.style.display = lbCb.checked ? 'block' : 'none';
+        }
+    }
+
+    initTagSelectors() {
+        // 排行榜平台单选
+        const lbContainer = document.getElementById('tag-group-leaderboard-source');
+        if (lbContainer) {
+            lbContainer.querySelectorAll('.tag-select-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const val = item.getAttribute('data-value');
+                    const hiddenInput = document.querySelector('input[name="subsonic.leaderboardSource"]');
+                    if (hiddenInput) hiddenInput.value = val;
+                    lbContainer.querySelectorAll('.tag-select-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                });
+            });
+        }
+
+        // 在线搜索平台多选
+        const searchContainer = document.getElementById('tag-group-search-sources');
+        if (searchContainer) {
+            searchContainer.querySelectorAll('.tag-select-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const hiddenInput = document.querySelector('input[name="subsonic.onlineSearchSources"]');
+                    let activeVals = [];
+                    item.classList.toggle('active');
+
+                    searchContainer.querySelectorAll('.tag-select-item.active').forEach(act => {
+                        activeVals.push(act.getAttribute('data-value'));
+                    });
+
+                    // 至少保留一个平台
+                    if (activeVals.length === 0) {
+                        item.classList.add('active');
+                        activeVals.push(item.getAttribute('data-value'));
+                    }
+
+                    if (hiddenInput) hiddenInput.value = activeVals.join(',');
+                });
+            });
+        }
+    }
+
+    updateLeaderboardSourceTagUI(val) {
+        const container = document.getElementById('tag-group-leaderboard-source');
+        if (!container) return;
+        container.querySelectorAll('.tag-select-item').forEach(item => {
+            if (item.getAttribute('data-value') === val) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
+            }
+        });
+    }
+
+    updateSearchSourcesTagUI(valStr) {
+        const container = document.getElementById('tag-group-search-sources');
+        if (!container) return;
+        const set = new Set((valStr || '').split(',').map(s => s.trim()).filter(Boolean));
+        container.querySelectorAll('.tag-select-item').forEach(item => {
+            const v = item.getAttribute('data-value');
+            if (set.has(v)) {
+                item.classList.add('active');
+            } else {
+                item.classList.remove('active');
+            }
+        });
     }
 
     togglePublicNonAdminAccessVisibility() {
@@ -2402,7 +2497,11 @@ class App {
             'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
             'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
             'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
+            'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
+            'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
             'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
+            'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
+            'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
             'singer.sourcePriority': formData.get('singer.sourcePriority'),
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };

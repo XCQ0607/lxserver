@@ -1062,7 +1062,7 @@ window.LocalMusicManager = {
 
             // Metadata Status check（多选：任意一个条件命中即显示）
             if (this.filterStatus.size > 0) {
-                const isUnindexed = item.source === 'unknown' || (item.songmid && item.songmid.includes(' - '));
+                const isUnindexed = item.source === 'unknown' || (item.songmid && String(item.songmid).includes(' - '));
                 const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
                 const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
                 const missingCover = !item.hasCover;
@@ -1289,7 +1289,7 @@ window.LocalMusicManager = {
                 : `歌曲平台：${item.source || '未知'}`;
             const safeSourceTitle = this.escapeAttr(sourceTitle);
             const safeSubPath = this.escapeHtml(item.subPath || '');
-            const isUnindexed = item.source === 'unknown' || (item.songmid && item.songmid.includes(' - '));
+            const isUnindexed = item.source === 'unknown' || (item.songmid && String(item.songmid).includes(' - '));
             const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
             const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
             const missingCover = !item.hasCover;
@@ -2503,7 +2503,7 @@ window.LocalMusicManager = {
 
     async autoLinkAll() {
         const unindexed = this.originalData.filter(item =>
-            item.source === 'unknown' || (item.songmid && item.songmid.includes(' - ')) || !item.name || item.name === '未知歌曲'
+            item.source === 'unknown' || (item.songmid && String(item.songmid).includes(' - ')) || !item.name || item.name === '未知歌曲'
         );
 
         if (unindexed.length === 0) {

@@ -1098,6 +1098,48 @@
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
+                                        <span class="config-toggle-label">启用 Subsonic 公开排行榜歌单</span>
+                                        <span class="config-toggle-desc">将在线排行榜（如飙升榜、热歌榜、新歌榜等）映射为 Subsonic 只读虚拟歌单</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.publicLeaderboards" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div id="subsonic-leaderboard-options" style="display: none; margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 10px;">
+                                    <div class="config-field">
+                                        <label class="config-label">排行榜音源平台（单选）</label>
+                                        <input type="hidden" name="subsonic.leaderboardSource" value="tx" />
+                                        <div class="tag-select-group" id="tag-group-leaderboard-source">
+                                            <span class="tag-select-item active" data-value="tx">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                QQ 音乐 (tx)
+                                            </span>
+                                            <span class="tag-select-item" data-value="wy">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                网易云 (wy)
+                                            </span>
+                                            <span class="tag-select-item" data-value="kg">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                酷狗音乐 (kg)
+                                            </span>
+                                            <span class="tag-select-item" data-value="kw">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                酷我音乐 (kw)
+                                            </span>
+                                            <span class="tag-select-item" data-value="mg">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                咪咕音乐 (mg)
+                                            </span>
+                                        </div>
+                                        <small class="config-hint" style="margin-top: 8px; display: block; line-height: 1.5; color: var(--text-secondary);">
+                                            💡 说明：排行榜歌单归属于系统虚拟用户 <code>lxserver</code> 的公开歌单（只读）。在音流等客户端中，请在歌单页选择<strong>「全部歌单」/「公开歌单」</strong>分类即可查看并播放。
+                                        </small>
+                                    </div>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
                                         <span class="config-toggle-label">开启全网在线搜索</span>
                                         <span class="config-toggle-desc">允许 Subsonic 客户端在搜索歌曲时检索全网音乐 API</span>
                                     </div>
@@ -1115,10 +1157,31 @@
                                     </select>
                                 </div>
                                 <div class="config-field">
-                                    <label class="config-label">默认在线搜索平台</label>
-                                    <input type="text" name="subsonic.onlineSearchSources"
-                                        class="form-input config-input" placeholder="wy,tx,kw,kg,mg" />
-                                    <small class="config-hint">可选 wy,tx,kw,kg,mg，用英文逗号分隔</small>
+                                    <label class="config-label">默认在线搜索平台（多选）</label>
+                                    <input type="hidden" name="subsonic.onlineSearchSources" value="wy,tx,kw,kg,mg" />
+                                    <div class="tag-select-group" id="tag-group-search-sources">
+                                        <span class="tag-select-item active" data-value="wy">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            网易云 (wy)
+                                        </span>
+                                        <span class="tag-select-item active" data-value="tx">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            QQ 音乐 (tx)
+                                        </span>
+                                        <span class="tag-select-item active" data-value="kw">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            酷我音乐 (kw)
+                                        </span>
+                                        <span class="tag-select-item active" data-value="kg">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            酷狗音乐 (kg)
+                                        </span>
+                                        <span class="tag-select-item active" data-value="mg">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            咪咕音乐 (mg)
+                                        </span>
+                                    </div>
+                                    <small class="config-hint">点击标签快速启用/停用对应平台搜索</small>
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
@@ -1127,6 +1190,26 @@
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.lyricTranslation" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">播放时触发服务器缓存</span>
+                                        <span class="config-toggle-desc">通过 Subsonic 播放的曲目在后台自动落盘到该用户缓存目录，已缓存自动跳过（注意可能产生较大流量）</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.cacheOnPlay" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">服务器存在缓存优先播放</span>
+                                        <span class="config-toggle-desc">通过 Subsonic 播放曲目时，若服务器已存在该歌曲缓存或下载文件，直接通过本地传输，避免请求源站</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.playCacheFirst" checked />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
