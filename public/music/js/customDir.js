@@ -657,7 +657,7 @@ window.CustomDirManager = {
             const isSelected = this.selectedItems.has(item.filename);
 
             // 未索引判断：source 为 custom/unknown 或包含未解析 mid
-            const isUnindexed = !item.source || item.source === 'custom' || item.source === 'unknown' || (item.songmid && item.songmid.includes('custom_'));
+            const isUnindexed = !item.source || item.source === 'custom' || item.source === 'unknown' || (item.songmid && String(item.songmid).includes('custom_'));
             const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
             const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
             const missingCover = !item.hasCover;
