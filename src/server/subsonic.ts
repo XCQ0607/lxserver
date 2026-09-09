@@ -157,7 +157,6 @@ export function syncNativeLibraryToSubsonic(
 /**
  * Subsonic 协议处理器
  * 实现了 OpenSubsonic 核心 API 集成
- * 实现了 OpenSubsonic 核心 API 集成
  *
  * 序列化策略：
  *  - JSON (f=json)：所有数据函数返回平铺的 JS 对象，sendResponse 直接 JSON.stringify
@@ -168,9 +167,18 @@ class SubsonicHandler {
     private readonly SERVER_VERSION = '1.0.0'
 
     // 预缓存歌曲 ID -> 封面 URL，避免 getCoverArt 重新请求 SDK
+    private static readonly MAX_SONG_PIC_CACHE = 5000
     private songPicUrlCache = new Map<string, string>()
     // In-flight Promise 复用：避免客户端并发请求同一未缓存专辑封面时重复调用 SDK
     private albumSongFetchInFlight = new Map<string, Promise<string | null>>()
+
+    private setSongPicUrl(id: string, url: string) {
+        if (this.songPicUrlCache.size >= SubsonicHandler.MAX_SONG_PIC_CACHE) {
+            const firstKey = this.songPicUrlCache.keys().next().value
+            if (firstKey) this.songPicUrlCache.delete(firstKey)
+        }
+        this.songPicUrlCache.set(id, url)
+    }
 
     // 在线全网搜索歌曲缓存 (ID -> MusicInfo)，确保后续 getSong / getCoverArt / getLyrics 能精准查到歌曲元数据
     private onlineSongCache = new Map<string, LX.Music.MusicInfo>()
@@ -683,8 +691,8 @@ class SubsonicHandler {
         const picUrl = meta.picUrl || (music as any).pic || (music as any).img || (music as any).albumPicUrl || (music as any).album?.picUrl || null
         if (picUrl && typeof picUrl === 'string' && picUrl.startsWith('http')) {
             // [双向缓存] 同时缓存给歌曲 ID 和专辑 ID
-            this.songPicUrlCache.set(id, picUrl)
-            if (rawAlbumId) this.songPicUrlCache.set(`alb_${source}_${rawAlbumId}`, picUrl)
+            this.setSongPicUrl(id, picUrl)
+            if (rawAlbumId) this.setSongPicUrl(`alb_${source}_${rawAlbumId}`, picUrl)
         }
 
         // [修复] 处理 Genre 发现逻辑
@@ -931,13 +939,15 @@ class SubsonicHandler {
             ))
         }
 
-        // [新增] 将 QQ 音乐排行榜(榜单)作为只读播放列表暴露，仅在音流「全部歌单」中出现
-        // （owner 设为系统名而非当前用户，使其被「我的歌单」的 owner 过滤排除，但仍留在「全部歌单」）
-        try {
-            const lbPlaylists = await this.getLeaderboardPlaylists()
-            playlists.push(...lbPlaylists)
-        } catch (err) {
-            console.error('[Subsonic] Append leaderboard playlists failed:', err)
+        // [新增] 排行榜(榜单)作为只读虚拟播放列表暴露
+        // 仅在配置开启 subsonic.publicLeaderboards 时生效
+        if (global.lx.config['subsonic.publicLeaderboards']) {
+            try {
+                const lbPlaylists = await this.getLeaderboardPlaylists()
+                playlists.push(...lbPlaylists)
+            } catch (err) {
+                console.error('[Subsonic] Append leaderboard playlists failed:', err)
+            }
         }
 
         if (format === 'json') {
@@ -1143,14 +1153,16 @@ class SubsonicHandler {
 
     // ─────────────────────────────────────────────
     // [新增] 排行榜(榜单) → 只读 Subsonic 播放列表
-    // 将 QQ 音乐榜单(含热歌榜)暴露为 Subsonic 播放列表，
+    // 将指定平台榜单(含热歌榜)暴露为 Subsonic 播放列表，
     // 音流等客户端无需 web 页面即可浏览/播放榜单。榜单为只读，不可增删改。
     // ─────────────────────────────────────────────
-    private readonly leaderboardSource = 'tx'
+    private getLeaderboardSource(): string {
+        return global.lx.config['subsonic.leaderboardSource'] || 'tx'
+    }
 
     private async getLeaderboardPlaylists(): Promise<any[]> {
-        const source = this.leaderboardSource
-        // 系统级 owner：不属于任何用户，使其在音流「我的歌单」(owner==我) 过滤中被排除，
+        const source = this.getLeaderboardSource()
+        // 系统级 owner：不属于任何具体用户，使其在音流「我的歌单」(owner==我) 过滤中被排除，
         // 但保留在「全部歌单」中；public:true 确保跨用户可见。
         const owner = 'lxserver'
         try {
@@ -1194,7 +1206,11 @@ class SubsonicHandler {
             const listName = board ? `榜单·${board.name}` : '排行榜'
 
             const data = await lb.getList(bangid, 1)
-            const musics = (data?.list || []).map((s: any) => this.normalizeLeaderboardSong(s, source))
+            const musics = (data?.list || []).map((s: any) => {
+                const m = this.normalizeLeaderboardSong(s, source)
+                this.cacheOnlineSong(m)
+                return m
+            })
 
             const coverArt = (musics[0] as any)?.img || 'logo'
             const playlistMeta = {
@@ -1214,7 +1230,7 @@ class SubsonicHandler {
                 return this.sendResponse(res, {
                     playlist: {
                         ...playlistMeta,
-                        entry: musics.map((m: any) => this.musicToSongFlat(m, id)),
+                        entry: musics.map((m: any) => this.musicToSongFlat(m, id, undefined, username)),
                     },
                 }, format)
             }
@@ -1222,7 +1238,7 @@ class SubsonicHandler {
                 playlist: {
                     attrs: playlistMeta,
                     children: {
-                        entry: musics.map((m: any) => this.musicToSongXml(m, id)),
+                        entry: musics.map((m: any) => this.musicToSongXml(m, id, undefined, username)),
                     },
                 },
             }, format)
@@ -3102,218 +3118,217 @@ class SubsonicHandler {
         }
 
         try {
-        // 0. 剥离前缀 (al-, ar-, tr-, sg-, mg-) 并处理 URL
-        id = id.replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
-        if (id === 'logo') {
-            const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
-            if (fs.existsSync(logoPath)) {
-                res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
-                return fs.createReadStream(logoPath).pipe(res)
+            // 0. 剥离前缀 (al-, ar-, tr-, sg-, mg-) 并处理 URL
+            id = id.replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
+            if (id === 'logo') {
+                const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
+                if (fs.existsSync(logoPath)) {
+                    res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
+                    return fs.createReadStream(logoPath).pipe(res)
+                }
             }
-        }
-        // 处理作为 coverArt 传入的直链 URL（客户端可能对其做 percent-encode 后再作为 id 传回）
-        let coverUrl = id
-        if (!coverUrl.startsWith('http') && (coverUrl.startsWith('https%3A') || coverUrl.startsWith('http%3A'))) {
-          try { coverUrl = decodeURIComponent(coverUrl) } catch { /* 解码失败保持原值 */ }
-        }
-        if (coverUrl.startsWith('http')) return proxyCoverImage(res, coverUrl)
+            // 处理作为 coverArt 传入的直链 URL（客户端可能对其做 percent-encode 后再作为 id 传回）
+            let coverUrl = id
+            if (!coverUrl.startsWith('http') && (coverUrl.startsWith('https%3A') || coverUrl.startsWith('http%3A'))) {
+                try { coverUrl = decodeURIComponent(coverUrl) } catch { /* 解码失败保持原值 */ }
+            }
+            if (coverUrl.startsWith('http')) return proxyCoverImage(res, coverUrl)
 
-        // [新增] 兼容逻辑：处理不规范的 ID（如原始 albumMid）
-        if (!id.includes('_')) {
+            // [新增] 兼容逻辑：处理不规范的 ID（如原始 albumMid）
+            if (!id.includes('_')) {
+                const userSpace = getUserSpace(username)
+                const listData = await userSpace.listManage.getListData()
+                const allMusics = [...listData.loveList, ...listData.defaultList, ...listData.userList.flatMap(l => (l.list || []) as LX.Music.MusicInfo[])]
+                const matched = allMusics.find((m: any) => m.meta?.albumId === id || m.meta?.albumMid === id)
+                if (matched) {
+                    const picUrl = (matched as any).meta?.picUrl || (matched as any).img
+                    if (picUrl) {
+                        return proxyCoverImage(res, picUrl)
+                    }
+                }
+            }
+
+            // 辅助：通过 SDK 获取封面（带超时保护）
+            const getPicViaSDK = async (music: LX.Music.MusicInfo): Promise<string | null> => {
+                const source = music.source as string
+                const sdk = musicSdk[source]
+                if (!sdk?.getPic) {
+                    return null
+                }
+                try {
+                    const meta = (music as any).meta || {}
+                    // 剥离 source 前缀：'wy_604841' -> '604841'，确保平台 SDK 能识别
+                    const rawSongId = music.id.includes('_')
+                        ? music.id.split('_').slice(1).join('_')
+                        : music.id
+                    const songInfo = {
+                        ...meta,
+                        id: music.id,
+                        name: music.name,
+                        singer: music.singer,
+                        source,
+                        songmid: meta.songId || rawSongId,
+                    }
+                    const picUrl = await Promise.race([
+                        sdk.getPic(songInfo),
+                        new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
+                    ])
+                    return typeof picUrl === 'string' && picUrl.startsWith('http') ? picUrl : null
+                } catch (e: any) {
+                    console.error(`[CoverArt] SDK getPic error:`, e?.message)
+                    return null
+                }
+            }
+
+
+
+            // 1. 优先尝试从内存预缓存中获取 (用于 SDK 动态抓取的歌曲)
+            if (this.songPicUrlCache.has(id)) {
+                const cachedUrl = this.songPicUrlCache.get(id)
+                if (cachedUrl) {
+                    return proxyCoverImage(res, cachedUrl)
+                }
+            }
+
+            // 2. 尝试从本地歌单库中查找
+            let found = await this.findMusicById(username, id).catch(() => null)
+
+            // [新增] 如果普通歌单没找到，去收藏专辑里找这首歌
+            if (!found && id.includes('_')) {
+                const libAlbums = await this.getLibraryData(username, 'albums')
+                for (const alb of libAlbums) {
+                    const song = (alb.list || []).find((s: any) => `${s.source}_${s.songmid || s.songId}` === id)
+                    if (song) {
+                        const source = alb.source || 'wy'
+                        found = { music: { ...song, id, meta: { picUrl: song.img || song.meta?.picUrl } } as any, listId: `alb_${source}_${alb.id}` }
+                        break
+                    }
+                }
+            }
+
+            if (found) {
+                const picUrl = (found.music as any)?.meta?.picUrl || (found.music as any)?.img || null
+                if (picUrl) return proxyCoverImage(res, picUrl)
+                const sdkPic = await getPicViaSDK(found.music)
+                if (sdkPic) return proxyCoverImage(res, sdkPic)
+            } else if (id.startsWith('alb_')) {
+                // [修复] 专辑封面：绝不能直接调歌曲 getPic（专辑对象无 songmid/hash，会读取 undefined.length 崩溃）。
+                // 优先用本地专辑库的 picUrl；没有则落到函数末尾的 204 兜底。
+                const parts = id.split('_')
+                const source = parts[1]
+                const realId = parts.slice(2).join('_')
+                try {
+                    const libAlbums = await this.getLibraryData(username, 'albums')
+                    const alb = libAlbums.find((a: any) =>
+                        `${(a.source || 'wy')}_${a.id}` === id || String(a.id) === realId)
+                    const localPic = alb?.picUrl || alb?.img
+                    if (localPic) return proxyCoverImage(res, localPic)
+                } catch (e) {
+                    console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
+                }
+                // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
+                const cloudCover = this.buildAlbumCoverUrl(source, realId)
+                if (cloudCover) return proxyCoverImage(res, cloudCover)
+                // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl（带 In-flight 复用）
+                const getAlbumSongs = musicSdk[source]?.extendDetail?.getAlbumSongs
+                if (getAlbumSongs) {
+                    try {
+                        let fetchPromise = this.albumSongFetchInFlight.get(id)
+                        if (!fetchPromise) {
+                            fetchPromise = (async () => {
+                                try {
+                                    const data = await getAlbumSongs(realId)
+                                    const firstSong = (data?.list || [])[0]
+                                    const cover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
+                                    return cover || null
+                                } catch (e) {
+                                    console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
+                                    return null
+                                } finally {
+                                    this.albumSongFetchInFlight.delete(id)
+                                }
+                            })()
+                            this.albumSongFetchInFlight.set(id, fetchPromise)
+                        }
+                        const albumCover = await fetchPromise
+                        if (albumCover) {
+                            this.setSongPicUrl(id, albumCover)
+                            return proxyCoverImage(res, albumCover)
+                        }
+                    } catch (e) {
+                        console.error(`[CoverArt] resolve albumCover failed for ${id}:`, (e as Error)?.message)
+                    }
+                }
+                // 注：musicSdk 各源未统一暴露专辑封面接口（kg 的 getAlbumInfo 未挂到 SDK 对象上），
+                // 此处不再强行调用歌曲 getPic，避免崩溃；专辑库有 picUrl 或可按 mid 构造时才返回封面。
+            } else if (id.startsWith('art_')) {
+                // [修改] 歌手封面逻辑优化：先查本地库，再查歌手图助手
+                const parts = id.split('_')
+                const source = parts[1]
+                const realId = parts.slice(2).join('_')
+
+                // 1. 尝试从本地歌手库 (artists.json) 获取 picUrl
+                const libArtists = await this.getLibraryData(username, 'artists')
+                const localArt = libArtists.find(a => (a.source === source && a.id === realId) || a.name === realId)
+                if (localArt && (localArt.picUrl || localArt.img)) {
+                    return proxyCoverImage(res, localArt.picUrl || localArt.img)
+                }
+
+                // 2. 兜底尝试使用歌手名搜索照片
+                const cover = await getSingerPic(localArt?.name || realId)
+                if (cover) return proxyCoverImage(res, cover)
+            } else if (id.includes('_')) {
+                // 1.5 歌曲不在已加载的库中，解析 ID 直接尝试 SDK
+                const parts = id.split('_')
+                // 排除特殊前缀，获取真正的 source
+                const source = ['alb', 'art', 'hot-songs'].includes(parts[0]) ? parts[1] : parts[0]
+                const songmid = ['alb', 'art', 'hot-songs'].includes(parts[0]) ? parts.slice(2).join('_') : parts.slice(1).join('_')
+
+                if (musicSdk[source]) {
+                    const music: any = { source, id, songmid, name: '', singer: '' }
+                    const sdkPic = await getPicViaSDK(music as any)
+                    if (sdkPic) return proxyCoverImage(res, sdkPic)
+                }
+            }
+
+            // 2. 尝试作为歌手 ID 处理 (artist_歌手名)
+            if (id.startsWith('artist_')) {
+                const singerName = id.slice(7)
+                if (singerName) {
+                    const cover = await getSingerPic(singerName)
+                    if (cover) return proxyCoverImage(res, cover)
+                }
+            }
+
+            // 3. 尝试作为歌单 ID 处理
             const userSpace = getUserSpace(username)
             const listData = await userSpace.listManage.getListData()
-            const allMusics = [...listData.loveList, ...listData.defaultList, ...listData.userList.flatMap(l => (l.list || []) as LX.Music.MusicInfo[])]
-            const matched = allMusics.find((m: any) => m.meta?.albumId === id || m.meta?.albumMid === id)
-            if (matched) {
-                const picUrl = (matched as any).meta?.picUrl || (matched as any).img
-                if (picUrl) {
-                                return proxyCoverImage(res, picUrl)
+
+            let listMusics: LX.Music.MusicInfo[] = []
+            if (id === 'love') {
+                listMusics = listData.loveList
+            } else if (id === 'default') {
+                listMusics = listData.defaultList
+            } else {
+                const list = listData.userList.find((l: any) => l.id === id)
+                if (list) {
+                    if ((list as any).Album) return proxyCoverImage(res, (list as any).Album)
+                    listMusics = (list.list || []) as LX.Music.MusicInfo[]
                 }
             }
-        }
 
-        // 辅助：通过 SDK 获取封面（带超时保护）
-        const getPicViaSDK = async (music: LX.Music.MusicInfo): Promise<string | null> => {
-            const source = music.source as string
-            const sdk = musicSdk[source]
-            if (!sdk?.getPic) {
-                        return null
-            }
-            try {
-                const meta = (music as any).meta || {}
-                // 剥离 source 前缀：'wy_604841' -> '604841'，确保平台 SDK 能识别
-                const rawSongId = music.id.includes('_')
-                    ? music.id.split('_').slice(1).join('_')
-                    : music.id
-                const songInfo = {
-                    ...meta,
-                    id: music.id,
-                    name: music.name,
-                    singer: music.singer,
-                    source,
-                    songmid: meta.songId || rawSongId,
+            if (listMusics.length > 0) {
+                for (const music of listMusics) {
+                    const picUrl = (music as any)?.meta?.picUrl || (music as any)?.img
+                    if (picUrl) return proxyCoverImage(res, picUrl)
                 }
-                        const picUrl = await Promise.race([
-                    sdk.getPic(songInfo),
-                    new Promise<null>(resolve => setTimeout(() => resolve(null), 5000)),
-                ])
-                        return typeof picUrl === 'string' && picUrl.startsWith('http') ? picUrl : null
-            } catch (e: any) {
-                console.error(`[CoverArt] SDK getPic error:`, e?.message)
-                return null
-            }
-        }
-
-
-
-        // 1. 优先尝试从内存预缓存中获取 (用于 SDK 动态抓取的歌曲)
-        if (this.songPicUrlCache.has(id)) {
-            const cachedUrl = this.songPicUrlCache.get(id)
-            if (cachedUrl) {
-                        return proxyCoverImage(res, cachedUrl)
-            }
-        }
-
-        // 2. 尝试从本地歌单库中查找
-        let found = await this.findMusicById(username, id).catch(() => null)
-
-        // [新增] 如果普通歌单没找到，去收藏专辑里找这首歌
-        if (!found && id.includes('_')) {
-            const libAlbums = await this.getLibraryData(username, 'albums')
-            for (const alb of libAlbums) {
-                const song = (alb.list || []).find((s: any) => `${s.source}_${s.songmid || s.songId}` === id)
-                if (song) {
-                    const source = alb.source || 'wy'
-                    found = { music: { ...song, id, meta: { picUrl: song.img || song.meta?.picUrl } } as any, listId: `alb_${source}_${alb.id}` }
-                    break
-                }
-            }
-        }
-
-        if (found) {
-            const picUrl = (found.music as any)?.meta?.picUrl || (found.music as any)?.img || null
-                if (picUrl) return proxyCoverImage(res, picUrl)
-            const sdkPic = await getPicViaSDK(found.music)
-            if (sdkPic) return proxyCoverImage(res, sdkPic)
-            } else if (id.startsWith('alb_')) {
-            // [修复] 专辑封面：绝不能直接调歌曲 getPic（专辑对象无 songmid/hash，会读取 undefined.length 崩溃）。
-            // 1) 优先用本地专辑库的 picUrl；2) 没有（云端/推荐专辑）则按专辑 mid 直接构造 QQ 封面 URL。
-            const parts = id.split('_')
-            const source = parts[1]
-            const realId = parts.slice(2).join('_')
-            try {
-                const libAlbums = await this.getLibraryData(username, 'albums')
-                const alb = libAlbums.find((a: any) =>
-                    `${(a.source || 'wy')}_${a.id}` === id || String(a.id) === realId)
-                const localPic = alb?.picUrl || alb?.img
-                if (localPic) return proxyCoverImage(res, localPic)
-            } catch (e) {
-                console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
-            }
-            // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
-            const cloudCover = this.buildAlbumCoverUrl(source, realId)
-            if (cloudCover) return proxyCoverImage(res, cloudCover)
-            // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl（带 In-flight 复用）
-            const getAlbumSongs = musicSdk[source]?.extendDetail?.getAlbumSongs
-            if (getAlbumSongs) {
-                try {
-                    let fetchPromise = this.albumSongFetchInFlight.get(id)
-                    if (!fetchPromise) {
-                        fetchPromise = (async () => {
-                            try {
-                                const data = await getAlbumSongs(realId)
-                                const firstSong = (data?.list || [])[0]
-                                const cover = firstSong?.img || firstSong?.picUrl || firstSong?.meta?.picUrl || firstSong?.al?.picUrl
-                                return cover || null
-                            } catch (e) {
-                                console.error(`[CoverArt] SDK getAlbumSongs failed for ${id}:`, (e as Error)?.message)
-                                return null
-                            } finally {
-                                this.albumSongFetchInFlight.delete(id)
-                            }
-                        })()
-                        this.albumSongFetchInFlight.set(id, fetchPromise)
-                    }
-                    const albumCover = await fetchPromise
-                    if (albumCover) {
-                        this.songPicUrlCache.set(id, albumCover)
-                        return proxyCoverImage(res, albumCover)
-                    }
-                } catch (e) {
-                    console.error(`[CoverArt] resolve albumCover failed for ${id}:`, (e as Error)?.message)
-                }
-            }
-            // 注：musicSdk 各源未统一暴露专辑封面接口（kg 的 getAlbumInfo 未挂到 SDK 对象上），
-            // 此处不再强行调用歌曲 getPic，避免崩溃；专辑库有 picUrl 或可按 mid 构造时才返回封面。
-        } else if (id.startsWith('art_')) {
-            // [修改] 歌手封面逻辑优化：先查本地库，再查歌手图助手
-            const parts = id.split('_')
-            const source = parts[1]
-            const realId = parts.slice(2).join('_')
-
-            // 1. 尝试从本地歌手库 (artists.json) 获取 picUrl
-            const libArtists = await this.getLibraryData(username, 'artists')
-            const localArt = libArtists.find(a => (a.source === source && a.id === realId) || a.name === realId)
-            if (localArt && (localArt.picUrl || localArt.img)) {
-                return proxyCoverImage(res, localArt.picUrl || localArt.img)
-            }
-
-            // 2. 兜底尝试使用歌手名搜索照片
-            const cover = await getSingerPic(localArt?.name || realId)
-            if (cover) return proxyCoverImage(res, cover)
-        } else if (id.includes('_')) {
-            // 1.5 歌曲不在已加载的库中，解析 ID 直接尝试 SDK
-                const parts = id.split('_')
-            // 排除特殊前缀，获取真正的 source
-            const source = ['alb', 'art', 'hot-songs'].includes(parts[0]) ? parts[1] : parts[0]
-            const songmid = ['alb', 'art', 'hot-songs'].includes(parts[0]) ? parts.slice(2).join('_') : parts.slice(1).join('_')
-
-            if (musicSdk[source]) {
-                const music: any = { source, id, songmid, name: '', singer: '' }
-                const sdkPic = await getPicViaSDK(music as any)
+                const sdkPic = await getPicViaSDK(listMusics[0])
                 if (sdkPic) return proxyCoverImage(res, sdkPic)
             }
-        } else {
-            }
 
-        // 2. 尝试作为歌手 ID 处理 (artist_歌手名)
-        if (id.startsWith('artist_')) {
-            const singerName = id.slice(7)
-            if (singerName) {
-                const cover = await getSingerPic(singerName)
-                if (cover) return proxyCoverImage(res, cover)
-            }
-        }
-
-        // 3. 尝试作为歌单 ID 处理
-        const userSpace = getUserSpace(username)
-        const listData = await userSpace.listManage.getListData()
-
-        let listMusics: LX.Music.MusicInfo[] = []
-        if (id === 'love') {
-            listMusics = listData.loveList
-        } else if (id === 'default') {
-            listMusics = listData.defaultList
-        } else {
-            const list = listData.userList.find((l: any) => l.id === id)
-            if (list) {
-                if ((list as any).Album) return proxyCoverImage(res, (list as any).Album)
-                listMusics = (list.list || []) as LX.Music.MusicInfo[]
-            }
-        }
-
-        if (listMusics.length > 0) {
-                for (const music of listMusics) {
-                const picUrl = (music as any)?.meta?.picUrl || (music as any)?.img
-                if (picUrl) return proxyCoverImage(res, picUrl)
-            }
-            const sdkPic = await getPicViaSDK(listMusics[0])
-            if (sdkPic) return proxyCoverImage(res, sdkPic)
-        }
-
-        // 4. 兜底
-        res.writeHead(204)
-        res.end()
+            // 4. 兜底
+            res.writeHead(204)
+            res.end()
         } catch (e: any) {
             console.error('[Subsonic] handleGetCoverArt error:', e?.message || e)
             if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })

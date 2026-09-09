@@ -256,6 +256,16 @@ declare namespace LX {
     'subsonic.onlineSearchMode'?: 'fallback' | 'merge' | 'local_only'
 
     /**
+     * 是否在 Subsonic 中公开在线排行榜(只读虚拟播放列表) (默认 false)
+     */
+    'subsonic.publicLeaderboards'?: boolean
+
+    /**
+     * Subsonic 在线排行榜音源平台 (tx | wy | kg | kw | mg，默认 tx)
+     */
+    'subsonic.leaderboardSource'?: string
+
+    /**
      * Subsonic 在线搜索默认平台 (如 wy,tx,kw,kg,mg)
      */
     'subsonic.onlineSearchSources'?: string

@@ -610,8 +610,8 @@ const saveUsers = () => {
 const reloadServerData = async () => {
   startupLog.info('Hot-reloading server data (users and config)...')
 
-  // 1. 重新加载 config.js (必须先加载基础配置)
-  const configPath = process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js')
+  // 1. 重新加载配置文件 (必须先加载基础配置)
+  const configPath = global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js')
   if (fs.existsSync(configPath)) {
     try {
       delete require.cache[require.resolve(configPath)]
@@ -636,9 +636,9 @@ const reloadServerData = async () => {
           backupInterval: global.lx.config['sync.backupInterval'],
         })
       }
-      startupLog.info('Config.js re-loaded and merged.')
+      startupLog.info(`Config re-loaded and merged from ${configPath}.`)
     } catch (err: any) {
-      startupLog.error('Failed to reload config.js:', err.message)
+      startupLog.error('Failed to reload config file:', err.message)
     }
   }
 
@@ -5928,13 +5928,15 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
+            'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
+            'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? true,
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
-            configFilePath: process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js'),
+            configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -6042,6 +6044,11 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
+              if (newConfig['subsonic.publicLeaderboards'] !== undefined) global.lx.config['subsonic.publicLeaderboards'] = newConfig['subsonic.publicLeaderboards']
+              if (newConfig['subsonic.leaderboardSource'] !== undefined) {
+                const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
+                if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(s)) global.lx.config['subsonic.leaderboardSource'] = s
+              }
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
@@ -6070,7 +6077,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 })
               }
 
-              const configPath = process.env.CONFIG_PATH || path.join(process.cwd(), 'config.js')
+              const configPath = global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js')
               const configContent = `module.exports = ${JSON.stringify({
                 serverName: global.lx.config.serverName,
                 bindIP: global.lx.config.bindIP,
@@ -6113,6 +6120,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'],
                 'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'],
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
+                'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
+                'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
                 'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
                 'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
                 'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],

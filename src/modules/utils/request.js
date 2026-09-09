@@ -68,6 +68,7 @@ const request = (url, options, callback) => {
         options.json = false
     }
     options.response_timeout = options.timeout
+    options.read_timeout = options.timeout
 
     return needle.request(options.method || 'get', url, data, options, (err, resp, body) => {
         if (!err) {
