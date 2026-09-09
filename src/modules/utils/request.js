@@ -67,8 +67,12 @@ const request = (url, options, callback) => {
         // data.content_type = 'multipart/form-data'
         options.json = false
     }
+    // 仅设置“首字节”超时(response_timeout)。不要设置 read_timeout：
+    // read_timeout 是两次数据分片之间的最大静默时间，会无差别作用于所有请求；
+    // 对长连接(音频代理流)而言，只要源站两次发包间隔超过 timeout，连接即被 abort，
+    // 表现为播放到一半(~timeout 秒)被掐断、scrobble=False。v2.0.1 无此设置且正常，故移除。
+    // 封面等短资源靠 response_timeout(首字节超时)已足够防止挂起。
     options.response_timeout = options.timeout
-    options.read_timeout = options.timeout
 
     return needle.request(options.method || 'get', url, data, options, (err, resp, body) => {
         if (!err) {
