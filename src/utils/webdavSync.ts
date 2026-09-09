@@ -1,5 +1,7 @@
 import fs from 'fs'
 import path from 'path'
+import http from 'http'
+import https from 'https'
 import { ZipArchive } from 'archiver'
 import { Extract } from 'unzipper'
 import crypto from 'crypto'
@@ -73,11 +75,19 @@ class WebDAVSync extends EventEmitter {
             try {
                 // 动态导入 webdav ESM 模块
                 const { createClient } = await import('webdav')
-                const options: any = {}
+                const isHttps = this.config.url.startsWith('https:')
+                const agent = isHttps
+                    ? new https.Agent({ keepAlive: true, maxSockets: 20, keepAliveMsecs: 60000, timeout: 60000 })
+                    : new http.Agent({ keepAlive: true, maxSockets: 20, keepAliveMsecs: 60000, timeout: 60000 })
+
+                const options: any = {
+                    httpAgent: agent,
+                    httpsAgent: agent,
+                }
                 if (this.config.username) options.username = this.config.username
                 if (this.config.password) options.password = this.config.password
                 this.client = createClient(this.config.url, options)
-                console.log('WebDAV client initialized')
+                console.log('WebDAV client initialized with Keep-Alive connection pooling')
                 return true
             } catch (err) {
                 console.error('Failed to initialize WebDAV client:', err)
@@ -100,6 +110,7 @@ class WebDAVSync extends EventEmitter {
         if (this.syncLogs.length > 100) {
             this.syncLogs = this.syncLogs.slice(0, 100)
         }
+        this.emit('log', log)
     }
 
     getSyncLogs(): SyncLog[] {
@@ -117,20 +128,56 @@ class WebDAVSync extends EventEmitter {
         }
     }
 
+    private shouldIgnore(relativePath: string): boolean {
+        const norm = relativePath.replace(/\\/g, '/').toLowerCase()
+        const basename = path.basename(norm)
+
+        // 忽略临时文件、日志、锁文件、操作系统隐匿文件
+        if (basename.startsWith('.') || basename.startsWith('temp-')) return true
+        if (basename.endsWith('.log') || basename.endsWith('.lock') || basename.endsWith('.tmp')) return true
+        if (norm.startsWith('temp-') || norm.includes('/temp-')) return true
+
+        // 忽略全量备份 zip（避免散文件同步备份 zip 造成循环与网络巨量浪费）
+        if (basename.startsWith('lx-sync-backup-') && basename.endsWith('.zip')) return true
+
+        // 忽略海量临时缓存目录 (subsonic 歌曲流缓存、在线搜索临时缓存、封面临时缓存等)
+        if (norm === 'cache' || norm.startsWith('cache/')) return true
+        if (norm === 'tmp' || norm.startsWith('tmp/')) return true
+        if (norm === 'logs' || norm.startsWith('logs/')) return true
+
+        return false
+    }
+
     private async scanFiles(): Promise<Map<string, string>> {
         const files = new Map<string, string>()
         const scanDir = (dir: string) => {
-            const items = fs.readdirSync(dir)
+            if (!fs.existsSync(dir)) return
+            let items: string[] = []
+            try {
+                items = fs.readdirSync(dir)
+            } catch (err) {
+                console.warn(`[WebDAV] Unable to read directory ${dir}:`, err)
+                return
+            }
+
             for (const item of items) {
                 const fullPath = path.join(dir, item)
-                const stat = fs.statSync(fullPath)
+                let stat: fs.Stats
+                try {
+                    stat = fs.statSync(fullPath)
+                } catch {
+                    continue
+                }
+
+                const relativePath = path.relative(this.dataPath, fullPath)
+                if (this.shouldIgnore(relativePath)) {
+                    continue
+                }
+
                 if (stat.isDirectory()) {
                     scanDir(fullPath)
                 } else {
-                    const relativePath = path.relative(this.dataPath, fullPath)
-                    if (!relativePath.includes('temp-') && !relativePath.endsWith('.log')) {
-                        files.set(relativePath, this.getFileHash(fullPath))
-                    }
+                    files.set(relativePath, this.getFileHash(fullPath))
                 }
             }
         }
@@ -162,14 +209,20 @@ class WebDAVSync extends EventEmitter {
     }
 
     private getRelativeRemotePath(remoteFilename: string): string {
-        const prefix = this.syncPath.endsWith('/') ? this.syncPath : this.syncPath + '/'
-        if (remoteFilename.startsWith(prefix)) {
-            return remoteFilename.slice(prefix.length)
+        // 重要：不主动进行 decodeURIComponent！
+        // 因为如果文件在磁盘上本身就是 URL 编码过的
+        // 且 WebDAV 返回的也是该路径，保持原字符才能与本地文件列表精确对应！
+        const normSync = this.syncPath.replace(/\\/g, '/').replace(/\/+$/, '')
+        const normRemote = remoteFilename.replace(/\\/g, '/')
+        const prefix = normSync + '/'
+
+        if (normRemote.startsWith(prefix)) {
+            return normRemote.slice(prefix.length).replace(/\\/g, '/')
         }
-        if (remoteFilename.startsWith(this.syncPath)) {
-            return remoteFilename.slice(this.syncPath.length).replace(/^\/+/, '')
+        if (normRemote.startsWith(normSync)) {
+            return normRemote.slice(normSync.length).replace(/^\/+/, '').replace(/\\/g, '/')
         }
-        return remoteFilename.replace(/^\/+/, '')
+        return normRemote.replace(/^\/+/, '').replace(/\\/g, '/')
     }
 
     private async runConcurrent<T, R>(
@@ -188,6 +241,46 @@ class WebDAVSync extends EventEmitter {
         })
         await Promise.all(workers)
         return results
+    }
+
+    /**
+     * 逐级安全确保远程目录存在（严格遵循 POSIX 路径与 WebDAV 规约）
+     * 自动捕获 405 (MKCOL Method Not Allowed, 目录已存在)、409 (Conflict)、301 等并容错处理
+     */
+    async ensureRemoteDir(remoteDirPath: string): Promise<boolean> {
+        if (!this.client) await this.initClient()
+        if (!this.client) return false
+
+        const normalizedDir = remoteDirPath.replace(/\\/g, '/').replace(/\/+$/, '')
+        if (!normalizedDir || normalizedDir === '/' || this.ensuredDirs.has(normalizedDir)) {
+            return true
+        }
+
+        const segments = normalizedDir.split('/').filter(Boolean)
+        let cur = ''
+
+        for (const seg of segments) {
+            cur += '/' + seg
+            if (this.ensuredDirs.has(cur)) continue
+
+            try {
+                // 部分 WebDAV 服务器调用 createDirectory 时若目录已存在会报 405
+                await this.client.createDirectory(cur, { recursive: false })
+            } catch (err: any) {
+                const msg = String(err?.message || '')
+                const status = err?.status || err?.response?.status
+                // 405 (Method Not Allowed), 301, 409 (Conflict) 均表示目录已存在或无需再建
+                if (status === 405 || status === 409 || msg.includes('405') || msg.includes('exists')) {
+                    // benign - directory already exists
+                } else {
+                    // 其他错误打印提示但继续允许尝试后续操作
+                    // console.warn(`[WebDAV] ensureRemoteDir warning for ${cur}:`, msg)
+                }
+            }
+            this.ensuredDirs.add(cur)
+        }
+
+        return true
     }
 
     async deleteRemoteFile(relativePath: string): Promise<boolean> {
@@ -217,128 +310,189 @@ class WebDAVSync extends EventEmitter {
         if (!this.client) await this.initClient()
         if (!this.client) return false
 
+        const localPath = path.join(this.dataPath, relativePath)
+        if (!fs.existsSync(localPath)) return false
+
+        let stat: fs.Stats
         try {
-            const localPath = path.join(this.dataPath, relativePath)
-            if (!fs.existsSync(localPath)) return false
-
-            const stat = fs.statSync(localPath)
-            const remotePath = `${this.syncPath}/${relativePath.replace(/\\/g, '/')}`
-
-            // 缓存已创建过的远程目录，避免每个文件重复发送 createDirectory 请求
-            const remoteDir = path.dirname(remotePath)
-            if (!this.ensuredDirs.has(remoteDir)) {
-                await this.client.createDirectory(remoteDir, { recursive: true })
-                this.ensuredDirs.add(remoteDir)
-            }
-
-            // 使用流式上传并监控进度
-            const readStream = fs.createReadStream(localPath)
-            const passThrough = new PassThrough()
-            let uploadedBytes = 0
-
-            passThrough.on('data', (chunk) => {
-                uploadedBytes += chunk.length
-                // 限制进度事件触发频率，例如每 1% 或每 100ms 触发一次，这里简单处理
-                // 如果文件很小，可能瞬间完成
-                this.emit('progress', {
-                    type: 'file',
-                    status: 'uploading',
-                    file: relativePath,
-                    current: uploadedBytes,
-                    total: stat.size
-                })
-            })
-
-            readStream.pipe(passThrough)
-
-            await this.client.putFileContents(remotePath, passThrough)
-
-            this.emit('progress', {
-                type: 'file',
-                status: 'success',
-                file: relativePath,
-                current: stat.size,
-                total: stat.size
-            })
-
-            this.addLog({
-                timestamp: Date.now(),
-                type: 'upload',
-                file: relativePath,
-                status: 'success',
-            })
-            return true
-        } catch (err: any) {
-            console.error(`[WebDAV] Failed to upload file ${relativePath}:`, err.message)
-            this.emit('progress', {
-                type: 'file',
-                status: 'error',
-                file: relativePath,
-                error: err.message
-            })
-            this.addLog({
-                timestamp: Date.now(),
-                type: 'upload',
-                file: relativePath,
-                status: 'error',
-                message: err.message,
-            })
+            stat = fs.statSync(localPath)
+        } catch {
             return false
         }
+
+        const remotePath = `${this.syncPath}/${relativePath.replace(/\\/g, '/')}`
+        const remoteDir = path.posix.dirname(remotePath)
+
+        // 确保远程父目录存在
+        await this.ensureRemoteDir(remoteDir)
+
+        // 重试机制：最多 3 次尝试，针对 423 Locked、405、网络波动进行智能退避
+        const maxRetries = 3
+        let lastError: any = null
+
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                // 使用流式上传并监控进度
+                const readStream = fs.createReadStream(localPath)
+                const passThrough = new PassThrough()
+                let uploadedBytes = 0
+
+                passThrough.on('data', (chunk) => {
+                    uploadedBytes += chunk.length
+                    this.emit('progress', {
+                        type: 'file',
+                        status: 'uploading',
+                        file: relativePath,
+                        current: uploadedBytes,
+                        total: stat.size
+                    })
+                })
+
+                readStream.pipe(passThrough)
+                await this.client.putFileContents(remotePath, passThrough, { overwrite: true })
+
+                this.emit('progress', {
+                    type: 'file',
+                    status: 'success',
+                    file: relativePath,
+                    current: stat.size,
+                    total: stat.size
+                })
+
+                this.addLog({
+                    timestamp: Date.now(),
+                    type: 'upload',
+                    file: relativePath,
+                    status: 'success',
+                })
+                return true
+            } catch (err: any) {
+                lastError = err
+                const errMsg = String(err?.message || '')
+                const status = err?.status || err?.response?.status
+
+                // 如果是 423 Locked，等待锁释放
+                const isLocked = status === 423 || errMsg.includes('423') || errMsg.includes('Locked')
+                const isMethodNotAllowed = status === 405 || errMsg.includes('405')
+
+                if (attempt < maxRetries) {
+                    const delay = isLocked ? attempt * 1200 : attempt * 600
+                    console.warn(`[WebDAV] Upload ${relativePath} attempt ${attempt} failed (${errMsg}), retrying in ${delay}ms...`)
+                    if (isMethodNotAllowed) {
+                        // 尝试重新确保父目录
+                        this.ensuredDirs.delete(remoteDir)
+                        await this.ensureRemoteDir(remoteDir)
+                    }
+                    await new Promise(r => setTimeout(r, delay))
+                }
+            }
+        }
+
+        console.error(`[WebDAV] Failed to upload file ${relativePath} after ${maxRetries} attempts:`, lastError?.message)
+        this.emit('progress', {
+            type: 'file',
+            status: 'error',
+            file: relativePath,
+            error: lastError?.message || 'Upload failed'
+        })
+        this.addLog({
+            timestamp: Date.now(),
+            type: 'upload',
+            file: relativePath,
+            status: 'error',
+            message: `重试${maxRetries}次失败: ${lastError?.message || '未知错误'}`
+        })
+        // 优雅跳过，返回 false，不阻断整个批量流程
+        return false
     }
 
-    async downloadFile(relativePath: string): Promise<boolean> {
+    async downloadFile(relativePath: string, rawRemotePath?: string): Promise<boolean> {
         if (!this.client) await this.initClient()
         if (!this.client) return false
 
-        try {
-            const remotePath = `${this.syncPath}/${relativePath.replace(/\\/g, '/')}`
-            const localPath = path.join(this.dataPath, relativePath)
+        const defaultRemotePath = `${this.syncPath}/${relativePath.replace(/\\/g, '/')}`
+        const primaryRemotePath = rawRemotePath || defaultRemotePath
+        const localPath = path.join(this.dataPath, relativePath)
 
-            // 确保本地目录存在
-            const localDir = path.dirname(localPath)
-            if (!fs.existsSync(localDir)) {
-                fs.mkdirSync(localDir, { recursive: true })
-            }
+        // 确保本地目录存在
+        const localDir = path.dirname(localPath)
+        if (!fs.existsSync(localDir)) {
+            fs.mkdirSync(localDir, { recursive: true })
+        }
 
-            const content = await this.client.getFileContents(remotePath) as any
+        const maxRetries = 3
+        let lastError: any = null
 
-            // 对比内容哈希，如果一致则跳过写入，避免触发文件系统监控
-            if (fs.existsSync(localPath)) {
-                const localContent = fs.readFileSync(localPath) as any
-                const localHash = crypto.createHash('md5').update(localContent).digest('hex')
-                const remoteHash = crypto.createHash('md5').update(content).digest('hex')
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                let content: any = null
+                try {
+                    content = await this.client.getFileContents(primaryRemotePath) as any
+                } catch (firstErr: any) {
+                    // 如果因为 URL 编码差异导致 404，尝试自动回退 (如原始路径 vs decodeURIComponent vs encodeURI)
+                    const status = firstErr?.status || firstErr?.response?.status
+                    if (status === 404 || String(firstErr?.message).includes('404')) {
+                        const candidates = new Set<string>()
+                        candidates.add(defaultRemotePath)
+                        try { candidates.add(decodeURIComponent(primaryRemotePath)) } catch { }
+                        try { candidates.add(encodeURI(decodeURI(primaryRemotePath))) } catch { }
 
-                if (localHash === remoteHash) {
-                    // console.log(`File ${relativePath} is up to date, skipping write.`)
-                    return true
+                        let recovered = false
+                        for (const altPath of candidates) {
+                            if (altPath === primaryRemotePath) continue
+                            try {
+                                content = await this.client.getFileContents(altPath) as any
+                                recovered = true
+                                break
+                            } catch { }
+                        }
+                        if (!recovered) throw firstErr
+                    } else {
+                        throw firstErr
+                    }
+                }
+
+                // 对比内容哈希，如果一致则跳过写入，避免触发文件系统监控
+                if (fs.existsSync(localPath)) {
+                    const localContent = fs.readFileSync(localPath) as any
+                    const localHash = crypto.createHash('md5').update(localContent).digest('hex')
+                    const remoteHash = crypto.createHash('md5').update(content).digest('hex')
+
+                    if (localHash === remoteHash) {
+                        return true
+                    }
+                }
+
+                fs.writeFileSync(localPath, content)
+
+                if (relativePath === 'config.js') {
+                    console.log('config.js restored from WebDAV, content updated in data directory.')
+                }
+
+                this.addLog({
+                    timestamp: Date.now(),
+                    type: 'download',
+                    file: relativePath,
+                    status: 'success',
+                })
+                return true
+            } catch (err: any) {
+                lastError = err
+                if (attempt < maxRetries) {
+                    await new Promise(r => setTimeout(r, attempt * 600))
                 }
             }
-
-            fs.writeFileSync(localPath, content)
-
-            if (relativePath === 'config.js') {
-                console.log('config.js restored from WebDAV, content updated in data directory.')
-            }
-
-            this.addLog({
-                timestamp: Date.now(),
-                type: 'download',
-                file: relativePath,
-                status: 'success',
-            })
-            return true
-        } catch (err: any) {
-            console.error(`[WebDAV] Failed to download file ${relativePath}:`, err.message)
-            this.addLog({
-                timestamp: Date.now(),
-                type: 'download',
-                file: relativePath,
-                status: 'error',
-                message: err.message,
-            })
-            return false
         }
+
+        console.error(`[WebDAV] Failed to download file ${relativePath} after ${maxRetries} attempts:`, lastError?.message)
+        this.addLog({
+            timestamp: Date.now(),
+            type: 'download',
+            file: relativePath,
+            status: 'error',
+            message: `下载失败: ${lastError?.message || '未知错误'}`,
+        })
+        return false
     }
 
     async createBackup(): Promise<string | null> {
@@ -347,20 +501,38 @@ class WebDAVSync extends EventEmitter {
             const zipName = `lx-sync-backup-${timestamp}.zip`
             const zipPath = path.join(this.dataPath, zipName)
 
+            // 预扫描待备份的文件总数，以便提供精确的打包进度条
+            const allFiles = await this.scanFiles()
+            const totalFiles = Math.max(allFiles.size, 1)
+
+            this.emit('progress', {
+                type: 'backup',
+                status: 'packing',
+                message: `正在准备打包，共 ${totalFiles} 个文件...`,
+                current: 0,
+                total: totalFiles,
+                percent: 2
+            })
+
             await new Promise<void>((resolve, reject) => {
                 const output = fs.createWriteStream(zipPath)
-                const archive = new ZipArchive({ zlib: { level: 9 } })
+                // 压缩级别调优：对于音乐、封面及数据库等混合文件，level: 4 或 5 可在保留极佳压缩比的同时将打包装箱耗时提升 3~4 倍
+                const archive = new ZipArchive({ zlib: { level: 4 } })
 
                 let fileCount = 0
 
                 // 监听文件添加事件
                 archive.on('entry', (entry: any) => {
                     fileCount++
+                    const packingPercent = Math.min(48, Math.round(5 + (fileCount / totalFiles) * 43))
                     this.emit('progress', {
                         type: 'backup',
                         status: 'packing',
-                        message: `正在打包文件: ${entry.name}`,
-                        current: fileCount
+                        message: `正在打包: ${entry.name}`,
+                        current: fileCount,
+                        total: totalFiles,
+                        percent: packingPercent,
+                        file: entry.name
                     })
                 })
 
@@ -370,10 +542,26 @@ class WebDAVSync extends EventEmitter {
                 archive.pipe(output)
                 archive.glob('**/*', {
                     cwd: this.dataPath,
-                    ignore: ['temp-*.zip', '*.log', 'lx-sync-backup-*.zip'],
+                    ignore: [
+                        'temp-*.zip',
+                        '*.log',
+                        '*.lock',
+                        '*.tmp',
+                        'lx-sync-backup-*.zip',
+                        'cache/**',
+                        'tmp/**',
+                        'logs/**'
+                    ],
                 })
 
                 archive.finalize()
+            })
+
+            this.emit('progress', {
+                type: 'backup',
+                status: 'packed',
+                message: 'ZIP 压缩包创建完成，准备上传云端...',
+                percent: 50
             })
 
             return zipName
@@ -387,6 +575,7 @@ class WebDAVSync extends EventEmitter {
         if (!this.client) await this.initClient()
         if (!this.client) return false
 
+        let zipPath: string | null = null
         try {
             // 检查是否有文件变化
             if (!force) {
@@ -402,13 +591,13 @@ class WebDAVSync extends EventEmitter {
             const zipName = await this.createBackup()
             if (!zipName) return false
 
-            const zipPath = path.join(this.dataPath, zipName)
+            zipPath = path.join(this.dataPath, zipName)
             const stat = fs.statSync(zipPath)
             const remotePath = `${this.backupPath}/${zipName}`
 
-            // 使用流式上传并监控进度
-            const readStream = fs.createReadStream(zipPath)
-            const passThrough = new PassThrough()
+            // 高性能流式上传：增大缓冲区至 1MB (1024 * 1024)，减少操作系统 I/O 切换与背压调度
+            const readStream = fs.createReadStream(zipPath, { highWaterMark: 1024 * 1024 })
+            const passThrough = new PassThrough({ highWaterMark: 1024 * 1024 })
             let uploadedBytes = 0
 
             // 节流控制，避免发送过多 SSE 消息
@@ -429,35 +618,28 @@ class WebDAVSync extends EventEmitter {
                 }
             })
 
+            // 确保远程备份目录存在
+            const remoteDir = path.posix.dirname(remotePath)
+            await this.ensureRemoteDir(remoteDir)
+
             readStream.pipe(passThrough)
 
-            try {
-                await this.client.putFileContents(remotePath, passThrough)
+            await this.client.putFileContents(remotePath, passThrough, { overwrite: true })
 
-                this.emit('progress', {
-                    type: 'backup',
-                    status: 'success',
-                    file: zipName,
-                    total: stat.size,
-                    current: stat.size
-                })
+            this.emit('progress', {
+                type: 'backup',
+                status: 'success',
+                file: zipName,
+                total: stat.size,
+                current: stat.size
+            })
 
-                this.addLog({
-                    timestamp: Date.now(),
-                    type: 'backup',
-                    file: zipName,
-                    status: 'success',
-                })
-            } finally {
-                // 确保无论上传成功还是失败，总是及时清理本地临时 zip 文件
-                if (fs.existsSync(zipPath)) {
-                    try {
-                        fs.unlinkSync(zipPath)
-                    } catch (e) {
-                        console.error('Failed to cleanup local backup zip:', e)
-                    }
-                }
-            }
+            this.addLog({
+                timestamp: Date.now(),
+                type: 'backup',
+                file: zipName,
+                status: 'success',
+            })
 
             // 清理旧备份（保留最近5个）
             try {
@@ -477,27 +659,49 @@ class WebDAVSync extends EventEmitter {
                 message: err.message,
             })
             return false
+        } finally {
+            // 确保无论上传成功还是失败，总是及时清理本地临时 zip 文件
+            if (zipPath && fs.existsSync(zipPath)) {
+                try {
+                    fs.unlinkSync(zipPath)
+                } catch (e) {
+                    console.error('Failed to cleanup local backup zip:', e)
+                }
+            }
         }
     }
 
     async syncAllFiles(): Promise<boolean> {
         if (!this.client) await this.initClient()
-        if (!this.client) return false
+        if (!this.client) {
+            this.emit('progress', { type: 'sync', status: 'error', message: 'WebDAV 客户端未初始化' })
+            return false
+        }
+
+        let total = 0
+        let successCount = 0
+        let failCount = 0
 
         try {
             const files = await this.scanFiles()
             const fileList = Array.from(files.keys())
             let count = 0
-            const total = fileList.length
+            total = fileList.length
+
+            if (total === 0) {
+                this.emit('progress', { type: 'sync', status: 'finish', total: 0, message: '没有检测到需要同步的数据文件' })
+                return true
+            }
 
             this.emit('progress', { type: 'sync', status: 'start', total })
 
-            let successCount = 0
-            let failCount = 0
-
-            // 使用受控并发（最多 5 个并发连接）加速批量文件上传
-            await this.runConcurrent(fileList, 5, async (file) => {
+            // 适度并发（4 连接），兼顾吞吐量同时防止 WebDAV 服务端 423 Locked 冲突
+            await this.runConcurrent(fileList, 4, async (file) => {
+                const ok = await this.uploadFile(file)
                 count++
+                if (ok) successCount++
+                else failCount++
+
                 this.emit('progress', {
                     type: 'sync',
                     status: 'processing',
@@ -505,21 +709,28 @@ class WebDAVSync extends EventEmitter {
                     total,
                     file
                 })
-                const ok = await this.uploadFile(file)
-                if (ok) successCount++
-                else failCount++
             })
 
-            this.emit('progress', { type: 'sync', status: 'finish', total })
             if (failCount > 0) {
-                console.warn(`[WebDAV] Sync all files finished with errors: ${successCount} succeeded, ${failCount} failed.`)
+                console.warn(`[WebDAV] Sync all files finished: ${successCount} succeeded, ${failCount} skipped/failed.`)
             } else {
                 console.log(`[WebDAV] Sync all files finished successfully (${successCount} files).`)
             }
             return failCount === 0
-        } catch (err) {
+        } catch (err: any) {
             console.error('Sync all files failed:', err)
+            this.emit('progress', { type: 'sync', status: 'error', message: err.message || '同步失败' })
             return false
+        } finally {
+            // 无论如何，在最后必须发射 finish 或 error，保证前端进度条绝对不悬挂！
+            this.emit('progress', {
+                type: 'sync',
+                status: 'finish',
+                total,
+                successCount,
+                failCount,
+                message: failCount > 0 ? `同步完成: ${successCount} 个成功，${failCount} 个失败/跳过` : `全部 ${total} 个文件同步成功`
+            })
         }
     }
 
@@ -558,32 +769,105 @@ class WebDAVSync extends EventEmitter {
         }
     }
 
-    async downloadLatestBackup(): Promise<boolean> {
+    async getBackupList(): Promise<Array<{ filename: string; basename: string; size?: number; time: number; timeStr: string }>> {
+        if (!this.client) await this.initClient()
+        if (!this.client) return []
+
+        try {
+            const items = await this.client.getDirectoryContents(`${this.backupPath}/`)
+            const backups = items
+                .filter((item: any) => item.basename && item.basename.startsWith('lx-sync-backup-'))
+                .sort((a: any, b: any) => this.parseBackupTime(b) - this.parseBackupTime(a))
+
+            return backups.map((item: any) => {
+                const time = this.parseBackupTime(item)
+                let timeStr = ''
+                if (time > 0) {
+                    const d = new Date(time)
+                    timeStr = d.toLocaleString('zh-CN', { hour12: false })
+                } else {
+                    timeStr = item.lastmod || '未知时间'
+                }
+                return {
+                    filename: item.filename,
+                    basename: item.basename,
+                    size: item.size,
+                    time,
+                    timeStr,
+                }
+            })
+        } catch (err: any) {
+            console.error('[WebDAV] Failed to get backup list:', err.message)
+            return []
+        }
+    }
+
+    async deleteBackupFile(targetFilename: string): Promise<boolean> {
         if (!this.client) await this.initClient()
         if (!this.client) return false
 
         try {
-            this.emit('progress', { type: 'restore', status: 'start', message: '正在获取备份列表...' })
+            const remotePath = targetFilename.startsWith('/') ? targetFilename : `${this.backupPath}/${targetFilename}`
+            await this.client.deleteFile(remotePath)
+            const basename = path.basename(remotePath)
+            this.addLog({
+                timestamp: Date.now(),
+                type: 'backup',
+                file: basename,
+                status: 'success',
+                message: `已删除云端备份: ${basename}`
+            })
+            return true
+        } catch (err: any) {
+            console.error(`[WebDAV] Failed to delete backup ${targetFilename}:`, err.message)
+            this.addLog({
+                timestamp: Date.now(),
+                type: 'backup',
+                file: targetFilename,
+                status: 'error',
+                message: `删除备份失败: ${err.message}`
+            })
+            return false
+        }
+    }
 
-            const items = await this.client.getDirectoryContents(`${this.backupPath}/`)
-            const backups = items
-                .filter((item: any) => item.basename.startsWith('lx-sync-backup-'))
-                .sort((a: any, b: any) => this.parseBackupTime(b) - this.parseBackupTime(a))
+    async restoreBackupFile(targetFilename?: string): Promise<boolean> {
+        if (!this.client) await this.initClient()
+        if (!this.client) return false
 
-            if (backups.length === 0) return false
+        try {
+            this.emit('progress', { type: 'restore', status: 'start', message: '正在检索备份数据...' })
 
-            const latestBackup = backups[0]
+            let targetItem: any = null
+            if (targetFilename) {
+                // 用户指定了恢复的文件名或路径
+                const basename = path.basename(targetFilename)
+                targetItem = {
+                    filename: targetFilename.startsWith('/') ? targetFilename : `${this.backupPath}/${targetFilename}`,
+                    basename
+                }
+            } else {
+                const items = await this.client.getDirectoryContents(`${this.backupPath}/`)
+                const backups = items
+                    .filter((item: any) => item.basename.startsWith('lx-sync-backup-'))
+                    .sort((a: any, b: any) => this.parseBackupTime(b) - this.parseBackupTime(a))
+
+                if (backups.length === 0) {
+                    this.emit('progress', { type: 'restore', status: 'error', message: '云端未找到任何全量备份文件' })
+                    return false
+                }
+                targetItem = backups[0]
+            }
 
             this.emit('progress', {
                 type: 'restore',
                 status: 'downloading',
-                message: `正在下载备份: ${latestBackup.basename}`
+                message: `正在下载备份: ${targetItem.basename}`
             })
 
-            const content = await this.client.getFileContents(latestBackup.filename)
+            const content = await this.client.getFileContents(targetItem.filename)
             const zipPath = path.join(this.dataPath, 'temp-restore.zip')
 
-            // 修复类型错误：使用 as any
             fs.writeFileSync(zipPath, content as any)
 
             this.emit('progress', {
@@ -595,22 +879,146 @@ class WebDAVSync extends EventEmitter {
             await this.extractZip(zipPath, this.dataPath)
             fs.unlinkSync(zipPath)
 
+            // 检查解压后数据目录是否确实有了 config.js
+            const targetConfigPath = global.lx?.configPath || path.join(this.dataPath, 'config.js')
+            if (!fs.existsSync(targetConfigPath)) {
+                console.log('Backup restored but config.js is missing in data dir, saving current config and uploading...')
+                if (global.lx && global.lx.saveConfig) {
+                    global.lx.saveConfig()
+                }
+                await this.uploadFile('config.js')
+            }
+
+            this.emit('progress', { type: 'restore', status: 'finish', message: '全量备份已成功恢复并还原！' })
+
             this.addLog({
                 timestamp: Date.now(),
                 type: 'restore',
-                file: latestBackup.basename,
+                file: targetItem.basename,
                 status: 'success',
             })
 
             return true
         } catch (err: any) {
+            this.emit('progress', { type: 'restore', status: 'error', message: `备份恢复失败: ${err.message}` })
             this.addLog({
                 timestamp: Date.now(),
                 type: 'restore',
-                file: 'latest-backup',
+                file: targetFilename || 'backup',
                 status: 'error',
                 message: err.message,
             })
+            return false
+        }
+    }
+
+    async downloadLatestBackup(): Promise<boolean> {
+        return this.restoreBackupFile()
+    }
+
+    async restoreScatteredFiles(): Promise<boolean> {
+        if (!this.client) await this.initClient()
+        if (!this.client) return false
+
+        try {
+            const items = await this.client.getDirectoryContents(`${this.syncPath}/`, { deep: true })
+            const files = items.filter((item: any) => item.type === 'file')
+
+            if (files.length === 0) {
+                this.emit('progress', { type: 'restore', status: 'error', message: `云端散文件目录 (${this.syncPath}) 为空` })
+                return false
+            }
+
+            console.log(`Restoring ${files.length} scattered files from WebDAV (${this.syncPath})...`)
+            let current = 0
+            let hasConfig = false
+
+            this.emit('progress', { type: 'restore', status: 'start', total: files.length, message: '开始比对并增量恢复散文件...' })
+
+            const remoteFileSet = new Set<string>()
+            const localFiles = await this.scanFiles()
+            const filesToDownload: { file: any; relativePath: string }[] = []
+
+            for (const file of files) {
+                const relativePath = this.getRelativeRemotePath(file.filename)
+                if (this.shouldIgnore(relativePath)) {
+                    continue
+                }
+
+                if (relativePath === 'config.js') hasConfig = true
+                remoteFileSet.add(relativePath)
+
+                // 如果本地存在该文件，且大小一致，跳过不必要下载
+                const localPath = path.join(this.dataPath, relativePath)
+                if (fs.existsSync(localPath)) {
+                    const localStat = fs.statSync(localPath)
+                    const remoteSize = file.size !== undefined ? Number(file.size) : NaN
+                    if (!isNaN(remoteSize) && localStat.size === remoteSize) {
+                        continue
+                    }
+                }
+                filesToDownload.push({ file, relativePath })
+            }
+
+            if (filesToDownload.length === 0) {
+                console.log(`All remote files are up to date locally, skipping restore download.`)
+            } else {
+                console.log(`Downloading ${filesToDownload.length} updated/new files from WebDAV (${this.syncPath})...`)
+                const total = filesToDownload.length
+                for (const item of filesToDownload) {
+                    current++
+                    this.emit('progress', {
+                        type: 'restore',
+                        status: 'processing',
+                        current,
+                        total,
+                        file: item.relativePath,
+                        message: `正在恢复散文件 (${current}/${total})`
+                    })
+                    await this.downloadFile(item.relativePath, item.file.filename)
+                }
+            }
+
+            // 如果恢复的文件中没有 config.js，说明云端配置缺失，将当前内存配置（含环境变量）同步上去
+            if (!hasConfig) {
+                console.log('Cloud config.js not found, saving current memory config and uploading...')
+                if (global.lx && global.lx.saveConfig) {
+                    global.lx.saveConfig()
+                }
+                await this.uploadFile('config.js')
+            }
+
+            // 双向数据一致性补齐：检查本地是否存在但云端缺失的文件，自动补传至云端
+            const missingOnRemote: string[] = []
+            for (const relativePath of localFiles.keys()) {
+                const normLocal = relativePath.replace(/\\/g, '/')
+                if (!remoteFileSet.has(normLocal) && !this.shouldIgnore(normLocal)) {
+                    missingOnRemote.push(normLocal)
+                }
+            }
+            if (missingOnRemote.length > 0) {
+                console.log(`[WebDAV] Found ${missingOnRemote.length} local files missing on cloud, uploading missing files...`)
+                let uploadedCount = 0
+                const uploadTotal = missingOnRemote.length
+                for (const file of missingOnRemote) {
+                    uploadedCount++
+                    this.emit('progress', {
+                        type: 'restore',
+                        status: 'processing',
+                        current: uploadedCount,
+                        total: uploadTotal,
+                        file,
+                        message: `正在向云端补齐缺失文件 (${uploadedCount}/${uploadTotal})`
+                    })
+                    await this.uploadFile(file)
+                }
+            }
+
+            this.emit('progress', { type: 'restore', status: 'finish', total: files.length, message: '散文件增量恢复完成' })
+            return true
+        } catch (err: any) {
+            console.error(`[WebDAV] Restore scattered files failed:`, err.message)
+            this.emit('progress', { type: 'restore', status: 'error', message: `恢复散文件失败: ${err.message}` })
             return false
         }
     }
@@ -648,9 +1056,19 @@ class WebDAVSync extends EventEmitter {
         }
     }
 
-    async restoreFromRemote() {
+    async restoreFromRemote(options?: { mode?: 'auto' | 'zip' | 'files'; targetFilename?: string }): Promise<boolean> {
         if (!this.client) await this.initClient()
         if (!this.client) return false
+
+        const mode = options?.mode || 'auto'
+
+        if (mode === 'zip') {
+            return this.restoreBackupFile(options?.targetFilename)
+        }
+
+        if (mode === 'files') {
+            return this.restoreScatteredFiles()
+        }
 
         // 1. 尝试恢复散文件
         try {
@@ -666,23 +1084,47 @@ class WebDAVSync extends EventEmitter {
                 this.emit('progress', { type: 'restore', status: 'start', total, message: '开始从云端恢复数据...' })
 
                 const remoteFileSet = new Set<string>()
+                const localFiles = await this.scanFiles()
+                const filesToDownload: { file: any; relativePath: string }[] = []
 
                 for (const file of files) {
-                    current++
                     const relativePath = this.getRelativeRemotePath(file.filename)
+                    if (this.shouldIgnore(relativePath)) {
+                        continue
+                    }
+
                     if (relativePath === 'config.js') hasConfig = true
                     remoteFileSet.add(relativePath)
 
-                    this.emit('progress', {
-                        type: 'restore',
-                        status: 'processing',
-                        current,
-                        total,
-                        file: relativePath,
-                        message: `正在恢复文件 (${current}/${total})`
-                    })
+                    // 如果本地存在该文件，且大小一致，跳过不必要下载
+                    const localPath = path.join(this.dataPath, relativePath)
+                    if (fs.existsSync(localPath)) {
+                        const localStat = fs.statSync(localPath)
+                        const remoteSize = file.size !== undefined ? Number(file.size) : NaN
+                        if (!isNaN(remoteSize) && localStat.size === remoteSize) {
+                            continue
+                        }
+                    }
+                    filesToDownload.push({ file, relativePath })
+                }
 
-                    await this.downloadFile(relativePath)
+                if (filesToDownload.length === 0) {
+                    console.log(`All ${files.length} remote files are up to date locally, skipping restore download.`)
+                } else {
+                    console.log(`Downloading ${filesToDownload.length} updated/new files from WebDAV (${this.syncPath})...`)
+                    const downloadTotal = filesToDownload.length
+                    for (const item of filesToDownload) {
+                        current++
+                        this.emit('progress', {
+                            type: 'restore',
+                            status: 'processing',
+                            current,
+                            total: downloadTotal,
+                            file: item.relativePath,
+                            message: `正在恢复文件 (${current}/${downloadTotal})`
+                        })
+                        await this.downloadFile(item.relativePath, item.file.filename)
+                    }
                 }
 
                 // 如果恢复的文件中没有 config.js，说明云端配置缺失，将当前内存配置（含环境变量）同步上去
@@ -695,16 +1137,27 @@ class WebDAVSync extends EventEmitter {
                 }
 
                 // 双向数据一致性补齐：检查本地是否存在但云端缺失的文件，自动补传至云端
-                const localFiles = await this.scanFiles()
                 const missingOnRemote: string[] = []
                 for (const relativePath of localFiles.keys()) {
-                    if (!remoteFileSet.has(relativePath)) {
-                        missingOnRemote.push(relativePath)
+                    const normLocal = relativePath.replace(/\\/g, '/')
+                    if (!remoteFileSet.has(normLocal) && !this.shouldIgnore(normLocal)) {
+                        missingOnRemote.push(normLocal)
                     }
                 }
                 if (missingOnRemote.length > 0) {
                     console.log(`[WebDAV] Found ${missingOnRemote.length} local files missing on cloud, uploading missing files...`)
+                    let uploadedCount = 0
+                    const uploadTotal = missingOnRemote.length
                     for (const file of missingOnRemote) {
+                        uploadedCount++
+                        this.emit('progress', {
+                            type: 'restore',
+                            status: 'processing',
+                            current: uploadedCount,
+                            total: uploadTotal,
+                            file,
+                            message: `正在向云端补齐缺失文件 (${uploadedCount}/${uploadTotal})`
+                        })
                         await this.uploadFile(file)
                     }
                 }

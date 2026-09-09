@@ -37,6 +37,9 @@ class App {
         this.processCpuHistory = [];
         this.systemMemHistory = [];
         this.processMemHistory = [];
+        this.monitorLabels = [];
+        this.cpuChartInstance = null;
+        this.memChartInstance = null;
         this.monitorTimer = null;
         this.init();
         this.initVersion();
@@ -164,6 +167,10 @@ class App {
         // 日志查看
         document.getElementById('refresh-logs-btn')?.addEventListener('click', () => this.loadLogs());
         document.getElementById('log-type-select')?.addEventListener('change', () => this.loadLogs());
+        document.getElementById('logs-auto-refresh-toggle')?.addEventListener('change', (e) => {
+            if (e.target.checked) this.startLogsAutoRefresh();
+            else this.stopLogsAutoRefresh();
+        });
 
         // 模态框
         document.querySelector('.modal-close')?.addEventListener('click', () => this.closeModal());
@@ -325,6 +332,7 @@ class App {
                 break;
             case 'logs':
                 this.loadLogs();
+                this.startLogsAutoRefresh();
                 break;
             case 'webdav':
                 try {
@@ -348,6 +356,10 @@ class App {
             case 'music':
                 window.location.href = (window.CONFIG && window.CONFIG['player.path']) || '/';
                 return;
+        }
+
+        if (viewName !== 'logs') {
+            this.stopLogsAutoRefresh();
         }
     }
 
@@ -504,15 +516,38 @@ class App {
         if (sysCpuText) sysCpuText.textContent = sysCpuVal.toFixed(2) + '%';
         if (procCpuText) procCpuText.textContent = procCpuVal.toFixed(2) + '%';
 
+        const nowStr = new Date().toLocaleTimeString('zh-CN', { hour12: false });
+        this.monitorLabels.push(nowStr);
         this.systemCpuHistory.push(sysCpuVal);
         this.processCpuHistory.push(procCpuVal);
         if (this.systemCpuHistory.length > 20) {
+            this.monitorLabels.shift();
             this.systemCpuHistory.shift();
             this.processCpuHistory.shift();
         }
-        this.renderMultiLineChart('cpu-chart', [
-            { data: this.systemCpuHistory, color: 'rgba(59, 130, 246, 0.4)', fill: true, label: 'System' },
-            { data: this.processCpuHistory, color: '#a855f7', fill: false, label: 'Process', strokeWidth: 3 }
+        this.updateChart('cpu', 'cpu-chart-canvas', this.monitorLabels, [
+            {
+                label: '系统 CPU (%)',
+                data: this.systemCpuHistory,
+                borderColor: '#3b82f6',
+                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                tension: 0.35,
+                fill: true
+            },
+            {
+                label: '本服务 CPU (%)',
+                data: this.processCpuHistory,
+                borderColor: '#c084fc',
+                backgroundColor: 'rgba(192, 132, 252, 0.08)',
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                tension: 0.35,
+                fill: true
+            }
         ]);
 
         // --- 内存监控 ---
@@ -525,15 +560,25 @@ class App {
         const statMemAbs = document.getElementById('stat-memory');
         if (statMemPerc) statMemPerc.textContent = sysMemVal.toFixed(2) + '%';
         if (statProcMemPerc) statProcMemPerc.textContent = procMemVal.toFixed(2) + '%';
-        if (statMemAbs) statMemAbs.textContent = this.formatFileSize(status.memory);
+        if (statMemAbs) {
+            const usedBytes = (status.totalMemory || 0) - (status.freeMemory || 0);
+            statMemAbs.textContent = `${this.formatFileSize(status.memory || 0)} / 系统已用 ${this.formatFileSize(usedBytes)}`;
+        }
 
         // 详情面板
         const memProgress = document.getElementById('monitor-mem-progress');
         const sysMemText = document.getElementById('monitor-mem-val');
         const procMemText = document.getElementById('monitor-process-mem-val');
-        if (memProgress) memProgress.style.width = sysMemVal + '%';
+        if (memProgress) memProgress.style.width = Math.min(100, Math.max(sysMemVal, procMemVal)) + '%';
         if (sysMemText) sysMemText.textContent = sysMemVal.toFixed(2) + '%';
         if (procMemText) procMemText.textContent = procMemVal.toFixed(2) + '%';
+
+        // 内存面板副标题详细信息
+        const memTotalText = document.getElementById('monitor-mem-total-text');
+        if (memTotalText && status.totalMemory) {
+            const totalMb = (status.totalMemory / 1024 / 1024 / 1024).toFixed(1);
+            memTotalText.textContent = `总容量 ${totalMb} GB · 服务占用 ${this.formatFileSize(status.memory || 0)}`;
+        }
 
         this.systemMemHistory.push(sysMemVal);
         this.processMemHistory.push(procMemVal);
@@ -541,9 +586,29 @@ class App {
             this.systemMemHistory.shift();
             this.processMemHistory.shift();
         }
-        this.renderMultiLineChart('mem-chart', [
-            { data: this.systemMemHistory, color: 'rgba(16, 185, 129, 0.4)', fill: true, label: 'System' },
-            { data: this.processMemHistory, color: '#3b82f6', fill: false, label: 'Process', strokeWidth: 3 }
+        this.updateChart('mem', 'mem-chart-canvas', this.monitorLabels, [
+            {
+                label: '系统内存 (%)',
+                data: this.systemMemHistory,
+                borderColor: '#10b981',
+                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                tension: 0.35,
+                fill: true
+            },
+            {
+                label: '本服务内存 (%)',
+                data: this.processMemHistory,
+                borderColor: '#60a5fa',
+                backgroundColor: 'rgba(96, 165, 250, 0.08)',
+                borderWidth: 2,
+                pointRadius: 2,
+                pointHoverRadius: 5,
+                tension: 0.35,
+                fill: true
+            }
         ]);
 
         // --- 状态与概览更新 ---
@@ -558,54 +623,138 @@ class App {
         const statCpuInfo = document.getElementById('stat-cpu-info');
         if (statCpuInfo) {
             const speedGhz = (status.cpuSpeed / 1000).toFixed(1);
-            statCpuInfo.textContent = `${status.cpus} Cores @ ${speedGhz}GHz`;
+            statCpuInfo.textContent = `${status.cpus} 核 · 频速 ${speedGhz} GHz`;
+        }
+
+        const cpuModelText = document.getElementById('monitor-cpu-model-text');
+        if (cpuModelText && status.cpuModel) {
+            cpuModelText.textContent = `${status.cpus} Cores @ ${status.cpuModel}`;
+        }
+
+        // 更新音源总数与 WebDAV 运行标徽
+        const statSourcesInfo = document.getElementById('stat-sources-info');
+        if (statSourcesInfo && status.sourcesCount !== undefined) {
+            statSourcesInfo.textContent = `已挂载自定义源: ${status.sourcesCount} 个`;
+        }
+
+        const webdavPill = document.getElementById('dash-webdav-status-pill');
+        if (webdavPill) {
+            if (status.isWebDAVConfigured) {
+                webdavPill.textContent = 'WebDAV 已就绪';
+                webdavPill.style.background = 'rgba(16, 185, 129, 0.15)';
+                webdavPill.style.color = '#34d399';
+                webdavPill.style.borderColor = 'rgba(16, 185, 129, 0.3)';
+            } else {
+                webdavPill.textContent = 'WebDAV 未配置';
+                webdavPill.style.background = 'rgba(245, 158, 11, 0.15)';
+                webdavPill.style.color = '#fbbf24';
+                webdavPill.style.borderColor = 'rgba(245, 158, 11, 0.3)';
+            }
         }
     }
 
-    renderMultiLineChart(svgId, series) {
-        const svg = document.getElementById(svgId);
-        if (!svg) return;
+    updateChart(type, canvasId, labels, datasets) {
+        if (typeof Chart === 'undefined') return;
+        const canvas = document.getElementById(canvasId);
+        if (!canvas) return;
 
-        const width = 200;
-        const height = 60;
-        const padding = 5;
+        let chartInstance = type === 'cpu' ? this.cpuChartInstance : this.memChartInstance;
 
-        let html = '';
-        series.forEach((s, idx) => {
-            if (s.data.length < 2) return;
-
-            const points = s.data.map((val, i) => {
-                const x = (i / (s.data.length - 1)) * width;
-                const y = height - (Math.max(val, 2) / 100) * (height - padding * 2) - padding;
-                return { x, y };
+        // 计算当前数据集合中的最大值，用于自适应纵轴
+        let maxVal = 0;
+        datasets.forEach(ds => {
+            ds.data.forEach(v => {
+                if (typeof v === 'number' && v > maxVal) maxVal = v;
             });
-
-            // 二次贝塞尔曲线平滑处理
-            let d = `M ${points[0].x} ${points[0].y}`;
-            for (let i = 0; i < points.length - 1; i++) {
-                const xc = (points[i].x + points[i + 1].x) / 2;
-                const yc = (points[i].y + points[i + 1].y) / 2;
-                d += ` Q ${points[i].x} ${points[i].y} ${xc} ${yc}`;
-            }
-            d += ` L ${points[points.length - 1].x} ${points[points.length - 1].y}`;
-
-            if (s.fill) {
-                const fillD = d + ` L ${width} ${height} L 0 ${height} Z`;
-                html += `
-                    <defs>
-                        <linearGradient id="grad-${svgId}-${idx}" x1="0%" y1="0%" x2="0%" y2="100%">
-                            <stop offset="0%" style="stop-color:${s.color};stop-opacity:0.3" />
-                            <stop offset="100%" style="stop-color:${s.color};stop-opacity:0" />
-                        </linearGradient>
-                    </defs>
-                    <path d="${fillD}" fill="url(#grad-${svgId}-${idx})" />
-                `;
-            }
-
-            html += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="${s.strokeWidth || 2}" stroke-linecap="round" />`;
         });
 
-        svg.innerHTML = html;
+        // 动态量程：至少留 20% 余量，最少设为 10%，封顶 100%
+        let suggestedMax = Math.min(100, Math.max(10, Math.ceil((maxVal * 1.25) / 5) * 5));
+
+        if (!chartInstance) {
+            const ctx = canvas.getContext('2d');
+            chartInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: [...labels],
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: {
+                        intersect: false,
+                        mode: 'index'
+                    },
+                    plugins: {
+                        legend: {
+                            display: false
+                        },
+                        tooltip: {
+                            backgroundColor: 'rgba(15, 23, 42, 0.92)',
+                            titleColor: '#e2e8f0',
+                            bodyColor: '#cbd5e1',
+                            borderColor: 'rgba(255, 255, 255, 0.12)',
+                            borderWidth: 1,
+                            padding: 10,
+                            boxPadding: 4,
+                            usePointStyle: true,
+                            callbacks: {
+                                label: function (context) {
+                                    return ` ${context.dataset.label}: ${Number(context.parsed.y).toFixed(2)}%`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            display: true,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.04)',
+                                drawBorder: false
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.35)',
+                                font: { size: 10 },
+                                maxTicksLimit: 6,
+                                maxRotation: 0
+                            }
+                        },
+                        y: {
+                            display: true,
+                            suggestedMin: 0,
+                            suggestedMax: suggestedMax,
+                            grid: {
+                                color: 'rgba(255, 255, 255, 0.05)',
+                                drawBorder: false
+                            },
+                            ticks: {
+                                color: 'rgba(255, 255, 255, 0.4)',
+                                font: { size: 10 },
+                                callback: function (value) {
+                                    return value + '%';
+                                },
+                                maxTicksLimit: 5
+                            }
+                        }
+                    }
+                }
+            });
+
+            if (type === 'cpu') this.cpuChartInstance = chartInstance;
+            else this.memChartInstance = chartInstance;
+        } else {
+            chartInstance.data.labels = [...labels];
+            datasets.forEach((ds, i) => {
+                if (chartInstance.data.datasets[i]) {
+                    chartInstance.data.datasets[i].data = [...ds.data];
+                }
+            });
+            // 动态调节刻度范围
+            chartInstance.options.scales.y.suggestedMax = suggestedMax;
+            chartInstance.update('none'); // 无多余全量动画，保持平滑高频刷新
+        }
     }
 
 
@@ -669,7 +818,19 @@ class App {
             if (tabs) tabs.classList.add('hidden');
         }
 
+        const totalCount = this.allUsers.length;
+        const hintTitle = type === 'data' ? '选择用户以查看歌单与数据' : '选择用户以管理快照备份';
         container.innerHTML = `
+            <div class="user-selection-header fade-in">
+                <div class="user-select-hint">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="12" y1="16" x2="12" y2="12"/>
+                        <line x1="12" y1="8" x2="12.01" y2="8"/>
+                    </svg>
+                    <span>${hintTitle}（共 ${totalCount} 位用户）</span>
+                </div>
+            </div>
             <div class="user-selection-grid fade-in">
                 ${this.allUsers.map(user => {
                     const isPublic = user.name === '_open';
@@ -2535,26 +2696,69 @@ class App {
         }
     }
 
-    async loadLogs() {
+    async loadLogs(isAuto = false) {
         const logType = document.getElementById('log-type-select')?.value || 'app';
 
         try {
             const data = await this.request(`/api/logs?type=${logType}&lines=200`);
             const container = document.getElementById('logs-content');
+            if (!container) return;
+
+            const titleEl = document.getElementById('terminal-active-type');
+            if (titleEl) {
+                const labelMap = { app: 'app.log', access: 'access.log', login: 'login.log', token: 'token.log', errors: 'error.log' };
+                titleEl.textContent = labelMap[logType] || `${logType}.log`;
+            }
+
+            // 检查用户是否正处于向上滚动浏览历史状态
+            const isNearBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 60;
 
             if (data.logs && data.logs.length) {
+                const countEl = document.getElementById('terminal-line-count');
+                if (countEl) countEl.textContent = `${data.logs.length} 行`;
+
                 container.innerHTML = data.logs
                     .filter(line => line.trim())
-                    .map(line => `<div class="log-line">${this.escapeHtml(line)}</div>`)
+                    .map(line => {
+                        let formatted = this.escapeHtml(line);
+                        // Highlight log levels
+                        formatted = formatted
+                            .replace(/\[(INFO|info)\]/g, '<span class="log-tag-info">INFO</span>')
+                            .replace(/\[(WARN|warn|WARNING)\]/g, '<span class="log-tag-warn">WARN</span>')
+                            .replace(/\[(ERROR|error|ERR)\]/g, '<span class="log-tag-error">ERROR</span>')
+                            .replace(/^(\d{4}[-/]\d{2}[-/]\d{2}[ T]\d{2}:\d{2}:\d{2}(?:\.\d{3})?)/, '<span class="log-time-tag">$1</span>');
+                        return `<div class="log-line">${formatted}</div>`;
+                    })
                     .join('');
 
-                // 滚动到底部
-                container.scrollTop = container.scrollHeight;
+                // 首次或者用户停留在底部时自动贴底
+                if (!isAuto || isNearBottom) {
+                    container.scrollTop = container.scrollHeight;
+                }
             } else {
-                container.innerHTML = '<p style="color: var(--text-secondary);">暂无日志</p>';
+                container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">暂无日志数据</p>';
             }
         } catch (err) {
-            document.getElementById('logs-content').innerHTML = '<p style="color: var(--accent-error);">加载日志失败</p>';
+            if (!isAuto) {
+                document.getElementById('logs-content').innerHTML = '<p style="color: var(--accent-error); text-align: center; padding: 2rem;">加载日志失败</p>';
+            }
+        }
+    }
+
+    startLogsAutoRefresh() {
+        this.stopLogsAutoRefresh();
+        this.logsRefreshTimer = setInterval(() => {
+            const toggle = document.getElementById('logs-auto-refresh-toggle');
+            if (this.currentView === 'logs' && (!toggle || toggle.checked)) {
+                this.loadLogs(true);
+            }
+        }, 3000);
+    }
+
+    stopLogsAutoRefresh() {
+        if (this.logsRefreshTimer) {
+            clearInterval(this.logsRefreshTimer);
+            this.logsRefreshTimer = null;
         }
     }
 
@@ -2645,11 +2849,13 @@ class App {
     }
 
     async backupToWebDAV() {
-        if (!(await showSelect('WebDAV 备份', '确定要创建全量备份并上传到 WebDAV 吗？'))) return;
+        if (!(await showSelect('WebDAV 备份', '确定要创建全量备份并上传到 WebDAV 吗？\n\n系统将自动扫描本地数据、压缩打包为 ZIP 并流式传输至云端。'))) return;
 
         const statusEl = document.getElementById('sync-status-content');
-        statusEl.innerHTML = '<p style="color: var(--accent-warning);">正在备份...</p>';
-        this.showProgress(true);
+        if (statusEl) {
+            statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-primary);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在扫描本地文件并打包上传...</span></div>';
+        }
+        this.showProgress(true, '全量 ZIP 备份与云端归档', '正在扫描并打包服务器数据...');
 
         try {
             const result = await this.request('/api/webdav/backup', {
@@ -2657,77 +2863,296 @@ class App {
                 body: JSON.stringify({ force: true })
             });
             if (result.success) {
-                statusEl.innerHTML = '<p style="color: var(--accent-success);">✅ 备份成功！</p>';
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 全量备份已成功上传至 WebDAV 云端！</p>';
+                }
                 this.loadSyncLogs();
             } else {
-                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 备份失败</p>';
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 备份失败: 服务器返回异常</p>';
+                }
             }
         } catch (err) {
-            statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 备份失败: ' + err.message + '</p>';
-        } finally {
-            setTimeout(() => this.showProgress(false), 3000);
+            if (statusEl) {
+                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 备份失败: ' + this.escapeHtml(err.message) + '</p>';
+            }
         }
     }
 
     async restoreFromWebDAV() {
-        if (!(await showSelect('WebDAV 恢复', '⚠️ 警告：从云端恢复将覆盖本地所有数据！\n\n确定要继续吗？', { danger: true }))) return;
+        const modal = document.getElementById('restore-choice-modal');
+        if (modal) {
+            modal.classList.remove('hidden');
+            this.switchRestoreTab('zip');
+        } else {
+            // 降级兼容
+            this.executeZipRestore();
+        }
+    }
 
-        const statusEl = document.getElementById('sync-status-content');
-        statusEl.innerHTML = '<p style="color: var(--accent-warning);">正在从云端恢复数据...</p>';
+    closeRestoreModal() {
+        document.getElementById('restore-choice-modal')?.classList.add('hidden');
+    }
+
+    switchRestoreTab(tab) {
+        const zipBtn = document.getElementById('tab-btn-zip');
+        const filesBtn = document.getElementById('tab-btn-files');
+        const zipPanel = document.getElementById('restore-panel-zip');
+        const filesPanel = document.getElementById('restore-panel-files');
+
+        if (tab === 'zip') {
+            zipBtn?.classList.add('active');
+            filesBtn?.classList.remove('active');
+            zipPanel?.classList.remove('hidden');
+            filesPanel?.classList.add('hidden');
+            this.loadBackupList();
+        } else {
+            filesBtn?.classList.add('active');
+            zipBtn?.classList.remove('active');
+            filesPanel?.classList.remove('hidden');
+            zipPanel?.classList.add('hidden');
+        }
+    }
+
+    async loadBackupList() {
+        const container = document.getElementById('backup-list-container');
+        if (!container) return;
+
+        container.innerHTML = `
+            <div style="text-align:center; padding: 2rem; color: var(--text-muted);">
+                <span class="task-spinner" style="width:20px;height:20px;display:inline-block;vertical-align:middle;margin-right:6px;"></span>
+                正在获取云端备份列表...
+            </div>
+        `;
 
         try {
-            const result = await this.request('/api/webdav/restore', { method: 'POST' });
-            if (result.success) {
-                statusEl.innerHTML = '<p style="color: var(--accent-success);">✅ 恢复成功！页面将刷新...</p>';
-                setTimeout(() => location.reload(), 2000);
+            const res = await this.request('/api/webdav/backups', { method: 'GET' });
+            if (res.success && res.backups && res.backups.length > 0) {
+                let html = '<div class="backup-zip-list">';
+                res.backups.forEach((item, index) => {
+                    const isLatest = index === 0;
+                    const sizeStr = item.size ? (item.size / (1024 * 1024)).toFixed(1) + ' MB' : '大小未知';
+                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString() : '未知时间');
+                    const escapedFilename = this.escapeHtml(item.filename || item.basename);
+                    const escapedBasename = this.escapeHtml(item.basename);
+
+                    html += `
+                        <div class="backup-zip-card ${isLatest ? 'latest' : ''}">
+                            <div class="backup-zip-info">
+                                <div class="backup-zip-name">
+                                    <span>📦 ${escapedBasename}</span>
+                                    ${isLatest ? '<span class="backup-latest-tag">最新快照</span>' : ''}
+                                </div>
+                                <div class="backup-zip-meta">
+                                    <span>🕒 备份时间: ${timeStr}</span>
+                                    <span>💾 体积: ${sizeStr}</span>
+                                </div>
+                            </div>
+                            <div class="backup-zip-actions">
+                                <button type="button" class="btn-primary restore-btn-single" onclick="app.executeZipRestore('${escapedFilename}', '${escapedBasename}')">
+                                    恢复此快照
+                                </button>
+                                <button type="button" class="btn-danger-outline backup-del-btn" title="删除此备份" onclick="app.executeDeleteBackup('${escapedFilename}', '${escapedBasename}')">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 15px; height: 15px;">
+                                        <polyline points="3 6 5 6 21 6"></polyline>
+                                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                    </svg>
+                                    删除
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+                container.innerHTML = html;
             } else {
-                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 恢复失败</p>';
+                container.innerHTML = `
+                    <div style="text-align:center; padding: 2rem; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 12px;">
+                        <p style="margin: 0; font-size: 0.9rem;">⚠️ 云端备份目录暂无可恢复的 ZIP 备份文件</p>
+                        <p style="margin: 6px 0 0 0; font-size: 0.78rem;">您可以先点击主页的「立即全量备份」进行首次归档。</p>
+                    </div>
+                `;
             }
         } catch (err) {
-            statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 恢复失败: ' + err.message + '</p>';
+            container.innerHTML = `
+                <div style="text-align:center; padding: 1.5rem; color: var(--accent-error);">
+                    获取云端备份列表失败: ${this.escapeHtml(err.message)}
+                </div>
+            `;
+        }
+    }
+
+    async executeDeleteBackup(targetFilename, targetBasename) {
+        const displayName = targetBasename || targetFilename;
+        if (!(await showSelect('删除云端备份', `确定要从 WebDAV 云端永久删除备份快照「${displayName}」吗？\n\n此操作不可撤销！`, { danger: true }))) return;
+
+        try {
+            showInfo(`正在删除备份: ${displayName}...`);
+            const res = await this.request('/api/webdav/backup', {
+                method: 'DELETE',
+                body: JSON.stringify({ filename: targetFilename })
+            });
+
+            if (res.success) {
+                showSuccess(`已成功删除备份: ${displayName}`);
+                // 重新刷新备份列表
+                this.loadBackupList();
+                this.loadSyncLogs();
+            } else {
+                showError(`删除失败: ${res.message || '未知错误'}`);
+            }
+        } catch (err) {
+            showError(`删除失败: ${err.message}`);
+        }
+    }
+
+    async executeZipRestore(targetFilename, targetBasename) {
+        const displayName = targetBasename ? `备份快照「${targetBasename}」` : '最新全量备份';
+        if (!(await showSelect('全量 ZIP 恢复', `⚠️ 警告：恢复${displayName}将覆盖本地数据！\n\n确定要立即恢复吗？建议恢复前确保本地数据已妥善归档。`, { danger: true }))) return;
+
+        this.closeRestoreModal();
+
+        const statusEl = document.getElementById('sync-status-content');
+        if (statusEl) {
+            statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-warning);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在从云端下载并恢复${displayName}...</span></div>`;
+        }
+        this.showProgress(true, '全量快照还原', `正在从云端下载${displayName}并完全还原系统状态...`);
+
+        try {
+            const result = await this.request('/api/webdav/restore', {
+                method: 'POST',
+                body: JSON.stringify({ mode: 'zip', targetFilename: targetFilename || undefined })
+            });
+            if (result.success) {
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 全量恢复成功！数据已更新，页面即将刷新...</p>';
+                }
+                setTimeout(() => location.reload(), 2000);
+            } else {
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 恢复失败</p>';
+                }
+            }
+        } catch (err) {
+            if (statusEl) {
+                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 恢复失败: ' + this.escapeHtml(err.message) + '</p>';
+            }
+        }
+    }
+
+    async executeScatteredRestore() {
+        if (!(await showSelect('散文件增量恢复', '确定要从云端增量恢复散文件吗？\n\n系统将比对云端散列文件并下载新增或变动的文件，本地独有文件将予以保留。'))) return;
+
+        this.closeRestoreModal();
+
+        const statusEl = document.getElementById('sync-status-content');
+        if (statusEl) {
+            statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-primary);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在比对并增量恢复散文件...</span></div>';
+        }
+        this.showProgress(true, '散文件增量恢复', '正在比对云端散文件并增量下载还原...');
+
+        try {
+            const result = await this.request('/api/webdav/restore', {
+                method: 'POST',
+                body: JSON.stringify({ mode: 'files' })
+            });
+            if (result.success) {
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 散文件已成功增量同步还原！</p>';
+                }
+                this.loadSyncLogs();
+            } else {
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 散文件恢复失败</p>';
+                }
+            }
+        } catch (err) {
+            if (statusEl) {
+                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 散文件恢复失败: ' + this.escapeHtml(err.message) + '</p>';
+            }
         }
     }
 
     async syncFilesToWebDAV() {
-        if (!(await showSelect('同步文件', '确定要强制同步所有文件到 WebDAV 吗？'))) return;
+        if (!(await showSelect('同步文件', '确定要强制同步所有本地文件到 WebDAV 吗？\n\n系统将自动检测文件变动并进行多线程增量传输。'))) return;
 
         const statusEl = document.getElementById('sync-status-content');
-        statusEl.innerHTML = '<p style="color: var(--accent-warning);">正在同步文件...</p>';
-        this.showProgress(true);
+        if (statusEl) {
+            statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-primary);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在比对本地与云端散文件...</span></div>';
+        }
+        this.showProgress(true, '批量文件多线程同步', '正在比对本地散文件并同步至云端...');
 
         try {
             const result = await this.request('/api/webdav/sync', { method: 'POST' });
             if (result.success) {
-                statusEl.innerHTML = '<p style="color: var(--accent-success);">✅ 同步成功！</p>';
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 散文件已全部同步至云端！</p>';
+                }
                 this.loadSyncLogs();
             } else {
-                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 同步失败</p>';
+                if (statusEl) {
+                    statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 同步失败</p>';
+                }
             }
         } catch (err) {
-            statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 同步失败: ' + err.message + '</p>';
-        } finally {
-            setTimeout(() => this.showProgress(false), 3000);
+            if (statusEl) {
+                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 同步失败: ' + this.escapeHtml(err.message) + '</p>';
+            }
         }
     }
 
-    showProgress(show) {
+    showProgress(show, title = '任务进行中', subtext = '正在与存储系统交互...') {
         const container = document.getElementById('sync-progress-container');
+        if (!container) return;
         if (show) {
             container.classList.remove('hidden');
-            this.updateProgress(0, '准备中...');
+            const titleEl = document.getElementById('progress-title');
+            const subtextEl = document.getElementById('progress-subtext');
+            if (titleEl) titleEl.textContent = title;
+            if (subtextEl) subtextEl.textContent = subtext;
+            this.setTaskStep(1);
+            this.updateProgress(0, '正在初始化...', '');
         } else {
             container.classList.add('hidden');
         }
     }
 
-    updateProgress(percent, text) {
+    setTaskStep(stepNumber) {
+        const steps = ['prepare', 'pack', 'transfer', 'finish'];
+        steps.forEach((stepName, idx) => {
+            const stepIndex = idx + 1;
+            const el = document.getElementById(`step-${stepName}`);
+            const line = document.getElementById(`stepline-${stepIndex}`);
+            if (el) {
+                el.classList.remove('active', 'done');
+                if (stepIndex < stepNumber) {
+                    el.classList.add('done');
+                } else if (stepIndex === stepNumber) {
+                    el.classList.add('active');
+                }
+            }
+            if (line) {
+                line.classList.remove('active', 'done');
+                if (stepIndex < stepNumber) {
+                    line.classList.add('done');
+                } else if (stepIndex === stepNumber) {
+                    line.classList.add('active');
+                }
+            }
+        });
+    }
+
+    updateProgress(percent, text, meta = '') {
         const bar = document.getElementById('progress-bar');
         const textEl = document.getElementById('progress-text');
-        const percentEl = document.getElementById('progress-percent');
+        const badgeEl = document.getElementById('progress-percent-badge');
+        const metaEl = document.getElementById('progress-meta');
 
-        if (bar) bar.style.width = `${percent}%`;
-        if (textEl) textEl.textContent = text;
-        if (percentEl) percentEl.textContent = `${Math.round(percent)}%`;
+        const clampedPercent = Math.max(0, Math.min(100, Math.round(percent)));
+        if (bar) bar.style.width = `${clampedPercent}%`;
+        if (textEl && text) textEl.textContent = text;
+        if (badgeEl) badgeEl.textContent = `${clampedPercent}%`;
+        if (metaEl && meta !== undefined) metaEl.textContent = meta;
     }
 
     // 辅助方法：生成歌曲标签 HTML
@@ -2804,45 +3229,87 @@ class App {
         this.sseSource.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                // console.log('SSE Progress:', data);
 
+                // 1. 实时日志推送
+                if (data.type === 'sync_log' && data.log) {
+                    this.appendLiveSyncLog(data.log);
+                    return;
+                }
+
+                // 2. 备份进度处理
                 if (data.type === 'backup') {
-                    if (data.status === 'uploading') {
-                        const percent = (data.current / data.total) * 100;
-                        this.updateProgress(percent, `正在上传备份: ${this.formatFileSize(data.current)} / ${this.formatFileSize(data.total)}`);
+                    this.showProgress(true, '全量 ZIP 备份进行中', '正在将数据压缩并上传至云端');
+                    if (data.status === 'preparing') {
+                        this.setTaskStep(1);
+                        this.updateProgress(2, data.message || '正在扫描与准备数据...', '');
                     } else if (data.status === 'packing') {
-                        this.updateProgress(5, data.message || '正在打包文件...');
-                    } else if (data.status === 'preparing') {
-                        this.updateProgress(0, data.message);
+                        this.setTaskStep(2);
+                        const percent = data.percent || (data.current && data.total ? Math.min(48, Math.round(5 + (data.current / data.total) * 43)) : 15);
+                        const meta = data.total ? `打包进度: ${data.current || 0}/${data.total} 文件` : '';
+                        this.updateProgress(percent, data.message || `正在压缩文件: ${data.file || ''}`, meta);
+                    } else if (data.status === 'packed') {
+                        this.setTaskStep(3);
+                        this.updateProgress(50, data.message || '压缩包创建完成，准备传输...', '');
+                    } else if (data.status === 'uploading') {
+                        this.setTaskStep(3);
+                        // 上传占用 50% ~ 98%
+                        const uploadRatio = data.total > 0 ? (data.current / data.total) : 0;
+                        const percent = Math.min(98, Math.round(50 + uploadRatio * 48));
+                        const meta = `${this.formatFileSize(data.current)} / ${this.formatFileSize(data.total)}`;
+                        this.updateProgress(percent, `正在上传云端: ${data.file || 'backup.zip'}`, meta);
                     } else if (data.status === 'success') {
-                        this.updateProgress(100, '备份上传完成');
+                        this.setTaskStep(4);
+                        this.updateProgress(100, '✅ 全量备份并上传完成！', '云端归档成功');
+                        setTimeout(() => this.showProgress(false), 3500);
+                        this.loadSyncLogs();
+                    } else if (data.status === 'error') {
+                        this.updateProgress(0, `❌ 备份失败: ${data.error || '未知错误'}`, '');
+                        setTimeout(() => this.showProgress(false), 5000);
                     }
                 } else if (data.type === 'sync') {
-                    if (data.status === 'processing') {
-                        const percent = (data.current / data.total) * 100;
-                        this.updateProgress(percent, `正在同步文件 (${data.current}/${data.total}): ${data.file}`)
+                    this.showProgress(true, '文件多线程同步中', '正在与 WebDAV 云端比对并同步变化');
+                    if (data.status === 'start') {
+                        this.setTaskStep(1);
+                        this.updateProgress(5, `开始同步，共 ${data.total || 0} 个文件...`, '');
+                    } else if (data.status === 'processing') {
+                        this.setTaskStep(3);
+                        const percent = data.total > 0 ? Math.min(99, Math.round((data.current / data.total) * 100)) : 50;
+                        const meta = `已完成: ${data.current}/${data.total}`;
+                        this.updateProgress(percent, `正在同步文件: ${data.file || ''}`, meta);
                     } else if (data.status === 'finish') {
-                        this.updateProgress(100, '文件同步完成');
+                        this.setTaskStep(4);
+                        const msg = data.message || (data.failCount > 0 ? `同步完成: ${data.successCount}成功，${data.failCount}失败/跳过` : '✅ 全部文件同步完成！');
+                        const meta = `共处理 ${data.total || 0} 个文件`;
+                        this.updateProgress(100, msg, meta);
+                        setTimeout(() => this.showProgress(false), 3500);
+                        this.loadSyncLogs();
+                    } else if (data.status === 'error') {
+                        this.updateProgress(0, `❌ 同步失败: ${data.message || '未知错误'}`, '');
+                        setTimeout(() => this.showProgress(false), 6000);
                     }
                 } else if (data.type === 'restore') {
-                    if (data.status === 'processing') {
-                        const percent = (data.current / data.total) * 100;
-                        this.updateProgress(percent, `正在恢复文件 (${data.current}/${data.total}): ${data.file}`);
+                    this.showProgress(true, '从云端恢复数据中', '正在拉取云端快照并还原本地');
+                    if (data.status === 'start') {
+                        this.setTaskStep(1);
+                        this.updateProgress(5, data.message || '正在检索云端数据列表...', '');
                     } else if (data.status === 'downloading') {
-                        this.updateProgress(30, data.message || '正在下载备份...');
+                        this.setTaskStep(3);
+                        this.updateProgress(35, data.message || '正在从云端下载备份包...', '');
                     } else if (data.status === 'extracting') {
-                        this.updateProgress(70, data.message || '正在解压备份...');
-                    } else if (data.status === 'start') {
-                        this.updateProgress(0, data.message || '正在从云端恢复数据...');
+                        this.setTaskStep(2);
+                        this.updateProgress(75, data.message || '正在解压并恢复数据文件...', '');
+                    } else if (data.status === 'processing') {
+                        this.setTaskStep(3);
+                        const percent = data.total > 0 ? Math.min(95, Math.round((data.current / data.total) * 100)) : 50;
+                        this.updateProgress(percent, `正在还原: ${data.file || ''}`, `进度: ${data.current}/${data.total}`);
                     } else if (data.status === 'finish') {
-                        this.updateProgress(100, data.message || '数据恢复完成');
+                        this.setTaskStep(4);
+                        this.updateProgress(100, '✅ 数据恢复完成！', '页面即将刷新生效');
+                        setTimeout(() => this.showProgress(false), 3500);
+                        this.loadSyncLogs();
                     } else if (data.status === 'error') {
-                        this.updateProgress(0, data.message || '恢复失败');
-                    }
-                } else if (data.type === 'file') {
-                    // 单文件上传进度（如果需要显示）
-                    if (data.status === 'uploading') {
-                        // 可以在这里更新更细粒度的进度，但可能会闪烁太快
+                        this.updateProgress(0, `❌ 恢复失败: ${data.message || '未知错误'}`, '');
+                        setTimeout(() => this.showProgress(false), 6000);
                     }
                 }
             } catch (e) {
@@ -2851,18 +3318,48 @@ class App {
         };
 
         this.sseSource.onerror = (err) => {
-            // console.error('SSE Error:', err);
             // 连接失败不报错，静默重试
         };
+    }
+
+    appendLiveSyncLog(log) {
+        const container = document.getElementById('sync-logs-content');
+        if (!container) return;
+
+        // 清理“暂无日志”提示
+        const emptyTip = container.querySelector('.sync-empty-tip');
+        if (emptyTip) emptyTip.remove();
+
+        const logItem = document.createElement('div');
+        logItem.className = 'sync-log-item new-log-flash';
+        logItem.innerHTML = `
+            <div class="log-info">
+                <span class="log-type log-type-${log.type}">${this.getLogTypeText(log.type)}</span>
+                <span class="log-file">${this.escapeHtml(log.file)}</span>
+                ${log.message ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">${this.escapeHtml(log.message)}</div>` : ''}
+            </div>
+            <div style="display: flex; align-items: center; gap: 1rem;">
+                <span class="log-status log-status-${log.status}">${log.status === 'success' ? '成功' : '失败'}</span>
+                <span class="log-time">${this.formatTime(log.timestamp)}</span>
+            </div>
+        `;
+
+        container.insertBefore(logItem, container.firstChild);
+
+        // 限制最大保留 100 条
+        while (container.children.length > 100) {
+            container.removeChild(container.lastChild);
+        }
     }
 
     async loadSyncLogs() {
         try {
             const data = await this.request('/api/webdav/logs');
             const container = document.getElementById('sync-logs-content');
+            if (!container) return;
 
             if (!data.logs || data.logs.length === 0) {
-                container.innerHTML = '<p style="color: var(--text-secondary); padding: 2rem; text-align: center;">暂无同步日志</p>';
+                container.innerHTML = '<p class="sync-empty-tip" style="color: var(--text-secondary); padding: 2.5rem; text-align: center;">暂无同步日志</p>';
                 return;
             }
 
@@ -2870,8 +3367,8 @@ class App {
             <div class="sync-log-item">
                 <div class="log-info">
                     <span class="log-type log-type-${log.type}">${this.getLogTypeText(log.type)}</span>
-                    <span class="log-file">${log.file}</span>
-                    ${log.message ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">${log.message}</div>` : ''}
+                    <span class="log-file">${this.escapeHtml(log.file)}</span>
+                    ${log.message ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">${this.escapeHtml(log.message)}</div>` : ''}
                 </div>
                 <div style="display: flex; align-items: center; gap: 1rem;">
                     <span class="log-status log-status-${log.status}">${log.status === 'success' ? '成功' : '失败'}</span>
@@ -3107,6 +3604,9 @@ class App {
         document.getElementById('restore-local-btn')?.addEventListener('click', () => document.getElementById('local-backup-input').click());
         document.getElementById('local-backup-input')?.addEventListener('change', (e) => this.handleLocalRestore(e));
 
+        // [新增] 进度卡片主动关闭/隐藏按钮
+        document.getElementById('btn-close-progress')?.addEventListener('click', () => this.showProgress(false));
+
         this.initSSE();
     }
 
@@ -3303,19 +3803,32 @@ class App {
 
     // [新增] 本地备份下载
     async downloadLocalBackup() {
-        if (!(await showSelect('本地备份', '确定要创建并下载本地全量 ZIP 备份吗？\n\n这可能需要一些时间，取决于数据量。'))) return;
+        if (!(await showSelect('本地备份', '确定要创建并下载本地全量 ZIP 备份吗？\n\n数据将被打包压缩为 ZIP 文件并由浏览器直接下载。'))) return;
+
+        this.showProgress(true, '本地 ZIP 备份下载', '正在打包服务器数据，请稍候...');
+        this.setTaskStep(1);
+        this.updateProgress(10, '正在准备打包环境...', '');
 
         try {
             // 直接通过 URL 下载，后端会处理 ZIP 创建并流式传输
             const url = `/api/backup/download?auth=${encodeURIComponent(this.password)}`;
             const a = document.createElement('a');
             a.href = url;
-            // 获取当前日期作为文件名建议
             const dateStr = new Date().toISOString().split('T')[0];
             a.download = `lx-sync-backup-local-${dateStr}.zip`;
             a.click();
+
+            this.setTaskStep(3);
+            this.updateProgress(60, '正在生成并下载 ZIP 压缩包...', '');
+            setTimeout(() => {
+                this.setTaskStep(4);
+                this.updateProgress(100, '✅ 本地备份已发送到浏览器下载！', '');
+                setTimeout(() => this.showProgress(false), 3000);
+            }, 1200);
         } catch (err) {
+            this.updateProgress(0, `❌ 下载失败: ${err.message}`, '');
             showError('下载本地备份失败: ' + err.message);
+            setTimeout(() => this.showProgress(false), 4000);
         }
     }
 

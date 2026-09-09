@@ -82,6 +82,10 @@ const loadedApis = new Map<string, any>()
 // API 初始化状态追踪 map<id, status>
 const apiStatus = new Map<string, { status: 'success' | 'failed', error?: string }>()
 
+export function getLoadedApisCount() {
+    return loadedApis.size
+}
+
 export function getApiStatus(owner: string, id: string) {
     return apiStatus.get(`${owner}_${id}`)
 }

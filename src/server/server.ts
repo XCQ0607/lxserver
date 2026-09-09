@@ -20,7 +20,7 @@ import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
-import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis } from './userApi'
+import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './userApi'
 import * as customSourceHandlers from './customSourceHandlers'
 import * as fileCache from './fileCache'
 import * as customMusicManager from './customMusicManager'
@@ -1317,6 +1317,9 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           cpuModel: os.cpus()[0]?.model || 'Unknown',
           cpuSpeed: os.cpus()[0]?.speed || 0,
           isWebDAVConfigured: !!(global.lx.config['webdav.url'] && global.lx.config['webdav.url'].trim() !== ''),
+          sourcesCount: getLoadedApisCount ? getLoadedApisCount() : 0,
+          nodeVersion: process.version,
+          platform: `${os.type()} ${os.arch()}`,
         }
 
         res.writeHead(200, {
@@ -6374,6 +6377,80 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // WebDAV Backups List API
+      if (pathname === '/api/webdav/backups' && req.method === 'GET') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401)
+          res.end('Unauthorized')
+          return
+        }
+
+        const webdavSync = global.lx.webdavSync
+        if (!webdavSync) {
+          res.writeHead(500)
+          res.end(JSON.stringify({ success: false, message: 'WebDAV not initialized', backups: [] }))
+          return
+        }
+
+        void webdavSync.getBackupList().then((backups: any[]) => {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'no-cache, no-store, must-revalidate'
+          })
+          res.end(JSON.stringify({ success: true, backups }))
+        }).catch((err: any) => {
+          res.writeHead(500)
+          res.end(JSON.stringify({ success: false, message: err.message, backups: [] }))
+        })
+        return
+      }
+
+      // WebDAV Delete Backup API
+      if (pathname === '/api/webdav/backup' && req.method === 'DELETE') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['frontend.password']) {
+          res.writeHead(401)
+          res.end('Unauthorized')
+          return
+        }
+
+        const webdavSync = global.lx.webdavSync
+        if (!webdavSync) {
+          res.writeHead(500)
+          res.end(JSON.stringify({ success: false, message: 'WebDAV not initialized' }))
+          return
+        }
+
+        let body = ''
+        req.on('data', chunk => {
+          body += chunk.toString()
+        })
+        req.on('end', () => {
+          try {
+            const data = body ? JSON.parse(body) : {}
+            const filename = data.filename
+            if (!filename) {
+              res.writeHead(400)
+              res.end(JSON.stringify({ success: false, message: 'Filename is required' }))
+              return
+            }
+
+            void webdavSync.deleteBackupFile(filename).then((success: boolean) => {
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success }))
+            }).catch((err: any) => {
+              res.writeHead(500)
+              res.end(JSON.stringify({ success: false, message: err.message }))
+            })
+          } catch (err: any) {
+            res.writeHead(400)
+            res.end(JSON.stringify({ success: false, message: 'Invalid JSON' }))
+          }
+        })
+        return
+      }
+
       // WebDAV Restore API
       if (pathname === '/api/webdav/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
@@ -6390,12 +6467,25 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           return
         }
 
-        void webdavSync.restoreFromRemote().then(async (success: boolean) => {
-          if (success) {
-            await reloadServerData()
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success }))
+        void readBody(req).then((body) => {
+          let payload: any = {}
+          try {
+            payload = JSON.parse(body || '{}')
+          } catch (e) {}
+
+          const mode = payload.mode || 'auto'
+          const targetFilename = payload.targetFilename
+
+          void webdavSync.restoreFromRemote({ mode, targetFilename }).then(async (success: boolean) => {
+            if (success) {
+              await reloadServerData()
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success }))
+          }).catch((err: any) => {
+            res.writeHead(500)
+            res.end(JSON.stringify({ success: false, message: err.message }))
+          })
         })
         return
       }
@@ -6438,12 +6528,22 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
           'Cache-Control': 'no-cache',
           'Connection': 'keep-alive',
         })
-        res.write('retry: 10000\\n\\n')
+        res.write('retry: 5000\n\n')
 
         const client = res
         sseClients.add(client)
 
+        // 定时发送 SSE 心跳保活
+        const heartbeatTimer = setInterval(() => {
+          try {
+            client.write(': heartbeat\n\n')
+          } catch {
+            clearInterval(heartbeatTimer)
+          }
+        }, 15000)
+
         req.on('close', () => {
+          clearInterval(heartbeatTimer)
           sseClients.delete(client)
         })
         return
@@ -6824,10 +6924,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
     perMessageDeflate: false,
   }) as unknown as LX.SocketServer
 
-  // WebDAV Sync Progress Broadcast
+  // WebDAV Sync Progress & Log Broadcast
   if (global.lx.webdavSync) {
     // 移除旧的监听器以防重复添加
     global.lx.webdavSync.removeAllListeners('progress')
+    global.lx.webdavSync.removeAllListeners('log')
+
     global.lx.webdavSync.on('progress', (data: any) => {
       // Broadcast to WebSocket clients
       if (wss) {
@@ -6839,6 +6941,22 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         }
       }
       // Broadcast to SSE clients
+      const sseMsg = `data: ${JSON.stringify(data)}\n\n`
+      for (const client of sseClients) {
+        client.write(sseMsg)
+      }
+    })
+
+    global.lx.webdavSync.on('log', (log: any) => {
+      const data = { type: 'sync_log', log }
+      if (wss) {
+        const msg = JSON.stringify({ type: 'webdav_log', data })
+        for (const client of wss.clients) {
+          if (client.readyState === WebSocket.OPEN) {
+            client.send(msg)
+          }
+        }
+      }
       const sseMsg = `data: ${JSON.stringify(data)}\n\n`
       for (const client of sseClients) {
         client.write(sseMsg)
