@@ -14,6 +14,32 @@ import {
   SYNC_CLOSE_CODE,
 } from '@/constants'
 import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace } from '@/user'
+import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
+import { encodeAlbumRule } from '@/modules/dislike/utils'
+import { normalizeText } from '@/server/utils/songVersion'
+import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
+
+/** 当前生效的 dislike 匹配选项，下发给前端保证前后端判定一致 */
+const dislikeMatchOptions = () => ({
+  crossSource: global.lx.config['subsonic.dislikeCrossSource'] === true,
+  duetMode: (global.lx.config['subsonic.dislikeDuetMode'] || 'any') as 'any' | 'all' | 'primary',
+  normalizeName: global.lx.config['subsonic.dislikeNormalizeName'] !== false,
+  requireSinger: global.lx.config['subsonic.dislikeRequireSinger'] !== false,
+})
+
+/** 把 dislike 规则集转成可 JSON 序列化的结构（Set/Map → Array，否则 JSON 里会变成 {}） */
+const serializeDislikeRules = (rules: string) => {
+  const parsed = parseDislikeRules(rules)
+  return {
+    exact: Array.from(parsed.exact),
+    musicNames: Array.from(parsed.musicNames),
+    singerNames: Array.from(parsed.singerNames),
+    albums: Array.from(parsed.albums.entries()).map(([albumName, singers]) => ({
+      albumName,
+      singers: Array.from(singers),
+    })),
+  }
+}
 import { createMsg2call } from 'message2call'
 import { ElFinderConnector, getSystemRoot } from './elfinderConnector'
 import formidable from 'formidable'
@@ -5645,6 +5671,115 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
         return
       }
 
+      // [新增] dislike 规则 API
+      // 与 Subsonic 评分联动共用同一份 lx-music 原生规则，保证各端一致：
+      //   GET  /api/music/dislike        返回已解析的规则集（歌曲 / 歌手 / 专辑）
+      //   POST /api/music/dislike/add     body: { type, name?, singer?, source?, albumId? }
+      //   POST /api/music/dislike/remove  body: 同上
+      if (pathname === '/api/music/dislike' && req.method === 'GET') {
+        const verified = verifyUserAuth(req)
+        if (!verified) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void getUserSpace(verified).dislikeManage.getDislikeRules().then(rules => {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+          res.end(JSON.stringify({ success: true, data: serializeDislikeRules(String(rules || '')), options: dislikeMatchOptions() }))
+        }).catch((err: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: err.message }))
+        })
+        return
+      }
+
+      if ((pathname === '/api/music/dislike/add' || pathname === '/api/music/dislike/remove') && req.method === 'POST') {
+        void readBody(req).then(async body => {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          try {
+            const isAdd = pathname === '/api/music/dislike/add'
+            const payload = JSON.parse(body || '{}')
+            const type = String(payload.type || 'song')
+            const name = String(payload.name || '')
+            const singer = String(payload.singer || '')
+            const source = String(payload.source || '')
+            const id = String(payload.id || '')
+            const albumId = String(payload.albumId || '')
+            const dm = getUserSpace(verified).dislikeManage
+
+            let removeKeys: Set<string> = new Set()
+            if (type === 'album') {
+              const albumName = String(payload.albumName || '')
+              if (!albumName) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing albumName' }))
+                return
+              }
+              const singers = splitSingers(singer)
+              if (isAdd) await dm.dislikeDataManage.addDislikeAlbums(singers.map(s => ({ albumName, singer: s })))
+              else for (const s of singers) removeKeys.add(encodeAlbumRule(albumName, s).toLowerCase())
+            } else if (type === 'singer') {
+              if (!singer) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing singer' }))
+                return
+              }
+              if (isAdd) await dm.dislikeDataManage.addDislikeInfo([{ name: '', singer }])
+              else removeKeys.add(`@${normalizeText(singer)}`)
+            } else {
+              if (!name) {
+                res.writeHead(400, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Missing name' }))
+                return
+              }
+              if (isAdd) await dm.dislikeDataManage.addDislikeInfo([{ name, singer }])
+              else removeKeys.add(singer ? `${normalizeText(name)}@${normalizeText(singer)}` : normalizeText(name))
+            }
+
+            // [双向联动] Web「不喜欢」 <-> Subsonic 评分：歌曲维度回写 ratings 映射。
+            // 仅当配置 subsonic.dislikeRating > 0 且请求带有效 id/source 时启用；
+            // 加不喜欢 -> ratings[id]=1（落入 dislike 区间，与正向联动一致）；取消 -> 清除评分。
+            // 专辑/歌手维度无法用单首歌评分表示，故跳过。
+            const dislikeRatingThreshold = global.lx.config['subsonic.dislikeRating'] ?? 1
+            if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
+              const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
+              try {
+                const { syncDislikeToRating } = require('./subsonic')
+                syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
+              } catch (e) {
+                console.error('[Dislike API] 评分回写失败:', e)
+              }
+            }
+
+            // 移除：原生没有单条删除，过滤掉目标行后整体覆盖
+            if (!isAdd && removeKeys.size > 0) {
+              const rules = String((await dm.getDislikeRules()) || '')
+              const lines = rules.split('\n').filter(l => l.trim())
+              const remain = lines.filter(l => !removeKeys.has(l.trim().toLowerCase()))
+              if (remain.length !== lines.length) {
+                await dm.dislikeDataManage.overwirteDislikeInfo(remain.join('\n'))
+              }
+            }
+
+            await dm.createSnapshot()
+            invalidateDislikeCache(verified)
+            const rules = await dm.getDislikeRules()
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+            res.end(JSON.stringify({ success: true, data: serializeDislikeRules(String(rules || '')), options: dislikeMatchOptions() }))
+          } catch (err: any) {
+            console.error('[Dislike API] Error:', err?.message)
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: err.message }))
+          }
+        })
+        return
+      }
+
       // [新增] 封面 API (备用)
 
       // [新增] 自定义源管理 API
@@ -5930,9 +6065,24 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
+            'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'] ?? 1,
+            'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'] ?? false,
+            'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'] ?? false,
+            'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'] ?? true,
+            'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'] ?? false,
+            'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'] ?? true,
+            'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'] ?? 'any',
+            'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'] ?? true,
+            'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'] ?? true,
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? true,
+            'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'] ?? true,
+            'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'] ?? 'flac,320k,128k',
+            'subsonic.quality.clientCapMode': global.lx.config['subsonic.quality.clientCapMode'] ?? 'soft',
+            'subsonic.source.priority': global.lx.config['subsonic.source.priority'] ?? 'kw,tx,wy,mg,kg',
+            'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'] ?? true,
+            'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'] ?? true,
             'singer.sourcePriority': (global.lx.config['singer.sourcePriority'] || ['tx', 'wy']).join(','),
             'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'] ?? 20,
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
@@ -6049,9 +6199,28 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
                 if (['tx', 'wy', 'kg', 'kw', 'mg'].includes(s)) global.lx.config['subsonic.leaderboardSource'] = s
               }
+              if (newConfig['subsonic.dislikeRating'] !== undefined) global.lx.config['subsonic.dislikeRating'] = Number(newConfig['subsonic.dislikeRating'])
+              if (newConfig['subsonic.hideDisliked'] !== undefined) global.lx.config['subsonic.hideDisliked'] = !!newConfig['subsonic.hideDisliked']
+              if (newConfig['subsonic.dislikeCrossSource'] !== undefined) global.lx.config['subsonic.dislikeCrossSource'] = !!newConfig['subsonic.dislikeCrossSource']
+              if (newConfig['subsonic.dislikeNoRecommend'] !== undefined) global.lx.config['subsonic.dislikeNoRecommend'] = !!newConfig['subsonic.dislikeNoRecommend']
+              if (newConfig['subsonic.dislikeDuetMode'] !== undefined) {
+                const dm = String(newConfig['subsonic.dislikeDuetMode']).trim().toLowerCase()
+                if (['any', 'all', 'primary'].includes(dm)) global.lx.config['subsonic.dislikeDuetMode'] = dm as any
+              }
+              if (newConfig['subsonic.dislikeNormalizeName'] !== undefined) global.lx.config['subsonic.dislikeNormalizeName'] = !!newConfig['subsonic.dislikeNormalizeName']
+              if (newConfig['subsonic.dislikeRequireSinger'] !== undefined) global.lx.config['subsonic.dislikeRequireSinger'] = !!newConfig['subsonic.dislikeRequireSinger']
+              if (newConfig['subsonic.linkRatingToDislike'] !== undefined) global.lx.config['subsonic.linkRatingToDislike'] = !!newConfig['subsonic.linkRatingToDislike']
+              if (newConfig['subsonic.linkDislikeToRating'] !== undefined) global.lx.config['subsonic.linkDislikeToRating'] = !!newConfig['subsonic.linkDislikeToRating']
+              if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
+              if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
+              if (newConfig['subsonic.quality.priority'] !== undefined) global.lx.config['subsonic.quality.priority'] = String(newConfig['subsonic.quality.priority'])
+              if (newConfig['subsonic.quality.clientCapMode'] !== undefined && ['hard', 'soft'].includes(newConfig['subsonic.quality.clientCapMode'])) global.lx.config['subsonic.quality.clientCapMode'] = newConfig['subsonic.quality.clientCapMode']
+              if (newConfig['subsonic.source.priority'] !== undefined) global.lx.config['subsonic.source.priority'] = String(newConfig['subsonic.source.priority'])
+              if (newConfig['subsonic.source.crossPlatform'] !== undefined) global.lx.config['subsonic.source.crossPlatform'] = !!newConfig['subsonic.source.crossPlatform']
+              if (newConfig['subsonic.source.autoSwitchCustom'] !== undefined) global.lx.config['subsonic.source.autoSwitchCustom'] = !!newConfig['subsonic.source.autoSwitchCustom']
               if (newConfig['singer.sourcePriority'] !== undefined) {
                 const priority = String(newConfig['singer.sourcePriority']).split(',').filter(s => s === 'tx' || s === 'wy') as Array<'tx' | 'wy'>
                 if (priority.length > 0) global.lx.config['singer.sourcePriority'] = priority
@@ -6122,9 +6291,25 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
                 'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
                 'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
+                'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'],
+                'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'],
+                'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'],
+                'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'],
+                'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'],
+                'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'],
+                'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'],
+                'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'],
+                'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'],
+                'subsonic.recommendPoolSize': global.lx.config['subsonic.recommendPoolSize'],
                 'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
                 'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
                 'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],
+                'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'],
+                'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'],
+                'subsonic.quality.clientCapMode': global.lx.config['subsonic.quality.clientCapMode'],
+                'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
+                'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'],
+                'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'],
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],

@@ -19,6 +19,7 @@ const ASSETS_TO_CACHE = [
     './js/songlist_manager.js',
     './js/list_search.js',
     './js/leaderboard_manager.js',
+    './js/dislike_manager.js',
     './js/local_music.js',
     './js/download_manager.js',
     './js/common_ui.js',

@@ -12,23 +12,27 @@ export const fetchRecommendedAlbums = async (type: string, size: number = 20) =>
         comm: { ct: 24, cv: 0 }
     }
 
+    // 每个地区的抓取量：按请求总量分摊到 6 个地区。
+    // 原来固定写死 num=5/10（合计约 30 条），客户端滚动一页就见底；
+    // 现在按 size 动态分配，让推荐池能支撑多页翻页。
+    const perArea = Math.max(5, Math.ceil((size || 20) / 6))
+
     if (type === 'recent') {
-        // [最新上架] 6个地区每个地区前5个组合
+        // [最新上架] 6个地区每个地区前 perArea 个组合
         for (let i = 1; i <= 6; i++) {
             payload[`area_${i}`] = {
                 module: 'newalbum.NewAlbumServer',
                 method: 'get_new_album_info',
-                param: { area: i, start: 0, num: 5 },
+                param: { area: i, start: 0, num: perArea },
             }
         }
     } else if (type === 'random') {
-        // [随机推荐] area 1-6 随机抽取和组合显示30条
-        // 从每个地区多取一些(10个)，合并后随机打乱
+        // [随机推荐] area 1-6 随机抽取和组合
         for (let i = 1; i <= 6; i++) {
             payload[`area_${i}`] = {
                 module: 'newalbum.NewAlbumServer',
                 method: 'get_new_album_info',
-                param: { area: i, start: 0, num: 10 },
+                param: { area: i, start: 0, num: perArea },
             }
         }
     } else {
@@ -67,13 +71,13 @@ export const fetchRecommendedAlbums = async (type: string, size: number = 20) =>
             }
         }
 
-        // 针对 random 类型进行打乱并截取 30 条
+        // 针对 random 类型进行打乱，并按请求数量截取
+        // （不再固定 30 条，否则客户端滚动一页就到底）
         if (type === 'random') {
             rawList.sort(() => Math.random() - 0.5)
-            rawList = rawList.slice(0, 30)
+            rawList = rawList.slice(0, size)
         } else if (type === 'recent') {
-            // recent 也限制在 30 条(5*6)
-            rawList = rawList.slice(0, 30)
+            rawList = rawList.slice(0, size)
         }
 
         return rawList.map(item => {

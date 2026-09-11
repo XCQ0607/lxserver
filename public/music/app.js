@@ -9800,7 +9800,7 @@ function buildPlaylistExport(listId, exportedAt = new Date().toISOString()) {
     if (listId === 'default') {
         playlist = { id: 'default', name: '默认列表', source: 'lxserver', list: currentListData.defaultList || [] };
     } else if (listId === 'love') {
-        playlist = { id: 'love', name: '我的收藏', source: 'lxserver', list: currentListData.loveList || [] };
+        playlist = { id: 'love', name: '我的喜爱', source: 'lxserver', list: currentListData.loveList || [] };
     } else {
         playlist = currentListData.userList?.find(item => item.id === listId);
     }
@@ -10023,7 +10023,8 @@ function renderMyLists(data) {
         sidebarItems.push({ id: 'default', type: 'system', el: createItem('default', '默认列表', 'fa-list', data.defaultList.length) });
     }
     if (data.loveList) {
-        sidebarItems.push({ id: 'love', type: 'system', el: createItem('love', '我的收藏', 'fa-heart', data.loveList.length) });
+        // 内层 ♥ 喜爱列表，命名为「我的喜爱」以与外层「我的收藏」折叠面板区分
+        sidebarItems.push({ id: 'love', type: 'system', el: createItem('love', '我的喜爱', 'fa-heart', data.loveList.length) });
     }
     if (data.userList) {
         data.userList.forEach(l => {
@@ -10081,7 +10082,7 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
         title = '默认列表';
     } else if (listId === 'love') {
         list = currentListData.loveList;
-        title = '我的收藏';
+        title = '我的喜爱';
     } else {
         const uList = currentListData.userList.find(l => l.id === listId);
         if (uList) {
@@ -11773,7 +11774,7 @@ function renderPlaylistAddGrid() {
     // 1. My Love
     const loveList = activeListData.loveList || [];
     const isLoved = !isBatch && targetId && loveList.some(s => s.id === targetId);
-    listContainer.appendChild(createGridItem('love', '我的收藏', loveList.length, isLoved));
+    listContainer.appendChild(createGridItem('love', '我的喜爱', loveList.length, isLoved));
 
     // 2. User Lists
     if (activeListData.userList) {

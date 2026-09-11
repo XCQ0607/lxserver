@@ -1234,6 +1234,102 @@
                                     </select>
                                     <small class="config-hint">设置歌手详情、头像及简介的获取来源优先级</small>
                                 </div>
+
+                                <!-- 不喜欢 / 评分联动 -->
+                                <div class="config-divider"></div>
+                                <div style="font-weight:600;margin:14px 0 10px;color:var(--text-primary);">不喜欢 / 评分联动 (Subsonic)</div>
+
+                                <div class="config-field">
+                                    <label class="config-label">评分联动 dislike 阈值</label>
+                                    <select name="subsonic.dislikeRating" class="form-input config-input">
+                                        <option value="0">0（关闭：评分不影响 dislike）</option>
+                                        <option value="1">1（≤1 星视为不喜欢）</option>
+                                        <option value="2">2（≤2 星视为不喜欢）</option>
+                                        <option value="3">3（≤3 星视为不喜欢）</option>
+                                        <option value="4">4（≤4 星视为不喜欢）</option>
+                                        <option value="5">5（任何非满星视为不喜欢）</option>
+                                    </select>
+                                    <small class="config-hint">Subsonic 客户端打低星时写回原生 dislike 规则的阈值；0 关闭整条联动</small>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">在列表中隐藏 dislike 歌曲</span>
+                                        <span class="config-toggle-desc">命中不喜欢规则的歌曲从专辑/歌单/搜索等列表中剔除；关闭则仅以评分体现</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.hideDisliked" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">dislike 跨平台同名命中</span>
+                                        <span class="config-toggle-desc">开启后同名不同歌手/专辑也会被一并屏蔽（有误伤风险）</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.dislikeCrossSource" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">推荐类接口排除 dislike</span>
+                                        <span class="config-toggle-desc">每日推荐/随机/相似歌曲中排除 dislike 命中歌曲（与隐藏列表独立）</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.dislikeNoRecommend" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">多歌手匹配模式（合唱 / 专辑共用）</label>
+                                    <select name="subsonic.dislikeDuetMode" class="form-input config-input">
+                                        <option value="any">any（任一歌手命中即屏蔽，合辑友好）</option>
+                                        <option value="all">all（全部歌手命中才屏蔽）</option>
+                                        <option value="primary">primary（仅看第一位歌手）</option>
+                                    </select>
+                                    <small class="config-hint">歌曲与专辑维度多歌手时，dislike 规则命中的判定方式（合唱歌曲与专辑歌手集合统一按此处理）</small>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">歌名去版本后缀归一化</span>
+                                        <span class="config-toggle-desc">「晴天 (Live)」也能命中「晴天」规则（代价：少数仅差后缀的不同歌曲会误并）</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.dislikeNormalizeName" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">要求歌手同时匹配</span>
+                                        <span class="config-toggle-desc">歌曲/专辑级别都要求歌手匹配，避免不同歌手同名歌曲被一起屏蔽</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.dislikeRequireSinger" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">评星 → 不喜欢 自动联动</span>
+                                        <span class="config-toggle-desc">Subsonic 客户端打低星时写回原生 dislike 规则；关闭则评分仅记录、不触碰不喜欢</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.linkRatingToDislike" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">不喜欢 → 评星 自动联动</span>
+                                        <span class="config-toggle-desc">网页端/Subsonic 点「不喜欢」回写客户端评分（低星）；关闭则不喜欢仅写入规则、不回写评星</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.linkDislikeToRating" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
                             </div>
                         </div>
 
