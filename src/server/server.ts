@@ -5722,7 +5722,12 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               }
               const singers = splitSingers(singer)
               if (isAdd) await dm.dislikeDataManage.addDislikeAlbums(singers.map(s => ({ albumName, singer: s })))
-              else for (const s of singers) removeKeys.add(encodeAlbumRule(albumName, s).toLowerCase())
+              else for (const s of singers) {
+                // 规范形式，与写入侧(filterRules -> encodeAlbumRule)完全一致：!<归一化专辑名>@<归一化歌手>
+                removeKeys.add(encodeAlbumRule(normalizeText(albumName), s))
+                // 兼容历史数据：旧版本整行归一化会把 @ 写成 #，一并加入以便清理存量条目
+                removeKeys.add(normalizeText(encodeAlbumRule(albumName, s)))
+              }
             } else if (type === 'singer') {
               if (!singer) {
                 res.writeHead(400, { 'Content-Type': 'application/json' })
@@ -5750,7 +5755,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
               try {
                 const { syncDislikeToRating } = require('./subsonic')
-                syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
+                await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
               } catch (e) {
                 console.error('[Dislike API] 评分回写失败:', e)
               }

@@ -161,6 +161,29 @@ export function syncNativeLibraryToSubsonic(
 }
 
 /**
+ * 同一用户 subsonic-meta.json 的「读-改-写」串行化锁。
+ *
+ * handleSetRating / handleStar / syncDislikeToRating 三处都会对同一个文件做读-改-写且互不互斥，
+ * 而中间存在 await 会让出事件循环；Subsonic 客户端批量操作时容易并发发出 star 与 setRating，
+ * 后写入者会整体覆盖前者的修改，导致用户刚设置的星标或评分丢失。
+ * 这里按 username 串成 Promise 链，保证同一用户的读-改-写严格顺序执行。
+ */
+const metaLocks = new Map<string, Promise<unknown>>()
+
+function withMetaLock<T>(username: string, task: () => Promise<T>): Promise<T> {
+    const prev = metaLocks.get(username) ?? Promise.resolve()
+    const run = (): Promise<T> => task()
+    // 前一个任务无论成功还是失败都要继续，避免一次异常卡死整条队列
+    const next = prev.then(run, run)
+    const tail = next.then(() => undefined, () => undefined)
+    metaLocks.set(username, tail)
+    tail.then(() => {
+        if (metaLocks.get(username) === tail) metaLocks.delete(username)
+    })
+    return next
+}
+
+/**
  * 双向联动：网页端「不喜欢」(dislike) <-> Subsonic 评分(rating)。
  * 网页给某首歌点「不喜欢」时，回写该用户 subsonic-meta.json 的 ratings 映射，
  * 使 Subsonic 客户端能看到这颗低星（与正向联动 handleSetRating 共用同一份存储）：
@@ -168,19 +191,21 @@ export function syncNativeLibraryToSubsonic(
  *   rating <= 0 -> 删除 ratings[id]（恢复未评）
  * id 即 Subsonic 歌曲 id（source_songId）。模块级函数，供 server.ts 的 /api/music/dislike 直接调用。
  */
-export function syncDislikeToRating(username: string, id: string, rating: number): void {
+export async function syncDislikeToRating(username: string, id: string, rating: number): Promise<void> {
     if (!id) return
     try {
-        const meta = readSubsonicMeta(username)
-        const r = Math.max(0, Math.min(5, Math.floor(rating)))
-        if (r <= 0) {
-            if (meta.ratings[id] === undefined) return
-            delete meta.ratings[id]
-        } else {
-            meta.ratings[id] = r
-        }
-        writeSubsonicMeta(username, meta)
-        subsonicLog.debug(`[Subsonic] dislike<->rating 同步: ${id} -> ${r} (user=${username})`)
+        await withMetaLock(username, async () => {
+            const meta = readSubsonicMeta(username)
+            const r = Math.max(0, Math.min(5, Math.floor(rating)))
+            if (r <= 0) {
+                if (meta.ratings[id] === undefined) return
+                delete meta.ratings[id]
+            } else {
+                meta.ratings[id] = r
+            }
+            writeSubsonicMeta(username, meta)
+            subsonicLog.debug(`[Subsonic] dislike<->rating 同步: ${id} -> ${r} (user=${username})`)
+        })
     } catch (e) {
         subsonicLog.error('[Subsonic] dislike<->rating 同步失败:', e)
     }
@@ -515,8 +540,10 @@ class SubsonicHandler {
             subsonicLog.debug(`[Subsonic Debug] ${req.method} /${method} (${format}) ${logDetails}`)
             // [实测] 完整记录客户端发来的所有参数，用于确认真实请求到底带了哪些字段（密码脱敏）
             const rawParams: Record<string, string> = {}
+            // 脱敏：明文密码(p / password) 与令牌认证(t=md5(密码+salt) / s=salt) 均不得落入日志
+            const SENSITIVE_KEYS = new Set(['p', 'password', 't', 's'])
             params.forEach((v, k) => {
-                rawParams[k] = (k === 'p' || k === 'password') ? '***' : v
+                rawParams[k] = SENSITIVE_KEYS.has(k) ? '***' : v
             })
             subsonicLog.debug(`[Subsonic RAW] /${method} ${JSON.stringify(rawParams)}`)
         }
@@ -1775,21 +1802,41 @@ class SubsonicHandler {
         }
         if (!Array.isArray(libAlbums) || libAlbums.length === 0) return
 
-        const MAX_FILL = 20
+        const MAX_FILL = 20         // 单次请求最多「成功补全」的专辑数
+        const MAX_ATTEMPTS = 20     // 单次请求最多发起的回源次数（原实现只统计成功数，音源全挂时会遍历整个库）
+        const REQ_TIMEOUT = 8000    // 单次回源超时(ms)，无超时会挂住整个 getAlbumList
+        const FAIL_COOLDOWN = 10 * 60 * 1000  // 失败冷却 10 分钟，冷却期内不再重复回源
+
+        // 带超时的 Promise 包装：超时后清理定时器，避免遗留句柄
+        const withTimeout = (p: Promise<any>, ms: number): Promise<any> =>
+            new Promise<any>((resolve, reject) => {
+                const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+                Promise.resolve(p).then(
+                    v => { clearTimeout(timer); resolve(v) },
+                    e => { clearTimeout(timer); reject(e) },
+                )
+            })
+
         let filled = 0
+        let attempted = 0
         let dirty = false
+        const now = Date.now()
 
         for (const alb of libAlbums) {
-            if (filled >= MAX_FILL) break
+            if (filled >= MAX_FILL || attempted >= MAX_ATTEMPTS) break
             if (Array.isArray(alb?.list) && alb.list.length > 0) continue
             const source = alb.source || 'wy'
             const albMid = String(alb?.meta?.albumId || alb?.id || '')
             if (!albMid) continue
+            // 失败冷却：近期回源失败的专辑在冷却期内直接跳过，避免每次请求都重复打音源
+            const failedAt = Number(alb?.fillFailedAt || 0)
+            if (failedAt && now - failedAt < FAIL_COOLDOWN) continue
             const sdk = (musicSdk as any)[source]
             if (!sdk?.extendDetail?.getAlbumSongs) continue
 
+            attempted++
             try {
-                const data = await sdk.extendDetail.getAlbumSongs(albMid)
+                const data = await withTimeout(sdk.extendDetail.getAlbumSongs(albMid), REQ_TIMEOUT)
                 const list = (data?.list || []).map((s: any) => ({
                     source,
                     singer: s.singer,
@@ -1802,13 +1849,22 @@ class SubsonicHandler {
                     songId: s.songId,
                     songmid: s.songmid || s.songId,
                 }))
-                if (list.length === 0) continue
+                if (list.length === 0) {
+                    // 空结果同样视为失败：记录时间戳并写回，冷却期内不再重试
+                    alb.fillFailedAt = now
+                    dirty = true
+                    continue
+                }
                 alb.list = list
+                if (alb.fillFailedAt !== undefined) delete alb.fillFailedAt
                 if (!alb.name && data.name) alb.name = data.name
                 if (!alb.picUrl && list[0]?.img) alb.picUrl = list[0].img
                 dirty = true
                 filled++
             } catch (e: any) {
+                // 记录失败时间，使后续请求在冷却期内跳过该专辑（原实现失败不记忆，会每次重复回源）
+                alb.fillFailedAt = now
+                dirty = true
                 subsonicLog.error(`[Subsonic] 专辑库补全失败 (${source}/${albMid}):`, e?.message)
             }
         }
@@ -2945,6 +3001,14 @@ class SubsonicHandler {
         const location = (global.lx.config['list.addMusicLocationType'] || 'bottom') as 'top' | 'bottom'
         let loveChanged = false
         let metaChanged = false
+        // 记录本次操作的增量。循环里存在网络 await（解析专辑/歌手/歌曲），
+        // 不能长时间持锁，因此只在写回时加锁，并把增量与「最新 meta」合并，避免覆盖并发写入。
+        const addedAlbums = new Set<string>()
+        const removedAlbums = new Set<string>()
+        const addedArtists = new Set<string>()
+        const removedArtists = new Set<string>()
+        const addedArtistNames = new Set<string>()
+        const removedArtistNames = new Set<string>()
         const action = isStar ? 'star' : 'unstar'
         const debug = !!global.lx.config['subsonic.enableDebug']
         const debugLog = (msg: string) => { if (debug) console.log(msg) }
@@ -2957,7 +3021,7 @@ class SubsonicHandler {
 
         for (const id of ids) {
             if (id.startsWith('alb_')) {
-                isStar ? starredAlbums.add(id) : starredAlbums.delete(id)
+                if (isStar) { starredAlbums.add(id); addedAlbums.add(id) } else { starredAlbums.delete(id); removedAlbums.add(id) }
                 metaChanged = true
                 subsonicLog.debug(`[Subsonic] ${action} 专辑 ${id} (user=${username})`)
                 debugLog(`[Subsonic Debug] ${action} 专辑 ${id} -> ${isStar ? '已星标' : '已取消星标'} (user=${username})`)
@@ -2990,10 +3054,10 @@ class SubsonicHandler {
                     subsonicLog.warn(`[Subsonic] ${action} 歌手 ${id} 跳过：无法解析歌手标识，未做任何改动 (user=${username})`)
                     continue
                 }
-                isStar ? starredArtists.add(canonical) : starredArtists.delete(canonical)
+                if (isStar) { starredArtists.add(canonical); addedArtists.add(canonical) } else { starredArtists.delete(canonical); removedArtists.add(canonical) }
                 if (name) {
                     const nk = this.normalizeArtistName(name)
-                    isStar ? starredArtistNames.add(nk) : starredArtistNames.delete(nk)
+                    if (isStar) { starredArtistNames.add(nk); addedArtistNames.add(nk) } else { starredArtistNames.delete(nk); removedArtistNames.add(nk) }
                 }
                 metaChanged = true
                 subsonicLog.debug(`[Subsonic] ${action} 歌手 ${id} -> 规范=${canonical}${name ? `, 名=${name}` : ''} (user=${username})`)
@@ -3041,11 +3105,18 @@ class SubsonicHandler {
         }
 
         if (metaChanged) {
-            await this.saveUserSubsonicMeta(username, {
-                starredAlbums: Array.from(starredAlbums),
-                starredArtists: Array.from(starredArtists),
-                starredArtistNames: Array.from(starredArtistNames),
-                ratings: meta.ratings,
+            await withMetaLock(username, async () => {
+                // 与「写回时刻的最新 meta」合并，而不是用循环开始前读到的旧快照整体覆盖，
+                // 否则会丢失并发的 star / setRating 写入。
+                const fresh = await this.getUserSubsonicMeta(username)
+                const merge = (base: string[], add: Set<string>, del: Set<string>): string[] =>
+                    Array.from(new Set([...(base || []).filter((x: string) => !del.has(x)), ...add]))
+                await this.saveUserSubsonicMeta(username, {
+                    starredAlbums: merge(fresh.starredAlbums, addedAlbums, removedAlbums),
+                    starredArtists: merge(fresh.starredArtists, addedArtists, removedArtists),
+                    starredArtistNames: merge(fresh.starredArtistNames, addedArtistNames, removedArtistNames),
+                    ratings: fresh.ratings,
+                })
             })
         }
         if (nativeArtistsDirty) await this.writeLibraryData(username, 'artists', nativeArtists)
@@ -3299,15 +3370,18 @@ class SubsonicHandler {
         if (isNaN(rating) || rating < 0 || rating > 5) {
             return this.sendError(res, 0, 'Rating must be between 0 and 5', format)
         }
-        const meta = await this.getUserSubsonicMeta(username)
-        if (rating === 0) {
-            delete meta.ratings[id]
-        } else {
-            meta.ratings[id] = rating
-        }
-        await this.saveUserSubsonicMeta(username, meta)
-        // [修复] 立即刷新内存评星缓存，保证本次请求之后的歌曲序列化能带上最新 userRating
-        this.userRatingsCache.set(username, meta.ratings || {})
+        // 读-改-写整体串行化，避免与并发的 star / dislike 联动互相覆盖
+        await withMetaLock(username, async () => {
+            const meta = await this.getUserSubsonicMeta(username)
+            if (rating === 0) {
+                delete meta.ratings[id]
+            } else {
+                meta.ratings[id] = rating
+            }
+            await this.saveUserSubsonicMeta(username, meta)
+            // [修复] 立即刷新内存评星缓存，保证本次请求之后的歌曲序列化能带上最新 userRating
+            this.userRatingsCache.set(username, meta.ratings || {})
+        })
         subsonicLog.debug(`[Subsonic] setRating ${id} -> ${rating} (user=${username})`)
 
         // [dislike 联动] 0 < rating <= dislikeRating 视为「不喜欢」，写回 lx-music 原生 dislike 规则；
@@ -3527,10 +3601,15 @@ class SubsonicHandler {
     ) {
         const size = Math.min(parseInt(params.get('size') || '20'), 100)
         try {
-            // 取当天全部候选（最多 100），再按当前用户评分过滤：评分为 1 的歌曲排除出每日推荐
+            // 取当天全部候选（最多 100），再按「不喜欢」阈值排除：评分落在 (0, threshold] 视为不喜欢。
+            // 阈值取自 subsonic.dislikeRating（可配置），避免此处硬编码导致管理员改阈值后语义不一致。
             const all = await fetchRecommendedSongs(100)
             const meta = await this.getUserSubsonicMeta(username)
-            const songs = all.filter((s: any) => (meta.ratings[s.id] || 0) !== 1).slice(0, size)
+            const threshold = global.lx.config['subsonic.dislikeRating'] ?? 1
+            const songs = all.filter((s: any) => {
+                const r = meta.ratings[s.id] || 0
+                return !(threshold > 0 && r > 0 && r <= threshold)
+            }).slice(0, size)
             const picked = songs.map((s: any) => ({ music: s, listId: 'recommended' }))
             return this.renderRandomSongs(res, picked, format, 'recommendedSongs', username)
         } catch (e) {
@@ -3631,7 +3710,14 @@ class SubsonicHandler {
         const withinCap = (q: string) => (KBPS[q] ?? 128) <= cap
         const inCap = pri.filter(withinCap)
         const overCap = pri.filter(q => !withinCap(q))
-        return cfg['subsonic.quality.clientCapMode'] === 'soft' ? [...inCap, ...overCap] : inCap
+        if (cfg['subsonic.quality.clientCapMode'] === 'soft') return [...inCap, ...overCap]
+        // hard 模式：当 maxBitrate 低于所有已知音质（如 64/96 < 最小 128）时 inCap 为空，
+        // 会让音质循环与缓存探测循环都不执行，最终 stream 抛「所有候选失败」。
+        // 此时回退到优先级列表中码率最低的一项，保证至少保留一个候选。
+        if (inCap.length === 0 && pri.length > 0) {
+            return [pri.reduce((lo, q) => (KBPS[q] ?? 128) < (KBPS[lo] ?? 128) ? q : lo)]
+        }
+        return inCap
     }
 
     private async resolveStreamUrl(
@@ -3685,7 +3771,10 @@ class SubsonicHandler {
                     continue
                 }
                 if (list.length === 0) continue
-                const match = list.find((it: any) => this.matchSongAcrossSources(it, musicInfo)) || list[0]
+                // 没有任何一条通过歌名/歌手校验时不得回退 list[0]，
+                // 否则会用不相干歌曲的 songmid 去解析播放地址，导致用户听到完全不同的歌。
+                const match = list.find((it: any) => this.matchSongAcrossSources(it, musicInfo))
+                if (!match) continue
                 const tSongmid = String(match?.songmid || match?.id || '')
                 if (!tSongmid) continue
                 candidates = [{

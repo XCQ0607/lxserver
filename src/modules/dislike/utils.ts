@@ -39,9 +39,12 @@ export const filterRules = (rules: string) => {
   for (const item of rules.split('\n')) {
     const line = item.trim()
     if (!line) continue
-    // 专辑规则（!<专辑名>@<歌手>）：按歌手拆分存储，专辑名可能含 @，整体归一化后保留，不走歌曲规则的 @ 切分
+    // 专辑规则（!<专辑名>@<歌手>）：按歌手拆分存储，专辑名可能含 @，不走歌曲规则的 @ 切分。
+    // 必须「先解析再重新编码」：直接对整行 normalizeText 会把分隔符 @ 替换成 #，
+    // 导致 parseAlbumRule 无法识别该行、删除侧也无法精确匹配。统一成 !<归一化专辑名>@<归一化歌手>。
     if (line.startsWith(ALBUM_RULE_PREFIX)) {
-      list.push(normalizeText(line))
+      const parsed = parseAlbumRule(line)
+      list.push(parsed ? encodeAlbumRule(parsed.albumName, parsed.singer) : normalizeText(line))
       continue
     }
     let [name, singer] = item.split(SPLIT_CHAR.DISLIKE_NAME)
