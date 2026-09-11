@@ -43,6 +43,7 @@
         }
     </script>
     <script src="vendor/js/marked.min.js"></script>
+    <script src="vendor/js/chart.umd.js"></script>
     <script src="music/assets/tailwindcss.js"></script>
     <script>
         tailwind.config = {
@@ -270,137 +271,160 @@
 
                     <div class="stats-grid">
                         <!-- 用户与设备合并卡片 -->
-                        <div class="stat-card glass stat-clickable stat-card-dual" onclick="app.switchView('users')">
+                        <div class="stat-card glass stat-clickable stat-card-dual" onclick="app.switchView('users')" title="点击直达用户管理">
                             <div class="stat-dual-section">
-                                <div class="stat-icon users-icon">
+                                <div class="stat-icon-wrap icon-blue-glow">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
                                         <circle cx="9" cy="7" r="4" />
                                     </svg>
                                 </div>
                                 <div class="stat-dual-info">
-                                    <h3>用户总数</h3>
+                                    <div class="stat-label-wrap">
+                                        <h3>用户总数</h3>
+                                        <span class="stat-mini-badge">管理</span>
+                                    </div>
                                     <p id="stat-users" class="stat-value">0</p>
                                 </div>
                             </div>
                             <div class="stat-dual-divider"></div>
                             <div class="stat-dual-section">
-                                <div class="stat-icon devices-icon">
+                                <div class="stat-icon-wrap icon-purple-glow">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <rect x="2" y="7" width="20" height="14" rx="2" ry="2" />
                                         <path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16" />
                                     </svg>
                                 </div>
                                 <div class="stat-dual-info">
-                                    <h3>在线设备</h3>
+                                    <div class="stat-label-wrap">
+                                        <h3>在线设备</h3>
+                                        <span class="stat-live-dot" title="实时连接"></span>
+                                    </div>
                                     <p id="stat-devices" class="stat-value">0</p>
                                 </div>
                             </div>
                         </div>
 
-                        <!-- 负载双显示卡片 -->
+                        <!-- CPU 负载卡片 -->
                         <div class="stat-card glass">
-                            <div class="stat-icon cpu-icon">
+                            <div class="stat-icon-wrap icon-cyan-glow">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <rect x="4" y="4" width="16" height="16" rx="2" />
                                     <path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 15h3M1 9h3M1 15h3" />
                                 </svg>
                             </div>
                             <div class="stat-content">
-                                <h3>CPU 负载 (系统/软件)</h3>
+                                <div class="stat-label-wrap">
+                                    <h3>CPU 负载</h3>
+                                    <span class="stat-split-tag">系统 / 服务</span>
+                                </div>
                                 <div class="stat-value-pair">
                                     <span id="stat-cpu" class="stat-value">0%</span>
-                                    <span class="stat-value-secondary">/ <span id="stat-process-cpu">0%</span></span>
+                                    <span class="stat-value-secondary">/ <span id="stat-process-cpu" class="stat-highlight-purple">0%</span></span>
                                 </div>
-                                <p id="stat-cpu-info" class="stat-value-small"
-                                    style="margin-top: 4px; opacity: 0.5; font-size: 0.75rem;">- Cores</p>
+                                <p id="stat-cpu-info" class="stat-value-small">- Cores</p>
                             </div>
                         </div>
 
+                        <!-- 内存占比卡片 -->
                         <div class="stat-card glass">
-                            <div class="stat-icon memory-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                    stroke-linecap="round" stroke-linejoin="round">
+                            <div class="stat-icon-wrap icon-amber-glow">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                     <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
                                 </svg>
                             </div>
                             <div class="stat-content">
-                                <h3>内存占比 (系统/软件)</h3>
+                                <div class="stat-label-wrap">
+                                    <h3>内存占用</h3>
+                                    <span class="stat-split-tag">系统 / 服务</span>
+                                </div>
                                 <div class="stat-value-pair">
                                     <span id="stat-memory-percent" class="stat-value">0%</span>
-                                    <span class="stat-value-secondary">/ <span
-                                            id="stat-process-memory-percent">0%</span></span>
+                                    <span class="stat-value-secondary">/ <span id="stat-process-memory-percent" class="stat-highlight-blue">0%</span></span>
                                 </div>
-                                <p id="stat-memory" class="stat-value-small"
-                                    style="margin-top: 4px; opacity: 0.5; font-size: 0.75rem;">0 MB</p>
+                                <p id="stat-memory" class="stat-value-small">0 MB</p>
                             </div>
                         </div>
 
-                        <div class="stat-card glass">
-                            <div class="stat-icon uptime-icon">
+                        <!-- 运行时间与音源综合状态卡片 -->
+                        <div class="stat-card glass stat-clickable" onclick="app.switchView('webdav')" title="点击查看存储与协同状态">
+                            <div class="stat-icon-wrap icon-emerald-glow">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                     <circle cx="12" cy="12" r="10" />
                                     <polyline points="12 6 12 12 16 14" />
                                 </svg>
                             </div>
                             <div class="stat-content">
-                                <h3>运行时间</h3>
+                                <div class="stat-label-wrap">
+                                    <h3>运行时间</h3>
+                                    <span class="stat-pill-online" id="dash-webdav-status-pill">WebDAV 就绪</span>
+                                </div>
                                 <p id="stat-uptime" class="stat-value">0h</p>
+                                <p id="stat-sources-info" class="stat-value-small">已加载音源: - 个</p>
                             </div>
                         </div>
                     </div>
 
-                    <!-- 实时监控面板 -->
+                    <!-- 实时动态折线监控面板 (专业图表与动态量程增强) -->
                     <div class="monitor-grid">
+                        <!-- CPU 监控 -->
                         <div class="monitor-card glass">
                             <div class="monitor-card-header">
                                 <div class="monitor-card-title">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                        style="width: 16px; height: 16px;">
-                                        <rect x="4" y="4" width="16" height="16" rx="2" />
-                                        <path d="M9 9h6v6H9z" />
-                                    </svg>
-                                    CPU 实时负载 (%)
+                                    <div class="monitor-title-icon" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa;">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                                            <rect x="4" y="4" width="16" height="16" rx="2" />
+                                            <path d="M9 9h6v6H9z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <span class="monitor-main-title">CPU 实时负载波动</span>
+                                        <div class="monitor-sub-info" id="monitor-cpu-model-text">计算核心监控中</div>
+                                    </div>
                                 </div>
-                                <div class="monitor-card-value">
-                                    <span id="monitor-cpu-val" title="系统总占用">0%</span>
-                                    <span style="font-size: 0.8rem; opacity: 0.6; margin: 0 0.5rem;">/</span>
-                                    <span id="monitor-process-cpu-val" title="后端服务占用"
-                                        style="color: var(--accent-secondary);">0%</span>
+                                <div class="monitor-header-right">
+                                    <div class="chart-legend-row">
+                                        <span class="legend-item"><span class="legend-dot" style="background: #3b82f6;"></span>系统 <b id="monitor-cpu-val">0%</b></span>
+                                        <span class="legend-item"><span class="legend-dot" style="background: #c084fc;"></span>本服务 <b id="monitor-process-cpu-val">0%</b></span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="progress-container">
-                                <div id="monitor-cpu-progress" class="progress-bar-fill" style="width: 0%;"></div>
+                            <!-- 双重动态进度刻度 -->
+                            <div class="progress-container-dual">
+                                <div id="monitor-cpu-progress" class="progress-bar-fill progress-cpu-sys" style="width: 0%;" title="系统占用"></div>
                             </div>
-                            <div class="chart-container">
-                                <svg id="cpu-chart" width="100%" height="100%" viewBox="0 0 200 60"
-                                    preserveAspectRatio="none" style="overflow: visible;"></svg>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="cpu-chart-canvas"></canvas>
                             </div>
                         </div>
 
+                        <!-- 内存监控 -->
                         <div class="monitor-card glass">
                             <div class="monitor-card-header">
                                 <div class="monitor-card-title">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                        style="width: 16px; height: 16px;">
-                                        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-                                    </svg>
-                                    内存实时占用 (%)
+                                    <div class="monitor-title-icon" style="background: rgba(16, 185, 129, 0.15); color: #34d399;">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                                            <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <span class="monitor-main-title">内存实时占用走势</span>
+                                        <div class="monitor-sub-info" id="monitor-mem-total-text">物理内存与 RSS 分配</div>
+                                    </div>
                                 </div>
-                                <div class="monitor-card-value">
-                                    <span id="monitor-mem-val" title="系统总占用">0%</span>
-                                    <span style="font-size: 0.8rem; opacity: 0.6; margin: 0 0.5rem;">/</span>
-                                    <span id="monitor-process-mem-val" title="后端服务占用"
-                                        style="color: var(--accent-primary);">0%</span>
+                                <div class="monitor-header-right">
+                                    <div class="chart-legend-row">
+                                        <span class="legend-item"><span class="legend-dot" style="background: #10b981;"></span>系统 <b id="monitor-mem-val">0%</b></span>
+                                        <span class="legend-item"><span class="legend-dot" style="background: #60a5fa;"></span>本服务 <b id="monitor-process-mem-val">0%</b></span>
+                                    </div>
                                 </div>
                             </div>
-                            <div class="progress-container">
-                                <div id="monitor-mem-progress" class="progress-bar-fill"
-                                    style="width: 0%; background: linear-gradient(90deg, #10b981, #3b82f6);"></div>
+                            <!-- 双重动态进度刻度 -->
+                            <div class="progress-container-dual">
+                                <div id="monitor-mem-progress" class="progress-bar-fill progress-mem-sys" style="width: 0%;" title="系统内存"></div>
                             </div>
-                            <div class="chart-container">
-                                <svg id="mem-chart" width="100%" height="100%" viewBox="0 0 200 60"
-                                    preserveAspectRatio="none" style="overflow: visible;"></svg>
+                            <div class="chart-canvas-wrapper">
+                                <canvas id="mem-chart-canvas"></canvas>
                             </div>
                         </div>
                     </div>
@@ -545,7 +569,8 @@
                     <div id="data-tabs-container" class="data-tabs-container hidden">
                         <div class="data-tabs-nav" id="data-tabs-nav">
                             <button class="data-tab-btn active" data-tab="all" onclick="app.setDataTab('all')">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <rect x="3" y="3" width="7" height="7"></rect>
                                     <rect x="14" y="3" width="7" height="7"></rect>
                                     <rect x="14" y="14" width="7" height="7"></rect>
@@ -554,7 +579,8 @@
                                 <span>全部</span>
                             </button>
                             <button class="data-tab-btn" data-tab="playlists" onclick="app.setDataTab('playlists')">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <path d="M9 18V5l12-2v13"></path>
                                     <circle cx="6" cy="18" r="3"></circle>
                                     <circle cx="18" cy="16" r="3"></circle>
@@ -563,7 +589,8 @@
                                 <span class="data-tab-count" id="tab-count-playlists">0</span>
                             </button>
                             <button class="data-tab-btn" data-tab="albums" onclick="app.setDataTab('albums')">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <circle cx="12" cy="12" r="10"></circle>
                                     <circle cx="12" cy="12" r="3"></circle>
                                 </svg>
@@ -571,7 +598,8 @@
                                 <span class="data-tab-count" id="tab-count-albums">0</span>
                             </button>
                             <button class="data-tab-btn" data-tab="artists" onclick="app.setDataTab('artists')">
-                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                                    stroke-width="2">
                                     <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path>
                                     <circle cx="12" cy="7" r="4"></circle>
                                 </svg>
@@ -732,7 +760,9 @@
                                 <div class="config-card-icon"
                                     style="background: linear-gradient(135deg, #ec4899, #db2777);">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                        <path
+                                            d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
+                                        </path>
                                         <path d="M9 14l2 2 4-4"></path>
                                     </svg>
                                 </div>
@@ -753,16 +783,23 @@
                                     </label>
                                 </div>
                                 <div class="config-divider"></div>
-                                <div style="font-size: 0.825rem; color: var(--text-secondary, #94a3b8); line-height: 1.6;">
-                                    <div style="font-weight: 600; margin-bottom: 0.35rem; color: var(--text-primary, #f8fafc);">💡 目录配置说明</div>
+                                <div
+                                    style="font-size: 0.825rem; color: var(--text-secondary, #94a3b8); line-height: 1.6;">
+                                    <div
+                                        style="font-weight: 600; margin-bottom: 0.35rem; color: var(--text-primary, #f8fafc);">
+                                        💡 目录配置说明</div>
                                     <p style="margin: 0 0 0.5rem 0;">不同系统路径结构参考：</p>
                                     <ul style="margin: 0 0 0.75rem 1.2rem; padding: 0;">
-                                        <li><b>Windows:</b> <code>D:/Music</code> 或 <code>C:\Users\Username\Music</code></li>
-                                        <li><b>Linux / macOS:</b> <code>/home/user/music</code> 或 <code>/var/music</code></li>
+                                        <li><b>Windows:</b> <code>D:/Music</code> 或 <code>C:\Users\Username\Music</code>
+                                        </li>
+                                        <li><b>Linux / macOS:</b> <code>/home/user/music</code> 或
+                                            <code>/var/music</code>
+                                        </li>
                                         <li><b>Docker:</b> 需先挂载容器目录，如 <code>/app/music</code></li>
                                     </ul>
-                                    <div style="padding: 0.5rem 0.75rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px dashed rgba(255, 255, 255, 0.15); word-break: break-all;">
-                                        配置文件参考路径 (config.js): <br/>
+                                    <div
+                                        style="padding: 0.5rem 0.75rem; background: rgba(255, 255, 255, 0.05); border-radius: 8px; border: 1px dashed rgba(255, 255, 255, 0.15); word-break: break-all;">
+                                        配置文件参考路径 (config.js): <br />
                                         <code id="config-js-path-ref" style="color: #38bdf8;">--</code>
                                     </div>
                                 </div>
@@ -1106,34 +1143,52 @@
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div id="subsonic-leaderboard-options" style="display: none; margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 10px;">
+                                <div id="subsonic-leaderboard-options"
+                                    style="display: none; margin-left: 12px; padding-left: 12px; border-left: 2px solid var(--accent-primary, #3b82f6); margin-top: 10px;">
                                     <div class="config-field">
                                         <label class="config-label">排行榜音源平台（单选）</label>
                                         <input type="hidden" name="subsonic.leaderboardSource" value="tx" />
                                         <div class="tag-select-group" id="tag-group-leaderboard-source">
                                             <span class="tag-select-item active" data-value="tx">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
                                                 QQ 音乐 (tx)
                                             </span>
                                             <span class="tag-select-item" data-value="wy">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
                                                 网易云 (wy)
                                             </span>
                                             <span class="tag-select-item" data-value="kg">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
                                                 酷狗音乐 (kg)
                                             </span>
                                             <span class="tag-select-item" data-value="kw">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
                                                 酷我音乐 (kw)
                                             </span>
                                             <span class="tag-select-item" data-value="mg">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                    stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
                                                 咪咕音乐 (mg)
                                             </span>
                                         </div>
-                                        <small class="config-hint" style="margin-top: 8px; display: block; line-height: 1.5; color: var(--text-secondary);">
-                                            💡 说明：排行榜歌单归属于系统虚拟用户 <code>lxserver</code> 的公开歌单（只读）。在音流等客户端中，请在歌单页选择<strong>「全部歌单」/「公开歌单」</strong>分类即可查看并播放。
+                                        <small class="config-hint"
+                                            style="margin-top: 8px; display: block; line-height: 1.5; color: var(--text-secondary);">
+                                            💡 说明：排行榜歌单归属于系统虚拟用户 <code>lxserver</code>
+                                            的公开歌单（只读）。在音流等客户端中，请在歌单页选择<strong>「全部歌单」/「公开歌单」</strong>分类即可查看并播放。
                                         </small>
                                     </div>
                                 </div>
@@ -1161,23 +1216,33 @@
                                     <input type="hidden" name="subsonic.onlineSearchSources" value="wy,tx,kw,kg,mg" />
                                     <div class="tag-select-group" id="tag-group-search-sources">
                                         <span class="tag-select-item active" data-value="wy">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
                                             网易云 (wy)
                                         </span>
                                         <span class="tag-select-item active" data-value="tx">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
                                             QQ 音乐 (tx)
                                         </span>
                                         <span class="tag-select-item active" data-value="kw">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
                                             酷我音乐 (kw)
                                         </span>
                                         <span class="tag-select-item active" data-value="kg">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
                                             酷狗音乐 (kg)
                                         </span>
                                         <span class="tag-select-item active" data-value="mg">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                <polyline points="20 6 9 17 4 12"></polyline>
+                                            </svg>
                                             咪咕音乐 (mg)
                                         </span>
                                     </div>
@@ -1196,7 +1261,8 @@
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">播放时触发服务器缓存</span>
-                                        <span class="config-toggle-desc">通过 Subsonic 播放的曲目在后台自动落盘到该用户缓存目录，已缓存自动跳过（注意可能产生较大流量）</span>
+                                        <span class="config-toggle-desc">通过 Subsonic
+                                            播放的曲目在后台自动落盘到该用户缓存目录，已缓存自动跳过（注意可能产生较大流量）</span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.cacheOnPlay" />
@@ -1206,7 +1272,8 @@
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">服务器存在缓存优先播放</span>
-                                        <span class="config-toggle-desc">通过 Subsonic 播放曲目时，若服务器已存在该歌曲缓存或下载文件，直接通过本地传输，避免请求源站</span>
+                                        <span class="config-toggle-desc">通过 Subsonic
+                                            播放曲目时，若服务器已存在该歌曲缓存或下载文件，直接通过本地传输，避免请求源站</span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.playCacheFirst" checked />
@@ -1369,24 +1436,95 @@
                     </form>
                 </div>
 
-                <!-- 新增：WebDAV 同步视图 -->
+                <!-- WebDAV 同步与云端备份视图 (现代化重构) -->
                 <div id="view-webdav" class="view">
                     <div class="webdav-container">
+                        <!-- 动态任务进度中心 (默认隐藏，进行备份/恢复/同步时动态展示并常驻状态) -->
+                        <div id="sync-progress-container" class="task-progress-card glass hidden">
+                            <div class="task-progress-header">
+                                <div class="task-progress-title-wrap">
+                                    <div class="task-spinner" id="task-spinner"></div>
+                                    <div>
+                                        <h3 id="progress-title">任务进行中</h3>
+                                        <div class="task-subtext" id="progress-subtext">正在与存储系统交互...</div>
+                                    </div>
+                                </div>
+                                <div class="task-progress-header-right">
+                                    <div class="task-progress-badge" id="progress-percent-badge">0%</div>
+                                    <button type="button" class="task-progress-close-btn" id="btn-close-progress"
+                                        title="关闭/隐藏进度卡片">
+                                        <svg viewBox="0 0 24 24" width="16" height="16" stroke="currentColor"
+                                            stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                                        </svg>
+                                    </button>
+                                </div>
+                            </div>
+
+                            <!-- 阶段步骤指示器 -->
+                            <div class="task-steps-bar" id="task-steps-bar">
+                                <div class="task-step" id="step-prepare">
+                                    <div class="step-dot">1</div>
+                                    <span>准备</span>
+                                </div>
+                                <div class="step-line" id="stepline-1"></div>
+                                <div class="task-step" id="step-pack">
+                                    <div class="step-dot">2</div>
+                                    <span>打包压缩</span>
+                                </div>
+                                <div class="step-line" id="stepline-2"></div>
+                                <div class="task-step" id="step-transfer">
+                                    <div class="step-dot">3</div>
+                                    <span>数据传输</span>
+                                </div>
+                                <div class="step-line" id="stepline-3"></div>
+                                <div class="task-step" id="step-finish">
+                                    <div class="step-dot">4</div>
+                                    <span>完成</span>
+                                </div>
+                            </div>
+
+                            <!-- 平滑流动进度条 -->
+                            <div class="task-progress-track">
+                                <div id="progress-bar" class="task-progress-fill" style="width: 0%;"></div>
+                            </div>
+
+                            <div class="task-progress-footer">
+                                <div class="task-progress-detail" id="progress-text">等待启动...</div>
+                                <div class="task-progress-meta" id="progress-meta"></div>
+                            </div>
+                        </div>
+
+                        <!-- 引导配置卡片 (未配置 WebDAV 时显示) -->
+                        <div id="webdav-config-guide" class="setup-guide-card glass hidden">
+                            <div class="setup-guide-icon">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    style="width:36px;height:36px;">
+                                    <path
+                                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                                    <line x1="12" y1="11" x2="12" y2="17" />
+                                    <line x1="9" y1="14" x2="15" y2="14" />
+                                </svg>
+                            </div>
+                            <h3>云端同步未开启</h3>
+                            <p>配置 WebDAV 后，即可随时在手机、电脑等多端同步歌单配置，并支持定时自动全量备份，数据安全无忧。</p>
+                            <button class="btn-primary glow-btn" onclick="app.jumpToWebDAVConfig()"
+                                style="margin-top: 1.25rem; padding: 0.75rem 2.25rem;">
+                                立即配置 WebDAV
+                            </button>
+                        </div>
+
                         <!-- 云端操作区 -->
                         <div id="webdav-cloud-group">
-                            <div class="webdav-group-label">云端操作</div>
+                            <div class="section-badge-header">
+                                <span class="badge-dot dot-blue"></span>
+                                <span class="section-badge-title">云端存储协同</span>
+                                <span class="section-badge-desc">支持全量快照归档与跨端增量同步</span>
+                            </div>
                             <div class="sync-actions-grid">
-                                <button id="test-webdav-btn" class="action-card glass">
-                                    <div class="action-card-icon icon-emerald">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <circle cx="12" cy="12" r="10" />
-                                            <polyline points="9 12 12 15 16 10" />
-                                        </svg>
-                                    </div>
-                                    <h4>测试连接</h4>
-                                    <p>验证 WebDAV 配置</p>
-                                </button>
-                                <button id="backup-webdav-btn" class="action-card glass">
+                                <button id="backup-webdav-btn" class="action-card glass card-featured">
+                                    <div class="action-card-glow glow-blue"></div>
                                     <div class="action-card-icon icon-blue">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -1394,21 +1532,13 @@
                                             <line x1="12" y1="15" x2="12" y2="3" />
                                         </svg>
                                     </div>
-                                    <h4>立即备份</h4>
-                                    <p>创建全量 ZIP 备份</p>
+                                    <h4>立即全量备份</h4>
+                                    <p><b>【本地 ➔ 云端】</b>打包全量数据为带时间戳的 ZIP 归档包上传，用于版本回滚</p>
+                                    <div class="card-action-tag">打包上传 ZIP 快照</div>
                                 </button>
-                                <button id="restore-webdav-btn" class="action-card glass">
-                                    <div class="action-card-icon icon-amber">
-                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                            <polyline points="17 8 12 3 7 8" />
-                                            <line x1="12" y1="3" x2="12" y2="15" />
-                                        </svg>
-                                    </div>
-                                    <h4>从云端恢复</h4>
-                                    <p>下载并恢复数据</p>
-                                </button>
+
                                 <button id="sync-files-btn" class="action-card glass">
+                                    <div class="action-card-glow glow-purple"></div>
                                     <div class="action-card-icon icon-purple">
                                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                             <polyline points="23 4 23 10 17 10" />
@@ -1417,96 +1547,130 @@
                                                 d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
                                         </svg>
                                     </div>
-                                    <h4>同步文件</h4>
-                                    <p>强制同步所有变化</p>
+                                    <h4>同步所有文件</h4>
+                                    <p><b>【本地 ➔ 云端】</b>增量多线程上传本地散列文件（配置、音源、歌单），不压缩直接保持原目录结构</p>
+                                    <div class="card-action-tag">多线程散文件上传</div>
+                                </button>
+
+                                <button id="restore-webdav-btn" class="action-card glass">
+                                    <div class="action-card-glow glow-amber"></div>
+                                    <div class="action-card-icon icon-amber">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                            <polyline points="17 8 12 3 7 8" />
+                                            <line x1="12" y1="3" x2="12" y2="15" />
+                                        </svg>
+                                    </div>
+                                    <h4>从云端恢复</h4>
+                                    <p><b>【云端 ➔ 本地】</b>提供「指定时间点 ZIP 整体还原」与「云端散文件增量合并下载」两种方式</p>
+                                    <div class="card-action-tag">云端还原 (双模式)</div>
+                                </button>
+
+                                <button id="test-webdav-btn" class="action-card glass">
+                                    <div class="action-card-glow glow-emerald"></div>
+                                    <div class="action-card-icon icon-emerald">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="10" />
+                                            <polyline points="9 12 12 15 16 10" />
+                                        </svg>
+                                    </div>
+                                    <h4>测试连接</h4>
+                                    <p>快速检测 WebDAV 服务器连通性、登录凭据与读写创建权限</p>
+                                    <div class="card-action-tag">连通检测</div>
                                 </button>
                             </div>
                         </div>
 
-                        <!-- 引导配置卡片 (默认隐藏) -->
-                        <div id="webdav-config-guide" class="setup-guide-card glass hidden">
-                            <div class="setup-guide-icon">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                    style="width:32px;height:32px;">
-                                    <path
-                                        d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                                    <line x1="12" y1="11" x2="12" y2="17" />
-                                    <line x1="9" y1="14" x2="15" y2="14" />
-                                </svg>
+                        <!-- 本地离线备份与还原区 -->
+                        <div class="webdav-local-group">
+                            <div class="section-badge-header">
+                                <span class="badge-dot dot-emerald"></span>
+                                <span class="section-badge-title">本地离线备份</span>
+                                <span class="section-badge-desc">支持一键打包下载到电脑本地或从离线压缩包还原</span>
                             </div>
-                            <h3>云端同步未开启</h3>
-                            <p>配置 WebDAV 后，您可以跨设备同步歌单、配置，并享受云端自动备份服务，数据永不丢失。</p>
-                            <button class="btn-primary" onclick="app.jumpToWebDAVConfig()"
-                                style="margin-top: 1rem; padding: 0.6rem 2rem;">
-                                立即配置 WebDAV
-                            </button>
-                        </div>
-
-                        <!-- 本地操作区 -->
-                        <div class="webdav-group-label" style="margin-top: 1.5rem;">本地备份</div>
-                        <div class="sync-actions-grid">
-                            <button id="backup-local-btn" class="action-card glass border-emerald">
-                                <div class="action-card-icon icon-emerald">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                        <polyline points="7 10 12 15 17 10" />
-                                        <line x1="12" y1="15" x2="12" y2="3" />
-                                    </svg>
-                                </div>
-                                <h4>本地备份</h4>
-                                <p>打包并下载 ZIP 到本地</p>
-                            </button>
-                            <button id="restore-local-btn" class="action-card glass border-amber">
-                                <div class="action-card-icon icon-amber">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                        <polyline points="17 8 12 3 7 8" />
-                                        <line x1="12" y1="3" x2="12" y2="15" />
-                                    </svg>
-                                </div>
-                                <h4>本地恢复</h4>
-                                <p>上传并还原 ZIP 备份</p>
-                            </button>
+                            <div class="sync-actions-grid">
+                                <button id="backup-local-btn" class="action-card glass border-emerald">
+                                    <div class="action-card-glow glow-emerald"></div>
+                                    <div class="action-card-icon icon-emerald">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                            <polyline points="7 10 12 15 17 10" />
+                                            <line x1="12" y1="15" x2="12" y2="3" />
+                                        </svg>
+                                    </div>
+                                    <h4>打包本地备份</h4>
+                                    <p>即时创建全量 ZIP 并由浏览器直接下载保存至本地</p>
+                                    <div class="card-action-tag tag-emerald">ZIP 下载</div>
+                                </button>
+                                <button id="restore-local-btn" class="action-card glass border-amber">
+                                    <div class="action-card-glow glow-amber"></div>
+                                    <div class="action-card-icon icon-amber">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                            <polyline points="17 8 12 3 7 8" />
+                                            <line x1="12" y1="3" x2="12" y2="15" />
+                                        </svg>
+                                    </div>
+                                    <h4>上传还原备份</h4>
+                                    <p>选择本地已有的 ZIP 备份包一键还原并自动热重载数据</p>
+                                    <div class="card-action-tag tag-amber">离线恢复</div>
+                                </button>
+                            </div>
                         </div>
                         <input type="file" id="local-backup-input" style="display: none;" accept=".zip" />
 
-                        <!-- 同步状态 -->
-                        <div id="webdav-status-section" class="sync-status-section glass">
-                            <div class="sync-section-hd">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                    style="width:18px;height:18px;color:var(--accent-primary)">
-                                    <circle cx="12" cy="12" r="10" />
-                                    <polyline points="12 6 12 12 16 14" />
-                                </svg>
-                                <h3>同步状态</h3>
-                            </div>
-                            <div id="sync-status-content">
-                                <p class="sync-empty-tip">暂无同步数据</p>
-                            </div>
-                        </div>
-
-                        <!-- 同步日志 -->
-                        <div id="webdav-logs-section" class="sync-logs-section glass">
-                            <div class="logs-header">
+                        <!-- 状态概览与实时同步日志栏 (并列/优雅布局) -->
+                        <div class="webdav-status-grid">
+                            <!-- 同步状态面板 -->
+                            <div id="webdav-status-section" class="sync-status-section glass">
                                 <div class="sync-section-hd">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                        style="width:18px;height:18px;color:var(--accent-secondary)">
-                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                        <polyline points="14 2 14 8 20 8" />
-                                    </svg>
-                                    <h3>同步日志</h3>
+                                    <div class="sync-section-hd-title">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            style="width:18px;height:18px;color:var(--accent-primary)">
+                                            <circle cx="12" cy="12" r="10" />
+                                            <polyline points="12 6 12 12 16 14" />
+                                        </svg>
+                                        <h3>同步状态与健康度</h3>
+                                    </div>
+                                    <span class="status-indicator-pill" id="webdav-live-indicator">
+                                        <span class="live-beacon"></span>
+                                        <span>实时监控中</span>
+                                    </span>
                                 </div>
-                                <button id="refresh-sync-logs-btn" class="btn-secondary">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                        style="width:14px;height:14px;">
-                                        <polyline points="23 4 23 10 17 10" />
-                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                                    </svg>
-                                    <span>刷新</span>
-                                </button>
+                                <div id="sync-status-content">
+                                    <p class="sync-empty-tip">暂无同步数据</p>
+                                </div>
                             </div>
-                            <div id="sync-logs-content" class="sync-logs-list">
-                                <p class="sync-empty-tip">暂无日志</p>
+
+                            <!-- 实时同步日志面板 -->
+                            <div id="webdav-logs-section" class="sync-logs-section glass">
+                                <div class="logs-header">
+                                    <div class="sync-section-hd-title">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                            style="width:18px;height:18px;color:var(--accent-secondary)">
+                                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                            <polyline points="14 2 14 8 20 8" />
+                                        </svg>
+                                        <h3>同步日志</h3>
+                                        <span class="realtime-tag">
+                                            <span class="realtime-dot"></span>
+                                            实时推送
+                                        </span>
+                                    </div>
+                                    <div class="logs-header-actions">
+                                        <button id="refresh-sync-logs-btn" class="btn-secondary btn-sm" title="手动刷新">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                style="width:14px;height:14px;">
+                                                <polyline points="23 4 23 10 17 10" />
+                                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                            </svg>
+                                            <span>刷新</span>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div id="sync-logs-content" class="sync-logs-list">
+                                    <p class="sync-empty-tip">暂无日志</p>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1522,13 +1686,32 @@
                             <option value="token">Token日志</option>
                             <option value="errors">错误日志</option>
                         </select>
-                        <button id="refresh-logs-btn" class="btn-secondary">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <polyline points="23 4 23 10 17 10" />
-                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                            </svg>
-                            <span>刷新</span>
-                        </button>
+                        <div class="logs-controls-wrap">
+                            <label class="pill-toggle-switch" title="切换是否每 3 秒自动拉取最新日志">
+                                <input type="checkbox" id="logs-auto-refresh-toggle" checked>
+                                <span class="pill-toggle-track"><span class="pill-toggle-thumb"></span></span>
+                                <span class="pill-toggle-label">
+                                    <span class="badge-dot dot-emerald" style="width:6px; height:6px;"></span>
+                                    自动轮询
+                                </span>
+                            </label>
+                            <button id="refresh-logs-btn" class="btn-secondary" title="手动刷新当前日志">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <polyline points="23 4 23 10 17 10" />
+                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                </svg>
+                                <span>刷新</span>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="terminal-header">
+                        <div class="terminal-dots">
+                            <span class="badge-dot dot-red"></span>
+                            <span class="badge-dot dot-amber"></span>
+                            <span class="badge-dot dot-emerald"></span>
+                            <span class="terminal-title" id="terminal-active-type" style="margin-left: 8px;">system.log</span>
+                        </div>
+                        <span class="terminal-badge" id="terminal-line-count">最新 200 行</span>
                     </div>
                     <div id="logs-content" class="logs-content glass"></div>
                 </div>
@@ -1664,10 +1847,12 @@
                     <label>用户名</label>
                     <input type="text" id="rename-user-input" class="form-input" placeholder="请输入用户名">
                 </div>
-                <div class="config-toggle-row" style="margin-top: 15px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
+                <div class="config-toggle-row"
+                    style="margin-top: 15px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
                     <div class="config-toggle-info">
                         <span class="config-toggle-label" style="font-weight: 500;">启用此用户自定义歌曲目录</span>
-                        <span class="config-toggle-desc" style="font-size: 0.75rem; color: var(--text-secondary);">为该用户指定独立的本地音乐存储目录</span>
+                        <span class="config-toggle-desc"
+                            style="font-size: 0.75rem; color: var(--text-secondary);">为该用户指定独立的本地音乐存储目录</span>
                     </div>
                     <label class="toggle-switch">
                         <input type="checkbox" id="user-custom-dir-enable-toggle" />
@@ -1677,24 +1862,31 @@
                 <div id="user-custom-dir-container" class="form-group hidden" style="margin-top: 15px;">
                     <label>自定义歌曲目录地址</label>
                     <div class="config-input-group">
-                        <input type="text" id="user-custom-dir-input" class="form-input" placeholder="例如 D:/Music 或 /var/music">
-                        <button type="button" id="test-user-custom-dir-btn" class="btn-secondary config-inline-btn">检测</button>
+                        <input type="text" id="user-custom-dir-input" class="form-input"
+                            placeholder="例如 D:/Music 或 /var/music">
+                        <button type="button" id="test-user-custom-dir-btn"
+                            class="btn-secondary config-inline-btn">检测</button>
                     </div>
-                    <div id="user-custom-dir-status" style="font-size: 0.75rem; margin-top: 6px; min-height: 1.1em;"></div>
-                    <div class="config-toggle-row" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">
+                    <div id="user-custom-dir-status" style="font-size: 0.75rem; margin-top: 6px; min-height: 1.1em;">
+                    </div>
+                    <div class="config-toggle-row"
+                        style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">
                         <div class="config-toggle-info">
                             <span class="config-toggle-label" style="font-weight: 500;">允许操作目录歌曲</span>
-                            <span class="config-toggle-desc" style="font-size: 0.75rem; color: var(--text-secondary);">允许该用户对自定义目录中的歌曲/分类进行添加、编辑与删除操作</span>
+                            <span class="config-toggle-desc"
+                                style="font-size: 0.75rem; color: var(--text-secondary);">允许该用户对自定义目录中的歌曲/分类进行添加、编辑与删除操作</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="user-custom-dir-operate-toggle" />
                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                         </label>
                     </div>
-                    <div class="config-toggle-row" style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">
+                    <div class="config-toggle-row"
+                        style="margin-top: 12px; padding-top: 10px; border-top: 1px dashed rgba(255, 255, 255, 0.1);">
                         <div class="config-toggle-info">
                             <span class="config-toggle-label" style="font-weight: 500;">允许写入歌曲文件</span>
-                            <span class="config-toggle-desc" style="font-size: 0.75rem; color: var(--text-secondary);">允许该用户对自定义目录中的歌曲手动关联、批量更新元数据及批量嵌入歌词</span>
+                            <span class="config-toggle-desc"
+                                style="font-size: 0.75rem; color: var(--text-secondary);">允许该用户对自定义目录中的歌曲手动关联、批量更新元数据及批量嵌入歌词</span>
                         </div>
                         <label class="toggle-switch">
                             <input type="checkbox" id="user-custom-dir-write-toggle" />
@@ -1709,6 +1901,74 @@
             <div class="modal-footer">
                 <button class="btn-secondary modal-close">取消</button>
                 <button id="save-rename-user-btn" class="btn-primary">确定</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 云端恢复选择与快照管理模态框 -->
+    <div id="restore-choice-modal" class="modal hidden">
+        <div class="modal-content glass" style="max-width: 600px;">
+            <div class="modal-header">
+                <div style="display: flex; align-items: center; gap: 0.6rem;">
+                    <span style="font-size: 1.25rem;">☁️</span>
+                    <h3 style="margin: 0;">从云端恢复数据</h3>
+                </div>
+                <button class="modal-close" onclick="app.closeRestoreModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <!-- 顶部切换 Tab -->
+                <div class="restore-choice-tabs">
+                    <button type="button" class="restore-tab-btn active" id="tab-btn-zip"
+                        onclick="app.switchRestoreTab('zip')">
+                        📦 全量 ZIP 快照恢复
+                    </button>
+                    <button type="button" class="restore-tab-btn" id="tab-btn-files"
+                        onclick="app.switchRestoreTab('files')">
+                        📄 散文件增量恢复
+                    </button>
+                </div>
+
+                <!-- 模式 1: 全量 ZIP 快照恢复面板 -->
+                <div id="restore-panel-zip">
+                    <p
+                        style="font-size: 0.84rem; color: var(--text-secondary); margin-bottom: 0.75rem; line-height: 1.5;">
+                        系统将检索云端备份归档包。您可以根据备份生成时间点，自由选择要恢复的历史快照：
+                    </p>
+                    <div id="backup-list-container">
+                        <div style="text-align:center; padding: 2rem; color: var(--text-muted);">
+                            <span class="task-spinner"
+                                style="width:20px;height:20px;display:inline-block;vertical-align:middle;margin-right:6px;"></span>
+                            正在获取云端备份快照列表...
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 模式 2: 散文件增量恢复面板 -->
+                <div id="restore-panel-files" class="hidden">
+                    <div
+                        style="padding: 1.25rem; border-radius: 14px; background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.2); margin-bottom: 1.25rem;">
+                        <h4 style="margin: 0 0 0.5rem 0; color: #c4b5fd; font-size: 0.95rem;">⚡ 增量散文件双向比对恢复</h4>
+                        <p style="margin: 0; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+                            直接比对云端同步目录（<code>/lx-sync</code>）下的散列数据文件。仅下载本地不存在或有更新的文件，耗时极短，适合多端常规增量同步。
+                        </p>
+                    </div>
+                    <div
+                        style="padding: 1rem; border-radius: 12px; background: rgba(0,0,0,0.2); font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; margin-bottom: 1.25rem;">
+                        💡 提示：散文件恢复不会删除本地特有的新文件，而是进行智能双向合并。
+                    </div>
+                    <button type="button" class="btn-primary" onclick="app.executeScatteredRestore()"
+                        style="width: 100%; padding: 0.85rem; font-weight: 600;">
+                        开始散文件增量恢复
+                    </button>
+                </div>
+
+                <div
+                    style="margin-top: 1rem; padding-top: 0.75rem; border-top: 1px dashed rgba(255,255,255,0.08); font-size: 0.76rem; color: var(--text-muted);">
+                    ⚠️ 注意：恢复数据将覆盖同名本地配置及歌单，恢复前建议确保已有备份。
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-secondary" onclick="app.closeRestoreModal()">关闭</button>
             </div>
         </div>
     </div>

@@ -576,6 +576,9 @@ const webdavSync = new WebDAVSync({
   backupInterval: global.lx.config['sync.backupInterval'],
 }, global.lx.dataPath)
 
+// 导出 webdavSync 实例供全局使用
+global.lx.webdavSync = webdavSync
+
 // 如果配置了 WebDAV，在启动时尝试从远程恢复
 if (webdavSync.isConfigured()) {
   console.log('WebDAV configured, attempting to restore from remote...')
@@ -631,9 +634,6 @@ if (webdavSync.isConfigured()) {
 } else {
   console.log('WebDAV not configured, skipping remote restore')
 }
-
-// 导出 webdavSync 实例供 API 使用
-global.lx.webdavSync = webdavSync
 
 // [新增] 确保数据目录下的 _open 及 _open/library 目录存在 (用于公共受限资源 & 公开收藏)
 const openDir = path.join(global.lx.userPath, '_open')
