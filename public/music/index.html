@@ -89,6 +89,11 @@
                         </a>
                     </li>
                     <li>
+                        <!--
+                            这是「我的收藏 / 歌单」折叠面板的父级容器标题，统一叫「我的收藏」。
+                            面板内部嵌套的 ♥ 喜爱列表另命名为「我的喜爱」(见 app.js 中 id='love' 的项)，
+                            以此与外层容器区分，避免重名混淆。
+                        -->
                         <div onclick="handleFavoritesClick()" id="tab-favorites"
                             class="flex items-center justify-between px-6 py-3 t-text-muted hover:t-bg-main transition-colors duration-200 cursor-pointer select-none">
                             <div class="flex items-center">
@@ -5366,6 +5371,7 @@
     <script src="js/list_search.js"></script>
     <script src="js/songlist_manager.js"></script>
     <script src="js/leaderboard_manager.js"></script>
+    <script src="js/dislike_manager.js"></script>
     <script src="js/wave.js"></script>
     <script src="js/visualizer.js"></script>
     <script src="js/pwa.js"></script>

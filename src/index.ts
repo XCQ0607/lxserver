@@ -352,6 +352,25 @@ if (envParams.SUBSONIC_CACHE_ON_PLAY !== undefined) {
 if (envParams.SUBSONIC_PLAY_CACHE_FIRST !== undefined) {
   setBoolConfig('subsonic.playCacheFirst', envParams.SUBSONIC_PLAY_CACHE_FIRST)
 }
+if (envParams.SUBSONIC_QUALITY_ENABLED !== undefined) {
+  setBoolConfig('subsonic.quality.enabled', envParams.SUBSONIC_QUALITY_ENABLED)
+}
+if (envParams.SUBSONIC_QUALITY_PRIORITY) {
+  global.lx.config['subsonic.quality.priority'] = envParams.SUBSONIC_QUALITY_PRIORITY.split(',').map((s: string) => s.trim()).filter(Boolean).join(',')
+}
+if (envParams.SUBSONIC_QUALITY_CLIENT_CAP_MODE) {
+  const mode = envParams.SUBSONIC_QUALITY_CLIENT_CAP_MODE as any
+  if (mode === 'hard' || mode === 'soft') global.lx.config['subsonic.quality.clientCapMode'] = mode
+}
+if (envParams.SUBSONIC_SOURCE_PRIORITY) {
+  global.lx.config['subsonic.source.priority'] = envParams.SUBSONIC_SOURCE_PRIORITY.split(',').map((s: string) => s.trim()).filter(Boolean).join(',')
+}
+if (envParams.SUBSONIC_SOURCE_CROSS_PLATFORM !== undefined) {
+  setBoolConfig('subsonic.source.crossPlatform', envParams.SUBSONIC_SOURCE_CROSS_PLATFORM)
+}
+if (envParams.SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM !== undefined) {
+  setBoolConfig('subsonic.source.autoSwitchCustom', envParams.SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM)
+}
 if (envParams.ARTIST_MAX_FETCH_PAGES) {
   const pages = parseInt(envParams.ARTIST_MAX_FETCH_PAGES, 10)
   if (!isNaN(pages) && pages > 0) global.lx.config['artist.maxFetchPages'] = pages
