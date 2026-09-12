@@ -34,6 +34,13 @@ export const parseAlbumRule = (line: string): { albumName: string, singer: strin
   return { albumName, singer }
 }
 
+/**
+ * 规整并去重不喜欢规则串。
+ * 歌曲维度做「歌名@歌手」归一化；专辑维度（! 前缀）先解析再重新编码，
+ * 避免把分隔符 @ 误写成 # 导致专辑规则失效且无法删除。
+ * @param rules 原始规则串（换行分隔）
+ * @returns 归一化后的规则集合（已去重）
+ */
 export const filterRules = (rules: string) => {
   const list: string[] = []
   for (const item of rules.split('\n')) {

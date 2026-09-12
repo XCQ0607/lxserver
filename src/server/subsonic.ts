@@ -170,6 +170,10 @@ export function syncNativeLibraryToSubsonic(
  */
 const metaLocks = new Map<string, Promise<unknown>>()
 
+/**
+ * 同一用户 subsonic-meta.json 的「读-改-写」串行化锁。
+ * 避免 handleSetRating / handleStar / syncDislikeToRating 并发写同一文件互相覆盖。
+ */
 function withMetaLock<T>(username: string, task: () => Promise<T>): Promise<T> {
     const prev = metaLocks.get(username) ?? Promise.resolve()
     const run = (): Promise<T> => task()
@@ -2095,6 +2099,9 @@ class SubsonicHandler {
         return Array.from(artistsMap.values())
     }
 
+    /**
+     * 歌手列表接口：收藏歌手 + 本地曲目反推出的歌手聚合，albumCount / songCount 取真实值。
+     */
     private async handleGetArtists(res: http.ServerResponse, username: string, format: string) {
         // [修改] 歌手列表 = 收藏歌手 + 本地曲目反推出的歌手，albumCount / songCount 取真实值
         const entries = await this.buildArtistDirectory(username)
@@ -3260,6 +3267,9 @@ class SubsonicHandler {
         return { name, source: '', singerId: '' }
     }
 
+    /**
+     * 根据 Subsonic 歌曲 id 解析出对应的「歌名 / 歌手 / 规则 key」，供写回 dislike 使用。
+     */
     private async resolveDislikeTarget(username: string, id: string): Promise<{
         infos: Array<{ name: string, singer: string }>
         album?: { albumName: string, singers: string[] }
@@ -3363,6 +3373,9 @@ class SubsonicHandler {
         return entries.filter(e => keptIds.has(e.music.id))
     }
 
+    /**
+     * 处理 Subsonic setRating：写回评分，并按配置把低分（<=阈值）联动为「不喜欢」。
+     */
     private async handleSetRating(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)

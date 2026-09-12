@@ -10,6 +10,7 @@ import { SPLIT_CHAR } from '@/constants'
 const normalizeCache = new Map<string, string>()
 const NORMALIZE_CACHE_LIMIT = 5000
 
+/** 带容量上限的归一化结果缓存，避免 filterDisliked 中「每首歌 × 每歌手 × 每条规则」重复计算。 */
 const cachedNormalize = (key: string, compute: () => string): string => {
   const hit = normalizeCache.get(key)
   if (hit !== undefined) return hit
