@@ -27,6 +27,9 @@ window.LeaderboardManager = (function () {
         if (initialized) return;
         initialized = true;
 
+        // 预加载 dislike 规则，供歌曲行的「不喜欢」按钮判定显示状态
+        if (window.DislikeManager) window.DislikeManager.load();
+
         // 优先从缓存读取
         const cachedSource = localStorage.getItem('lb-source-select');
         state.source = cachedSource || 'wy';
@@ -267,6 +270,11 @@ window.LeaderboardManager = (function () {
                             onclick="event.stopPropagation(); window.LeaderboardManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5"></i>
                     </button>
+                    <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                            title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
+                            onclick="event.stopPropagation(); window.LeaderboardManager.dislikeSong(${index})">
+                        <i class="fas fa-thumbs-down w-3.5 h-3.5"></i>
+                    </button>
                 </div>
             </div>
             `;
@@ -481,6 +489,24 @@ window.LeaderboardManager = (function () {
         renderSongs: function () {
             renderSongs(state.songs);
             renderPagination();
+        },
+
+        /**
+         * 切换某首歌的「不喜欢」状态。
+         * 走 /api/music/dislike，与 Subsonic 评分联动共用同一份规则。
+         */
+        dislikeSong: async function (index) {
+            const song = state.songs[index];
+            if (!song || !window.DislikeManager) return;
+            try {
+                const nowDisliked = await window.DislikeManager.toggleSong(song);
+                this.renderSongs();
+                if (typeof window.showToast === 'function') {
+                    window.showToast('success', nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
+                }
+            } catch (e) {
+                console.error('[Leaderboard] dislike failed:', e);
+            }
         },
 
         resetLocalPage: function () {

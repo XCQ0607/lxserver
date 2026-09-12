@@ -82,6 +82,7 @@ const loadedApis = new Map<string, any>()
 // API 初始化状态追踪 map<id, status>
 const apiStatus = new Map<string, { status: 'success' | 'failed', error?: string }>()
 
+/** 返回已成功加载的 API 源数量，用于状态展示与健康检查。 */
 export function getLoadedApisCount() {
     return loadedApis.size
 }
