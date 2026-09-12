@@ -502,7 +502,7 @@ window.LeaderboardManager = (function () {
                 const nowDisliked = await window.DislikeManager.toggleSong(song);
                 this.renderSongs();
                 if (typeof window.showToast === 'function') {
-                    window.showToast(nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
+                    window.showToast('success', nowDisliked ? '已加入不喜欢' : '已移出不喜欢');
                 }
             } catch (e) {
                 console.error('[Leaderboard] dislike failed:', e);

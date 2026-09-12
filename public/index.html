@@ -1314,7 +1314,7 @@
                                         <option value="2">2（≤2 星视为不喜欢）</option>
                                         <option value="3">3（≤3 星视为不喜欢）</option>
                                         <option value="4">4（≤4 星视为不喜欢）</option>
-                                        <option value="5">5（任何非满星视为不喜欢）</option>
+                                        <option value="5">5（所有已评分歌曲视为不喜欢）</option>
                                     </select>
                                     <small class="config-hint">Subsonic 客户端打低星时写回原生 dislike 规则的阈值；0 关闭整条联动</small>
                                 </div>
@@ -1394,6 +1394,57 @@
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.linkDislikeToRating" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div style="font-weight:600;margin:14px 0 10px;color:var(--text-primary);">音质 / 源优选 (Subsonic)</div>
+
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">音质优选总开关</span>
+                                        <span class="config-toggle-desc">按优先级主动选最优可用音质；关闭则 stream 仅单次解析</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.quality.enabled" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">音质优先级（高→低）</label>
+                                    <input type="text" name="subsonic.quality.priority" class="form-input config-input" placeholder="flac,320k,128k" />
+                                    <small class="config-hint">逗号分隔，按此顺序主动优选</small>
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">客户端 maxBitrate 上界模式</label>
+                                    <select name="subsonic.quality.clientCapMode" class="form-input config-input">
+                                        <option value="soft">soft（上限内取不到再突破上限选更高优先级）</option>
+                                        <option value="hard">hard（仅选 ≤ 上限的最高优先级）</option>
+                                    </select>
+                                    <small class="config-hint">客户端声明最大码率时的取舍策略</small>
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">跨平台源优选顺序</label>
+                                    <input type="text" name="subsonic.source.priority" class="form-input config-input" placeholder="kw,tx,wy,mg,kg" />
+                                    <small class="config-hint">逗号分隔，客户端所选源始终优先</small>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">允许跨平台优选</span>
+                                        <span class="config-toggle-desc">按歌名+歌手在其它平台搜索替身</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.source.crossPlatform" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">同源切换其它自定义源</span>
+                                        <span class="config-toggle-desc">callUserApiGetMusicUrl 内部循环同平台候选脚本</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.source.autoSwitchCustom" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>

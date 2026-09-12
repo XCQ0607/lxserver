@@ -6,7 +6,7 @@
  *   歌名@歌手                    → 精确屏蔽一首歌
  *   歌名                         → 屏蔽所有同名（翻唱 / 多版本）
  *   @歌手                        → 屏蔽该歌手全部歌曲
- *   !<source>:<albumId>@<singer> → 屏蔽整张专辑
+ *   !<专辑名>@<歌手> → 屏蔽整张专辑
  *
  * 规则由服务端统一解析（/api/music/dislike），这里只做前端判定与增删，
  * 归一化规则与 src/modules/dislike/match.ts 保持一致。
@@ -20,7 +20,7 @@ window.DislikeManager = (function () {
         exact: new Set(),
         musicNames: new Set(),
         singerNames: new Set(),
-        albums: [], // [{ source, albumId, singer }]
+        albums: [], // [{ albumName, singers: [] }]
         // 匹配选项由服务端下发，保证前后端判定一致
         crossSource: false,
         duetMode: 'any', // any | all | primary
@@ -42,16 +42,19 @@ window.DislikeManager = (function () {
      * 歌名归一化：剥离常见版本后缀，与服务端 normalizeSongName 保持一致。
      * 「晴天 (Live)」→「晴天」
      */
+    // 与 src/server/utils/songVersion.ts 的 VERSION_SUFFIX_RE 保持一致：支持括号内与无括号连字符两种形式
     const VERSION_SUFFIX_RE =
-        /[\s\-–—_]*[（(](?:live|remix|现场|伴奏|纯音乐|demo|翻唱|acoustic|instrumental|off\s*vocal|版)[^）)]*[）)]\s*$/i;
+        /(?:[\s\-–—_]*[（(](?:live|remix|现场|伴奏|纯音乐|demo|翻唱|acoustic|instrumental|off\s*vocal|版)[^）)]*[）)]|[\s]*[-–—]\s*(?:live|remix|现场|伴奏|纯音乐|demo|翻唱|acoustic|instrumental|off\s*vocal))\s*$/i;
     const normalizeSongName = (v) => normalize(v).replace(VERSION_SUFFIX_RE, '').trim();
 
-    const getAlbumId = (song) => song?.albumId ?? song?.meta?.albumId ?? song?.album?.id;
+    const getAlbumName = (song) => song?.albumName ?? song?.meta?.albumName ?? song?.album ?? '';
 
     async function request(url, payload) {
+        const headers = { ...(typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {}) };
+        if (payload) headers['Content-Type'] = 'application/json';
         const res = await fetch(url, {
             method: payload ? 'POST' : 'GET',
-            headers: payload ? { 'Content-Type': 'application/json' } : undefined,
+            headers,
             body: payload ? JSON.stringify(payload) : undefined,
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -100,21 +103,25 @@ window.DislikeManager = (function () {
             new Set([name, state.normalizeName ? normalizeSongName(song.name) : ''].filter(Boolean))
         );
 
-        // 1. 专辑维度（专辑 ID + 歌手 双重校验）
-        const albumId = getAlbumId(song);
-        if (song.source && albumId != null && String(albumId) !== '') {
-            const src = normalize(song.source);
-            const aid = normalize(albumId);
+        // 1. 专辑维度（专辑名 + 歌手 双重校验）
+        // 服务端 serializeDislikeRules 仅返回 { albumName, singers }，故按专辑名匹配
+        const albumName = getAlbumName(song);
+        if (albumName) {
+            const an = normalize(albumName);
             for (const alb of state.albums) {
-                if (alb.albumId !== aid) continue;
-                if (!state.crossSource && alb.source && src && alb.source !== src) continue;
-                if (alb.singer) {
+                if (normalize(alb.albumName ?? '') !== an) continue;
+                if (alb.singers && alb.singers.length) {
                     if (!singers.length) {
                         // 歌曲没有歌手信息：requireSinger 时无法确认，保守放过
                         if (state.requireSinger) continue;
                     } else {
-                        const s = state.normalizeName ? normalizeSongName(alb.singer) : normalize(alb.singer);
-                        if (!singers.some((x) => x === s || x.includes(s) || s.includes(x))) continue;
+                        const albumSingers = alb.singers.map((s) =>
+                            state.normalizeName ? normalizeSongName(s) : normalize(s)
+                        );
+                        const hit = singers.some((x) =>
+                            albumSingers.some((a) => x === a || x.includes(a) || a.includes(x))
+                        );
+                        if (!hit) continue;
                     }
                 }
                 return true;
@@ -163,9 +170,9 @@ window.DislikeManager = (function () {
     const addSinger = (singer) => mutate('add', { type: 'singer', singer: singer || '' });
     const removeSinger = (singer) => mutate('remove', { type: 'singer', singer: singer || '' });
     const addAlbum = (song) =>
-        mutate('add', { type: 'album', source: song?.source || '', albumId: getAlbumId(song) || '', singer: song?.singer || '' });
+        mutate('add', { type: 'album', albumName: getAlbumName(song), singer: song?.singer || '' });
     const removeAlbum = (song) =>
-        mutate('remove', { type: 'album', source: song?.source || '', albumId: getAlbumId(song) || '', singer: song?.singer || '' });
+        mutate('remove', { type: 'album', albumName: getAlbumName(song), singer: song?.singer || '' });
 
     /** 切换某首歌的不喜欢状态 */
     async function toggleSong(song) {

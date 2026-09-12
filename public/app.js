@@ -2516,6 +2516,26 @@ class App {
                 form.elements['subsonic.linkDislikeToRating'].checked = config['subsonic.linkDislikeToRating'] === true;
             }
 
+            // 音质 / 源优选
+            if (form.elements['subsonic.quality.enabled']) {
+                form.elements['subsonic.quality.enabled'].checked = config['subsonic.quality.enabled'] !== false;
+            }
+            if (form.elements['subsonic.quality.priority']) {
+                form.elements['subsonic.quality.priority'].value = config['subsonic.quality.priority'] || 'flac,320k,128k';
+            }
+            if (form.elements['subsonic.quality.clientCapMode']) {
+                form.elements['subsonic.quality.clientCapMode'].value = config['subsonic.quality.clientCapMode'] || 'soft';
+            }
+            if (form.elements['subsonic.source.priority']) {
+                form.elements['subsonic.source.priority'].value = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
+            }
+            if (form.elements['subsonic.source.crossPlatform']) {
+                form.elements['subsonic.source.crossPlatform'].checked = config['subsonic.source.crossPlatform'] !== false;
+            }
+            if (form.elements['subsonic.source.autoSwitchCustom']) {
+                form.elements['subsonic.source.autoSwitchCustom'].checked = config['subsonic.source.autoSwitchCustom'] !== false;
+            }
+
             // 自定义歌曲目录配置
             if (form.elements['user.enableCustomMusicDir']) {
                 form.elements['user.enableCustomMusicDir'].checked = config['user.enableCustomMusicDir'] === true;
@@ -2701,6 +2721,12 @@ class App {
             'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
             'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
             'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
+            'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
+            'subsonic.quality.priority': (formData.get('subsonic.quality.priority') || '').trim() || 'flac,320k,128k',
+            'subsonic.quality.clientCapMode': formData.get('subsonic.quality.clientCapMode') || 'soft',
+            'subsonic.source.priority': (formData.get('subsonic.source.priority') || '').trim() || 'kw,tx,wy,mg,kg',
+            'subsonic.source.crossPlatform': formData.get('subsonic.source.crossPlatform') === 'on',
+            'subsonic.source.autoSwitchCustom': formData.get('subsonic.source.autoSwitchCustom') === 'on',
             'singer.sourcePriority': formData.get('singer.sourcePriority'),
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };

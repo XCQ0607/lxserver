@@ -28,9 +28,10 @@ export const normalizeText = (value: unknown): string =>
       .toLowerCase()
   )
 
-/** 歌名版本后缀正则（Live / Remix / 现场 / 伴奏 …），供排序、折叠、归一化共用 */
+/** 歌名版本后缀正则（Live / Remix / 现场 / 伴奏 …），供排序、折叠、归一化共用。
+ *  支持两种形式：括号内「晴天 (Live)」「晴天（现场版）」与无括号连字符「晴天 - Remix」「晴天 - Live」 */
 export const VERSION_SUFFIX_RE =
-  /[\s\-–—_]*[（(](?:live|remix|现场|伴奏|纯音乐|demo|翻唱|acoustic|instrumental|off\s*vocal|版)[^）)]*[）)]\s*$/i
+  /(?:[\s\-–—_]*[（(](?:live|remix|现场|伴奏|纯音乐|demo|翻唱|acoustic|instrumental|off\s*vocal|版)[^）)]*[）)]|[\s]*[-–—]\s*(?:live|remix|现场|伴奏|纯音乐|demo|翻唱|acoustic|instrumental|off\s*vocal))\s*$/i
 
 /**
  * 归一化歌名：剥离常见版本后缀。
