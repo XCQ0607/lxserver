@@ -4,6 +4,7 @@ import os from 'os'
 import fs from 'fs'
 // @ts-ignore
 import needle from 'needle'
+import { getProxyAgent } from '../../modules/utils/proxy.js'
 
 /**
  * AcoustID 歌曲识别工具类
@@ -86,7 +87,9 @@ export async function lookupSong(fingerprint: string, duration: number): Promise
     try {
         const response = await needle('post', API_URL, params, {
             json: false,
-            multipart: false
+            multipart: false,
+            // AcoustID 识别属于应用类出站请求
+            agent: await getProxyAgent(API_URL, 'app'),
         })
 
         if (response.statusCode !== 200) {

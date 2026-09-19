@@ -1,4 +1,5 @@
 import http from 'http'
+import { getProxyAgent } from '../modules/utils/proxy.js'
 
 /**
  * 封面图片代理与缓存（图片显示核心实现）
@@ -66,14 +67,36 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
         return res.end(cached.buf)
     }
 
-    const doFetch = async (): Promise<{ buf: Buffer, ct: string } | null> => {
+    // 封面代理属于「应用」类出站请求，走独立的 app 代理开关
+    const appAgent = await getProxyAgent(picUrl, 'app')
+
+    const doFetch = async (fetchUrl: string): Promise<{ buf: Buffer, ct: string } | null> => {
         if (res.destroyed || res.writableEnded) return null
         await coverAcquire()
         try {
             if (res.destroyed || res.writableEnded) return null
+
+            // 开启 app 代理时改用 needle：原生 fetch 无法指定 agent
+            if (appAgent) {
+                const needle = (await import('needle')).default
+                const r: any = await needle('get', fetchUrl, null, {
+                    agent: appAgent,
+                    response_timeout: 20000,
+                    follow_max: 3,
+                    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
+                } as any)
+                const status: number = r?.statusCode || 0
+                if (status < 200 || status >= 300) return null
+                const buf = Buffer.isBuffer(r?.body) ? r.body : Buffer.from(r?.raw || [])
+                if (buf.length === 0) return null
+                const upstreamCt: string = r?.headers?.['content-type'] || ''
+                const ct = upstreamCt.startsWith('image/') ? upstreamCt.split(';')[0].trim() : 'image/jpeg'
+                return { buf, ct }
+            }
+
             const controller = new AbortController()
             const timer = setTimeout(() => controller.abort(), 20000)
-            const imgResp = await fetch(picUrl, {
+            const imgResp = await fetch(fetchUrl, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
                 signal: controller.signal,
             })
@@ -98,7 +121,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
     for (let attempt = 0; attempt < 3 && !result; attempt++) {
         if (res.destroyed || res.writableEnded) return
         if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt))
-        result = await doFetch()
+        result = await doFetch(picUrl)
     }
 
     if (result) {

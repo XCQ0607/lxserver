@@ -693,7 +693,7 @@
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div class="config-field">
+                                <div class="config-field" id="proxy-all-address-field">
                                     <label class="config-label">代理地址</label>
                                     <div class="config-input-group">
                                         <input type="text" name="proxy.all.address" class="form-input config-input"
@@ -709,6 +709,65 @@
                                         </button>
                                     </div>
                                     <small class="config-hint">支持 http:// 或 socks5://</small>
+                                </div>
+
+                                <!-- 细分代理：音乐平台 / 自定义音源 / 应用 各自独立 -->
+                                <div class="config-divider"></div>
+                                <div class="config-field">
+                                    <label class="config-label">音乐平台（内置音源 tx / wy / kg 等）</label>
+                                    <select name="proxy.music.mode" class="form-input config-input">
+                                        <option value="inherit">沿用统一代理</option>
+                                        <option value="off">直连（不走代理）</option>
+                                        <option value="on">使用下方地址</option>
+                                    </select>
+                                </div>
+                                <div class="config-field" id="proxy-music-address-field">
+                                    <label class="config-label">代理地址</label>
+                                    <div class="config-input-group">
+                                        <input type="text" name="proxy.music.address" class="form-input config-input"
+                                            placeholder="http://127.0.0.1:7890" />
+                                        <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
+                                            data-target="proxy.music.address">测试</button>
+                                    </div>
+                                </div>
+
+                                <div class="config-divider"></div>
+                                <div class="config-field">
+                                    <label class="config-label">自定义音源（导入的第三方脚本）</label>
+                                    <select name="proxy.customSource.mode" class="form-input config-input">
+                                        <option value="inherit">沿用统一代理</option>
+                                        <option value="off">直连（不走代理）</option>
+                                        <option value="on">使用下方地址</option>
+                                    </select>
+                                </div>
+                                <div class="config-field" id="proxy-customSource-address-field">
+                                    <label class="config-label">代理地址</label>
+                                    <div class="config-input-group">
+                                        <input type="text" name="proxy.customSource.address" class="form-input config-input"
+                                            placeholder="http://127.0.0.1:7890" />
+                                        <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
+                                            data-target="proxy.customSource.address">测试</button>
+                                    </div>
+                                </div>
+
+                                <div class="config-divider"></div>
+                                <div class="config-field">
+                                    <label class="config-label">应用（封面代理 / 识别 / 远程导入音源）</label>
+                                    <select name="proxy.app.mode" class="form-input config-input">
+                                        <option value="inherit">沿用统一代理</option>
+                                        <option value="off">直连（不走代理）</option>
+                                        <option value="on">使用下方地址</option>
+                                    </select>
+                                </div>
+                                <div class="config-field" id="proxy-app-address-field">
+                                    <label class="config-label">代理地址</label>
+                                    <div class="config-input-group">
+                                        <input type="text" name="proxy.app.address" class="form-input config-input"
+                                            placeholder="http://127.0.0.1:7890" />
+                                        <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
+                                            data-target="proxy.app.address">测试</button>
+                                    </div>
+                                    <small class="config-hint">未单独配置时，三类都沿用上面的统一代理</small>
                                 </div>
                             </div>
                         </div>

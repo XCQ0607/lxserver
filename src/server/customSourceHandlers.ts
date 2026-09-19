@@ -2,6 +2,8 @@ import * as fs from 'fs'
 import * as path from 'path'
 import { extractMetadata, loadUserApi, initUserApis, getApiStatus } from './userApi'
 import type { IncomingMessage, ServerResponse } from 'http'
+import needle from 'needle'
+import { getProxyAgent } from '../modules/utils/proxy.js'
 
 // 读取请求体
 async function readBody(req: IncomingMessage): Promise<string> {
@@ -264,6 +266,20 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         // 辅助函数：支持重定向的下载
         const download = async (targetUrl: string, depth = 0): Promise<string> => {
             if (depth > 5) throw new Error('Too many redirects')
+
+            // 远程导入音源脚本属于应用类出站请求：开启 app 代理时走 needle
+            // （原生 https.get 无法直接使用 tunnel agent）
+            const agent = await getProxyAgent(targetUrl, 'app')
+            if (agent) {
+                const resp: any = await needle('get', targetUrl, null, {
+                    agent,
+                    follow_max: 5,
+                    response_timeout: 30000,
+                })
+                if (resp.statusCode !== 200) throw new Error(`Failed to download: status code ${resp.statusCode}`)
+                return Buffer.isBuffer(resp.body) ? resp.body.toString('utf-8') : String(resp.body || '')
+            }
+
             const protocol = targetUrl.startsWith('https') ? require('https') : require('http')
 
             return new Promise((resolve, reject) => {

@@ -36,6 +36,7 @@ import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSync
 import { getDownloadQualityCandidates } from './downloadQuality'
 import crypto from 'node:crypto'
 import needle from 'needle'
+import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 
 /** 当前生效的 dislike 匹配选项，下发给前端保证前后端判定一致 */
@@ -810,6 +811,8 @@ const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
     response_timeout: 8000,
     read_timeout: 8000,
     headers,
+    // 音质探测抓的是音乐平台的音频地址，归 music 分类
+    agent: await getProxyAgent(audioUrl, 'music'),
   }
 
   try {
@@ -5991,6 +5994,8 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                         follow_max: 0,
                         response_timeout: 4000, // Increase timeout slightly
                         read_timeout: 4000,
+                        // 解析的是音乐平台链接，归 music 分类
+                        agent: await getProxyAgent(u, 'music'),
                         headers: {
                           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                           'Referer': new URL(u).origin
@@ -6758,6 +6763,13 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'] ?? false,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
+            // 三类细分代理：enabled 为 undefined 表示「沿用上面的统一开关」
+            'proxy.music.enabled': global.lx.config['proxy.music.enabled'],
+            'proxy.music.address': global.lx.config['proxy.music.address'] || '',
+            'proxy.customSource.enabled': global.lx.config['proxy.customSource.enabled'],
+            'proxy.customSource.address': global.lx.config['proxy.customSource.address'] || '',
+            'proxy.app.enabled': global.lx.config['proxy.app.enabled'],
+            'proxy.app.address': global.lx.config['proxy.app.address'] || '',
             'admin.path': global.lx.config['admin.path'] ?? '/music',
             'player.path': global.lx.config['player.path'] ?? '/',
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
@@ -6859,6 +6871,18 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
               if (newConfig['webdav.excludeMusic'] !== undefined) global.lx.config['webdav.excludeMusic'] = !!newConfig['webdav.excludeMusic']
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = newConfig['proxy.all.address']
+              // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
+              ;(['music', 'customSource', 'app'] as const).forEach(cat => {
+                const cfg: any = global.lx.config
+                const kEnabled = `proxy.${cat}.enabled`
+                const kAddress = `proxy.${cat}.address`
+                if (newConfig[kEnabled] !== undefined) {
+                  cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
+                }
+                if (newConfig[kAddress] !== undefined) {
+                  cfg[kAddress] = newConfig[kAddress] === null ? '' : String(newConfig[kAddress] || '')
+                }
+              })
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
                 const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
@@ -6990,6 +7014,13 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'],
                 'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
                 'proxy.all.address': global.lx.config['proxy.all.address'],
+                // undefined 会被序列化省略 -> 下次启动仍为「沿用统一开关」
+                'proxy.music.enabled': global.lx.config['proxy.music.enabled'],
+                'proxy.music.address': global.lx.config['proxy.music.address'] || '',
+                'proxy.customSource.enabled': global.lx.config['proxy.customSource.enabled'],
+                'proxy.customSource.address': global.lx.config['proxy.customSource.address'] || '',
+                'proxy.app.enabled': global.lx.config['proxy.app.enabled'],
+                'proxy.app.address': global.lx.config['proxy.app.address'] || '',
                 'admin.path': global.lx.config['admin.path'] ?? '/admin',
                 'player.path': global.lx.config['player.path'] ?? '/',
                 'subsonic.enable': global.lx.config['subsonic.enable'],

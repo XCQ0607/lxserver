@@ -231,6 +231,26 @@ declare namespace LX {
     'proxy.all.address'?: string
 
     /**
+     * 音乐平台(内置音源 SDK)请求是否单独走代理；undefined 表示沿用 proxy.all.*
+     */
+    'proxy.music.enabled'?: boolean
+
+    /** 音乐平台请求的代理地址 */
+    'proxy.music.address'?: string
+
+    /** 自定义音源脚本请求是否单独走代理；undefined 表示沿用 proxy.all.* */
+    'proxy.customSource.enabled'?: boolean
+
+    /** 自定义音源脚本请求的代理地址 */
+    'proxy.customSource.address'?: string
+
+    /** 应用自身功能(封面代理/识别/远程导入等)请求是否单独走代理；undefined 表示沿用 proxy.all.* */
+    'proxy.app.enabled'?: boolean
+
+    /** 应用自身功能请求的代理地址 */
+    'proxy.app.address'?: string
+
+    /**
      * 是否禁用数据收集
      */
     disableTelemetry?: boolean

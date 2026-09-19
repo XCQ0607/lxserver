@@ -61,6 +61,15 @@ const config: LX.Config = {
   'proxy.all.enabled': false,
   'proxy.all.address': '',
 
+  // 细分代理：音乐平台 / 自定义音源 / 应用。
+  // enabled 为 undefined 表示该类别「沿用上面的统一开关」，显式 true/false 才独立生效。
+  'proxy.music.enabled': undefined,
+  'proxy.music.address': '',
+  'proxy.customSource.enabled': undefined,
+  'proxy.customSource.address': '',
+  'proxy.app.enabled': undefined,
+  'proxy.app.address': '',
+
   // 访问路径配置
   'admin.path': '/admin', // 后台管理路径
   'player.path': '/', // 播放器路径，默认为根路径 /

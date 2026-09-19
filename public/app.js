@@ -2364,6 +2364,17 @@ class App {
             if (form.elements['proxy.all.address']) {
                 form.elements['proxy.all.address'].value = config['proxy.all.address'] || '';
             }
+            // 细分代理：enabled 为 undefined -> 沿用统一代理
+            ['music', 'customSource', 'app'].forEach(cat => {
+                const modeSel = form.elements[`proxy.${cat}.mode`];
+                if (modeSel) {
+                    const enabled = config[`proxy.${cat}.enabled`];
+                    modeSel.value = enabled === undefined || enabled === null ? 'inherit' : (enabled ? 'on' : 'off');
+                }
+                const addrEl = form.elements[`proxy.${cat}.address`];
+                if (addrEl) addrEl.value = config[`proxy.${cat}.address`] || '';
+            });
+            this.updateProxyFieldsVisibility();
             if (form.elements['user.enablePath']) {
                 form.elements['user.enablePath'].checked = config['user.enablePath'] !== false;
             }
@@ -2914,6 +2925,16 @@ class App {
             'proxy.header': formData.get('proxy.header'),
             'proxy.all.enabled': formData.get('proxy.all.enabled') === 'on',
             'proxy.all.address': formData.get('proxy.all.address'),
+            ...(() => {
+                const out = {};
+                ['music', 'customSource', 'app'].forEach(cat => {
+                    const mode = formData.get(`proxy.${cat}.mode`);
+                    // null = 沿用统一代理（服务端写回 undefined）
+                    out[`proxy.${cat}.enabled`] = (mode === 'inherit' || mode == null) ? null : (mode === 'on');
+                    out[`proxy.${cat}.address`] = formData.get(`proxy.${cat}.address`) || '';
+                });
+                return out;
+            })(),
             'user.enablePath': formData.get('user.enablePath') === 'on',
             'user.enableRoot': formData.get('user.enableRoot') === 'on',
             'user.enablePublicRestriction': formData.get('user.enablePublicRestriction') === 'on',
@@ -3128,8 +3149,27 @@ class App {
         }
     }
 
-    async testProxy() {
-        const address = document.querySelector('input[name="proxy.all.address"]').value;
+    // 代理地址输入框只在真正需要填地址时出现：
+    // - 统一代理开关关闭 -> 隐藏统一代理地址
+    // - 细分选「沿用统一代理」或「直连」 -> 隐藏该类的地址
+    updateProxyFieldsVisibility() {
+        const form = document.getElementById('config-form');
+        if (!form) return;
+        const allField = document.getElementById('proxy-all-address-field');
+        if (allField) {
+            allField.style.display = form.elements['proxy.all.enabled']?.checked ? '' : 'none';
+        }
+        ['music', 'customSource', 'app'].forEach(cat => {
+            const field = document.getElementById(`proxy-${cat}-address-field`);
+            if (!field) return;
+            field.style.display = form.elements[`proxy.${cat}.mode`]?.value === 'on' ? '' : 'none';
+        });
+    }
+
+    async testProxy(addressOverride) {
+        const address = addressOverride !== undefined
+            ? addressOverride
+            : (document.querySelector('input[name="proxy.all.address"]')?.value || '');
         if (!address) {
             showInfo('请输入代理地址');
             return;
@@ -3902,6 +3942,20 @@ class App {
         document.getElementById('sync-files-btn')?.addEventListener('click', () => this.syncFilesToWebDAV());
         document.getElementById('refresh-sync-logs-btn')?.addEventListener('click', () => this.loadSyncLogs());
         document.getElementById('test-proxy-btn')?.addEventListener('click', () => this.testProxy());
+        // 细分代理：各分类地址旁的「测试」按钮，测的是该分类自己的地址
+        document.querySelectorAll('.test-proxy-btn-cat')?.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const target = btn.getAttribute('data-target');
+                const input = document.querySelector(`input[name="${target}"]`);
+                this.testProxy(input ? input.value : '');
+            });
+        });
+        // 代理地址框按需显示
+        const cfgForm = document.getElementById('config-form');
+        cfgForm?.elements['proxy.all.enabled']?.addEventListener('change', () => this.updateProxyFieldsVisibility());
+        ['music', 'customSource', 'app'].forEach(cat => {
+            cfgForm?.elements[`proxy.${cat}.mode`]?.addEventListener('change', () => this.updateProxyFieldsVisibility());
+        });
 
         // [新增] 本地备份/还原事件绑定
         document.getElementById('backup-local-btn')?.addEventListener('click', () => this.downloadLocalBackup());

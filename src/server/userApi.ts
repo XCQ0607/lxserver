@@ -8,6 +8,7 @@ import * as zlib from 'zlib'
 import { promisify } from 'util'
 
 import * as tunnel from 'tunnel'
+import { getProxyAgent } from '../modules/utils/proxy.js'
 const inflate = promisify(zlib.inflate)
 const deflate = promisify(zlib.deflate)
 
@@ -126,7 +127,13 @@ export function extractMetadata(script: string): Partial<UserApiInfo> {
 }
 
 // 创建 lx.request 包装器（使用 needle）
-function createLxRequest(isUnsafe: boolean = false) {
+async function createLxRequest(isUnsafe: boolean = false) {
+    // 自定义音源脚本调用 lx.request 是同步的，无法在调用时 await，
+    // 因此这里预先按 http/https 各建一个 agent，调用时按目标协议取用。
+    // 走 customSource 分类的独立开关（未配置时沿用 proxy.all.*）。
+    const agentHttps = await getProxyAgent('https://lx-proxy-probe.invalid', 'customSource')
+    const agentHttp = agentHttps ? await getProxyAgent('http://lx-proxy-probe.invalid', 'customSource') : undefined
+
     return (url: string, options: any, callback: Function) => {
         const safeOptions = decontextify(options || {})
         const { method = 'get', timeout, headers, body, form, formData } = safeOptions
@@ -136,6 +143,9 @@ function createLxRequest(isUnsafe: boolean = false) {
             follow_max: 5,
             response_timeout: typeof timeout === 'number' && timeout > 0 ? Math.min(timeout, 60000) : 60000
         }
+
+        if (agentHttps && /^https:/i.test(String(url))) requestOptions.agent = agentHttps
+        else if (agentHttp) requestOptions.agent = agentHttp
 
         let data = body
         if (form) {
@@ -261,7 +271,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     const lxObject = {
         ...lxDataInside,
         utils: lxUtils,
-        request: createLxRequest(!!apiInfo.allowUnsafeVM && !!global.lx.config['system.allowUnsafeVM']),
+        request: await createLxRequest(!!apiInfo.allowUnsafeVM && !!global.lx.config['system.allowUnsafeVM']),
         send: (eventName: string, data: any) => {
             const dData = decontextify(data)
             // console.log(`[UserApi-${fullApiInfo.name}] send:`, eventName)
