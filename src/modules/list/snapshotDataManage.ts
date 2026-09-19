@@ -168,10 +168,39 @@ export class SnapshotDataManage {
     this.listDir = path.join(userDataManage.userDir, File.listDir)
     checkAndCreateDirSync(this.listDir)
 
-    this.snapshotDir = path.join(this.listDir, File.listSnapshotDir)
+    // [歌单快照额外备份路径] 配置了 snapshot.backupPath 时，快照存到该路径下（按用户名隔离），否则用默认 list/snapshot
+    const backupPathConf = (global.lx.config['snapshot.backupPath'] || '').trim()
+    if (backupPathConf) {
+      const base = path.isAbsolute(backupPathConf)
+        ? backupPathConf
+        : path.join(global.lx.dataPath, backupPathConf)
+      this.snapshotDir = path.join(base, userDataManage.userName, File.listSnapshotDir)
+    } else {
+      this.snapshotDir = path.join(this.listDir, File.listSnapshotDir)
+    }
     checkAndCreateDirSync(this.snapshotDir)
 
-    this.snapshotInfoFilePath = path.join(this.listDir, File.listSnapshotInfoJSON)
+    // 迁移旧快照：默认路径（list/snapshot）下的数据整体搬迁到当前 snapshotDir
+    const legacySnapshotDir = path.join(this.listDir, File.listSnapshotDir)
+    if (this.snapshotDir !== legacySnapshotDir && fs.existsSync(legacySnapshotDir)) {
+      for (const name of fs.readdirSync(legacySnapshotDir)) {
+        const src = path.join(legacySnapshotDir, name)
+        const dst = path.join(this.snapshotDir, name)
+        if (!fs.existsSync(dst)) {
+          try { fs.renameSync(src, dst) } catch (e) { syncLog.error('migrate snapshot file failed:', name, e) }
+        }
+      }
+      if (fs.readdirSync(legacySnapshotDir).length === 0) {
+        try { fs.rmdirSync(legacySnapshotDir) } catch { /* ignore */ }
+      }
+    }
+
+    // 快照元数据文件（snapshotInfo.json）跟随 snapshotDir 存放，首次运行从旧位置迁移
+    this.snapshotInfoFilePath = path.join(this.snapshotDir, File.listSnapshotInfoJSON)
+    const legacyInfoPath = path.join(this.listDir, File.listSnapshotInfoJSON)
+    if (!fs.existsSync(this.snapshotInfoFilePath) && fs.existsSync(legacyInfoPath)) {
+      try { fs.renameSync(legacyInfoPath, this.snapshotInfoFilePath) } catch (e) { syncLog.error('migrate snapshotInfo failed:', e) }
+    }
     this.snapshotInfo = fs.existsSync(this.snapshotInfoFilePath)
       ? JSON.parse(fs.readFileSync(this.snapshotInfoFilePath).toString())
       : { latest: null, time: 0, list: [], clients: {} }

@@ -6896,6 +6896,14 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 global.lx.config['subsonic.path'] = newConfig['subsonic.path'].replace(/\/+$/, '') || '/rest'
               }
               if (newConfig['subsonic.enableDebug'] !== undefined) global.lx.config['subsonic.enableDebug'] = newConfig['subsonic.enableDebug']
+              // [本地配置备份] configBackup 配置
+              if (newConfig['configBackup.enable'] !== undefined) global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']
+              if (newConfig['configBackup.retentionDays'] !== undefined) {
+                const rd = Number(newConfig['configBackup.retentionDays'])
+                global.lx.config['configBackup.retentionDays'] = Number.isFinite(rd) && rd > 0 ? Math.floor(rd) : 7
+              }
+              if (newConfig['configBackup.dir'] !== undefined) global.lx.config['configBackup.dir'] = String(newConfig['configBackup.dir'] ?? '')
+              if (newConfig['snapshot.backupPath'] !== undefined) global.lx.config['snapshot.backupPath'] = String(newConfig['snapshot.backupPath'] ?? '')
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
@@ -7019,6 +7027,10 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
                 'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
                 'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'],
                 'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'],
+                'configBackup.enable': global.lx.config['configBackup.enable'],
+                'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'],
+                'configBackup.dir': global.lx.config['configBackup.dir'],
+                'snapshot.backupPath': global.lx.config['snapshot.backupPath'] || '',
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],

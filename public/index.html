@@ -637,11 +637,6 @@
                                         placeholder="LX Sync Server" />
                                 </div>
                                 <div class="config-field">
-                                    <label class="config-label">最大快照数</label>
-                                    <input type="number" name="maxSnapshotNum" class="form-input config-input"
-                                        placeholder="10" />
-                                </div>
-                                <div class="config-field">
                                     <label class="config-label">添加歌曲位置</label>
                                     <select name="list.addMusicLocationType" class="form-input config-input">
                                         <option value="top">顶部</option>
@@ -917,6 +912,64 @@
                                 <div id="webdav-disabled-hint" style="display: none;">
                                     <div class="config-divider"></div>
                                     <p style="color: var(--text-secondary); text-align: center; padding: 1rem 0;">请先开启 WebDAV 同步服务以配置详细参数</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 备份与恢复卡片 -->
+                        <div id="config-card-configbackup" class="config-card glass">
+                            <div class="config-card-header">
+                                <div class="config-card-icon"
+                                    style="background: linear-gradient(135deg, #10b981, #059669);">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                        <polyline points="17 21 17 13 7 13 7 21" />
+                                        <polyline points="7 3 7 8 15 8" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="config-card-title">备份与恢复</h3>
+                                    <p class="config-card-desc">歌单数据快照与本地配置备份设置</p>
+                                </div>
+                            </div>
+                            <div class="config-card-body">
+                                <div class="config-field">
+                                    <label class="config-label">最大快照数</label>
+                                    <input type="number" name="maxSnapshotNum" class="form-input config-input"
+                                        placeholder="10" />
+                                    <small class="config-hint">用户歌单数据保留的历史快照份数，超限自动清理</small>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">启用本地配置备份</span>
+                                        <span class="config-toggle-desc">每日生成一份 config.js 副本，按保留天数自动清理</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="configBackup.enable" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-field-row">
+                                    <div class="config-field">
+                                        <label class="config-label">保留天数</label>
+                                        <input type="number" name="configBackup.retentionDays" class="form-input config-input"
+                                            min="1" max="365" placeholder="7" />
+                                        <small class="config-hint">默认 7 天</small>
+                                    </div>
+                                    <div class="config-field">
+                                        <label class="config-label">配置备份目录</label>
+                                        <input type="text" name="configBackup.dir" class="form-input config-input"
+                                            placeholder="留空= <data>/backups" />
+                                        <small class="config-hint">相对路径基于 data 目录，绝对路径直接使用</small>
+                                    </div>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div class="config-field">
+                                    <label class="config-label">歌单快照备份路径</label>
+                                    <input type="text" name="snapshot.backupPath" class="form-input config-input"
+                                        placeholder="留空= 用户数据目录 list/snapshot" />
+                                    <small class="config-hint">额外快照存储路径，按用户名自动隔离；相对路径基于 data 目录，绝对路径直接使用。修改后重启生效并自动迁移旧快照</small>
                                 </div>
                             </div>
                         </div>

@@ -88,6 +88,65 @@ const getConfigHash = (filePath: string) => {
 const dataPath = envParams.DATA_PATH ?? path.join(__dirname, '../data')
 const resolvedConfigPath = process.env.CONFIG_PATH || path.join(dataPath, 'config.js')
 
+// [本地配置备份] 每天一份 config-YYYY-MM-DD.js，保留可配置天数（见 configBackup.*）
+let lastBackupDate = ''
+
+const getConfigBackupDir = (): string => {
+  const dir = global.lx?.config['configBackup.dir']
+  if (dir && typeof dir === 'string' && dir.trim()) {
+    const p = dir.trim()
+    return path.isAbsolute(p) ? p : path.join(dataPath, p)
+  }
+  return path.join(dataPath, 'backups')
+}
+
+const getConfigBackupRetention = (): number => {
+  const days = global.lx?.config['configBackup.retentionDays']
+  return typeof days === 'number' && days > 0 ? days : 7
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+const getTodayStr = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+}
+
+// 清理超过保留期的本地配置备份（按文件 mtime 判断）
+const cleanOldConfigBackups = () => {
+  const backupDir = getConfigBackupDir()
+  try {
+    if (!fs.existsSync(backupDir)) return
+    const cutoff = Date.now() - getConfigBackupRetention() * 24 * 60 * 60 * 1000
+    for (const name of fs.readdirSync(backupDir)) {
+      if (!/^config-\d{4}-\d{2}-\d{2}\.js$/.test(name)) continue
+      const fp = path.join(backupDir, name)
+      try {
+        if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp)
+      } catch { /* ignore */ }
+    }
+  } catch (err) {
+    console.error('[Config] Failed to clean old config backups:', err)
+  }
+}
+
+// 每天只备份一次（同日覆盖），备份后顺带清理过期文件
+const backupConfig = () => {
+  if (global.lx?.config['configBackup.enable'] === false) return
+  const dateStr = getTodayStr()
+  if (dateStr === lastBackupDate) return
+  const backupDir = getConfigBackupDir()
+  try {
+    if (!global.lx?.configPath || !fs.existsSync(global.lx.configPath)) return
+    fs.mkdirSync(backupDir, { recursive: true })
+    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${dateStr}.js`))
+    lastBackupDate = dateStr
+    console.log(`[Config] Local backup saved to ${backupDir}/config-${dateStr}.js`)
+  } catch (err) {
+    console.error('[Config] Failed to backup config:', err)
+  }
+  cleanOldConfigBackups()
+}
+
 const saveConfigToFile = () => {
   const content = `module.exports = ${JSON.stringify(global.lx.config, null, 2)}`
   try {
@@ -98,6 +157,7 @@ const saveConfigToFile = () => {
     fs.writeFileSync(global.lx.configPath, content)
     lastConfigHash = crypto.createHash('md5').update(content).digest('hex')
     // console.log('Current memory config saved to ' + global.lx.configPath)
+    backupConfig()
   } catch (err) {
     console.error('Failed to save config file:', err)
   }
@@ -661,6 +721,11 @@ if (!fs.existsSync(openLibDir)) {
 
 // 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
 saveConfigToFile()
+
+// 每日清理过期本地配置备份（保留最近 7 天）
+cleanOldConfigBackups()
+const configBackupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
+if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
 
 startServer(global.lx.config.port, global.lx.config.bindIP)
 
