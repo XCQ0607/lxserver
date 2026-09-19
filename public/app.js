@@ -2351,6 +2351,7 @@ class App {
         try {
             const config = await this.request('/api/config');
             this.configLoaded = true;
+            this.loadedConfig = config; // 保存原始配置，供 saveConfig 对比「需重启」字段是否变更
             const form = document.getElementById('config-form');
 
             form.elements['serverName'].value = config.serverName || '';
@@ -2470,6 +2471,27 @@ class App {
             }
             if (form.elements['subsonic.enableDebug']) {
                 form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
+            }
+            if (form.elements['subsonic.port']) {
+                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
+            }
+            // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
+            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
+            const standaloneFields = document.getElementById('subsonic-standalone-fields');
+            if (standaloneToggle && standaloneFields) {
+                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
+                standaloneToggle.checked = enabled;
+                standaloneFields.classList.toggle('hidden', !enabled);
+                standaloneToggle.onchange = () => {
+                    const on = standaloneToggle.checked;
+                    standaloneFields.classList.toggle('hidden', !on);
+                    const portInput = form.elements['subsonic.port'];
+                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
+                        portInput.value = 4050;
+                    } else if (!on) {
+                        portInput.value = 0;
+                    }
+                };
             }
             if (form.elements['subsonic.onlineSearch']) {
                 form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
@@ -2944,6 +2966,7 @@ class App {
             'subsonic.enable': formData.get('subsonic.enable') === 'on',
             'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
             'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
+            'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
             'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
             'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
             'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
@@ -2971,6 +2994,17 @@ class App {
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };
 
+        // [需要重启] 以下配置仅在进程启动时由 server.ts 读取
+        // （startSubsonicStandaloneServer / handleStartServer），保存后不会即时生效，必须重启服务。
+        // 检测本次保存是否实际修改了它们，若是则提示用户重启。
+        const restartRequiredKeys = ['subsonic.enable', 'subsonic.port'];
+        const prevConfig = this.loadedConfig || {};
+        const changedRestartKeys = restartRequiredKeys.filter(k => {
+            if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
+            return config[k] !== prevConfig[k];
+        });
+        const needRestart = changedRestartKeys.length > 0;
+
         try {
             const res = await this.request('/api/config', {
                 method: 'POST',
@@ -2987,11 +3021,36 @@ class App {
             const navPlayerLink = document.getElementById('nav-player-link');
             if (navPlayerLink) navPlayerLink.href = playerPath === '' ? '/' : (playerPath ?? '/');
 
+            // 保存成功后同步「已加载配置」，供下次保存对比
+            this.loadedConfig = config;
+
             if (!silent) {
                 if (res.warning) {
                     showInfo('配置保存成功！\n\n⚠️ 警告：' + res.warning);
                 } else {
                     showSuccess('配置保存成功！');
+                }
+                // 若改动了需重启才生效的配置，提醒并支持一键重启
+                if (needRestart) {
+                    const ok = await showSelect(
+                        '需要重启服务器',
+                        `你修改了以下「需重启才能生效」的配置：\n\n• ${changedRestartKeys.join('\n• ')}\n\n` +
+                        `当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？`,
+                        { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
+                    );
+                    if (ok) {
+                        try {
+                            const r = await this.request('/api/restart', { method: 'POST' });
+                            if (r.success) {
+                                showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
+                                setTimeout(() => window.location.reload(), 5000);
+                            } else {
+                                showError('重启失败: ' + (r.message || '未知错误'));
+                            }
+                        } catch (e) {
+                            showError('重启请求失败: ' + e.message);
+                        }
+                    }
                 }
             }
         } catch (err) {

@@ -1171,6 +1171,24 @@
                                         placeholder="/rest" />
                                     <small class="config-hint">Subsonic API 默认路径为 /rest。修改后需在客户端同步更新 URL</small>
                                 </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">启用 Subsonic 独立监听端口</span>
+                                        <span class="config-toggle-desc">开启后单独监听一个端口，仅暴露 Subsonic API；关闭则不启用（端口归 0）</span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" id="subsonic-standalone-toggle" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-divider"></div>
+                                <div id="subsonic-standalone-fields" class="hidden">
+                                    <div class="config-field">
+                                        <label class="config-label">Subsonic 独立监听端口</label>
+                                        <input type="number" name="subsonic.port" class="form-input config-input"
+                                            min="0" max="65535" placeholder="0-65535" />
+                                    </div>
+                                </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">

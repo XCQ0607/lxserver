@@ -1076,7 +1076,7 @@ const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: s
   }
 }
 
-const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Promise((resolve, reject) => {
+const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promise((resolve, reject) => {
   const httpServer = http.createServer(async (req, res) => {
     // CORS 跨域处理
     res.setHeader('Access-Control-Allow-Origin', '*')
@@ -6762,6 +6762,7 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
             'player.path': global.lx.config['player.path'] ?? '/',
             'subsonic.enable': global.lx.config['subsonic.enable'] ?? true,
             'subsonic.path': global.lx.config['subsonic.path'] ?? '/rest',
+            'subsonic.port': global.lx.config['subsonic.port'] ?? 0,
             'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'] ?? false,
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
@@ -8019,6 +8020,64 @@ const handleStartServer = async (port = 9527, ip = '127.0.0.1') => await new Pro
   httpServer.listen(port, ip)
 })
 
+// [Subsonic 独立端口] 在独立监听端口上只暴露 Subsonic API。
+// 鉴权复用 subsonic 自身 verifyAuth（subsonic.ts 内部实现）——只有携带合法 Subsonic 凭据(用户/密码/token)的请求才会被处理，
+// 未通过鉴权的请求一律返回错误，从而实现「只允许 Subsonic 用户通过」。
+const startSubsonicStandaloneServer = () => {
+  const subEnabled = global.lx.config['subsonic.enable'] !== false
+  const subPort = global.lx.config['subsonic.port']
+  if (!subEnabled || !(typeof subPort === 'number' && subPort > 0)) return
+
+  // 不绑定特定 IP：监听所有网卡，访问控制交由防火墙处理
+  const subBindIP = '0.0.0.0'
+  const subServer = http.createServer(async (req, res) => {
+    // 与主端口一致的 CORS 头，兼容跨域 Subsonic 客户端
+    res.setHeader('Access-Control-Allow-Origin', '*')
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
+    res.setHeader('Access-Control-Allow-Headers', '*')
+    res.setHeader('Access-Control-Allow-Private-Network', 'true')
+
+    if (req.method === 'OPTIONS') {
+      res.writeHead(204)
+      res.end()
+      return
+    }
+
+    try {
+      const { subsonicHandler } = require('./subsonic')
+      const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
+
+      // [路由守卫] 仅允许 /rest/{method} 形式的 Subsonic API 调用，其余路径一律 404。
+      // 真正的 Subsonic 客户端请求形如 /rest/ping.view，会正常进入处理方法；
+      // 浏览器裸访问（/、/rest、/rest/ 等）及爬虫请求返回「像资源不存在」的 404：
+      // 只给状态码、不附带任何服务器说明文案，避免暴露「这是一个服务器 / 服务在响应」的特征。
+      if (!/^\/rest\/.+/.test(urlObj.pathname)) {
+        res.writeHead(404)
+        res.end()
+        return
+      }
+
+      // 直接交给 subsonic 处理；handleRequest 内部 verifyAuth 只会放行通过 Subsonic 鉴权的用户
+      await subsonicHandler.handleRequest(req, res, urlObj)
+    } catch (err: any) {
+      if (!res.headersSent) {
+        res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('Internal Server Error')
+      }
+    }
+  })
+
+  subServer.on('error', (err: any) => {
+    startupLog.error(`Subsonic standalone server failed on ${subBindIP}:${subPort}: ${err.message}`)
+    console.error('[Subsonic] standalone server error:', err)
+  })
+
+  subServer.listen(subPort, subBindIP, () => {
+    startupLog.info(`Subsonic standalone server listening on ${subBindIP}:${subPort}`)
+    console.log(`[Subsonic] Standalone API listening on http://${subBindIP}:${subPort}`)
+  })
+}
+
 // const handleStopServer = async() => new Promise<void>((resolve, reject) => {
 //   if (!wss) return
 //   for (const client of wss.clients) client.close(SYNC_CLOSE_CODE.normal)
@@ -8192,6 +8251,9 @@ export const startServer = async (port: number, ip: string) => {
     status.message = ''
     scheduler.startScheduler()
     status.address = ip == '0.0.0.0' ? getAddress() : [ip]
+
+    // [Subsonic 独立端口] 主端口就绪后启动（独立端口失败不影响主服务）
+    startSubsonicStandaloneServer()
 
 
 

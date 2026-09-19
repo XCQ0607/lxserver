@@ -256,6 +256,13 @@ declare namespace LX {
     'subsonic.path'?: string
 
     /**
+     * Subsonic 独立监听端口 (默认 0)
+     * 0 = 不启用独立端口, Subsonic 仍走主端口的 subsonic.path;
+     * >0 = 单独监听该端口, 仅暴露 Subsonic API 且只允许通过 Subsonic 鉴权(verifyAuth)的用户访问。
+     */
+    'subsonic.port'?: number
+
+    /**
      * 是否开启 Subsonic 调试日志模式 (默认 false)
      */
     'subsonic.enableDebug'?: boolean

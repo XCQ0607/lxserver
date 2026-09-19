@@ -266,9 +266,6 @@ if (envParams.PORT) {
   const port = parseInt(envParams.PORT, 10)
   if (!isNaN(port) && port > 0) global.lx.config.port = port
 }
-if (envParams.BIND_IP) {
-  global.lx.config.bindIP = envParams.BIND_IP
-}
 if (envParams.ENABLE_WEBPLAYER_AUTH !== undefined) {
   setBoolConfig('player.enableAuth', envParams.ENABLE_WEBPLAYER_AUTH)
 }
@@ -662,7 +659,7 @@ if (!fs.existsSync(openLibDir)) {
 // 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
 saveConfigToFile()
 
-startServer(global.lx.config.port, global.lx.config.bindIP)
+startServer(global.lx.config.port, '0.0.0.0')
 
 // 监控配置文件变动以实现热重载 (由于 nodemon 已忽略该文件)
 const activeWatcherConfigPath = global.lx.configPath
