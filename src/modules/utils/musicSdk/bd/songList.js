@@ -1,5 +1,9 @@
 import { httpFetch } from '../../request'
-import { formatPlayTime, toMD5 } from '../../index'
+import { formatPlayTime } from '../../index'
+// [修复] toMD5 由 musicSdk/utils 导出（kw/kg/mg 等音源都从这里导入）；
+// 之前从 '../../index'(musicSdk/index) 导入并不存在该导出，运行时报
+// "(0, index_1.toMD5) is not a function"，导致 bd 源歌单枚举整体失败（电台列表里永远没有 bd 源）。
+import { toMD5 } from '../utils'
 import CryptoJS from 'crypto-js'
 
 export default {

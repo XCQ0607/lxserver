@@ -3,25 +3,25 @@ import { httpFetch } from '../../request'
 const MUSICU_URL = 'https://u.y.qq.com/cgi-bin/musicu.fcg'
 
 const createSearchFetch = (str, searchType, resultNum, pageNum) => {
-    return httpFetch(MUSICU_URL, {
-        method: 'post',
+    // [修复] 该接口现在只认 GET + data=URL 编码 JSON；POST 到 musicu.fcg 会被拒（{"code":500001}），
+    // 会导致 searchSinger 永远失败 → getSingerMid 拿不到 MID → 歌手页专辑退化为本地聚合（歌曲量偏少）。
+    const payload = {
+        comm: { ct: '19', cv: '1859', uin: '0' },
+        req: {
+            method: 'DoSearchForQQMusicDesktop',
+            module: 'music.search.SearchCgiService',
+            param: {
+                grp: 1,
+                num_per_page: resultNum,
+                page_num: pageNum,
+                query: str,
+                search_type: searchType,
+            },
+        },
+    }
+    return httpFetch(`${MUSICU_URL}?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`, {
         headers: {
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/115.0',
-            'Content-Type': 'application/json;charset=utf-8',
-        },
-        body: {
-            comm: { ct: '19', cv: '1859', uin: '0' },
-            req: {
-                method: 'DoSearchForQQMusicDesktop',
-                module: 'music.search.SearchCgiService',
-                param: {
-                    grp: 1,
-                    num_per_page: resultNum,
-                    page_num: pageNum,
-                    query: str,
-                    search_type: searchType,
-                },
-            },
         },
     })
 }

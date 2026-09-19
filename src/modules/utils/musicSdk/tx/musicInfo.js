@@ -11,25 +11,25 @@ const getSinger = (singers) => {
 }
 
 export default (songmid) => {
-  const requestObj = httpFetch('https://u.y.qq.com/cgi-bin/musicu.fcg', {
-    method: 'post',
+  // [修复] musicu.fcg 现只认 GET + data=URL 编码 JSON（POST 一律返回 {"code":500001}）
+  const payload = {
+    comm: {
+      ct: '19',
+      cv: '1859',
+      uin: '0',
+    },
+    req: {
+      module: 'music.pf_song_detail_svr',
+      method: 'get_song_detail_yqq',
+      param: {
+        song_type: 0,
+        song_mid: songmid,
+      },
+    },
+  }
+  const requestObj = httpFetch(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
-    },
-    body: {
-      comm: {
-        ct: '19',
-        cv: '1859',
-        uin: '0',
-      },
-      req: {
-        module: 'music.pf_song_detail_svr',
-        method: 'get_song_detail_yqq',
-        param: {
-          song_type: 0,
-          song_mid: songmid,
-        },
-      },
     },
   })
   return requestObj.promise.then(({ body }) => {
