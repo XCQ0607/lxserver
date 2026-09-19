@@ -26,6 +26,9 @@ jobs:
       - name: Get Release Notes
         run: |
           awk '/^## v/ {if (p) exit; p=1} p' changelog.md > RELEASE_NOTES.md || cp changelog.md RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          echo "---" >> RELEASE_NOTES.md
+          echo "* 本次版本由 @XCQ0607 维护构建 🚀" >> RELEASE_NOTES.md
 
       - name: Upload metadata
         uses: actions/upload-artifact@v4

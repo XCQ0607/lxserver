@@ -14,6 +14,19 @@ import { getCachedDislikeRuleSet, invalidateDislikeCache } from '@/server/utils/
 import { proxyCoverImage } from '@/server/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
+import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/radioStations'
+
+// 音乐源歌单 → 电台 列表缓存（避免每次 getInternetRadioStations 都枚举全部音源实拉）
+let playlistRadioCache: { ts: number; stations: any[] } | null = null
+const PLAYLIST_RADIO_TTL = 10 * 60 * 1000
+
+// QQ 官方电台(radio_tx_*)可用性探测缓存：
+// QQ 的 GetRadioSong 接口已返回 500003、旧接口直接 404（上游失效），官方电台点了必然失败。
+// 与其把一堆「点了没反应」的电台暴露给客户端，不如在上游恢复前不返回它们；
+// 每 OFFICIAL_RADIO_TTL 用一首歌探测一次，上游恢复后自动重新出现（自愈）。
+let officialRadioAvailability: { ts: number; available: boolean } | null = null
+const OFFICIAL_RADIO_TTL = 10 * 60 * 1000
+const OFFICIAL_RADIO_PROBE_TIMEOUT = 6000
 import fs from 'fs'
 import path from 'path'
 // @ts-ignore
@@ -24,6 +37,28 @@ import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musi
 import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
 const musicSdk = musicSdkRaw as any
+
+// ─────────────────────────────────────────────
+// 电台流「短期票据」
+// ─────────────────────────────────────────────
+// 实测：客户端播放网络电台时，会把 internetRadioStation.streamUrl 当作「可直接播放的外部地址」
+// 原样请求，不会自行附加 Subsonic 凭据；而该 URL 会被客户端展示，也可能被复制/分享，
+// 若把用户凭据(u+t+s 或 u+p)拼进去，等于泄露长期令牌。
+// 因此改签服务端票据：URL 只带 u(用户名) + rtexp(过期) + rtsig(HMAC)，不含任何用户凭据。
+const RADIO_TICKET_TTL = 12 * 60 * 60 * 1000 // 12 小时
+const RADIO_TICKET_EXP = 'rtexp'
+const RADIO_TICKET_SIG = 'rtsig'
+
+function radioTicketSecret(): string {
+    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-radio-ticket')
+}
+
+function signRadioTicket(id: string, user: string, exp: number): string {
+    return crypto.createHmac('sha256', radioTicketSecret())
+        .update(`${id}|${user}|${exp}`)
+        .digest('hex')
+        .slice(0, 40)
+}
 
 // 推荐结果缓存：同一类型短时间内共享一次 QQ 抓取结果，避免客户端并发请求（启动瞬间
 // newest/recent/random 同时打来）重复访问。缓存成功后保留较长时间，并在 QQ 失败时
@@ -367,6 +402,30 @@ class SubsonicHandler {
         return null
     }
 
+    /**
+     * 校验「电台流短期票据」(rtexp + rtsig)。仅对 stream/download 且 id 为 radio_* 的请求生效。
+     * 通过则返回票据中的用户名，否则返回 null。
+     */
+    private verifyRadioTicket(params: URLSearchParams, method: string): string | null {
+        if (method !== 'stream' && method !== 'download') return null
+        const id = params.get('id') || ''
+        if (!id.startsWith('radio_')) return null
+        const user = params.get('u') || ''
+        const exp = Number(params.get(RADIO_TICKET_EXP) || 0)
+        const sig = params.get(RADIO_TICKET_SIG) || ''
+        if (!user || !exp || !sig) return null
+        if (!Number.isFinite(exp) || Date.now() > exp) return null
+        // 票据用户名必须是真实用户
+        if (!global.lx.config.users?.some((x: any) => x.name === user)) return null
+        const expect = signRadioTicket(id, user, exp)
+        if (expect.length !== sig.length) return null
+        try {
+            return crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig)) ? user : null
+        } catch {
+            return null
+        }
+    }
+
     // ─────────────────────────────────────────────
     // 响应序列化
     // ─────────────────────────────────────────────
@@ -508,15 +567,20 @@ class SubsonicHandler {
         }
 
         const format = params.get('f') === 'json' ? 'json' : 'xml'
-        const username = this.verifyAuth(params)
+        const { pathname } = urlObj
+        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
+        // 常规鉴权：u + (t&s) 或 u + p
+        let username = this.verifyAuth(params)
+        // [电台流] 客户端把自产电台 streamUrl 当外部地址原样请求、不带用户凭据，
+        // 这里接受服务端签发的短期票据（u + rtexp + rtsig），避免用户凭据出现在 URL 中。
+        if (!username) {
+            username = this.verifyRadioTicket(params, method)
+        }
         if (!username) {
             return this.sendError(res, 40, 'Wrong username or password', format)
         }
         this.currentUsername = username
-
-        const { pathname } = urlObj
-        const method = pathname.split('/').pop()?.split('.')[0] || ''
 
         // [starred] 预先计算当前用户 love 列表歌曲 id 集合，供歌曲序列化标记 starred（排除热路径方法）
         if (!['ping', 'getLicense', 'stream', 'download', 'getCoverArt'].includes(method)) {
@@ -597,7 +661,16 @@ class SubsonicHandler {
                     return this.handleGetGenres(res, username, format)
 
                 case 'getInternetRadioStations':
-                    return this.handleGetInternetRadioStations(res, format)
+                    return this.handleGetInternetRadioStations(res, params, format)
+
+                case 'createInternetRadioStation':
+                    return this.handleCreateInternetRadioStation(res, params, format)
+
+                case 'updateInternetRadioStation':
+                    return this.handleUpdateInternetRadioStation(res, params, format)
+
+                case 'deleteInternetRadioStations':
+                    return this.handleDeleteInternetRadioStations(res, params, format)
 
                 case 'getAlbumList':
                     return this.handleGetAlbumList(res, username, params, format, false)
@@ -2420,19 +2493,206 @@ class SubsonicHandler {
         }, format)
     }
 
-    private async handleGetInternetRadioStations(res: http.ServerResponse, format: string) {
-        // const radios = await fetchRadios()
-        const radios: any[] = []
-        if (format === 'json') {
-            return this.sendResponse(res, { internetRadioStations: { internetRadioStation: radios } }, format)
+    private buildRadioStationAttrs(station: any, format: string) {
+        return format === 'json'
+            ? { internetRadioStation: station }
+            : { internetRadioStation: { attrs: station } }
+    }
+
+    /**
+     * 音乐源歌单 → 电台站点：枚举各音源 songList.getList 的公开热门歌单，
+     * 每个歌单包装成一个 Internet Radio Station（id=radio_pl_<source>_<plId>），
+     * 播放时由 stream 处理随机取歌单内一首歌（见 handleStream 的 radio_pl_ 分支）。
+     * 结果缓存 10 分钟，避免每次打开电台页都实拉全部音源。
+     */
+    private async getPlaylistRadioStations(): Promise<any[]> {
+        const now = Date.now()
+        if (playlistRadioCache && now - playlistRadioCache.ts < PLAYLIST_RADIO_TTL) {
+            return playlistRadioCache.stations
         }
-        return this.sendResponse(res, {
-            internetRadioStations: {
-                children: {
-                    internetRadioStation: radios.map(r => ({ attrs: r }))
+        const stations: any[] = []
+        const perSourceCap = 12
+        const totalCap = 90
+        const sources = Object.keys((musicSdk as any) || {}).filter(
+            (s) => (musicSdk as any)[s]?.songList?.getList && (musicSdk as any)[s]?.songList?.getListDetail,
+        )
+        for (const source of sources) {
+            if (stations.length >= totalCap) break
+            try {
+                const res: any = await (musicSdk as any)[source].songList.getList('hot', '', 1)
+                const list: any[] = res?.list || []
+                for (const item of list.slice(0, perSourceCap)) {
+                    const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
+                    if (!plId) continue
+                    const stationId = `radio_pl_${source}_${plId}`
+                    stations.push({
+                        id: stationId,
+                        name: item.name || `歌单(${source})`,
+                        streamUrl: `/rest/stream?id=${stationId}`,
+                        homepageUrl: '',
+                    })
+                    if (stations.length >= totalCap) break
                 }
+            } catch (err) {
+                subsonicLog.warn(`[Subsonic] getPlaylistRadioStations source ${source} failed: ${(err as any)?.message || err}`)
             }
-        }, format)
+        }
+        playlistRadioCache = { ts: now, stations }
+        return stations
+    }
+
+    /**
+     * 官方电台(QQ radio_tx_*)可用性探测：上游 GetRadioSong 若取不到歌（接口已废弃，返回 500003 / 旧接口 404），
+     * 则官方电台整体判定为不可用、暂不返回给客户端；结果缓存 OFFICIAL_RADIO_TTL，上游恢复后自动重新出现。
+     * 带超时，避免拖慢电台列表请求。
+     */
+    private async isOfficialRadioAvailable(radios: any[]): Promise<boolean> {
+        if (!radios || radios.length === 0) return false
+        const now = Date.now()
+        if (officialRadioAvailability && now - officialRadioAvailability.ts < OFFICIAL_RADIO_TTL) {
+            return officialRadioAvailability.available
+        }
+        let available = false
+        try {
+            const probeId = String(radios[0].id).replace('radio_tx_', '')
+            const songs = await Promise.race([
+                fetchRadioSongs(probeId),
+                new Promise<any[]>((resolve) => {
+                    const t = setTimeout(() => resolve([]), OFFICIAL_RADIO_PROBE_TIMEOUT)
+                    // 探测计时器不应阻碍进程退出
+                    if (typeof (t as any).unref === 'function') (t as any).unref()
+                }),
+            ])
+            available = Array.isArray(songs) && songs.length > 0
+        } catch {
+            available = false
+        }
+        officialRadioAvailability = { ts: now, available }
+        if (!available) {
+            subsonicLog.warn('[Subsonic] 官方电台上游取歌接口不可用，已暂时从电台列表隐藏（上游恢复后自动出现）')
+        }
+        return available
+    }
+
+    private async handleGetInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        try {
+            const official = await fetchRadios()           // QQ 官方电台：streamUrl 指向本服 /rest/stream?id=radio_tx_*
+            const officialUsable = await this.isOfficialRadioAvailable(official) // 上游取歌接口失效时隐藏，避免「点了没反应」
+            const userStations = listRadioStations()        // 用户自建电台：落盘持久化
+            const playlistStations = await this.getPlaylistRadioStations() // 音乐源歌单：本服随机取歌
+            // [修复] 本服生成的电台 streamUrl 是相对路径（/rest/stream?id=radio_tx_99），
+            // 但协议里客户端会把它当作可直接播放的绝对地址，相对路径在第三方客户端必然失败。
+            // 这里按当前访问地址补全（尊重反向代理的 X-Forwarded-Proto）。
+            const radioReq = (res as any).req as http.IncomingMessage | undefined
+            const host = radioReq?.headers?.host || ''
+            const fwdProto = radioReq?.headers?.['x-forwarded-proto']
+            const rawProto = Array.isArray(fwdProto) ? fwdProto[0] : (fwdProto || '')
+            const scheme = String(rawProto).split(',')[0].trim()
+                || ((radioReq as any)?.socket?.encrypted ? 'https' : 'http')
+
+            // [修复] 客户端播放「网络电台」时，会把 internetRadioStation.streamUrl 当作
+            // 可直接播放的音频地址「原样请求」，不会自行附加 Subsonic 凭据；
+            // 而本服为官方电台/歌单电台生成的 streamUrl 指回 /rest/stream，该端点强制鉴权，
+            // 缺少凭据会直接返回错误 40 —— 客户端便表现为「地址能显示，但点了播不了」。
+            // 但把用户凭据(u+t+s / u+p)拼进去会随 URL 一起被展示、复制，等于泄露长期令牌；
+            // 因此改为签发服务端短期票据（u + rtexp + rtsig），不含任何用户凭据。
+            // 外部地址（用户自建电台）原样返回，不做任何改动。
+            const radioUser = params.get('u') || ''
+            const absolutize = (u: string) => {
+                if (!u || /^https?:\/\//i.test(u) || !host) return u
+                const abs = `${scheme}://${host}${u.startsWith('/') ? '' : '/'}${u}`
+                // 仅对本服自产的 /rest/ 端点签发短期票据，外部电台地址保持原样
+                if (!u.startsWith('/rest/') || !radioUser) return abs
+                const idMatch = /[?&]id=([^&#]+)/.exec(u)
+                const id = idMatch ? decodeURIComponent(idMatch[1]) : ''
+                if (!id) return abs
+                const exp = Date.now() + RADIO_TICKET_TTL
+                const ticket = new URLSearchParams({
+                    u: radioUser,
+                    [RADIO_TICKET_EXP]: String(exp),
+                    [RADIO_TICKET_SIG]: signRadioTicket(id, radioUser, exp),
+                }).toString()
+                return `${abs}${abs.includes('?') ? '&' : '?'}${ticket}`
+            }
+
+            const stations = [
+                ...(officialUsable ? official : []).map((r: any) => ({
+                    id: r.id,
+                    name: r.name,
+                    streamUrl: r.streamUrl,
+                    homepageUrl: '',
+                })),
+                ...userStations.map((s) => ({
+                    id: s.id,
+                    name: s.name,
+                    streamUrl: s.streamUrl,
+                    homepageUrl: s.homepageUrl || '',
+                })),
+                ...playlistStations.map((r) => ({
+                    id: r.id,
+                    name: r.name,
+                    streamUrl: r.streamUrl,
+                    homepageUrl: r.homepageUrl || '',
+                })),
+            ]
+            if (format === 'json') {
+                return this.sendResponse(res, { internetRadioStations: { internetRadioStation: stations } }, format)
+            }
+            return this.sendResponse(res, {
+                internetRadioStations: {
+                    children: {
+                        internetRadioStation: stations.map((r) => ({ attrs: r })),
+                    },
+                },
+            }, format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] getInternetRadioStations error:', err)
+            return this.sendResponse(res, { internetRadioStations: { internetRadioStation: [] } }, format)
+        }
+    }
+
+    private async handleCreateInternetRadioStation(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        const name = params.get('name')
+        const streamUrl = params.get('streamUrl')
+        const homepageUrl = params.get('homepageUrl') || ''
+        if (!name || !streamUrl) {
+            return this.sendError(res, 10, 'Required parameter missing: name, streamUrl', format)
+        }
+        try {
+            const station = addRadioStation(name, streamUrl, homepageUrl)
+            return this.sendResponse(res, this.buildRadioStationAttrs(station, format), format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] createInternetRadioStation error:', err)
+            return this.sendError(res, 0, 'Failed to create internet radio station', format)
+        }
+    }
+
+    private async handleUpdateInternetRadioStation(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        const name = params.get('name')
+        const streamUrl = params.get('streamUrl')
+        const homepageUrl = params.get('homepageUrl')
+        if (!id) return this.sendError(res, 10, 'Required parameter missing: id', format)
+        try {
+            const station = updateRadioStation(id, name ?? undefined, streamUrl ?? undefined, homepageUrl ?? undefined)
+            if (!station) return this.sendError(res, 70, 'Internet radio station not found', format)
+            return this.sendResponse(res, this.buildRadioStationAttrs(station, format), format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] updateInternetRadioStation error:', err)
+            return this.sendError(res, 0, 'Failed to update internet radio station', format)
+        }
+    }
+
+    private async handleDeleteInternetRadioStations(res: http.ServerResponse, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+        if (!ids.length) return this.sendError(res, 10, 'Required parameter missing: id', format)
+        try {
+            for (const id of ids) removeRadioStation(id)
+            return this.sendResponse(res, {}, format)
+        } catch (err) {
+            subsonicLog.error('[Subsonic] deleteInternetRadioStations error:', err)
+            return this.sendError(res, 0, 'Failed to delete internet radio station', format)
+        }
     }
 
     private async fetchOnlineSearchSongs(cleanQuery: string, sources: string[], limit: number = 30): Promise<{ music: LX.Music.MusicInfo, listId: string }[]> {
@@ -3948,6 +4208,49 @@ class SubsonicHandler {
                     subsonicLog.warn(`[Subsonic] Radio ${id} returned empty song list`)
                 }
                 return this.sendError(res, 0, 'Could not resolve radio track', format)
+            }
+
+            // [新增] 用户自建电台(radio_usr_*)：直接 302 重定向到用户配置的 streamUrl
+            if (id.startsWith('radio_usr_')) {
+                const station = getRadioStation(id)
+                if (station && station.streamUrl) {
+                    subsonicLog.debug(`[Subsonic] Redirecting user radio ${id} -> ${station.streamUrl}`)
+                    res.writeHead(302, { Location: station.streamUrl })
+                    return res.end()
+                }
+                return this.sendError(res, 70, 'Radio station not found', format)
+            }
+
+            // [新增] 音乐源歌单 → 电台(radio_pl_<source>_<plId>)：随机取歌单内一首歌播放
+            if (id.startsWith('radio_pl_')) {
+                const rest = id.slice('radio_pl_'.length)
+                const us = rest.indexOf('_')
+                if (us <= 0) return this.sendError(res, 70, 'Invalid playlist radio id', format)
+                const plSource = rest.slice(0, us)
+                const plId = rest.slice(us + 1)
+                try {
+                    const detail: any = await (musicSdk as any)[plSource]?.songList?.getListDetail?.(plId, 1)
+                    const songs: any[] = detail?.list || []
+                    if (songs.length > 0) {
+                        const s = songs[Math.floor(Math.random() * songs.length)]
+                        const songmid = String(s.songmid || s.mid || s.id || s.hash || '')
+                        if (!songmid) return this.sendError(res, 0, 'Playlist radio song missing songmid', format)
+                        const musicInfo: any = {
+                            ...s,
+                            source: s.source || plSource,
+                            songmid,
+                            meta: { ...(s.meta || {}), songId: songmid },
+                        }
+                        const result = await callUserApiGetMusicUrl(plSource as any, musicInfo, quality, username)
+                        if (result && result.url) {
+                            res.writeHead(302, { Location: result.url })
+                            return res.end()
+                        }
+                    }
+                } catch (err) {
+                    subsonicLog.error(`[Subsonic] radio_pl_ ${id} error: ${(err as any)?.message || err}`)
+                }
+                return this.sendError(res, 0, 'Could not resolve playlist radio track', format)
             }
 
             // [新增] 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)。

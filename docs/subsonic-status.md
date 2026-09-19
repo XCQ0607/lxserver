@@ -39,10 +39,16 @@
 | `getSongsByGenre` / `getSongsByGenre2` | 发现 | ✅ | 按流派拉取云端歌曲 |
 | `getSimilarSongs` / `getSimilarSongs2` | 发现 | ✅ | 同歌手相似 |
 | `getTopSongs` | 发现 | ✅ | 歌手热门 |
-| `getInternetRadioStations` | 电台 | ✅ | QQ 音乐电台 |
+| `getInternetRadioStations` | 电台 | ✅ | 三类来源：QQ 官方电台 / 用户自建电台（`radioStations.ts` 落盘）/ 音乐源歌单电台 |
 | **`getRecommendedSongs`** | **发现（新增）** | ✅ | **每日推荐歌曲（见第二节）** |
 | **`getDailySongs`** | **发现（新增）** | ✅ | **`getRecommendedSongs` 的别名** |
 | **`getSongsByTag`** | **发现（新增）** | ✅ | **别名，同样映射为每日推荐**（lx-server 未实现独立按标签检索） |
+
+> **网络电台补充说明（2026-09-19）**
+>
+> - 自产电台地址会补全为**绝对地址**（尊重反向代理的 `X-Forwarded-Proto`）—— 客户端把 `internetRadioStation.streamUrl` 当作可直接播放的音频地址「原样请求」，相对路径在第三方客户端必然失败。
+> - 这类地址带**服务端短期签名票据**（`u` + `rtexp` + `rtsig`，HMAC-SHA256，12 小时），而不是用户凭据：客户端请求该 URL 时不会附带 Subsonic 凭据，直接透传 `u+t+s` 会把长期令牌写进客户端会展示、可复制的 URL。票据仅对 `stream` / `download` 且 `id=radio_*` 生效，外部（用户自建）电台地址原样返回。
+> - QQ 官方电台的取歌接口（`GetRadioSong`）当前返回 `500003`、旧接口 404，因此对官方电台做可用性探测（结果缓存 10 分钟）并在不可用时暂时从列表隐藏，上游恢复后自动重现。
 
 ---
 
