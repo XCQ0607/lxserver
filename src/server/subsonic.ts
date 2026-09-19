@@ -4,12 +4,16 @@ import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/userApi'
 import { downloadAndCache, checkCache, serveCacheFile } from '@/server/fileCache'
-import { getSingerPic, getSingerDetail, getSingerMid } from '@/server/utils/singer'
+import {
+    getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
+    resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
+} from '@/server/utils/singer'
 import { fetchRecommendedAlbums } from '@/server/utils/recommendAlbums'
 import { fetchRecommendedSongs } from '@/server/utils/recommendSongs'
 import { filterDisliked, splitSingers, type DislikeRuleSet } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
+import { buildQueryVariants, toSimplified } from '@/server/utils/zhConvert'
 import { getCachedDislikeRuleSet, invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { proxyCoverImage } from '@/server/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
@@ -23,7 +27,131 @@ import wyMusicInfo from '@/modules/utils/musicSdk/wy/musicInfo.js'
 import { getMusicInfo as kgGetMusicInfo } from '@/modules/utils/musicSdk/kg/musicInfo.js'
 import { getMusicInfo as mgGetMusicInfo } from '@/modules/utils/musicSdk/mg/musicInfo.js'
 import bdMusicInfo from '@/modules/utils/musicSdk/bd/musicInfo.js'
+import { spawn } from 'child_process'
 const musicSdk = musicSdkRaw as any
+
+// ─────────────────────────────────────────────
+// 服务端签名票据密钥
+// ─────────────────────────────────────────────
+// 需要下发给客户端、随后由客户端原样回传的「服务器内部值」用签名令牌承载（防篡改 + 可过期）。
+// 密钥取自前端访问密码，不落 URL。
+function serverTicketSecret(): string {
+    return String((global.lx.config as any)?.['frontend.password'] || 'lxserver-ticket')
+}
+
+/** 把错误原因压成可安全回传给客户端的一小段文本（截断 + 打码常见密钥参数） */
+function briefErrorText(err: any, max = 200): string {
+    let s = String(err?.message || err || '').replace(/\s+/g, ' ').trim()
+    s = s.replace(/((?:key|token|api[_-]?key|apikey|password|pass|sign)=)[^&\s'"]+/gi, '$1***')
+    return s.length > max ? s.slice(0, max) + '…' : s
+}
+
+// ─────────────────────────────────────────────
+// [transcoding] 转码决策票据
+// ─────────────────────────────────────────────
+// getTranscodeDecision 下发 transcodeParams，客户端原样回传给 getTranscodeStream。
+// 规范要求该值是「服务器内部值、已正确转义」，因此这里做成签名令牌（防篡改 + 可过期）。
+const TRANSCODE_PARAM_TTL = 30 * 60 * 1000
+
+function signTranscodeParams(payload: Record<string, any>): string {
+    const body = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url')
+    const sig = crypto.createHmac('sha256', serverTicketSecret()).update(body).digest('hex').slice(0, 16)
+    return `${body}.${sig}`
+}
+
+function verifyTranscodeParams(token: string): Record<string, any> | null {
+    const [body, sig] = String(token || '').split('.')
+    if (!body || !sig) return null
+    const expect = crypto.createHmac('sha256', serverTicketSecret()).update(body).digest('hex').slice(0, 16)
+    if (expect.length !== sig.length) return null
+    try {
+        if (!crypto.timingSafeEqual(Buffer.from(expect), Buffer.from(sig))) return null
+    } catch { return null }
+    try {
+        const payload = JSON.parse(Buffer.from(body, 'base64url').toString('utf8'))
+        if (!payload || typeof payload.exp !== 'number' || Date.now() > payload.exp) return null
+        return payload
+    } catch { return null }
+}
+
+// 排行榜列表封面缓存：getBoards 接口不带封面，按需抓取榜单首歌封面并按榜单缓存，避免每次 getPlaylists 都实拉
+const leaderboardCoverCache = new Map<string, { ts: number; url: string }>()
+const leaderboardCoverInflight = new Map<string, Promise<string>>()
+const LEADERBOARD_COVER_TTL = 30 * 60 * 1000
+
+// 共享歌单(各音源歌单)封面缓存：getList 返回的歌单项含 img，列表阶段直接记录，getCoverArt 命中即用
+const sharedPlaylistCoverCache = new Map<string, string>()
+
+/** 给 Promise 加超时（超时即 reject 并清理定时器），避免单个音源挂住整个搜索请求 */
+function withTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(`timeout after ${ms}ms`)), ms)
+        Promise.resolve(p).then(
+            v => { clearTimeout(timer); resolve(v) },
+            e => { clearTimeout(timer); reject(e) },
+        )
+    })
+}
+
+/** 多源结果按源轮询交错取数，避免"响应最快的源"占满全部名额 */
+function interleaveBySource<T>(groups: T[][], max: number): T[] {
+    const out: T[] = []
+    let i = 0
+    let added = true
+    while (out.length < max && added) {
+        added = false
+        for (const g of groups) {
+            if (!g || i >= g.length) continue
+            out.push(g[i])
+            added = true
+            if (out.length >= max) break
+        }
+        i++
+    }
+    return out
+}
+
+// ─────────────────────────────────────────────
+// Subsonic 服务端转码:ffmpeg 可用性检测 + 并发限流
+// ─────────────────────────────────────────────
+let ffmpegProbeDone = false
+let ffmpegAvailable = false
+async function probeFfmpeg(): Promise<boolean> {
+    if (ffmpegProbeDone) return ffmpegAvailable
+    try {
+        await new Promise<void>((resolve) => {
+            const p = spawn('ffmpeg', ['-version'])
+            p.on('error', () => resolve())
+            p.on('close', () => resolve())
+        })
+        ffmpegAvailable = true
+    } catch {
+        ffmpegAvailable = false
+    }
+    ffmpegProbeDone = true
+    return ffmpegAvailable
+}
+
+class TranscodeSemaphore {
+    private active = 0
+    private queue: Array<() => void> = []
+    constructor(private max: number) {}
+    async acquire(): Promise<void> {
+        if (this.active < this.max) { this.active++; return }
+        await new Promise<void>((resolve) => this.queue.push(resolve))
+        this.active++
+    }
+    release(): void {
+        this.active--
+        const next = this.queue.shift()
+        if (next) next()
+    }
+}
+let transcodeSemaphore: TranscodeSemaphore | null = null
+function getTranscodeSemaphore(max: number): TranscodeSemaphore {
+    if (!transcodeSemaphore) transcodeSemaphore = new TranscodeSemaphore(max)
+    return transcodeSemaphore
+}
 
 // 推荐结果缓存：同一类型短时间内共享一次 QQ 抓取结果，避免客户端并发请求（启动瞬间
 // newest/recent/random 同时打来）重复访问。缓存成功后保留较长时间，并在 QQ 失败时
@@ -53,7 +181,7 @@ async function cachedRecommend(type: string, size: number): Promise<any[]> {
 }
 
 // 封面图片的缓存 / 并发限流 / 重试逻辑已抽到 @/server/coverProxy，
-// 由 handleGetCoverArt 通过 proxyCoverImage(res, url) 调用。
+// 由 handleGetCoverArt 通过 this.proxyCover(res, url) 调用。
 
 // ─────────────────────────────────────────────
 // 图片字段提取助手（星标写回原生收藏时，从源头补齐歌手头像 / 专辑封面）
@@ -124,6 +252,198 @@ export function writeSubsonicMeta(username: string, meta: SubsonicMeta) {
     } catch (e) {
         subsonicLog.error('[Subsonic] Failed to write subsonic-meta.json:', e)
     }
+}
+
+/**
+ * 播放历史（scrobble 上报）条目。
+ * 只存 id + 时间戳：scrobble 是高频写入（音流实测 1853 次/月量级），
+ * 若写入时还要回源解析歌名会显著拖慢，歌名留给读取时按需解析。
+ */
+export interface ScrobbleEntry {
+    id: string
+    time: number
+}
+
+/** 播放队列状态（savePlayQueue / getPlayQueue 跨设备续播用） */
+export interface PlayQueueState {
+    ids: string[]
+    current?: string
+    /** [indexBasedQueue] 当前曲目的 0 基索引（按索引保存/读取队列时使用） */
+    currentIndex?: number
+    position?: number
+    changed: number
+    changedBy?: string
+}
+
+/** 书签条目（getBookmarks / createBookmark / deleteBookmark）：某首歌 + 播放位置 */
+export interface BookmarkEntry {
+    id: string
+    /** 播放位置（毫秒） */
+    position: number
+    comment: string
+    created: number
+}
+
+const MAX_SCROBBLES = 2000
+const MAX_QUEUE_IDS = 1000
+
+function getScrobbleFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-scrobbles.json')
+}
+
+function getPlayQueueFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-playqueue.json')
+}
+
+export function readScrobbles(username: string): ScrobbleEntry[] {
+    try {
+        const filePath = getScrobbleFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            if (Array.isArray(data)) return data.filter(it => it && typeof it.id === 'string')
+        }
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to read subsonic-scrobbles.json:', e)
+    }
+    return []
+}
+
+export function writeScrobbles(username: string, list: ScrobbleEntry[]) {
+    try {
+        const filePath = getScrobbleFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        // 只保留最近若干条，避免长期运行后文件无限增长
+        const trimmed = list.length > MAX_SCROBBLES ? list.slice(list.length - MAX_SCROBBLES) : list
+        fs.writeFileSync(filePath, JSON.stringify(trimmed), 'utf8')
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to write subsonic-scrobbles.json:', e)
+    }
+}
+
+export function readPlayQueue(username: string): PlayQueueState | null {
+    try {
+        const filePath = getPlayQueueFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            if (data && Array.isArray(data.ids)) return data as PlayQueueState
+        }
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to read subsonic-playqueue.json:', e)
+    }
+    return null
+}
+
+export function writePlayQueue(username: string, state: PlayQueueState) {
+    try {
+        const filePath = getPlayQueueFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        fs.writeFileSync(filePath, JSON.stringify({ ...state, ids: state.ids.slice(0, MAX_QUEUE_IDS) }), 'utf8')
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to write subsonic-playqueue.json:', e)
+    }
+}
+
+function getBookmarkFilePath(username: string): string {
+    return path.join(global.lx.userPath, getUserDirname(username), 'subsonic-bookmarks.json')
+}
+
+export function readBookmarks(username: string): BookmarkEntry[] {
+    try {
+        const filePath = getBookmarkFilePath(username)
+        if (fs.existsSync(filePath)) {
+            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
+            if (Array.isArray(data)) {
+                return data
+                    .filter(it => it && typeof it.id === 'string')
+                    .map(it => ({
+                        id: it.id,
+                        position: Math.max(0, Math.floor(Number(it.position) || 0)),
+                        comment: typeof it.comment === 'string' ? it.comment : '',
+                        created: Number(it.created) || Date.now(),
+                    }))
+            }
+        }
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to read subsonic-bookmarks.json:', e)
+    }
+    return []
+}
+
+export function writeBookmarks(username: string, list: BookmarkEntry[]) {
+    try {
+        const filePath = getBookmarkFilePath(username)
+        const dirPath = path.dirname(filePath)
+        if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
+        fs.writeFileSync(filePath, JSON.stringify(list), 'utf8')
+    } catch (e) {
+        subsonicLog.error('[Subsonic] Failed to write subsonic-bookmarks.json:', e)
+    }
+}
+
+/**
+ * [playbackReport] 客户端实时播放状态（只存内存，重启即清空）。
+ * 与写盘的 scrobble 历史不同：这里保存「正在播什么 + 精确位置」，
+ * 仅当 state=stopped 且 ignoreScrobble≠true 时才额外落一条播放历史。
+ */
+interface PlaybackReportState {
+    id: string
+    positionMs: number
+    state: string
+    playbackRate: number
+    updatedAt: number
+}
+const playbackReportState = new Map<string, PlaybackReportState>()
+
+// 拼音首字母边界字：每个字母取汉语拼音中最靠前的那个汉字。
+// 拼音没有 I / U / V 开头，故不在表内——与主流音乐客户端的索引一致。
+const PY_INDEX_LETTERS = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'W', 'X', 'Y', 'Z']
+const PY_INDEX_BOUNDS = ['吖', '八', '嚓', '哒', '妸', '发', '旮', '哈', '讥', '咔', '垃', '妈', '拏', '噢', '妑', '七', '呥', '仨', '他', '哇', '夕', '丫', '匝']
+const pyCollator = typeof Intl !== 'undefined' ? new Intl.Collator('zh-Hans-CN') : null
+
+/**
+ * 取艺术家索引分组键：英文名取首字母，中文名按拼音首字母归入 A-Z，其余归入 “#”。
+ *
+ * [修复] 之前只认 [A-Z]，全部中文歌手都落进同一个 “#” 分组，
+ * 客户端的字母索引 / 快速跳转形同虚设，列表看起来就是一整坨没排序。
+ * 判定依赖 ICU 中文排序（本机与官方 node 镜像均启用 full-icu），
+ * 相比 GB2312 区位码方案不依赖字符编码。
+ */
+/**
+ * 歌手头像用的图片降尺寸。
+ *
+ * 头像此前是原图直出，实测单张达 17.9MB；而 coverArtScaling 扩展只是声明、并未真正生效
+ * （size 参数被忽略），生产镜像又是 `npm install --omit=dev`、sharp 并未安装，
+ * 无法在服务端缩放。因此改为改写上游 URL 自带的尺寸参数，零依赖地把头像压到小图：
+ *  - 腾讯：尺寸就编码在路径里 (.../T002R800x800M000xxx.jpg) -> 改成 300x300
+ *  - 网易：追加或替换 ?param=300y300
+ * 仅用于歌手头像场景，专辑 / 歌曲封面仍走原图以保证清晰度。
+ */
+export function downscaleAvatarUrl(url: string, size = 300): string {
+    if (!url || typeof url !== 'string') return url
+    if (/y\.gtimg\.cn\/.*\/T\d{3}R\d+x\d+M/.test(url)) {
+        return url.replace(/(T\d{3}R)\d+x\d+(M)/, `$1${size}x${size}$2`)
+    }
+    if (/music\.126\.net/.test(url)) {
+        const param = `${size}y${size}`
+        if (/[?&]param=/.test(url)) return url.replace(/([?&]param=)[^&]*/, `$1${param}`)
+        return url + (url.includes('?') ? '&' : '?') + `param=${param}`
+    }
+    return url
+}
+
+export function getArtistIndexKey(name: string): string {
+    const ch = (name || '').trim().charAt(0)
+    if (!ch) return '#'
+    if (/[a-zA-Z]/.test(ch)) return ch.toUpperCase()
+    if (!/[\u4e00-\u9fa5]/.test(ch)) return '#'
+    if (pyCollator) {
+        for (let i = PY_INDEX_BOUNDS.length - 1; i >= 0; i--) {
+            if (pyCollator.compare(ch, PY_INDEX_BOUNDS[i]) >= 0) return PY_INDEX_LETTERS[i]
+        }
+    }
+    return '#'
 }
 
 /**
@@ -593,6 +913,10 @@ class SubsonicHandler {
                 case 'getMusicDirectory':
                     return this.handleGetMusicDirectory(res, username, params, format)
 
+                case 'getAlbumInfo':
+                case 'getAlbumInfo2':
+                    return this.handleGetAlbumInfo(res, username, params, format)
+
                 case 'getGenres':
                     return this.handleGetGenres(res, username, format)
 
@@ -605,6 +929,12 @@ class SubsonicHandler {
                 case 'getAlbumList2':
                     return this.handleGetAlbumList(res, username, params, format, true)
 
+                case 'getTranscodeDecision':
+                    return this.handleGetTranscodeDecision(res, username, params, format)
+
+                case 'getTranscodeStream':
+                    return this.handleGetTranscodeStream(req, res, username, params, format)
+
                 case 'getLyrics':
                     return this.handleGetLyrics(res, username, params, format)
 
@@ -616,7 +946,7 @@ class SubsonicHandler {
 
                 case 'getArtistInfo':
                 case 'getArtistInfo2':
-                    return this.handleGetArtistInfo(res, username, params, format)
+                    return this.handleGetArtistInfo(res, username, params, format, method)
 
                 case 'getArtist':
                     return this.handleGetArtist(res, username, params, format)
@@ -652,7 +982,10 @@ class SubsonicHandler {
 
                 case 'getSimilarSongs':
                 case 'getSimilarSongs2':
-                    return this.handleGetSimilarSongs(res, username, params, format)
+                    return this.handleGetSimilarSongs(res, username, params, format, method)
+
+                case 'getSonicSimilarTracks':
+                    return this.handleGetSonicSimilarTracks(res, username, params, format)
 
                 case 'getTopSongs':
                     return this.handleGetTopSongs(res, username, params, format)
@@ -672,11 +1005,41 @@ class SubsonicHandler {
                     return this.handleDeletePlaylist(res, username, params, format)
 
                 case 'scrobble':
-                    return this.sendResponse(res, {}, format)
+                    return this.handleScrobble(res, username, params, format)
+
+                case 'reportPlayback':
+                    return this.handleReportPlayback(res, username, params, format)
+
+                case 'getBookmarks':
+                    return this.handleGetBookmarks(res, username, format)
+
+                case 'createBookmark':
+                    return this.handleCreateBookmark(res, username, params, format)
+
+                case 'deleteBookmark':
+                    return this.handleDeleteBookmark(res, username, params, format)
 
                 case 'getNowPlaying':
-                    return this.sendResponse(res, { nowPlaying: { entry: [] } }, format)
+                    return this.handleGetNowPlaying(res, username, format)
 
+                case 'savePlayQueue':
+                    return this.handleSavePlayQueue(res, username, params, format)
+
+                case 'getPlayQueue':
+                    return this.handleGetPlayQueue(res, username, format)
+
+                case 'savePlayQueueByIndex':
+                    return this.handleSavePlayQueueByIndex(res, username, params, format)
+
+                case 'getPlayQueueByIndex':
+                    return this.handleGetPlayQueueByIndex(res, username, format)
+
+                case 'getIndexes':
+                    return this.handleGetIndexes(res, username, format)
+
+                case 'startScan':
+                    // [新增] 本服曲库是在线聚合、无常驻扫描任务，返回 ok 只是为了不让客户端
+                    // 因 "Method not found" 报错；真实状态由 getScanStatus 统一返回（恒为未扫描）。
                 case 'getScanStatus':
                     return this.sendResponse(res, format === 'json'
                         ? { scanStatus: { scanning: false, count: 0 } }
@@ -1042,14 +1405,25 @@ class SubsonicHandler {
             ))
         }
 
-        // [新增] 排行榜(榜单)作为只读虚拟播放列表暴露
+        // [新增] 共享歌单(只读虚拟播放列表)：排行榜 / 歌单 / 都要，由 sharedListMode 决定
         // 仅在配置开启 subsonic.publicLeaderboards 时生效
         if (global.lx.config['subsonic.publicLeaderboards']) {
-            try {
-                const lbPlaylists = await this.getLeaderboardPlaylists()
-                playlists.push(...lbPlaylists)
-            } catch (err) {
-                subsonicLog.error('[Subsonic] Append leaderboard playlists failed:', err)
+            const mode = global.lx.config['subsonic.sharedListMode'] || 'leaderboard'
+            if (mode === 'leaderboard' || mode === 'both') {
+                try {
+                    const lbPlaylists = await this.getLeaderboardPlaylists()
+                    playlists.push(...lbPlaylists)
+                } catch (err) {
+                    subsonicLog.error('[Subsonic] Append leaderboard playlists failed:', err)
+                }
+            }
+            if (mode === 'playlist' || mode === 'both') {
+                try {
+                    const plPlaylists = await this.getSharedPlaylists()
+                    playlists.push(...plPlaylists)
+                } catch (err) {
+                    subsonicLog.error('[Subsonic] Append shared playlists failed:', err)
+                }
             }
         }
 
@@ -1068,6 +1442,10 @@ class SubsonicHandler {
         // [新增] 排行榜(榜单)虚拟只读播放列表
         if (id.startsWith('lb_')) {
             return this.handleGetLeaderboardPlaylist(res, username, id, format)
+        }
+        // [新增] 共享歌单(歌单)虚拟只读播放列表
+        if (id.startsWith('pl_')) {
+            return this.handleGetSharedPlaylist(res, username, id, format)
         }
 
         const userSpace = getUserSpace(username)
@@ -1135,6 +1513,7 @@ class SubsonicHandler {
         const playlistId = params.get('playlistId')
         if (!playlistId) return this.sendError(res, 10, 'Required parameter is missing: playlistId', format)
         if (playlistId.startsWith('lb_')) return this.sendError(res, 0, '排行榜为只读播放列表，不支持修改', format)
+        if (playlistId.startsWith('pl_')) return this.sendError(res, 0, '共享歌单为只读播放列表，不支持修改', format)
 
         try {
             const userSpace = getUserSpace(username)
@@ -1240,6 +1619,7 @@ class SubsonicHandler {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
         if (id.startsWith('lb_')) return this.sendError(res, 0, '排行榜为只读播放列表，不支持删除', format)
+        if (id.startsWith('pl_')) return this.sendError(res, 0, '共享歌单为只读播放列表，不支持删除', format)
         if (id === 'default' || id === 'love') {
             return this.sendError(res, 0, 'Built-in playlists cannot be deleted', format)
         }
@@ -1291,13 +1671,51 @@ class SubsonicHandler {
                     duration: 0,
                     created: new Date().toISOString(),
                     changed: new Date().toISOString(),
-                    coverArt: 'logo',
+                    // coverArt 用榜单歌单 id 作为令牌（lb_<source>_<bangid>），
+                    // 由 getCoverArt 按需拉取该榜单首歌封面并代理返回；不再统一用 'logo'（SVG 部分客户端不渲染）
+                    coverArt: id,
                 }
             })
         } catch (err) {
             subsonicLog.error('[Subsonic] getLeaderboardPlaylists error:', err)
             return []
         }
+    }
+
+    /**
+     * 解析排行榜封面令牌 lb_<source>_<bangid>，按需抓取该榜单首歌封面（带缓存与并发复用）。
+     * getBoards 接口不返回封面，故列表项 coverArt 用令牌占位，由 getCoverArt 在客户端真正请求时才拉取。
+     */
+    private async getLeaderboardCoverUrl(token: string): Promise<string> {
+        const m = /^lb_([^_]+)_(.+)$/.exec(token)
+        if (!m) return 'logo'
+        const source = m[1]
+        const bangid = m[2]
+        const key = `${source}_${bangid}`
+        const now = Date.now()
+        const cached = leaderboardCoverCache.get(key)
+        if (cached && now - cached.ts < LEADERBOARD_COVER_TTL) return cached.url
+        let inflight = leaderboardCoverInflight.get(key)
+        if (!inflight) {
+            inflight = (async () => {
+                try {
+                    const lb = (musicSdk as any)[source]?.leaderboard
+                    if (!lb || typeof lb.getList !== 'function') return 'logo'
+                    const data: any = await lb.getList(bangid, 1)
+                    const list: any[] = data?.list || []
+                    const img = list[0]?.img
+                    return (typeof img === 'string' && img) ? img : 'logo'
+                } catch {
+                    return 'logo'
+                } finally {
+                    leaderboardCoverInflight.delete(key)
+                }
+            })()
+            leaderboardCoverInflight.set(key, inflight)
+        }
+        const url = await inflight
+        leaderboardCoverCache.set(key, { ts: now, url })
+        return url
     }
 
     private async handleGetLeaderboardPlaylist(res: http.ServerResponse, username: string, id: string, format: string) {
@@ -1370,6 +1788,163 @@ class SubsonicHandler {
         if (!song.meta) song.meta = {}
         if (!song.meta.picUrl && song.img) song.meta.picUrl = song.img
         return song
+    }
+
+    /** 将指定平台的热门/最新歌单暴露为 Subsonic 只读虚拟播放列表（共享歌单「歌单」模式）。 */
+    private async getSharedPlaylists(): Promise<any[]> {
+        const source = this.getLeaderboardSource() // 复用共享歌单平台选择
+        const sort = global.lx.config['subsonic.sharedListSort'] === 'new' ? 'new' : 'hot'
+        const owner = 'lxserver'
+        try {
+            const sl = (musicSdk as any)[source]?.songList
+            if (!sl || typeof sl.getList !== 'function') return []
+            const res: any = await sl.getList(sort, '', 1)
+            const list: any[] = res?.list || []
+            return list.map((item: any) => {
+                const plId = String(item.id ?? item.dissid ?? item.tid ?? item.listId)
+                const id = `pl_${source}_${plId}`
+                const img = typeof item.img === 'string' && item.img
+                    ? (item.img.startsWith('//') ? `https:${item.img}` : item.img)
+                    : 'logo'
+                // 记录封面，便于客户端以 pl_ id 请求 getCoverArt 时直接命中
+                sharedPlaylistCoverCache.set(id, img)
+                return {
+                    id,
+                    name: `歌单·${item.name || item.dissname || '未知歌单'}`,
+                    comment: '歌单(只读)',
+                    owner,
+                    public: true,
+                    songCount: 0,
+                    duration: 0,
+                    created: new Date().toISOString(),
+                    changed: new Date().toISOString(),
+                    coverArt: img,
+                }
+            })
+        } catch (err) {
+            subsonicLog.error('[Subsonic] getSharedPlaylists error:', err)
+            return []
+        }
+    }
+
+    private async handleGetSharedPlaylist(res: http.ServerResponse, username: string, id: string, format: string) {
+        const parts = id.split('_') // ['pl', source, plId...]
+        const source = parts[1]
+        const plId = parts.slice(2).join('_')
+        try {
+            const sl = (musicSdk as any)[source]?.songList
+            if (!sl || typeof sl.getListDetail !== 'function') return this.sendError(res, 70, 'Playlist source not found', format)
+            const detail: any = await sl.getListDetail(plId, 1)
+            const list: any[] = detail?.list || []
+            let musics: LX.Music.MusicInfo[] = list.map((s: any) => {
+                const m = this.normalizeLeaderboardSong(s, source)
+                this.cacheOnlineSong(m)
+                return m
+            })
+            if (global.lx.config['subsonic.hideDisliked']) {
+                musics = await this.filterDislikedSongs(username, musics)
+            }
+            const coverArt = (musics[0] as any)?.img || detail?.info?.img || 'logo'
+            const playlistMeta = {
+                id,
+                // SDK 的歌单名在 info.name（旧接口在顶层 name），都要兼容
+                name: `歌单·${detail?.info?.name || detail?.name || plId}`,
+                comment: '歌单(只读)',
+                owner: 'lxserver',
+                public: true,
+                songCount: musics.length,
+                duration: musics.reduce((sum: number, m: any) => sum + this.parseDuration(m.interval), 0),
+                created: new Date().toISOString(),
+                changed: new Date().toISOString(),
+                coverArt,
+            }
+            if (format === 'json') {
+                return this.sendResponse(res, {
+                    playlist: {
+                        ...playlistMeta,
+                        entry: musics.map((m: any) => this.musicToSongFlat(m, id, undefined, username)),
+                    },
+                }, format)
+            }
+            return this.sendResponse(res, {
+                playlist: {
+                    attrs: playlistMeta,
+                    children: {
+                        entry: musics.map((m: any) => this.musicToSongXml(m, id, undefined, username)),
+                    },
+                },
+            }, format)
+        } catch (err: any) {
+            subsonicLog.error('[Subsonic] handleGetSharedPlaylist error:', err)
+            return this.sendError(res, 0, '获取歌单失败: ' + (err?.message || err), format)
+        }
+    }
+
+    /**
+     * [getAlbumInfo / getAlbumInfo2] 专辑信息（notes + 封面 URL）。
+     * 本服曲库是在线聚合，官方 albumInfo 的 notes 大多没有数据源，因此：
+     *  - 本地收藏专辑（lib-alb_*）取它的描述；
+     *  - 封面用平台 CDN 直链（能构造时，目前仅 tx）；构造不出则留空。
+     */
+    private async handleGetAlbumInfo(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+
+        let notes = ''
+        let coverSource = ''
+        let coverMid = ''
+        // 兜底封面：本地专辑 / 歌曲自带的封面 URL（一般是平台 CDN 直链，客户端可直接取，无需本服鉴权）
+        let directImg = ''
+
+        if (id.startsWith('lib-alb_')) {
+            const realId = id.replace('lib-alb_', '')
+            try {
+                const libAlbums = await this.getLibraryData(username, 'albums')
+                const album: any = libAlbums.find((a: any) =>
+                    String(a.id) === realId || String(a.meta?.albumId) === realId || String(a.meta?.albumMid) === realId)
+                if (album) {
+                    notes = String(album.desc || album.description || '').trim()
+                    coverSource = album.source || ''
+                    coverMid = String(album.meta?.albumId || album.meta?.albumMid || album.id || '')
+                    directImg = String(album.img || album.meta?.picUrl || '').trim()
+                }
+            } catch (e: any) {
+                subsonicLog.error(`[Subsonic] getAlbumInfo 读取本地专辑失败 (${id}):`, e?.message || e)
+            }
+        }
+
+        // 先按「歌曲 id」解析（本地列表 / 在线缓存都能命中）：这样既能拿到它所属专辑的 mid，
+        // 又能拿到歌曲自带的封面直链（非 tx 平台构造不出专辑封面时兜底用）
+        if (!coverMid) {
+            const found = await this.findMusicById(username, id).catch(() => null)
+            const m: any = found?.music
+            if (m) {
+                coverSource = coverSource || m.source || ''
+                coverMid = String(m.meta?.albumMid || m.meta?.albumId || m.albumId || '')
+                directImg = directImg || String(m.img || m.meta?.picUrl || '').trim()
+            }
+        }
+        // 兜底：兼容 <source>_<albumMid> 形式的专辑 id（如 alb_tx_xxx）
+        if (!coverMid) {
+            const us = id.indexOf('_')
+            if (us > 0) {
+                coverSource = coverSource || id.slice(0, us)
+                coverMid = id.slice(us + 1).replace(/^alb[_a-z]*_/, '')
+            }
+        }
+
+        // 优先按平台规则构造专辑封面（目前仅 tx）；构造不出则退用自带的封面直链
+        let imageUrl = (coverSource && coverMid) ? (this.buildAlbumCoverUrl(coverSource, coverMid) || '') : ''
+        if (!imageUrl) imageUrl = directImg
+        const info = {
+            notes,
+            musicBrainzId: '',
+            smallImageUrl: imageUrl,
+            mediumImageUrl: imageUrl,
+            largeImageUrl: imageUrl,
+        }
+        if (format === 'json') return this.sendResponse(res, { albumInfo: info }, format)
+        return this.sendResponse(res, { albumInfo: { attrs: info } }, format)
     }
 
     // getAlbum: 返回 album + song[] 格式（音流等客户端期望的格式）
@@ -1525,6 +2100,18 @@ class SubsonicHandler {
                 }
             } else {
                 subsonicLog.warn(`[Subsonic] SDK missing extendDetail.getAlbumSongs for ${source}`)
+            }
+
+            // [兜底] 单曲专辑（无专辑信息的歌以 alb_<source>_<songId> 出现在播放历史里）：
+            // SDK 取不到曲目时按单曲解析，避免点进去一片空白
+            if (!musics || musics.length === 0) {
+                const single = await this.findMusicById(username, `${source}_${realId}`).catch(() => null)
+                if (single) {
+                    musics = [single.music]
+                    if (!listName || listName === 'Album Detail') {
+                        listName = String((single.music as any)?.name || '单曲')
+                    }
+                }
             }
         } else if (id.startsWith('album_')) {
             // 聚合专辑 ID（由 getAlbumList/getAlbumList2 生成）
@@ -1909,7 +2496,22 @@ class SubsonicHandler {
         const RECOMMEND_POOL_SIZE = Math.max(20, Math.min(500, global.lx.config['subsonic.recommendPoolSize'] ?? 100))
         let recommendPool: any[] = []
 
-        if (type === 'recent' || type === 'newest' || type === 'random' || type === 'byGenre') {
+        // [播放历史] recent / frequent 优先使用真实播放记录（scrobble）。
+        // 之前这两个 type 返回的都是在线推荐的新专辑，与用户实际听过的内容毫无关系，
+        // 导致客户端「最近播放」页面显示的并不是自己听过的东西。
+        if (type === 'recent' || type === 'frequent') {
+            try {
+                const history = readScrobbles(username)
+                if (history.length) {
+                    recommendPool = await this.buildPlayedAlbums(username, history, type, RECOMMEND_POOL_SIZE)
+                }
+            } catch (e) {
+                subsonicLog.error(`[Subsonic] 播放历史构造专辑列表失败(${type}):`, e)
+                recommendPool = []
+            }
+        }
+
+        if (recommendPool.length === 0 && (type === 'recent' || type === 'newest' || type === 'random' || type === 'byGenre')) {
             try {
                 if (type === 'byGenre') {
                     const genreNameOrId = params.get('genre') || ''
@@ -1976,7 +2578,28 @@ class SubsonicHandler {
                 }
             }
 
-            albums = libAlbums.slice(offset, offset + size).map(buildAlbum)
+            let pool = libAlbums.map(buildAlbum)
+
+            // [兜底] 用户未必单独收藏过专辑（NAS 实测 library/albums.json 是空的），
+            // 推荐接口又整批失败时，从本地歌曲反推专辑；还不够就用在线歌曲缓存补齐，
+            // 避免「最近发行」这类标签页直接空白
+            if (pool.length < RECOMMEND_POOL_SIZE) {
+                const seen = new Set<string>(pool.map(a => String(a.id)))
+                for (const a of await this.buildLocalAlbums(username, true)) {
+                    if (seen.has(String(a.id))) continue
+                    seen.add(String(a.id))
+                    pool.push(a)
+                }
+            }
+
+            if (type === 'random') {
+                for (let i = pool.length - 1; i > 0; i--) {
+                    const j = Math.floor(Math.random() * (i + 1))
+                    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+                }
+            }
+
+            albums = pool.slice(offset, offset + size)
         }
 
         const wrapKey = isV2 ? 'albumList2' : 'albumList'
@@ -1993,6 +2616,70 @@ class SubsonicHandler {
         }, format)
     }
 
+
+    /**
+     * 从本地数据反推出专辑列表，作为在线推荐失败时的兜底。
+     *
+     * 实测 NAS 上腾讯 musicu 推荐接口会整批失败（日志里 getArtistAlbums、source=tx 搜索批量报错），
+     * 而用户未必单独收藏过专辑（NAS 上该用户的 library/ 目录就是空的），
+     * 原逻辑会一路回退到空列表，客户端「最近发行」直接一片空白。
+     *
+     * 只收录带 albumId 的条目：没有 albumId 的专辑点进去拿不到曲目，宁可不显示。
+     */
+    private async buildLocalAlbums(username: string, includeOnlineCache: boolean): Promise<any[]> {
+        const collect = (songs: any[], out: Map<string, any>) => {
+            for (const m of songs) {
+                if (!m) continue
+                const source = m.source || 'wy'
+                const albumName = String((m as any)?.meta?.albumName || (m as any)?.albumName || '').trim()
+                const albumId = String((m as any)?.meta?.albumId || (m as any)?.albumId || '').trim()
+                if (!albumId || !albumName || albumName === 'Unknown Album') continue
+                const key = `${source}_${albumId}`
+                const exist = out.get(key)
+                if (exist) {
+                    exist.songCount += 1
+                    continue
+                }
+                const primarySinger = String(m.singer || '').split('、')[0] || 'LX Music'
+                out.set(key, {
+                    id: `alb_${source}_${albumId}`,
+                    name: albumName,
+                    title: albumName,
+                    album: albumName,
+                    artist: m.singer || 'LX Music',
+                    artistId: (m as any).singerId ? `art_${source}_${(m as any).singerId}` : `artist_${primarySinger}`,
+                    isDir: true,
+                    coverArt: (m as any)?.meta?.picUrl || (m as any)?.img || `alb_${source}_${albumId}`,
+                    songCount: 1,
+                    duration: this.parseDuration(m.interval),
+                    created: new Date().toISOString(),
+                    playCount: 0,
+                })
+            }
+        }
+
+        const out = new Map<string, any>()
+        try {
+            const userSpace = getUserSpace(username)
+            const listData = await userSpace.listManage.getListData()
+            collect(listData.loveList || [], out)
+            collect(listData.defaultList || [], out)
+            for (const l of (listData.userList || [])) collect((l as any).list || [], out)
+            const libAlbums = await this.getLibraryData(username, 'albums')
+            for (const alb of libAlbums) collect((alb as any).list || [], out)
+        } catch (e) {
+            subsonicLog.error('[Subsonic] 本地歌曲聚合专辑失败:', e)
+        }
+
+        // 最后手段：在线歌曲缓存（持久化的历史搜索结果，NAS 上有数千首）。
+        // 它的内容不是「新发行」，优先级最低，仅用于保证列表非空。
+        if (includeOnlineCache && out.size < 20) {
+            this.loadOnlineSongCache()
+            collect(Array.from(this.onlineSongCache.values()), out)
+        }
+
+        return Array.from(out.values())
+    }
 
     /**
      * 聚合出「歌手维度」目录。
@@ -2101,7 +2788,49 @@ class SubsonicHandler {
             }
         }
 
-        return Array.from(artistsMap.values())
+        // [修复] 同名条目合并：收藏歌手库用规范 id（art_源_平台ID），本地曲目反推用名字型 id（artist_名字），
+        // 两者会在客户端变成两个同名歌手，且收藏那条通常是 0 专辑 0 歌曲（点进去一片空白）。
+        // 这里把同名条目并入规范条目：曲目 / 专辑 / 星标 / 头像合并，保留规范 id 以便继续走平台数据。
+        const buckets = new Map<string, any[]>()
+        for (const entry of artistsMap.values()) {
+            const key = normalizeSingerName(toSimplified(entry.name || ''))
+            if (!key) continue
+            if (!buckets.has(key)) buckets.set(key, [])
+            buckets.get(key)!.push(entry)
+        }
+
+        const mergedList: any[] = []
+        for (const group of buckets.values()) {
+            if (group.length === 1) {
+                mergedList.push(group[0])
+                continue
+            }
+            // 主条目优先取规范 id（art_ 前缀，能走平台数据），其次取本地曲目最多的
+            const sorted = group.slice().sort((a, b) => {
+                const av = a.id.startsWith('art_') ? 0 : 1
+                const bv = b.id.startsWith('art_') ? 0 : 1
+                if (av !== bv) return av - bv
+                return (b.songCount || 0) - (a.songCount || 0)
+            })
+            const main = sorted[0]
+            const seenSongs = new Set<string>((main.songs || []).map((s: any) => String(s?.id || '')))
+            for (const other of sorted.slice(1)) {
+                for (const s of other.songs || []) {
+                    const sid = String(s?.id || '')
+                    if (sid && seenSongs.has(sid)) continue
+                    if (sid) seenSongs.add(sid)
+                    main.songs.push(s)
+                }
+                for (const k of other.albumKeys || []) main.albumKeys.add(k)
+                main.starred = main.starred || other.starred
+                if (!main.picUrl && other.picUrl) main.picUrl = other.picUrl
+                if (!main.singerId && other.singerId) main.singerId = other.singerId
+            }
+            main.songCount = main.songs.length
+            mergedList.push(main)
+        }
+
+        return mergedList
     }
 
     /**
@@ -2119,22 +2848,24 @@ class SubsonicHandler {
                 albumCount: a.albumKeys.size,
                 songCount: a.songCount,
                 coverArt: a.id,
-                artistImageUrl: a.picUrl || undefined,
+                // 头像字段同样降尺寸：客户端直连时会直接下载，原图实测有 17.9MB
+                artistImageUrl: a.picUrl ? downscaleAvatarUrl(a.picUrl) : undefined,
                 ...(a.starred ? { starred: new Date().toISOString() } : {}),
             }))
             .sort((x, y) => x.name.localeCompare(y.name, 'zh-Hans-CN'))
 
-        // 按首字母分组
+        // 按索引分组：中文按拼音首字母归入 A-Z，
+        // 避免中文歌手全部挤在 “#” 里导致客户端字母索引失效
         const indexMap = new Map<string, any[]>()
         for (const a of artists) {
-            const firstChar = a.name[0]?.toUpperCase() || '#'
-            const key = /[A-Z]/.test(firstChar) ? firstChar : '#'
+            const key = getArtistIndexKey(a.name)
             if (!indexMap.has(key)) indexMap.set(key, [])
             indexMap.get(key)!.push(a)
         }
 
+        // “#” 组排在最后（与 Navidrome 等服务端实现一致），其余按字母顺序
         const indexArr = Array.from(indexMap.entries())
-            .sort((a, b) => a[0].localeCompare(b[0]))
+            .sort((a, b) => ((a[0] === '#' ? 1 : 0) - (b[0] === '#' ? 1 : 0)) || a[0].localeCompare(b[0]))
             .map(([name, artistList]) => ({
                 name,
                 artist: artistList,
@@ -2179,22 +2910,38 @@ class SubsonicHandler {
             source = parts[1]
             artistId = parts.slice(2).join('_')
         } else if (id.startsWith('artist_')) {
-            // 兼容旧版或 Fallback: 使用 getSingerMid 动态寻址
+            // 名字型 id：先不在线寻址，交给下面的「本地优先」逻辑
             singerName = decodeURIComponent(id.slice(7))
-            const mid = await getSingerMid(singerName)
-            if (mid) {
-                source = 'tx' // 寻址成功后默认切换到 TX
-                artistId = mid
-            } else {
-                artistId = singerName
-            }
         } else {
             artistId = id
         }
 
-        // 本地「歌手维度」聚合数据：在线接口取不到时用它兜底，保证歌手页不空白
-        const localEntry = (await this.buildArtistDirectory(username)).find(a => a.id === id)
+        // 本地「歌手维度」聚合数据，两个用途：
+        // 1) 在线接口取不到时用它兜底，保证歌手页不空白（否则只有客户端本地收藏的那几首）；
+        // 2) 名字型 id(artist_<名字>) 若本地目录里有规范 id(source+singerId)，直接复用，
+        //    不再依赖在线寻址——寻址走音源搜索接口，偶发失败会让整页专辑/歌曲栏空白。
+        const directory = await this.buildArtistDirectory(username)
+        const localEntry = directory.find(a => a.id === id)
+            || (singerName && singerName !== 'Unknown' ? directory.find(a => a.name === singerName) : undefined)
         if (localEntry && (!singerName || singerName === 'Unknown')) singerName = localEntry.name
+
+        if (!artistId && singerName && singerName !== 'Unknown') {
+            if (localEntry?.source && localEntry?.singerId) {
+                source = localEntry.source
+                artistId = String(localEntry.singerId)
+            } else {
+                // [修复] 之前这里把源写死成 'tx'，违反 singer.sourcePriority：
+                // getSingerMid 若命中的是 wy，却拿 wy 的 mid 去请求 tx 的专辑接口，必然失败或串台。
+                const detail = await getSingerDetail(singerName)
+                if (detail) {
+                    source = detail.source
+                    artistId = detail.mid
+                    if (detail.matchedName) singerName = detail.matchedName
+                } else {
+                    artistId = singerName // 退化：按名字查（多数源会失败，最终靠本地兜底）
+                }
+            }
+        }
 
         // 定义精准的平台 ID (用于封面和元数据绑定)
         const resolvedId = (source && artistId && artistId !== id) ? `art_${source}_${artistId}` : id
@@ -2204,84 +2951,137 @@ class SubsonicHandler {
         let hotSongs: LX.Music.MusicInfo[] = []
         let artistPic = ''
 
+        // [跨源合并] 歌手名未知时（例如直接点 art_tx_<mid> 进来），先向主源要一次详情拿名字，
+        // 否则无法按名字到其它平台寻址
+        if ((!singerName || singerName === 'Unknown') && artistId && musicSdk[source]?.extendDetail?.getArtistDetail) {
+            const d = await musicSdk[source].extendDetail.getArtistDetail(artistId).catch(() => null)
+            if (d?.name) singerName = d.name
+            if (d?.avatar || d?.pic) artistPic = d.avatar || d.pic
+        }
+
+        // 参与抓取的「源 + 该源自己的 mid」：
+        // 1) 主源（id 里带的那个平台）永远排第一；
+        // 2) singer.sourcePriority 配了多个源时，按歌手名到其它平台再寻址一轮，
+        //    把那些平台的专辑/歌曲也合并进来——各平台 mid 不通用，必须各自寻址。
+        //    只配了 1 个源时行为不变（单源）。
+        const sourceTargets: Array<{ source: string, id: string }> = []
+        if (artistId && artistId !== singerName) sourceTargets.push({ source, id: artistId })
+        if (singerName && singerName !== 'Unknown' && getOrderedSingerSources().length > 1) {
+            const hits = await resolveSingerSources(singerName).catch(() => [] as any[])
+            for (const h of hits) {
+                if (!sourceTargets.some(t => t.source === h.source)) {
+                    sourceTargets.push({ source: h.source, id: h.mid })
+                }
+            }
+        }
+
+        // 单个源上抓取：专辑多页（最多 5 页 × 50）+ 热门歌曲多页（最多 5 页 × 100）
+        const fetchSourceData = async (src: string, sid: string) => {
+            const sdk = musicSdk[src]?.extendDetail
+            if (!sdk) return { albums: [] as any[], songs: [] as any[], pic: '', name: '' }
+
+            const fetchAllAlbums = async () => {
+                const MAX_PAGES = 5
+                const PAGE_SIZE = 50
+                let all: any[] = []
+                for (let p = 1; p <= MAX_PAGES; p++) {
+                    try {
+                        const data = await sdk.getArtistAlbums(sid, p, PAGE_SIZE)
+                        const pageList = data.list || []
+                        all = all.concat(pageList)
+                        if (pageList.length < PAGE_SIZE) break
+                    } catch (err) {
+                        subsonicLog.error(`[Subsonic] SDK getArtistAlbums(${src}) Error at page ${p}:`, err)
+                        break
+                    }
+                }
+                return all
+            }
+            const fetchAllSongs = async () => {
+                const MAX_PAGES = 5
+                const PAGE_SIZE = 100
+                let all: any[] = []
+                for (let p = 1; p <= MAX_PAGES; p++) {
+                    try {
+                        const data = await sdk.getArtistSongs(sid, p, PAGE_SIZE, 'hot')
+                        const pageList = data.list || []
+                        all = all.concat(pageList)
+                        if (pageList.length < PAGE_SIZE) break
+                    } catch (err) {
+                        subsonicLog.error(`[Subsonic] SDK getArtistSongs(${src}) Error at page ${p}:`, err)
+                        break
+                    }
+                }
+                return all
+            }
+
+            const [rawAlbums, allSongsRaw] = await Promise.all([
+                fetchAllAlbums().catch(() => [] as any[]),
+                fetchAllSongs().catch(() => [] as any[]),
+            ])
+
+            return {
+                albums: rawAlbums,
+                songs: allSongsRaw,
+                pic: rawAlbums[0]?.singerPic || (allSongsRaw[0] as any)?.singerPic || '',
+                name: rawAlbums[0]?.singerName || '',
+            }
+        }
+
         try {
-            if (musicSdk[source]?.extendDetail) {
-                // 1. 先抓取专辑列表 (多页，最多 5 页 × 50 = 250 张；顺序执行以保证稳定性)
-                const fetchAllAlbums = async () => {
-                    const MAX_PAGES = 5
-                    const PAGE_SIZE = 50
-                    let all: any[] = []
-                    for (let p = 1; p <= MAX_PAGES; p++) {
-                        try {
-                            const data = await musicSdk[source].extendDetail.getArtistAlbums(artistId, p, PAGE_SIZE)
-                            const pageList = data.list || []
-                            all = all.concat(pageList)
-                            if (pageList.length < PAGE_SIZE) break
-                        } catch (err) {
-                            subsonicLog.error(`[Subsonic] SDK getArtistAlbums Error at page ${p}:`, err)
-                            break
-                        }
-                    }
-                    return all
+            const perSource = await Promise.all(sourceTargets.map(t => fetchSourceData(t.source, t.id)))
+
+            // [修复] 歌手名取 SDK 返回的官方名，并只保留主歌手：
+            // 之前无条件取 allSongsRaw[0].singer，热歌首曲若为合唱，整页名字会串成「黄霄雲、刘端端」
+            for (const r of perSource) {
+                if (!r.name) continue
+                singerName = splitSingers(r.name)[0] || r.name
+                break
+            }
+            if ((!singerName || singerName === 'Unknown') && localEntry?.name) singerName = localEntry.name
+            if (!singerName) {
+                const libArtists = await this.getLibraryData(username, 'artists')
+                const localArt = libArtists.find(a => (a.source === source && a.id === artistId) || a.name === artistId)
+                if (localArt) singerName = localArt.name
+            }
+
+            // 封面：主源优先，任一个有图即可
+            if (!artistPic) {
+                for (const r of perSource) {
+                    if (r.pic) { artistPic = r.pic; break }
                 }
-                const rawAlbums = await fetchAllAlbums().catch(() => [] as any[])
+            }
 
-                // 2. 循环抓取多页歌曲 (最多 5 页，共 500 首)
-                const fetchAllSongs = async () => {
-                    const MAX_PAGES = 5
-                    const PAGE_SIZE = 100
-                    let all: any[] = []
-                    for (let p = 1; p <= MAX_PAGES; p++) {
-                        try {
-                            const data = await musicSdk[source].extendDetail.getArtistSongs(artistId, p, PAGE_SIZE, 'hot')
-                            const pageList = data.list || []
-                            all = all.concat(pageList)
-                            if (pageList.length < PAGE_SIZE) break
-                        } catch (err) {
-                            subsonicLog.error(`[Subsonic] SDK getArtistSongs Error at page ${p}:`, err)
-                            break
-                        }
-                    }
-                    return all
-                }
+            // 合并各源结果：专辑按归一化专辑名去重，歌曲按「归一歌名 + 主歌手」去重，主源版本胜出
+            const seenAlbum = new Set<string>()
+            const seenSong = new Set<string>()
+            for (let i = 0; i < perSource.length; i++) {
+                const src = sourceTargets[i].source
 
-                const allSongsRaw = await fetchAllSongs()
-
-                // [关键修复] 必须先恢复 singerName 才能进行 albums.map
-                // 优先级：从热门歌曲中提取 > 从本地收藏库匹配 > 原有推断
-                if (allSongsRaw.length > 0) {
-                    singerName = allSongsRaw[0].singer
-                    if ((allSongsRaw[0] as any).singerPic) artistPic = (allSongsRaw[0] as any).singerPic
+                for (const alb of perSource[i].albums) {
+                    const key = normalizeSingerName(alb.name)
+                    if (!key || seenAlbum.has(key)) continue
+                    seenAlbum.add(key)
+                    albums.push({
+                        id: `alb_${src}_${alb.id || alb.albumMid}`,
+                        name: alb.name,
+                        title: alb.name,
+                        album: alb.name,
+                        artist: singerName || alb.singerName || 'Unknown',
+                        artistId: resolvedId,
+                        songCount: alb.total || 0,
+                        coverArt: alb.img || alb.picUrl || resolvedId,
+                        isDir: true,
+                        year: alb.publishTime ? parseInt(String(alb.publishTime).split(/[/-]/)[0]) : undefined,
+                    })
                 }
 
-                if (singerName === 'Unknown' || !singerName) {
-                    const libArtists = await this.getLibraryData(username, 'artists')
-                    const localArt = libArtists.find(a => (a.source === source && a.id === artistId) || a.name === artistId)
-                    if (localArt) singerName = localArt.name
+                for (const s of perSource[i].songs) {
+                    const dedupKey = `${normalizeSingerName(s.name)}@${normalizeSingerName(splitSingers(s.singer || '')[0] || '')}`
+                    if (seenSong.has(dedupKey)) continue
+                    seenSong.add(dedupKey)
+                    hotSongs.push({ ...s, id: `${src}_${s.songmid || s.songId}` } as any)
                 }
-
-                if (rawAlbums[0]?.singerPic) artistPic = rawAlbums[0].singerPic
-                if (rawAlbums[0]?.singerName && (singerName === 'Unknown' || !singerName)) {
-                    singerName = rawAlbums[0].singerName
-                }
-
-                albums = rawAlbums.map((alb: any) => ({
-                    id: `alb_${source}_${alb.id || alb.albumMid}`,
-                    name: alb.name,
-                    title: alb.name,
-                    album: alb.name,
-                    artist: singerName || alb.singerName || 'Unknown',
-                    artistId: resolvedId,
-                    songCount: alb.total || 0,
-                    coverArt: alb.img || alb.picUrl || resolvedId,
-                    isDir: true,
-                    year: alb.publishTime ? parseInt(String(alb.publishTime).split(/[/-]/)[0]) : undefined,
-                }))
-
-                hotSongs = allSongsRaw.map((s: any) => ({
-                    ...s,
-                    id: `${source}_${s.songmid || s.songId}`
-                }))
             }
         } catch (e) {
             subsonicLog.error(`[Subsonic] SDK Artist load error:`, e)
@@ -2346,7 +3146,9 @@ class SubsonicHandler {
             albumCount: albums.length,
             songCount: hotSongs.length,
             coverArt: resolvedId,
-            artistImageUrl: artistPic || resolvedId,
+            // [修复] 没有封面时不能把 ID 令牌塞进 artistImageUrl（它是 URL 字段），
+            // 否则客户端会把它当图片直链去请求而必然失败；应留空让客户端回落到 coverArt
+            artistImageUrl: artistPic || undefined,
             ...(artistStarred ? { starred: new Date().toISOString() } : {}),
         }
 
@@ -2376,7 +3178,7 @@ class SubsonicHandler {
     }
 
 
-    private async handleGetArtistInfo(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+    private async handleGetArtistInfo(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, method?: string) {
         const id = params.get('id') || ''
         const artistName = params.get('artist') || ''
 
@@ -2399,10 +3201,12 @@ class SubsonicHandler {
             mediumImageUrl: pic,
             largeImageUrl: pic,
         }
+        // [修复] 根元素此前恒为 artistInfo2，导致 getArtistInfo(v1) 也返回 v2 的结构
+        const wrapKey = method === 'getArtistInfo2' ? 'artistInfo2' : 'artistInfo'
         if (format === 'json') {
-            return this.sendResponse(res, { artistInfo2: info }, format)
+            return this.sendResponse(res, { [wrapKey]: info }, format)
         }
-        return this.sendResponse(res, { artistInfo2: { attrs: info } }, format)
+        return this.sendResponse(res, { [wrapKey]: { attrs: info } }, format)
     }
 
     private async handleGetGenres(res: http.ServerResponse, username: string, format: string) {
@@ -2457,18 +3261,23 @@ class SubsonicHandler {
                 const allItems: any[] = []
                 const existingIds = new Set<string>()
 
-                for (let page = 1; page <= pagesToFetch; page++) {
-                    const searchRes = await musicSdk[source].musicSearch.search(cleanQuery, page, pageSize)
-                    const list = Array.isArray(searchRes?.list) ? searchRes.list : []
-                    if (list.length === 0) break
+                // [新增] 简繁变体补搜：原词命中不足时换个字形再搜一轮
+                // （实测「黄霄雲」(繁) 各源合计仅 5 条，「黄霄云」(简) 有 203 条）
+                for (const kw of buildQueryVariants(cleanQuery)) {
+                    for (let page = 1; page <= pagesToFetch; page++) {
+                        const searchRes = await musicSdk[source].musicSearch.search(kw, page, pageSize)
+                        const list = Array.isArray(searchRes?.list) ? searchRes.list : []
+                        if (list.length === 0) break
 
-                    for (const item of list) {
-                        const songmid = String(item.songmid || item.id || '')
-                        if (!songmid || existingIds.has(songmid)) continue
-                        existingIds.add(songmid)
-                        allItems.push(item)
+                        for (const item of list) {
+                            const songmid = String(item.songmid || item.id || '')
+                            if (!songmid || existingIds.has(songmid)) continue
+                            existingIds.add(songmid)
+                            allItems.push(item)
+                        }
+
+                        if (allItems.length >= targetLimit) break
                     }
-
                     if (allItems.length >= targetLimit) break
                 }
 
@@ -2520,6 +3329,146 @@ class SubsonicHandler {
         }
         this.onlineSearchCache.set(cacheKey, { expiresAt: Date.now() + 5 * 60 * 1000, results: interleaved })
         return interleaved
+    }
+
+    /**
+     * 在线搜索歌手（各源 extendSearch.searchSinger），映射为 Subsonic artist 结构。
+     * 各源并发、单源 8s 超时、按规范 id 去重，失败静默跳过（不影响其它源）。
+     */
+    /**
+     * 歌手名与查询词的相关度(0~1)：先做简繁/标点归一再比较，完全相等为 1，否则取字符命中率。
+     * 音源会把联想兜底结果一并返回（搜「黄霄云」会带回「周兴哲」这类完全无关的歌手），据此剔除。
+     */
+    private artistRelevance(query: string, name: string): number {
+        const q = normalizeSingerName(toSimplified(query || ''))
+        const n = normalizeSingerName(toSimplified(name || ''))
+        if (!q || !n) return 0
+        if (q === n) return 1
+        return nameSimilarity(q, n)
+    }
+
+    private async fetchOnlineSearchArtists(query: string, sources: string[], limit: number): Promise<any[]> {
+        const max = Math.max(1, Math.min(limit || 20, 50))
+        // 跨源合并与否由 singer.sourcePriority 决定：只配了 1 个源时保持单源行为
+        const orderedSources = getOrderedSingerSources()
+        const mergeAcrossSources = orderedSources.length > 1
+        const sourceRank = new Map<string, number>()
+        orderedSources.forEach((s, i) => sourceRank.set(s, i))
+
+        const groups = await Promise.all(sources.map(async (src): Promise<any[]> => {
+            const sdk = (musicSdk as any)[src]
+            if (!sdk?.extendSearch?.searchSinger) return []
+            const rows: any[] = []
+            const seen = new Set<string>()
+            try {
+                // [新增] 简繁变体补搜（同歌曲搜索）
+                for (const kw of buildQueryVariants(query)) {
+                    const data: any = await withTimeout(sdk.extendSearch.searchSinger(kw, 1, max), 8000)
+                    for (const item of (data?.list || [])) {
+                        const mid = String(item.mid || item.id || '')
+                        if (!mid) continue
+                        const id = `art_${src}_${mid}`
+                        if (seen.has(id)) continue
+                        seen.add(id)
+                        const name = item.name || ''
+                        rows.push({
+                            id,
+                            name,
+                            title: name,
+                            albumCount: item.albumSize ?? 0,
+                            coverArt: id,               // 交给 getCoverArt 的 art_ 分支解析
+                            artistImageUrl: item.picUrl ? downscaleAvatarUrl(item.picUrl) : undefined,
+                            isDir: true,
+                            _source: src,
+                            _score: this.artistRelevance(query, name),
+                        })
+                    }
+                    if (rows.length >= max) break
+                }
+            } catch { /* 单源失败忽略 */ }
+            return rows
+        }))
+
+        const all = groups.flat()
+        if (!all.length) return []
+
+        // 相关性保留线：音源会把联想兜底结果一起返回，名字与查询毫无交集的
+        //（搜「黄霄云」带回「周兴哲」这类）低于此线丢掉；
+        // 名字相关的（「黄霄雲的人」「黄霄云的面包」）保留，靠排序让真身排最前。
+        const MIN_SCORE = 0.3
+        let kept: any[] = all.filter(a => a._score > MIN_SCORE)
+        // 全部判为无关时回填原始结果，避免拼音/生僻写法被误伤导致搜空
+        if (!kept.length) kept = all
+        // 排序：先按相关度降序，同相关度按作品量降序（真身通常专辑/歌曲最多）
+        kept.sort((a, b) => (b._score - a._score) || ((b.albumCount || 0) - (a.albumCount || 0)))
+
+        // 同名多源合并：归一化姓名相同的不同平台条目合成一条，按 singer.sourcePriority 选代表
+        if (mergeAcrossSources) {
+            const byName = new Map<string, any>()
+            for (const item of kept) {
+                const key = normalizeSingerName(toSimplified(item.name || ''))
+                if (!key) continue
+                const exist = byName.get(key)
+                if (!exist) {
+                    byName.set(key, item)
+                    continue
+                }
+                const ra = sourceRank.has(exist._source) ? sourceRank.get(exist._source)! : 99
+                const rb = sourceRank.has(item._source) ? sourceRank.get(item._source)! : 99
+                if (rb < ra) byName.set(key, item)
+            }
+            kept = Array.from(byName.values())
+        }
+
+        return kept.slice(0, max).map(({ _source, _score, ...rest }) => rest)
+    }
+
+    /**
+     * 在线搜索专辑（各源 extendSearch.searchAlbum），映射为 Subsonic album 结构。
+     * id 采用 alb_<source>_<albumMid>，点进去即可走 handleGetAlbum 的 SDK 分支。
+     */
+    private async fetchOnlineSearchAlbums(query: string, sources: string[], limit: number): Promise<any[]> {
+        const max = Math.max(1, Math.min(limit || 20, 50))
+        const seen = new Set<string>()
+        const groups = await Promise.all(sources.map(async (src): Promise<any[]> => {
+            const sdk = (musicSdk as any)[src]
+            if (!sdk?.extendSearch?.searchAlbum) return []
+            const rows: any[] = []
+            try {
+                // [新增] 简繁变体补搜（同歌曲搜索）
+                for (const kw of buildQueryVariants(query)) {
+                    const data: any = await withTimeout(sdk.extendSearch.searchAlbum(kw, 1, max), 8000)
+                    for (const item of (data?.list || [])) {
+                        const mid = String(item.mid || item.id || '')
+                        if (!mid) continue
+                        const id = `alb_${src}_${mid}`
+                        if (seen.has(id)) continue
+                        seen.add(id)
+                        const artistName = item.artistName || ''
+                        const artistId = item.artistId
+                            ? `art_${src}_${item.artistId}`
+                            : (artistName ? `artist_${artistName}` : id)
+                        rows.push({
+                            id,
+                            name: item.name || '',
+                            title: item.name || '',
+                            album: item.name || '',
+                            artist: artistName,
+                            artistId,
+                            isDir: true,
+                            coverArt: item.picUrl || id,
+                            songCount: item.size || 0,
+                            duration: 0,
+                            created: new Date().toISOString(),
+                            playCount: 0,
+                        })
+                    }
+                    if (rows.length >= max) break
+                }
+            } catch { /* 单源失败忽略 */ }
+            return rows
+        }))
+        return interleaveBySource(groups, max)
     }
 
     private async handleSearch(res: http.ServerResponse, username: string, params: URLSearchParams, format: string, method: string = 'search3') {
@@ -2767,6 +3716,64 @@ class SubsonicHandler {
                         }
                     }
                 }
+            }
+        }
+
+        // [新增] 在线歌手/专辑搜索：Subsonic 客户端搜索页有「艺人 / 专辑」两栏，
+        // 此前它们只从本地库取（未收藏时恒为空）。这里在本地区结果不足时并发补在线结果。
+        if (cleanQuery && searchMode !== 'local_only') {
+            const needArtists = artistCount > 0 && matchedArtists.length < artistOffset + artistCount
+            const needAlbums = albumCount > 0 && matchedAlbums.length < albumOffset + albumCount
+            if (needArtists || needAlbums) {
+                const [onlineArtists, onlineAlbums] = await Promise.all([
+                    needArtists
+                        ? this.fetchOnlineSearchArtists(cleanQuery, targetOnlineSources, artistOffset + artistCount)
+                        : Promise.resolve([] as any[]),
+                    needAlbums
+                        ? this.fetchOnlineSearchAlbums(cleanQuery, targetOnlineSources, albumOffset + albumCount)
+                        : Promise.resolve([] as any[]),
+                ])
+                const artistIds = new Set(matchedArtists.map((a: any) => a.id))
+                for (const a of onlineArtists) {
+                    if (!artistIds.has(a.id)) { matchedArtists.push(a); artistIds.add(a.id) }
+                }
+                const albumIds = new Set(matchedAlbums.map((a: any) => a.id))
+                for (const a of onlineAlbums) {
+                    if (!albumIds.has(a.id)) { matchedAlbums.push(a); albumIds.add(a.id) }
+                }
+            }
+        }
+
+        // [新增] 跨源同名去重：同一首歌常会被多个音源各返回一次（搜一次出现 5 份），
+        // 按「歌名 + 主歌手」归一后只保留一份，优先保留 subsonic.source.priority 中更靠前的源。
+        // 只合并"同名同歌手"的跨源重复，不合并不同版本（Live/Remix 等歌名本身不同）。
+        if (matchedSongs.length > 1) {
+            const rawPriority = global.lx.config['subsonic.source.priority']
+            const priority: string[] = Array.isArray(rawPriority) ? rawPriority : ['kw', 'tx', 'wy', 'mg', 'kg']
+            const rankOf = (src: string) => {
+                const i = priority.indexOf(src)
+                return i < 0 ? priority.length : i
+            }
+            const picked = new Map<string, { item: any, rank: number }>()
+            const order: string[] = []
+            for (const it of matchedSongs as any[]) {
+                const m = it.music || it
+                const key = `${normalizeText(String(m.name || ''))}@${normalizeText(String((m.singer || '').split('、')[0] || ''))}`
+                const rank = rankOf(String(m.source || ''))
+                const prev = picked.get(key)
+                if (!prev) {
+                    picked.set(key, { item: it, rank })
+                    order.push(key)
+                } else if (rank < prev.rank) {
+                    picked.set(key, { item: it, rank })
+                }
+            }
+            const beforeCount = matchedSongs.length
+            if (order.length !== beforeCount) {
+                matchedSongs = order.map(k => picked.get(k)!.item)
+                subsonicLog.debug(`[Subsonic] 跨源去重: ${beforeCount} → ${matchedSongs.length} (query=${cleanQuery})`)
+            } else {
+                subsonicLog.debug(`[Subsonic] 跨源去重: 无重复 ${beforeCount} 条 (query=${cleanQuery}) 样例key=${Array.from(picked.keys()).slice(0, 3).join(' | ')}`)
             }
         }
 
@@ -3568,7 +4575,14 @@ class SubsonicHandler {
                 const cloudSongs = await fetchSongsByGenre(categoryId, fetchSize)
                 if (cloudSongs.length > 0) {
                     const parentId = `genre_${genreNameOrId}`
-                    const picked = cloudSongs.map((s: any) => ({ music: s, listId: parentId }))
+                    // [修复] 多取是为了随机多样性，但最终必须按客户端的 size 截断，
+                    // 否则 size=10 也会把 100 首全部塞给客户端
+                    const shuffled = cloudSongs.slice()
+                    for (let i = shuffled.length - 1; i > 0; i--) {
+                        const j = Math.floor(Math.random() * (i + 1))
+                        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+                    }
+                    const picked = shuffled.slice(0, size).map((s: any) => ({ music: s, listId: parentId }))
                     return this.renderRandomSongs(res, picked, format, rootKey, username)
                 }
             } catch (e) {
@@ -3650,15 +4664,11 @@ class SubsonicHandler {
         }
     }
 
-    private async handleGetSimilarSongs(
-        res: http.ServerResponse,
-        username: string,
-        params: URLSearchParams,
-        format: string,
-    ) {
-        const id = params.get('id')
-        const count = Math.min(parseInt(params.get('count') || '10'), 50)
-
+    /**
+     * 挑「相似歌曲」候选：同歌手(3 分) + 同专辑(2 分) 分层排序、层内随机；目标歌不在库时退化为随机。
+     * getSimilarSongs/2 与 getSonicSimilarTracks 共用同一套挑选逻辑，避免两处漂移。
+     */
+    private async pickSimilarEntries(username: string, id: string | null, count: number): Promise<Array<{ music: LX.Music.MusicInfo, listId: string }>> {
         const userSpace = getUserSpace(username)
         const listData = await userSpace.listManage.getListData()
 
@@ -3671,31 +4681,102 @@ class SubsonicHandler {
         addAll(listData.defaultList, 'default')
         for (const list of listData.userList) addAll((list.list || []) as LX.Music.MusicInfo[], list.id)
 
-        // 找目标歌曲
-        const target = id ? all.find(({ music }) => music.id === id) : null
+        // 找目标歌曲：本地列表里没有时用统一解析器兜底（在线缓存中的歌也能命中）
+        let target = id ? all.find(({ music }) => music.id === id) : null
+        if (!target && id) {
+            const found = await this.findMusicById(username, id).catch(() => null)
+            if (found) target = { music: found.music, listId: found.listId }
+        }
 
-        let candidates = all.filter(({ music }) => music.id !== id)
+        const candidates = all.filter(({ music }) => music.id !== id)
+        const shuffle = <T>(arr: T[]): T[] => {
+            const a = arr.slice()
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1))
+                ;[a[i], a[j]] = [a[j], a[i]]
+            }
+            return a
+        }
 
+        let picked: { music: LX.Music.MusicInfo, listId: string }[] = []
         if (target) {
-            // 同歌手优先
-            const sameSinger = candidates.filter(({ music }) => music.singer === target.music.singer)
-            const others = candidates.filter(({ music }) => music.singer !== target.music.singer)
-            candidates = [...sameSinger, ...others]
-        }
+            const singerKey = (s: string) => normalizeSingerName(toSimplified(s || ''))
+            const targetSingers = new Set(splitSingers(target.music.singer || '').map(singerKey).filter(Boolean))
+            const targetAlbum = singerKey((target.music as any).albumName || (target.music as any).album || '')
 
-        // 打乱并取前 count
-        for (let i = candidates.length - 1; i > 0; i--) {
-            const j = Math.floor(Math.random() * (i + 1));
-            [candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+            // [修复] 之前先排「同歌手优先」再整体打乱，优先顺序被洗掉，
+            // 导致返回歌与目标毫无关系（搜「孙尚香」回来「青花」）。
+            // 改为分层：同歌手(3) + 同专辑(2) 计分，层内随机、层间按分排序。
+            const layers = new Map<number, { music: LX.Music.MusicInfo, listId: string }[]>()
+            for (const c of candidates) {
+                const singers = splitSingers(c.music.singer || '').map(singerKey)
+                let score = 0
+                if (singers.some(s => targetSingers.has(s))) score += 3
+                const album = singerKey((c.music as any).albumName || (c.music as any).album || '')
+                if (targetAlbum && album === targetAlbum) score += 2
+                if (!layers.has(score)) layers.set(score, [])
+                layers.get(score)!.push(c)
+            }
+            for (const score of Array.from(layers.keys()).sort((a, b) => b - a)) {
+                picked = picked.concat(shuffle(layers.get(score)!))
+                if (picked.length >= count) break
+            }
+            picked = picked.slice(0, count)
+        } else {
+            // 目标歌不在本地曲库：退化为随机（与旧行为一致）
+            picked = shuffle(candidates).slice(0, count)
         }
-        let picked = candidates.slice(0, count)
 
         // [dislike] 相似歌曲属于推荐性质，受 dislikeNoRecommend 控制
         if (global.lx.config['subsonic.dislikeNoRecommend']) {
             picked = await this.filterDislikedEntries(username, picked)
         }
+        return picked
+    }
 
-        const wrapKey = 'similarSongs2'
+    /**
+     * [sonicSimilarity] getSonicSimilarTracks：与目标歌「相似」的曲目（id 必填，count 默认 10）。
+     * 注意：本服没有声学分析（AudioMuse 之类），similarity 是由「同歌手/同专辑」启发式排序
+     * 归一化得到的**排序分**，并非声学相似度；目的只是让客户端拿到排序稳定、可用的相似列表。
+     */
+    private async handleGetSonicSimilarTracks(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        const count = Math.min(Math.max(1, parseInt(params.get('count') || '10') || 10), 50)
+        const picked = await this.pickSimilarEntries(username, id, count)
+
+        const matched = picked.map(({ music, listId }, i) => ({
+            // 单调递减的排序分：第一位接近 1，末尾不低于 0.1
+            similarity: Math.max(0.1, Number((1 - i * (0.9 / Math.max(1, picked.length))).toFixed(3))),
+            song: format === 'json'
+                ? this.musicToSongFlat(music, listId, undefined, username)
+                : this.musicToSongXml(music, listId, undefined, username),
+        }))
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                sonicMatch: matched.map(m => ({ entry: m.song, similarity: m.similarity })),
+            }, format)
+        }
+        return this.sendResponse(res, {
+            sonicMatch: matched.map(m => ({ attrs: { similarity: m.similarity }, children: { entry: m.song } })),
+        }, format)
+    }
+
+    private async handleGetSimilarSongs(
+        res: http.ServerResponse,
+        username: string,
+        params: URLSearchParams,
+        format: string,
+        method?: string,
+    ) {
+        const id = params.get('id')
+        const count = Math.min(parseInt(params.get('count') || '10'), 50)
+
+        const picked = await this.pickSimilarEntries(username, id, count)
+
+        // [修复] 根元素此前恒为 similarSongs2，导致 getSimilarSongs(v1) 也返回 v2 的结构
+        const wrapKey = method === 'getSimilarSongs2' ? 'similarSongs2' : 'similarSongs'
 
         if (format === 'json') {
             return this.sendResponse(res, {
@@ -3866,6 +4947,114 @@ class SubsonicHandler {
         return true
     }
 
+    /**
+     * [transcoding] getTranscodeDecision：告知客户端「这份媒体能否直放 / 是否需要转码」。
+     * 本服音源是「在线直链 + 可选 ffmpeg 转码」，因此：
+     *  - canDirectPlay 恒为 true：我们总能把音源直链交给客户端（客户端自己 seek）；
+     *  - canTranscode 取决于本机 ffmpeg 是否可用；
+     *  - transcodeParams 是签名令牌，getTranscodeStream 用它拿回本次决策（目标格式/码率）。
+     * 注：本实现不解析请求体里的 ClientInfo（直放恒可行，无需按能力协商）。
+     */
+    private async handleGetTranscodeDecision(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const mediaId = (params.get('mediaId') || '').trim()
+        if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
+        const mediaType = (params.get('mediaType') || 'song').trim() || 'song'
+
+        let ffmpegOk = false
+        try { ffmpegOk = await probeFfmpeg() } catch { ffmpegOk = false }
+
+        const targetFormat = String(global.lx.config['subsonic.transcode.format'] || 'mp3').toLowerCase()
+        const targetBitrate = 320 // kbps
+        const transcodeParams = signTranscodeParams({
+            id: mediaId,
+            type: mediaType,
+            format: targetFormat,
+            bitrate: targetBitrate,
+            exp: Date.now() + TRANSCODE_PARAM_TTL,
+        })
+
+        const sourceStream = { protocol: 'http', container: '', codec: '', audioChannels: 2, audioBitrate: 0, audioProfile: '', audioSamplerate: 0, audioBitdepth: 0 }
+        const transcodeStreamInfo = { protocol: 'http', container: targetFormat, codec: targetFormat, audioChannels: 2, audioBitrate: targetBitrate * 1000, audioProfile: '', audioSamplerate: 48000, audioBitdepth: 16 }
+
+        subsonicLog.debug(`[Subsonic] getTranscodeDecision: ${mediaId} ffmpeg=${ffmpegOk} (user=${username})`)
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                transcodeDecision: {
+                    canDirectPlay: true,
+                    canTranscode: ffmpegOk,
+                    transcodeReason: [],
+                    errorReason: '',
+                    transcodeParams,
+                    sourceStream,
+                    transcodeStream: transcodeStreamInfo,
+                },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            transcodeDecision: {
+                attrs: {
+                    canDirectPlay: true,
+                    canTranscode: ffmpegOk,
+                    errorReason: '',
+                    transcodeParams,
+                },
+                children: {
+                    sourceStream: { attrs: sourceStream },
+                    transcodeStream: { attrs: transcodeStreamInfo },
+                },
+            },
+        }, format)
+    }
+
+    /**
+     * [transcoding] getTranscodeStream：按 transcodeParams（决策令牌）返回转码后的媒体流。
+     * ffmpeg 不可用时 transcodeStream 内部会降级为 302 直链。
+     */
+    private async handleGetTranscodeStream(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        username: string,
+        params: URLSearchParams,
+        format: string,
+    ) {
+        const mediaId = (params.get('mediaId') || '').trim()
+        if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
+        const decision = verifyTranscodeParams(params.get('transcodeParams') || '')
+        if (!decision) return this.sendError(res, 10, 'Invalid or expired transcodeParams', format)
+
+        const offset = Math.max(0, Math.floor(Number(params.get('offset') || 0)) || 0)
+        const targetFormat = String(decision.format || 'mp3').toLowerCase()
+        const bitrate = Math.max(32, Math.min(Number(decision.bitrate) || 320, 999))
+
+        // 解析歌曲信息（本地列表 / 在线缓存 / 回源）
+        let musicInfo: any = null
+        try {
+            const hit = await this.resolveSongMeta(username, mediaId)
+            musicInfo = hit?.music || null
+        } catch { /* 回退到前缀解析 */ }
+        if (!musicInfo) {
+            const us = mediaId.indexOf('_')
+            const src = us > 0 ? mediaId.slice(0, us) : ''
+            const mid = us > 0 ? mediaId.slice(us + 1) : mediaId
+            musicInfo = { source: src, songmid: mid, id: mediaId, meta: { songId: mid } }
+        }
+        const source = musicInfo.source || ''
+        const songmid = String(musicInfo.songmid || musicInfo.meta?.songId || '')
+        if (!source || !songmid) return this.sendError(res, 0, 'Could not resolve media', format)
+
+        let result: { url: string, quality: string } | null = null
+        try {
+            result = await this.resolveStreamUrl(source, songmid, mediaId, musicInfo, 'flac', 0, username)
+        } catch (e: any) {
+            return this.sendError(res, 0, 'Could not resolve music URL: ' + briefErrorText(e), format)
+        }
+        if (!result?.url) return this.sendError(res, 0, 'Could not resolve music URL', format)
+
+        subsonicLog.debug(`[Subsonic] getTranscodeStream: ${mediaId} -> ${targetFormat}@${bitrate}k offset=${offset}s (user=${username})`)
+        await this.transcodeStream(req, res, result.url, bitrate, format, offset, targetFormat)
+    }
+
     private async handleStream(
         req: http.IncomingMessage,
         res: http.ServerResponse,
@@ -3890,6 +5079,9 @@ class SubsonicHandler {
 
         try {
             const maxBitrate = parseInt(params.get('maxBitrate') || '0')
+            // [transcodeOffset] 客户端要求从第 N 秒开始（单位：秒）。
+            // 仅在服务端转码链路上生效；直接 302 到音源直链时无法携带偏移（客户端自行 seek）。
+            const timeOffsetSec = Math.max(0, Math.floor(Number(params.get('timeOffset') || 0)) || 0)
             let quality = '128k'
             if (maxBitrate === 0 || maxBitrate >= 320) {
                 quality = 'flac' // 优先请求最高音质，SDK 会自动降级
@@ -3901,6 +5093,7 @@ class SubsonicHandler {
             if (id.startsWith('radio_tx_')) {
                 const radioId = id.replace('radio_tx_', '')
                 // subsonicLog.debug(`[Subsonic] Radio stream requested: ${id}`)
+                let failReason = ''
                 const songs = await fetchRadioSongs(radioId)
                 // subsonicLog.debug(`[Subsonic] Radio ${id} fetched ${songs?.length || 0} songs`)
 
@@ -3942,12 +5135,14 @@ class SubsonicHandler {
                         res.writeHead(302, { Location: result.url })
                         return res.end()
                     } else {
+                        failReason = '音源未能解析出可播放链接'
                         subsonicLog.error(`[Subsonic] Radio ${id} failed to resolve music URL`)
                     }
                 } else {
+                    failReason = '上游取歌接口未返回歌曲（QQ 电台接口可能已失效）'
                     subsonicLog.warn(`[Subsonic] Radio ${id} returned empty song list`)
                 }
-                return this.sendError(res, 0, 'Could not resolve radio track', format)
+                return this.sendError(res, 0, 'Could not resolve radio track' + (failReason ? `: ${failReason}` : ''), format)
             }
 
             // [新增] 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)。
@@ -4035,7 +5230,33 @@ class SubsonicHandler {
                 }
             }
 
-            const result = await this.resolveStreamUrl(source, songmid, id, musicInfo, quality, maxBitrate, username)
+            const transcodeEnabled = global.lx.config['subsonic.transcode.enabled']
+            const onQualityMiss = global.lx.config['subsonic.transcode.onQualityMiss'] !== false
+            // 仅当客户端设了上限(maxBitrate>0)且音源缺对应低音质时,才走服务端转码兜底(默认关,需手动开启)
+            const wantTranscode = !!transcodeEnabled && onQualityMiss && maxBitrate > 0
+
+            let result: { url: string, quality: string, selected?: string } | null = null
+            let needTranscode = false
+            try {
+                result = await this.resolveStreamUrl(source, songmid, id, musicInfo, quality, maxBitrate, username)
+                // soft 模式可能突破上限返回高音质；若实际音质超出客户端上限且要转码,则转码兜底
+                if (wantTranscode && this.isQualityOverCap(result.quality, maxBitrate)) {
+                    needTranscode = true
+                }
+            } catch (e: any) {
+                // 所有候选失败(hard 模式无低音质 / 音源无此曲):尝试取最高可用音质转码兜底
+                if (wantTranscode) {
+                    const hi = await this.resolveHighestQuality(source, songmid, id, musicInfo, username)
+                    if (hi && hi.url) {
+                        result = hi
+                        needTranscode = true
+                    } else {
+                        throw e
+                    }
+                } else {
+                    throw e
+                }
+            }
 
             if (result && result.url) {
                 // [诊断] 打印缓存触发决策，便于排查 Subsonic 播放不缓存问题
@@ -4071,6 +5292,11 @@ class SubsonicHandler {
                         }
                     })
                 }
+                // 转码兜底:服务端拉高音质 -> ffmpeg 降码率 -> 流式发给客户端(节省客户端流量)
+                if (needTranscode) {
+                    await this.transcodeStream(req, res, result.url, maxBitrate, format, timeOffsetSec)
+                    return
+                }
                 res.writeHead(302, { Location: result.url })
                 res.end()
             } else {
@@ -4081,6 +5307,108 @@ class SubsonicHandler {
         }
     }
 
+    /**
+     * 判断实际音质是否超出客户端 maxBitrate 上限(用于决定是否转码兜底)。
+     * maxBitrate=0 表示客户端要最高音质,永不转码。
+     */
+    private isQualityOverCap(quality: string, maxBitrate: number): boolean {
+        if (maxBitrate === 0) return false
+        const KBPS: Record<string, number> = { master: 9999, hires: 9999, flac24bit: 9999, flac: 9999, '320k': 320, '192k': 192, '128k': 128 }
+        const b = KBPS[String(quality).toLowerCase()] ?? 128
+        return b > maxBitrate
+    }
+
+    /**
+     * 取最高可用音质(突破上限),用于转码兜底时拉取高音质源。
+     * maxBitrate=0 时 getQualityPriorityOrder 返回全部优先级,resolveStreamUrl 会取最高可用。
+     */
+    private async resolveHighestQuality(
+        source: string, songmid: string, id: string, musicInfo: any, username: string,
+    ): Promise<{ url: string, quality: string, selected?: string } | null> {
+        try {
+            const r = await this.resolveStreamUrl(source, songmid, id, musicInfo, 'flac', 0, username)
+            return r && r.url ? r : null
+        } catch {
+            return null
+        }
+    }
+
+    /**
+     * 服务端流式转码:边从音源下载高码率,边经 ffmpeg 降到目标码率,实时转发给客户端。
+     * 用于「音源无客户端请求的低音质」场景,既满足客户端低码率需求,又节省其下行流量。
+     * 客户端断开时中止 ffmpeg 进程;ffmpeg 缺失则降级为 302 直链(避免播放失败)。
+     */
+    private async transcodeStream(
+        req: http.IncomingMessage,
+        res: http.ServerResponse,
+        url: string,
+        maxBitrate: number,
+        format: string,
+        timeOffsetSec = 0,
+        formatOverride?: string,
+    ): Promise<void> {
+        const cfg = global.lx.config
+        const targetFormat = String(formatOverride || cfg['subsonic.transcode.format'] || 'mp3').toLowerCase()
+        const maxConcurrent = Math.max(1, Number(cfg['subsonic.transcode.maxConcurrent'] ?? 2) || 2)
+
+        // ffmpeg 可用性检测:缺失则降级 302 直链,避免播放失败
+        let ok = false
+        try { ok = await probeFfmpeg() } catch { ok = false }
+        if (!ok) {
+            subsonicLog.warn(`[Subsonic] transcode enabled but ffmpeg unavailable, fallback 302 -> ${String(url).slice(0, 60)}`)
+            res.writeHead(302, { Location: url })
+            res.end()
+            return
+        }
+
+        const sem = getTranscodeSemaphore(maxConcurrent)
+        await sem.acquire()
+        subsonicLog.info(`[Subsonic] transcode start: target=${maxBitrate}k format=${targetFormat} url=${String(url).slice(0, 60)}`)
+
+        // [transcodeOffset] 从指定秒数开始转码（-ss 放在 -i 前做快速定位），用于客户端在转码流里跳转
+        const args = [
+            ...(timeOffsetSec > 0 ? ['-ss', String(timeOffsetSec)] : []),
+            '-i', url, '-b:a', `${maxBitrate}k`, '-ar', '48000', '-f', targetFormat, '-',
+        ]
+        const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] })
+        const contentType = targetFormat === 'mp3' ? 'audio/mpeg'
+            : targetFormat === 'opus' ? 'audio/ogg'
+            : targetFormat === 'aac' ? 'audio/aac'
+            : 'application/octet-stream'
+
+        res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' })
+
+        let cleaned = false
+        const cleanup = () => {
+            if (cleaned) return
+            cleaned = true
+            sem.release()
+            try { if (!proc.killed) proc.kill('SIGKILL') } catch { /* ignore */ }
+        }
+
+        proc.stdout.pipe(res)
+        proc.on('error', () => {
+            cleanup()
+            subsonicLog.error(`[Subsonic] transcode ffmpeg error (url=${String(url).slice(0, 60)})`)
+        })
+        proc.on('close', () => cleanup())
+        // 客户端断开:中止转码,释放并发额度
+        req.on('close', () => cleanup())
+        if (cfg['subsonic.enableDebug']) {
+            proc.stderr.on('data', (d: Buffer) => subsonicLog.debug(`[Subsonic][ffmpeg] ${d.toString().slice(0, 200)}`))
+        } else {
+            proc.stderr.resume() // 排空 stderr,避免子进程因管道满而阻塞
+        }
+    }
+
+    /**
+     * 封面代理：把当前请求要求的尺寸（coverArtScaling）透传给 proxyCoverImage。
+     * 尺寸挂在 res 上而不是实例字段，避免并发请求之间互相串尺寸。
+     */
+    private async proxyCover(res: http.ServerResponse, url: string) {
+        return proxyCoverImage(res, url, (res as any).__coverSize || 0)
+    }
+
     private async handleGetCoverArt(
         req: http.IncomingMessage,
         res: http.ServerResponse,
@@ -4088,6 +5416,10 @@ class SubsonicHandler {
         params: URLSearchParams,
         format: string,
     ) {
+        // [coverArtScaling] 客户端实际会带 size（实测 92/120 次请求带），此前被完全忽略
+        const coverSize = Math.max(0, Math.min(parseInt(params.get('size') || '0') || 0, 1500))
+        ;(res as any).__coverSize = coverSize
+
         let id = params.get('id')
         if (!id) {
             res.writeHead(204)
@@ -4109,7 +5441,36 @@ class SubsonicHandler {
             if (!coverUrl.startsWith('http') && (coverUrl.startsWith('https%3A') || coverUrl.startsWith('http%3A'))) {
                 try { coverUrl = decodeURIComponent(coverUrl) } catch { /* 解码失败保持原值 */ }
             }
-            if (coverUrl.startsWith('http')) return proxyCoverImage(res, coverUrl)
+            if (coverUrl.startsWith('http')) return this.proxyCover(res, coverUrl)
+
+            // [新增] 排行榜虚拟歌单封面：coverArt 形如 lb_<source>_<bangid>，getBoards 接口不带图，
+            // 按需拉取该榜单首歌封面（带缓存）后代理返回；失败回退 logo。
+            if (id.startsWith('lb_')) {
+                const url = await this.getLeaderboardCoverUrl(id)
+                if (url && url !== 'logo') {
+                    return this.proxyCover(res, url.startsWith('//') ? `https:${url}` : url)
+                }
+                const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
+                if (fs.existsSync(logoPath)) {
+                    res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
+                    return fs.createReadStream(logoPath).pipe(res)
+                }
+                return res.end()
+            }
+
+            // [新增] 共享歌单(歌单)虚拟歌单封面：coverArt 形如 pl_<source>_<plId>，列表阶段已记录歌单 img
+            if (id.startsWith('pl_')) {
+                const url = sharedPlaylistCoverCache.get(id)
+                if (url && url !== 'logo') {
+                    return this.proxyCover(res, url.startsWith('//') ? `https:${url}` : url)
+                }
+                const logoPath = path.join(global.lx.staticPath, 'music/assets/logo.svg')
+                if (fs.existsSync(logoPath)) {
+                    res.writeHead(200, { 'Content-Type': 'image/svg+xml' })
+                    return fs.createReadStream(logoPath).pipe(res)
+                }
+                return res.end()
+            }
 
             // [新增] 兼容逻辑：处理不规范的 ID（如原始 albumMid）
             if (!id.includes('_')) {
@@ -4120,7 +5481,7 @@ class SubsonicHandler {
                 if (matched) {
                     const picUrl = (matched as any).meta?.picUrl || (matched as any).img
                     if (picUrl) {
-                        return proxyCoverImage(res, picUrl)
+                        return this.proxyCover(res, picUrl)
                     }
                 }
             }
@@ -4163,7 +5524,7 @@ class SubsonicHandler {
             if (this.songPicUrlCache.has(id)) {
                 const cachedUrl = this.songPicUrlCache.get(id)
                 if (cachedUrl) {
-                    return proxyCoverImage(res, cachedUrl)
+                    return this.proxyCover(res, cachedUrl)
                 }
             }
 
@@ -4185,9 +5546,9 @@ class SubsonicHandler {
 
             if (found) {
                 const picUrl = (found.music as any)?.meta?.picUrl || (found.music as any)?.img || null
-                if (picUrl) return proxyCoverImage(res, picUrl)
+                if (picUrl) return this.proxyCover(res, picUrl)
                 const sdkPic = await getPicViaSDK(found.music)
-                if (sdkPic) return proxyCoverImage(res, sdkPic)
+                if (sdkPic) return this.proxyCover(res, sdkPic)
             } else if (id.startsWith('alb_')) {
                 // [修复] 专辑封面：绝不能直接调歌曲 getPic（专辑对象无 songmid/hash，会读取 undefined.length 崩溃）。
                 // 优先用本地专辑库的 picUrl；没有则落到函数末尾的 204 兜底。
@@ -4199,13 +5560,13 @@ class SubsonicHandler {
                     const alb = libAlbums.find((a: any) =>
                         `${(a.source || 'wy')}_${a.id}` === id || String(a.id) === realId)
                     const localPic = alb?.picUrl || alb?.img
-                    if (localPic) return proxyCoverImage(res, localPic)
+                    if (localPic) return this.proxyCover(res, localPic)
                 } catch (e) {
                     console.error(`[CoverArt] read album library failed for ${id}:`, (e as Error)?.message)
                 }
                 // [修复] 云端/推荐专辑不进本地库，按专辑 mid 直接构造封面 URL（修复首页推荐专辑缺图）
                 const cloudCover = this.buildAlbumCoverUrl(source, realId)
-                if (cloudCover) return proxyCoverImage(res, cloudCover)
+                if (cloudCover) return this.proxyCover(res, cloudCover)
                 // [补齐] NetEase(wy) 等源的专辑封面无法仅凭 id 拼 URL，走 SDK 取专辑详情拿真实 picUrl（带 In-flight 复用）
                 const getAlbumSongs = musicSdk[source]?.extendDetail?.getAlbumSongs
                 if (getAlbumSongs) {
@@ -4230,7 +5591,7 @@ class SubsonicHandler {
                         const albumCover = await fetchPromise
                         if (albumCover) {
                             this.setSongPicUrl(id, albumCover)
-                            return proxyCoverImage(res, albumCover)
+                            return this.proxyCover(res, albumCover)
                         }
                     } catch (e) {
                         console.error(`[CoverArt] resolve albumCover failed for ${id}:`, (e as Error)?.message)
@@ -4248,12 +5609,12 @@ class SubsonicHandler {
                 const libArtists = await this.getLibraryData(username, 'artists')
                 const localArt = libArtists.find(a => (a.source === source && a.id === realId) || a.name === realId)
                 if (localArt && (localArt.picUrl || localArt.img)) {
-                    return proxyCoverImage(res, localArt.picUrl || localArt.img)
+                    return this.proxyCover(res, downscaleAvatarUrl(localArt.picUrl || localArt.img))
                 }
 
                 // 2. 兜底尝试使用歌手名搜索照片
                 const cover = await getSingerPic(localArt?.name || realId)
-                if (cover) return proxyCoverImage(res, cover)
+                if (cover) return this.proxyCover(res, downscaleAvatarUrl(cover))
             } else if (id.includes('_')) {
                 // 1.5 歌曲不在已加载的库中，解析 ID 直接尝试 SDK
                 const parts = id.split('_')
@@ -4264,7 +5625,7 @@ class SubsonicHandler {
                 if (musicSdk[source]) {
                     const music: any = { source, id, songmid, name: '', singer: '' }
                     const sdkPic = await getPicViaSDK(music as any)
-                    if (sdkPic) return proxyCoverImage(res, sdkPic)
+                    if (sdkPic) return this.proxyCover(res, sdkPic)
                 }
             }
 
@@ -4273,7 +5634,7 @@ class SubsonicHandler {
                 const singerName = id.slice(7)
                 if (singerName) {
                     const cover = await getSingerPic(singerName)
-                    if (cover) return proxyCoverImage(res, cover)
+                    if (cover) return this.proxyCover(res, downscaleAvatarUrl(cover))
                 }
             }
 
@@ -4289,7 +5650,7 @@ class SubsonicHandler {
             } else {
                 const list = listData.userList.find((l: any) => l.id === id)
                 if (list) {
-                    if ((list as any).Album) return proxyCoverImage(res, (list as any).Album)
+                    if ((list as any).Album) return this.proxyCover(res, (list as any).Album)
                     listMusics = (list.list || []) as LX.Music.MusicInfo[]
                 }
             }
@@ -4297,10 +5658,10 @@ class SubsonicHandler {
             if (listMusics.length > 0) {
                 for (const music of listMusics) {
                     const picUrl = (music as any)?.meta?.picUrl || (music as any)?.img
-                    if (picUrl) return proxyCoverImage(res, picUrl)
+                    if (picUrl) return this.proxyCover(res, picUrl)
                 }
                 const sdkPic = await getPicViaSDK(listMusics[0])
-                if (sdkPic) return proxyCoverImage(res, sdkPic)
+                if (sdkPic) return this.proxyCover(res, sdkPic)
             }
 
             // 4. 兜底
@@ -4311,6 +5672,396 @@ class SubsonicHandler {
             if (!res.headersSent) res.writeHead(500, { 'Content-Type': 'application/json' })
             if (!res.writableEnded) res.end(JSON.stringify({ error: 'cover art error' }))
         }
+    }
+
+    /**
+     * 按歌曲 id 取出可直接返回的条目：JSON 用平铺对象，XML 需要包成 { attrs }。
+     * 先查本地列表，其次在线歌曲缓存（findMusicById 内部会加载 onlineSongCache）。
+     */
+    private async songEntryById(username: string, id: string, format: string): Promise<any | null> {
+        const found = await this.findMusicById(username, id)
+        if (!found) return null
+        const flat = this.musicToSongFlat(found.music, found.listId, undefined, username)
+        return format === 'json' ? flat : { attrs: flat }
+    }
+
+    /**
+     * [playbackReport] reportPlayback：客户端按状态变化上报播放时间线。
+     * 约定（OpenSubsonic）：state ∈ starting|playing|paused|stopped；
+     *  - 服务端不得凭「预计播放结束」自行判定已播完，只有收到 stopped 才算一次播放；
+     *  - ignoreScrobble=true 时只更新 now-playing 状态，不产生 scrobble/播放次数副作用。
+     * 本实现：所有状态都记入内存态 now-playing（含精确位置）；仅 stopped 且未 ignoreScrobble 时落一条播放历史。
+     */
+    private async handleReportPlayback(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const mediaId = (params.get('mediaId') || '').trim().replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
+        if (!mediaId) return this.sendError(res, 10, 'Required parameter is missing: mediaId', format)
+        const state = (params.get('state') || '').trim()
+        if (!state) return this.sendError(res, 10, 'Required parameter is missing: state', format)
+        const mediaType = (params.get('mediaType') || 'song').trim() || 'song'
+        const positionMs = Math.max(0, Math.floor(Number(params.get('positionMs') || 0)) || 0)
+        const playbackRate = Number(params.get('playbackRate') || 1) || 1
+        const ignoreScrobble = params.get('ignoreScrobble') === 'true'
+
+        playbackReportState.set(username, { id: mediaId, positionMs, state, playbackRate, updatedAt: Date.now() })
+
+        if (!ignoreScrobble && state === 'stopped' && mediaType === 'song') {
+            const list = readScrobbles(username)
+            list.push({ id: mediaId, time: Date.now() })
+            writeScrobbles(username, list)
+        }
+
+        subsonicLog.debug(`[Subsonic] reportPlayback: state=${state} mediaId=${mediaId} pos=${positionMs}ms rate=${playbackRate} ignore=${ignoreScrobble} (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** [书签] getBookmarks：返回该用户的全部书签（歌 + 位置） */
+    private async handleGetBookmarks(res: http.ServerResponse, username: string, format: string) {
+        const list = readBookmarks(username)
+        if (format === 'json') {
+            const out: any[] = []
+            for (const b of list) {
+                const entry = await this.songEntryById(username, b.id, format)
+                if (!entry) continue
+                out.push({ entry, position: b.position, username, comment: b.comment, created: new Date(b.created).toISOString() })
+            }
+            return this.sendResponse(res, { bookmarks: { bookmark: out } }, format)
+        }
+        const out: any[] = []
+        for (const b of list) {
+            const entry = await this.songEntryById(username, b.id, format)
+            if (!entry) continue
+            out.push({
+                attrs: { position: b.position, username, comment: b.comment, created: new Date(b.created).toISOString() },
+                children: { entry: { attrs: entry.attrs } },
+            })
+        }
+        return this.sendResponse(res, { bookmarks: { children: { bookmark: out } } }, format)
+    }
+
+    /** [书签] createBookmark：新建/覆盖某首歌的书签（id + position 必填，comment 可选） */
+    private async handleCreateBookmark(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        if (!params.has('position')) return this.sendError(res, 10, 'Required parameter is missing: position', format)
+        const position = Math.max(0, Math.floor(Number(params.get('position')) || 0))
+        const comment = params.get('comment') || ''
+        const list = readBookmarks(username).filter(b => b.id !== id)
+        list.push({ id, position, comment, created: Date.now() })
+        writeBookmarks(username, list)
+        subsonicLog.debug(`[Subsonic] createBookmark: ${id} @${position}ms (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** [书签] deleteBookmark：删除某首歌的书签 */
+    private async handleDeleteBookmark(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const id = params.get('id')
+        if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+        writeBookmarks(username, readBookmarks(username).filter(b => b.id !== id))
+        return this.sendResponse(res, {}, format)
+    }
+
+    /**
+     * scrobble：客户端上报播放。
+     * [修复] 之前这里直接返回空成功、什么都不记录，服务端无从得知用户听过什么
+     * （音流在高频调用，NAS 实例日志里 1853 次）。现在落盘为播放历史。
+     */
+    private async handleScrobble(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        // [修复] 必须剥离客户端加的 id 前缀（al-/ar-/tr-/sg-/mg-，与 getCoverArt 一致）：
+        // 带前缀的 id 存进播放历史后会解析不出歌曲，导致「最近播放」漏掉这些歌
+        const ids = params.getAll('id')
+            .flatMap(v => String(v).split(','))
+            .map(s => s.trim().replace(/^(al-|ar-|tr-|sg-|mg-)/, ''))
+            .filter(Boolean)
+        if (!ids.length) return this.sendError(res, 10, 'Required parameter is missing: id', format)
+
+        const timeParam = params.get('time')
+        const parsed = timeParam ? Number(timeParam) : NaN
+        // 客户端可能传毫秒(13 位)或秒(10 位)时间戳
+        const eventTime = Number.isFinite(parsed) && parsed > 0
+            ? (String(Math.floor(parsed)).length >= 13 ? parsed : parsed * 1000)
+            : Date.now()
+
+        const list = readScrobbles(username)
+        for (const id of ids) list.push({ id, time: eventTime })
+        writeScrobbles(username, list)
+
+        subsonicLog.debug(`[Subsonic] scrobble: ${ids.length} 首 (${ids.slice(0, 3).join(', ')}) time=${new Date(eventTime).toISOString()} (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /**
+     * getNowPlaying：最近的播放活动。用 scrobble 历史近似（15 分钟窗口），
+     * 同一首歌只保留最近一条；按 ID 解析出完整歌曲条目返回。
+     */
+    private async handleGetNowPlaying(res: http.ServerResponse, username: string, format: string) {
+        const since = Date.now() - 15 * 60 * 1000
+        const latest = new Map<string, number>()
+        for (const it of readScrobbles(username)) {
+            if (it.time < since) continue
+            latest.set(it.id, it.time)
+        }
+        // [playbackReport] 实时上报的播放状态优先（含精确位置），15 分钟窗口内有效
+        const reported = playbackReportState.get(username)
+        const reportedActive = !!reported && Date.now() - reported.updatedAt < 15 * 60 * 1000 && reported.state !== 'stopped'
+        if (reportedActive && reported) latest.set(reported.id, reported.updatedAt)
+        const entries = Array.from(latest.entries())
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20)
+
+        const songs: any[] = []
+        for (const [id, time] of entries) {
+            const entry = await this.songEntryById(username, id, format)
+            if (!entry) continue
+            const extra: any = {
+                userName: username,
+                minutesAgo: Math.max(0, Math.round((Date.now() - time) / 60000)),
+                playerId: 0,
+                playerName: 'lxserver',
+            }
+            // [playbackReport] 正在播放的那首附带精确位置（GetNowPlaying 的 timeline 字段）
+            if (reportedActive && reported && reported.id === id) extra.positionMs = reported.positionMs
+            songs.push(format === 'json' ? { ...entry, ...extra } : { attrs: { ...entry.attrs, ...extra } })
+        }
+
+        // toXml 的数组必须挂在 children 下，否则会渲染成空元素 <nowPlaying />
+        return this.sendResponse(res, format === 'json'
+            ? { nowPlaying: { entry: songs } }
+            : { nowPlaying: { children: { entry: songs } } }, format)
+    }
+
+    /** savePlayQueue：保存当前播放队列，用于跨设备 / 重连后续播 */
+    private async handleSavePlayQueue(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+            .flatMap(v => String(v).split(','))
+            .map(s => s.trim())
+            .filter(Boolean)
+        const current = params.get('current') || (ids.length ? ids[ids.length - 1] : '')
+        const position = Math.max(0, Math.floor(Number(params.get('position') || 0)) || 0)
+
+        writePlayQueue(username, {
+            ids,
+            current,
+            // 同时记录索引，供 getPlayQueueByIndex 使用（indexBasedQueue 扩展）
+            currentIndex: Math.max(0, ids.indexOf(current)),
+            position,
+            changed: Date.now(),
+            changedBy: params.get('c') || '',
+        })
+
+        subsonicLog.debug(`[Subsonic] savePlayQueue: ${ids.length} 首 current=${current} position=${position}ms (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** getPlayQueue：读取上次保存的播放队列（含当前曲目下标与播放位置） */
+    private async handleGetPlayQueue(res: http.ServerResponse, username: string, format: string) {
+        const state = readPlayQueue(username)
+        const ids = state?.ids || []
+        const entries: any[] = []
+        for (const id of ids) {
+            const entry = await this.songEntryById(username, id, format)
+            if (entry) entries.push(entry)
+        }
+
+        const currentIndex = state?.current ? Math.max(0, ids.indexOf(state.current)) : 0
+        const position = state?.position || 0
+        const changed = new Date(state?.changed || 0).toISOString()
+        const changedBy = state?.changedBy || ''
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                playQueue: { entry: entries, current: currentIndex, position, username, changed, changedBy },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            playQueue: {
+                attrs: { current: currentIndex, position, username, changed, changedBy },
+                children: { entry: entries },
+            },
+        }, format)
+    }
+
+    /**
+     * [indexBasedQueue] savePlayQueueByIndex：按「索引」保存播放队列。
+     * 与 savePlayQueue 的区别：用 currentIndex 而不是歌曲 id 表达当前曲目，
+     * 因此允许队列里存在重复曲目。不带任何 id 的调用 = 清空队列（此时不得带 currentIndex）。
+     */
+    private async handleSavePlayQueueByIndex(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
+        const ids = params.getAll('id')
+            .flatMap(v => String(v).split(','))
+            .map(s => s.trim())
+            .filter(Boolean)
+        const changedBy = params.get('c') || ''
+
+        if (!ids.length) {
+            if (params.has('currentIndex')) {
+                return this.sendError(res, 10, 'currentIndex must not be set when clearing the play queue', format)
+            }
+            writePlayQueue(username, { ids: [], current: '', position: 0, changed: Date.now(), changedBy })
+            return this.sendResponse(res, {}, format)
+        }
+
+        const currentIndex = Number(params.get('currentIndex'))
+        if (!Number.isInteger(currentIndex) || currentIndex < 0 || currentIndex > ids.length - 1) {
+            // 规范要求：currentIndex 越界必须返回错误码 10
+            return this.sendError(res, 10, 'Required parameter is missing or invalid: currentIndex', format)
+        }
+        const position = Math.max(0, Math.floor(Number(params.get('position') || 0)) || 0)
+
+        writePlayQueue(username, {
+            ids,
+            current: ids[currentIndex],
+            currentIndex,
+            position,
+            changed: Date.now(),
+            changedBy,
+        })
+        subsonicLog.debug(`[Subsonic] savePlayQueueByIndex: ${ids.length} 首 currentIndex=${currentIndex} position=${position}ms (user=${username})`)
+        return this.sendResponse(res, {}, format)
+    }
+
+    /** [indexBasedQueue] getPlayQueueByIndex：读取播放队列（索引语义，含 currentIndex） */
+    private async handleGetPlayQueueByIndex(res: http.ServerResponse, username: string, format: string) {
+        const state = readPlayQueue(username)
+        const ids = state?.ids || []
+        const entries: any[] = []
+        for (const id of ids) {
+            const entry = await this.songEntryById(username, id, format)
+            if (entry) entries.push(entry)
+        }
+
+        const currentIndex = typeof state?.currentIndex === 'number'
+            ? state.currentIndex
+            : (state?.current ? Math.max(0, ids.indexOf(state.current)) : 0)
+        const position = state?.position || 0
+        const changed = new Date(state?.changed || 0).toISOString()
+        const changedBy = state?.changedBy || ''
+
+        if (format === 'json') {
+            return this.sendResponse(res, {
+                playQueueByIndex: { entry: entries, currentIndex, position, username, changed, changedBy },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            playQueueByIndex: {
+                attrs: { currentIndex, position, username, changed, changedBy },
+                children: { entry: entries },
+            },
+        }, format)
+    }
+
+    /**
+     * getIndexes：目录浏览的根索引（旧式 / 部分客户端依赖，音流实测未调用）。
+     * 按首字母分组为 index，非 A-Z 归入 “#”（与多数服务端实现一致）。
+     */
+    private async handleGetIndexes(res: http.ServerResponse, username: string, format: string) {
+        const directory = await this.buildArtistDirectory(username)
+        // 与 getArtists 使用同一套索引分组（中文按拼音首字母），保持一致
+        const buckets = new Map<string, any[]>()
+        for (const a of directory) {
+            const key = getArtistIndexKey(a.name)
+            if (!buckets.has(key)) buckets.set(key, [])
+            buckets.get(key)!.push(a)
+        }
+        const keys = Array.from(buckets.keys())
+            .sort((a, b) => ((a === '#' ? 1 : 0) - (b === '#' ? 1 : 0)) || a.localeCompare(b))
+
+        const child: any[] = []
+        for (const key of keys) {
+            const items = buckets.get(key)
+            if (!items || !items.length) continue
+            const artists = items.map(a => ({
+                attrs: {
+                    id: a.id,
+                    name: a.name,
+                    albumCount: a.albumKeys?.size ?? 0,
+                },
+            }))
+            child.push({ attrs: { name: key }, children: { artist: artists } })
+        }
+
+        const lastModified = Date.now()
+        if (format === 'json') {
+            const childJson = child.map(c => ({
+                name: c.attrs.name,
+                artist: c.children.artist.map((x: any) => x.attrs),
+            }))
+            return this.sendResponse(res, {
+                indexes: { lastModified, ignoredArticles: '', child: childJson },
+            }, format)
+        }
+        return this.sendResponse(res, {
+            indexes: { attrs: { lastModified, ignoredArticles: '' }, children: { child } },
+        }, format)
+    }
+
+    /**
+     * 基于真实播放历史(scrobble)构造专辑列表，结构与推荐池保持一致：
+     * - recent   (最近播放)：按专辑最后一次播放时间降序
+     * - frequent (最常播放)：按专辑累计播放次数降序
+     * 只回溯最近若干条，避免历史很长时逐首解析过慢。
+     */
+    private async buildPlayedAlbums(username: string, history: ScrobbleEntry[], type: 'recent' | 'frequent', limit: number) {
+        const stats = new Map<string, { count: number, lastTime: number, song: any, duration: number, songIds: Set<string> }>()
+
+        let unresolved = 0
+        let noAlbum = 0
+        for (const item of history.slice(-400)) {
+            // 兼容历史脏数据：旧版本写入时未剥离客户端前缀（tr- / ar- 等）
+            const rawId = String(item.id || '').replace(/^(al-|ar-|tr-|sg-|mg-)/, '')
+            const song = await this.songEntryById(username, rawId, 'json')
+            if (!song) { unresolved++; continue }
+            let albumId = String(song.albumId || song.parent || '').trim()
+            // [修复] albumId 退化成列表 id（love / 歌单 id）会产生 id=love 的脏专辑条目。
+            // 这类歌、以及没有专辑信息的单曲，统一表示为「单曲专辑」alb_<source>_<songId>：
+            // 既保证听过的歌都出现在列表里，点进去也至少能播这一首
+            if (!albumId || !albumId.startsWith('alb_')) {
+                const sid = String(song.id || '')
+                const idx = sid.indexOf('_')
+                const src = idx > 0 ? sid.slice(0, idx) : String(song.source || 'wy')
+                const songId = idx > 0 ? sid.slice(idx + 1) : sid
+                if (!songId) { noAlbum++; continue }
+                albumId = `alb_${src}_${songId}`
+                noAlbum++
+            }
+            const cur = stats.get(albumId)
+            if (!cur) {
+                stats.set(albumId, { count: 1, lastTime: item.time, song, duration: Number(song.duration) || 0, songIds: new Set([String(song.id || '')]) })
+            } else {
+                cur.count++
+                cur.duration += Number(song.duration) || 0
+                if (song.id) cur.songIds.add(String(song.id))
+                if (item.time > cur.lastTime) {
+                    cur.lastTime = item.time
+                    cur.song = song
+                }
+            }
+        }
+        if (unresolved || noAlbum) {
+            subsonicLog.debug(`[Subsonic] 播放历史构造专辑：解析失败 ${unresolved} 条、无专辑信息 ${noAlbum} 条（已跳过）`)
+        }
+
+        const list = Array.from(stats.entries()).map(([albumId, s]) => ({
+            id: albumId,
+            name: s.song.album || '未知专辑',
+            title: s.song.album || '未知专辑',
+            album: s.song.album || '未知专辑',
+            artist: s.song.artist || '未知歌手',
+            artistId: s.song.artistId || `artist_${s.song.artist || ''}`,
+            isDir: true,
+            coverArt: s.song.coverArt || albumId,
+            // [修复] 之前恒为 0：客户端在专辑上显示「0 首」，看起来像数据不对。
+            // songCount 是该专辑里实际播放过的不同曲目数（播放次数放在 playCount）
+            songCount: s.songIds.size,
+            duration: s.duration,
+            created: new Date(s.lastTime).toISOString(),
+            playCount: s.count,
+        }))
+
+        list.sort(type === 'frequent'
+            ? (a, b) => (b.playCount - a.playCount) || (Date.parse(b.created) - Date.parse(a.created))
+            : (a, b) => Date.parse(b.created) - Date.parse(a.created))
+
+        return list.slice(0, limit)
     }
 
     private async handleGetTopSongs(
@@ -4377,6 +6128,8 @@ class SubsonicHandler {
         if (global.lx.config['subsonic.hideDisliked']) {
             picked = await this.filterDislikedEntries(username, picked)
         }
+        // [修复] 尊重客户端的 count：SDK 分支此前会把抓到的全部返回（最多 500 首）
+        picked = picked.slice(0, count)
 
         if (format === 'json') {
             return this.sendResponse(res, {
@@ -4410,9 +6163,20 @@ class SubsonicHandler {
     private handleGetOpenSubsonicExtensions(res: http.ServerResponse, format: string) {
         const extensions = [
             { name: 'formPost', versions: [1] },
-            { name: 'coverArtScaling', versions: [1] },
-            { name: 'thumbnails', versions: [1] },
-            { name: 'lyrics', versions: [1] }
+            // [修复] 原先声明的 'lyrics' / 'coverArtScaling' 都不是 OpenSubsonic 官方扩展名。
+            // 官方歌词扩展叫 songLyrics，客户端据此决定是否调用 getLyricsBySongId —— 声明错名字等于该接口白做。
+            // 封面缩放仍通过 getCoverArt 的 size 参数生效，只是官方没有对应扩展名可声明，故不再虚报。
+            { name: 'songLyrics', versions: [1] },
+            // [新增] 播放时间线上报（reportPlayback / getNowPlaying 附带位置）
+            { name: 'playbackReport', versions: [1] },
+            // [新增] 相似曲目（getSonicSimilarTracks；本服为启发式排序，非声学分析）
+            { name: 'sonicSimilarity', versions: [1] },
+            // [新增] 按索引保存/读取播放队列（savePlayQueueByIndex / getPlayQueueByIndex）
+            { name: 'indexBasedQueue', versions: [1] },
+            // [新增] stream 支持 timeOffset（秒），转码链路可从指定位置开始
+            { name: 'transcodeOffset', versions: [1] },
+            // [新增] 转码决策/转码流（getTranscodeDecision / getTranscodeStream）
+            { name: 'transcoding', versions: [1] }
         ]
         const data = { openSubsonicExtensions: format === 'json' ? extensions : { children: { extension: extensions.map(e => ({ attrs: e })) } } }
         return this.sendResponse(res, data, format)

@@ -2490,6 +2490,16 @@ class App {
                 form.elements['subsonic.leaderboardSource'].value = lbSource;
                 this.updateLeaderboardSourceTagUI(lbSource);
             }
+            if (form.elements['subsonic.sharedListMode']) {
+                const mode = config['subsonic.sharedListMode'] || 'leaderboard';
+                form.elements['subsonic.sharedListMode'].value = mode;
+                this.updateTagGroupActive('tag-group-shared-mode', mode);
+            }
+            if (form.elements['subsonic.sharedListSort']) {
+                const sort = config['subsonic.sharedListSort'] || 'hot';
+                form.elements['subsonic.sharedListSort'].value = sort;
+                this.updateTagGroupActive('tag-group-shared-sort', sort);
+            }
             this.toggleSubsonicLeaderboardVisibility();
             if (form.elements['subsonic.lyricTranslation']) {
                 form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
@@ -2590,6 +2600,14 @@ class App {
         }
     }
 
+    updateTagGroupActive(groupId, value) {
+        const container = document.getElementById(groupId);
+        if (!container) return;
+        container.querySelectorAll('.tag-select-item').forEach(i => {
+            i.classList.toggle('active', i.getAttribute('data-value') === value);
+        });
+    }
+
     initTagSelectors() {
         // 排行榜平台单选
         const lbContainer = document.getElementById('tag-group-leaderboard-source');
@@ -2600,6 +2618,32 @@ class App {
                     const hiddenInput = document.querySelector('input[name="subsonic.leaderboardSource"]');
                     if (hiddenInput) hiddenInput.value = val;
                     lbContainer.querySelectorAll('.tag-select-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                });
+            });
+        }
+        // 共享歌单内容三态
+        const modeContainer = document.getElementById('tag-group-shared-mode');
+        if (modeContainer) {
+            modeContainer.querySelectorAll('.tag-select-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const val = item.getAttribute('data-value');
+                    const hiddenInput = document.querySelector('input[name="subsonic.sharedListMode"]');
+                    if (hiddenInput) hiddenInput.value = val;
+                    modeContainer.querySelectorAll('.tag-select-item').forEach(i => i.classList.remove('active'));
+                    item.classList.add('active');
+                });
+            });
+        }
+        // 共享歌单排序
+        const sortContainer = document.getElementById('tag-group-shared-sort');
+        if (sortContainer) {
+            sortContainer.querySelectorAll('.tag-select-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    const val = item.getAttribute('data-value');
+                    const hiddenInput = document.querySelector('input[name="subsonic.sharedListSort"]');
+                    if (hiddenInput) hiddenInput.value = val;
+                    sortContainer.querySelectorAll('.tag-select-item').forEach(i => i.classList.remove('active'));
                     item.classList.add('active');
                 });
             });
@@ -2949,6 +2993,8 @@ class App {
             'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
             'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
             'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
+            'subsonic.sharedListMode': (formData.get('subsonic.sharedListMode') || '').trim() || 'leaderboard',
+            'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
             'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
             'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
             'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',

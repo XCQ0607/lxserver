@@ -1230,6 +1230,27 @@
                                             的公开歌单（只读）。在音流等客户端中，请在歌单页选择<strong>「全部歌单」/「公开歌单」</strong>分类即可查看并播放。
                                         </small>
                                     </div>
+                                    <div class="config-field" style="margin-top: 16px;">
+                                        <label class="config-label">共享歌单内容（三态）</label>
+                                        <input type="hidden" name="subsonic.sharedListMode" value="leaderboard" />
+                                        <div class="tag-select-group" id="tag-group-shared-mode">
+                                            <span class="tag-select-item active" data-value="leaderboard">排行榜</span>
+                                            <span class="tag-select-item" data-value="playlist">歌单</span>
+                                            <span class="tag-select-item" data-value="both">都要</span>
+                                        </div>
+                                        <small class="config-hint"
+                                            style="margin-top: 8px; display: block; line-height: 1.5; color: var(--text-secondary);">
+                                            选择「排行榜」仅暴露榜单；「歌单」仅暴露平台热门/最新歌单；「都要」同时暴露两者。
+                                        </small>
+                                    </div>
+                                    <div class="config-field" style="margin-top: 16px;">
+                                        <label class="config-label">共享歌单排序</label>
+                                        <input type="hidden" name="subsonic.sharedListSort" value="hot" />
+                                        <div class="tag-select-group" id="tag-group-shared-sort">
+                                            <span class="tag-select-item active" data-value="hot">热门</span>
+                                            <span class="tag-select-item" data-value="new">最新</span>
+                                        </div>
+                                    </div>
                                 </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">

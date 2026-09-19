@@ -236,6 +236,9 @@ export const fetchRadios = async () => {
         }).promise
         const groupList = body?.data?.data?.groupList || []
 
+        // [修复] Subsonic 访问路径可配置(subsonic.path)，自产 streamUrl 不能再写死 /rest，
+        // 否则改了 subsonic.path 后官方电台地址会 404。
+        const subsonicBase = String((global.lx.config as any)?.['subsonic.path'] || '/rest').replace(/\/+$/, '') || '/rest'
         const radioMap = new Map<string, any>()
         for (const group of groupList) {
             if (!group.radioList) continue
@@ -245,7 +248,7 @@ export const fetchRadios = async () => {
                     radioMap.set(id, {
                         id: id,
                         name: r.radioName,
-                        streamUrl: `/rest/stream?id=${id}`,
+                        streamUrl: `${subsonicBase}/stream?id=${id}`,
                         coverArt: r.radioImg || id
                     })
                 }

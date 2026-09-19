@@ -2,7 +2,7 @@
 
 > 范围：`src/server/subsonic.ts` 对 Subsonic REST API 的**自定义实现**对照表。
 > 图例：✅ 已实现可用　🟡 占位（返回空 / no-op，兼容客户端握手）　❌ 未实现（返回 `Method not found`）
-> 更新：2026-09-10（新增「每日推荐歌曲」接口，见文末）
+> 更新：2026-09-19（协议补全：专辑信息 / 播放上报 / 书签 / 播放队列 / 相似歌曲 / 转码，见第四节）
 
 ---
 
@@ -31,8 +31,8 @@
 | `createPlaylist` / `updatePlaylist` / `deletePlaylist` | 歌单 | ✅ | |
 | `star` / `unstar` | 收藏 | ✅ | |
 | `setRating` | 评分 | ✅ | 评分按用户持久化（0-5，0=清除）；每日推荐会排除评分落入「不喜欢」阈值（`subsonic.dislikeRating`，默认 1）的歌曲 |
-| `scrobble` | 播放 | 🟡 | no-op（返回成功） |
-| `getNowPlaying` | 播放 | 🟡 | 返回空列表 |
+| `scrobble` | 播放 | ✅ | 写入播放历史；按规范仅 `stopped` 且未带 `ignoreScrobble` 时记录 |
+| `getNowPlaying` | 播放 | ✅ | 返回正在播放列表，条目带 `positionMs` |
 | `getLyrics` / `getLyricsBySongId` | 歌词 | ✅ | |
 | `getOpenSubsonicExtensions` | 扩展 | ✅ | |
 | `getRandomSongs` | 发现 | ✅ | 本地库随机 / 流派随机 |
@@ -73,10 +73,7 @@ GET /rest/getDailySongs?u=<user>&p=<pass>&f=json
 
 | 方法 | 类别 |
 |---|---|
-| `getIndexes` | 浏览 |
 | `getVideos` | 媒体 |
-| `getBookmarks` / `createBookmark` / `deleteBookmark` | 书签 |
-| `getPlayQueue` / `savePlayQueue` | 播放队列 |
 | `createUser` / `updateUser` / `deleteUser` / `changePassword` / `getAvatar` | 用户管理 |
 | `getPodcasts` / `getNewestPodcasts` / `refreshPodcasts` 等播客系列 | 播客 |
 | `getChatMessages` / `createChatMessage` | 聊天 |
@@ -84,3 +81,29 @@ GET /rest/getDailySongs?u=<user>&p=<pass>&f=json
 | `createInternetRadioStation` / `updateInternetRadioStation` / `deleteInternetRadioStation` | 电台管理 |
 
 > 注：lx-server 定位是「个人音乐库桥接」，未实现多用户管理 / 播客 / 分享 / 聊天等协作类接口属预期范围。
+
+---
+
+## 四、2026-09-19 协议补全（本轮新增）
+
+补齐以下官方 / OpenSubsonic 方法（此前均走 default 分支返回 `Method not found`）：
+
+| 方法 | 类别 | 说明 |
+|---|---|---|
+| `getIndexes` | 浏览 | 艺术家按拼音首字母索引分组 |
+| `getAlbumInfo` / `getAlbumInfo2` | 浏览 | 专辑介绍（`notes`）+ 封面 URL；构造不出平台直链时回退歌曲自带封面 |
+| `reportPlayback` | 播放 | OpenSubsonic `playbackReport` 扩展；仅 `stopped` 且未带 `ignoreScrobble` 时写入播放历史 |
+| `getPlayQueue` / `savePlayQueue` | 播放队列 | 按用户持久化；`current` 指向的歌曲缺失时按列表兜底 |
+| `getPlayQueueByIndex` / `savePlayQueueByIndex` | 播放队列 | OpenSubsonic `indexBasedQueue` 扩展；`currentIndex` 越界返回错误码 10 |
+| `getBookmarks` / `createBookmark` / `deleteBookmark` | 书签 | 按用户落盘持久化 |
+| `getSonicSimilarTracks` | 发现 | OpenSubsonic `sonicSimilarity` 扩展；复用同歌手相似歌挑选逻辑（排序分，非声学分析） |
+| `getTranscodeDecision` / `getTranscodeStream` | 转码 | OpenSubsonic `transcoding` 扩展；下发签名 `transcodeParams`，服务端 ffmpeg 流式转码 |
+
+配套变更：
+
+- `scrobble` 由 no-op 改为写入播放历史，`getNowPlaying` 返回正在播放列表（条目带 `positionMs`）。
+- `stream` / `download` 支持 OpenSubsonic `transcodeOffset`：`timeOffset`（秒）作为 ffmpeg 快速定位（`-ss` 置于 `-i` 之前）。
+- `getOpenSubsonicExtensions` 改为声明**实际实现**的扩展名：`formPost`、`songLyrics`、`playbackReport`、`sonicSimilarity`、`indexBasedQueue`、`transcodeOffset`、`transcoding`。此前的 `coverArtScaling` / `thumbnails` / `lyrics` 并非官方扩展名，客户端据此永远不会调用 `getLyricsBySongId`；封面缩放仍通过 `getCoverArt` 的 `size` 参数生效。
+- 服务端转码：`ffmpeg` 可用性探测（缺失时降级 302 直链）、并发信号量（`subsonic.transcode.maxConcurrent`）、目标格式（`subsonic.transcode.format`），并在 `handleStream` 中按客户端 `maxBitrate` 决定是否转码。
+- `search3` 补齐在线歌手 / 专辑搜索（此前只查本地库，未收藏时恒为空）；歌手寻址改为相似度匹配（失败短缓存 + 诊断日志）；跨源同名歌手合并与去重；简繁双向搜索（新增 `src/server/utils/zhConvert.ts`）。
+- 协议根元素、参数截断与封面尺寸修正；共享歌单支持「排行榜 / 歌单 / 都要」三态配置（`subsonic.sharedListMode`、`subsonic.sharedListSort`）。

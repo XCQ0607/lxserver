@@ -280,6 +280,12 @@ declare namespace LX {
      */
     'subsonic.leaderboardSource'?: string
 
+    /** Subsonic 共享歌单内容模式 (leaderboard | playlist | both，默认 leaderboard) */
+    'subsonic.sharedListMode'?: string
+
+    /** Subsonic 共享歌单排序 (hot | new，默认 hot) */
+    'subsonic.sharedListSort'?: string
+
     /**
      * Subsonic 评分联动 dislike 的阈值 (默认 1)
      * 评分 rating 满足 0 < rating <= dislikeRating 时视为「不喜欢」，写回 lx-music 原生 dislike 规则。
@@ -373,6 +379,27 @@ declare namespace LX {
      * 开启后,若服务器该用户目录下已存在此歌曲的缓存或下载文件,直接传输本地流,避免向源站请求在线直链
      */
     'subsonic.playCacheFirst'?: boolean
+
+    /**
+     * Subsonic 服务端转码总开关 (默认 false)。开启后,当音源无客户端请求音质(及更低音质)时,
+     * 服务端拉取最高可用音质并经 ffmpeg 降码率后流式发给客户端,节省客户端流量(需服务端安装 ffmpeg)。
+     */
+    'subsonic.transcode.enabled'?: boolean
+
+    /**
+     * 仅当音源缺失对应低音质时才转码 (默认 true)。关闭则退回 302 直链原行为,永不转码。
+     */
+    'subsonic.transcode.onQualityMiss'?: boolean
+
+    /**
+     * 转码目标容器格式 (默认 'mp3'),可选 mp3 | opus | aac。
+     */
+    'subsonic.transcode.format'?: string
+
+    /**
+     * 转码并发上限 (默认 2),防止多客户端同时转码压垮服务器 CPU。
+     */
+    'subsonic.transcode.maxConcurrent'?: number
 
     /**
      * Subsonic 音质优选总开关 (默认 true)。关闭后 stream 仅做单次解析、不做优先级选择。

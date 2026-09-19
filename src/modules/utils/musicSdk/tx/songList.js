@@ -202,6 +202,55 @@ export default {
 
     id = await this.getListId(id)
 
+    // [修复] 旧接口 fcg_ucc_getcdinfo_byids_cp 已被腾讯加隐私校验
+    //（返回 { code: 0, subcode: 4000, msg: 'check privacy error!' } 且不含 cdlist），
+    // 会让 body.cdlist[0] 抛 "Cannot read properties of undefined (reading '0')"，歌单整页打不开。
+    // 优先改用 musicu.fcg 的 music.srfDissInfo.DissInfo/CgiGetDiss（GET + data=URL 编码 JSON）。
+    try {
+      const payload = {
+        comm: { ct: 24, cv: 0, uin: '0', format: 'json' },
+        req: {
+          module: 'music.srfDissInfo.DissInfo',
+          method: 'CgiGetDiss',
+          param: {
+            disstid: Number(id),
+            dirid: 0,
+            tag: 1,
+            song_num: 1000,
+            page: 1,
+            onlysonglist: 0,
+          },
+        },
+      }
+      const requestObj_v2 = httpFetch(`https://u.y.qq.com/cgi-bin/musicu.fcg?format=json&data=${encodeURIComponent(JSON.stringify(payload))}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; MSIE 9.0; Windows NT 6.1; WOW64; Trident/5.0)',
+        },
+      })
+      const { body: bodyV2 } = await requestObj_v2.promise
+      const detail = bodyV2?.req?.data
+      if (detail && Array.isArray(detail.songlist) && detail.songlist.length) {
+        const dir = detail.dirinfo || {}
+        return {
+          list: this.filterListDetail(detail.songlist),
+          page: 1,
+          limit: detail.songlist.length + 1,
+          total: detail.songlist.length,
+          source: 'tx',
+          info: {
+            name: dir.title || '',
+            img: dir.picurl || dir.picurl2 || '',
+            desc: decodeName(dir.desc || '').replace(/<br>/g, '\n'),
+            author: dir.host_nick || (dir.creator && dir.creator.nick) || '',
+            play_count: formatPlayCount(dir.listennum || 0),
+          },
+        }
+      }
+    } catch (err) {
+      // 忽略：继续回退到旧接口
+    }
+
+    // 回退：旧接口（腾讯若恢复可用仍可命中）
     const requestObj_listDetail = httpFetch(this.getListDetailUrl(id), {
       headers: {
         Origin: 'https://y.qq.com',
@@ -211,7 +260,8 @@ export default {
     const { body } = await requestObj_listDetail.promise
 
     if (body.code !== this.successCode) return this.getListDetail(id, ++tryNum)
-    const cdlist = body.cdlist[0]
+    const cdlist = Array.isArray(body.cdlist) ? body.cdlist[0] : null
+    if (!cdlist) return this.getListDetail(id, ++tryNum)
     return {
       list: this.filterListDetail(cdlist.songlist),
       page: 1,
@@ -230,22 +280,24 @@ export default {
   filterListDetail(rawList) {
     // console.log(rawList)
     return rawList.map(item => {
+      // [修复] 新版接口个别歌曲可能缺少 album 字段，直接取 .name/.mid 会抛 TypeError
+      const album = item.album || {}
       const { types, _types } = buildQualitys(item.file)
       // types.reverse()
       return {
         singer: formatSingerName(item.singer, 'name'),
         name: item.title,
-        albumName: item.album.name,
-        albumId: item.album.mid,
+        albumName: album.name,
+        albumId: album.mid,
         source: 'tx',
         interval: formatPlayTime(item.interval),
         songId: item.id,
-        albumMid: item.album.mid,
+        albumMid: album.mid,
         strMediaMid: item.file.media_mid,
         songmid: item.mid,
-        img: (item.album.name === '' || item.album.name === '空')
+        img: (album.name === '' || album.name === '空')
           ? item.singer?.length ? `https://y.gtimg.cn/music/photo_new/T001R800x800M000${item.singer[0].mid}.jpg` : ''
-          : `https://y.gtimg.cn/music/photo_new/T002R800x800M000${item.album.mid}.jpg`,
+          : `https://y.gtimg.cn/music/photo_new/T002R800x800M000${album.mid}.jpg`,
         lrc: null,
         otherSource: null,
         types,

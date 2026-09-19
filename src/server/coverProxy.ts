@@ -48,14 +48,40 @@ function coverRelease() {
 }
 
 /**
+ * 尽力而为地按请求尺寸改写上游图片 URL（OpenSubsonic coverArtScaling）。
+ *
+ * 服务端没有 sharp（生产镜像 `npm install --omit=dev` 不会装它），无法真正缩放字节；
+ * 但腾讯/网易的图片尺寸本来就编码在 URL 里，改写它就能拿到对应尺寸的图。
+ * 无法识别的域名原样返回——客户端仍能正常显示，只是图更大。
+ */
+function applyImageSize(url: string, size: number): string {
+    if (!url || !/^https?:\/\//.test(url) || !(size > 0)) return url
+    const s = Math.max(16, Math.min(Math.floor(size), 1500))
+    // 腾讯：.../T002R800x800M000<mid>.jpg
+    if (/y\.gtimg\.cn\/.*\/T\d{3}R\d+x\d+M/.test(url)) {
+        return url.replace(/(T\d{3}R)\d+x\d+(M)/, `$1${s}x${s}$2`)
+    }
+    // 网易：追加或替换 ?param=WxH
+    if (/music\.126\.net/.test(url)) {
+        const param = `${s}y${s}`
+        if (/[?&]param=/.test(url)) return url.replace(/([?&]param=)[^&]*/, `$1${param}`)
+        return url + (url.includes('?') ? '&' : '?') + `param=${param}`
+    }
+    return url
+}
+
+/**
  * 代理并返回一张封面图片。
  * - 命中新鲜缓存直接返回（X-Cache: HIT）
  * - 否则经信号量限流回源抓取，失败重试 3 次
  * - 全部失败且有过期缓存则降级返回（X-Cache: STALE），否则返回 204
+ * @param size 期望边长（px），>0 时对可识别的图片源改写尺寸
  */
-export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) {
+export async function proxyCoverImage(res: http.ServerResponse, picUrl: string, size?: number) {
+    // 尺寸作用在最终 URL 上，并按改写后的 URL 缓存（不同尺寸各自缓存一份）
+    const finalUrl = size && size > 0 ? applyImageSize(picUrl, size) : picUrl
     const now = Date.now()
-    const cached = coverImageCache.get(picUrl)
+    const cached = coverImageCache.get(finalUrl)
     // 命中新鲜缓存直接返回，避免重复回源被图片 CDN 限流
     if (cached && now - cached.ts < COVER_CACHE_TTL) {
         res.writeHead(200, {
@@ -66,14 +92,14 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
         return res.end(cached.buf)
     }
 
-    const doFetch = async (): Promise<{ buf: Buffer, ct: string } | null> => {
+    const doFetch = async (fetchUrl: string): Promise<{ buf: Buffer, ct: string } | null> => {
         if (res.destroyed || res.writableEnded) return null
         await coverAcquire()
         try {
             if (res.destroyed || res.writableEnded) return null
             const controller = new AbortController()
             const timer = setTimeout(() => controller.abort(), 20000)
-            const imgResp = await fetch(picUrl, {
+            const imgResp = await fetch(fetchUrl, {
                 headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36' },
                 signal: controller.signal,
             })
@@ -86,7 +112,7 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
             const ct = (upstreamCt && upstreamCt.startsWith('image/')) ? upstreamCt.split(';')[0].trim() : 'image/jpeg'
             return { buf, ct }
         } catch (e) {
-            console.error('[CoverArt] proxy fetch failed:', picUrl, (e as Error)?.message)
+            console.error('[CoverArt] proxy fetch failed:', fetchUrl, (e as Error)?.message)
             return null
         } finally {
             coverRelease()
@@ -98,11 +124,21 @@ export async function proxyCoverImage(res: http.ServerResponse, picUrl: string) 
     for (let attempt = 0; attempt < 3 && !result; attempt++) {
         if (res.destroyed || res.writableEnded) return
         if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt))
-        result = await doFetch()
+        result = await doFetch(finalUrl)
+    }
+
+    // [回退] 改写尺寸后的 URL 未必被上游支持（实测腾讯对过小尺寸会返回空），
+    // 此时改用原始 URL 再取一次，避免客户端要小图反而拿到空白封面
+    if (!result && finalUrl !== picUrl) {
+        for (let attempt = 0; attempt < 2 && !result; attempt++) {
+            if (res.destroyed || res.writableEnded) return
+            if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt))
+            result = await doFetch(picUrl)
+        }
     }
 
     if (result) {
-        coverCacheSet(picUrl, { ts: Date.now(), buf: result.buf, ct: result.ct })
+        coverCacheSet(finalUrl, { ts: Date.now(), buf: result.buf, ct: result.ct })
         if (res.destroyed || res.writableEnded) return
         res.writeHead(200, {
             'Content-Type': result.ct,
