@@ -57,7 +57,7 @@
     "unzipper": "^0.12.5",
     "utf-8-validate": "^6.0.6",
     "vm2": "^3.12.2",
-    "webdav": "^5.9.0",
+    "webdav": "^5.11.0",
     "ws": "8.21.3"
   },
   "devDependencies": {
