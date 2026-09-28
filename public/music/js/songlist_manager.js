@@ -29,6 +29,12 @@ window.SongListManager = (function () {
         limit: 30
     };
 
+    // Sort mode state
+    let sortMode = false;
+    let sortableInstance = null;
+    // Working copy of list in sort mode (to avoid mutating detailState.list until save)
+    let sortWorkList = [];
+
     // Initialize
     async function init() {
         console.log('[SongList] Initializing...');
@@ -458,6 +464,51 @@ window.SongListManager = (function () {
             const isCurrentMatch = window.ListSearch.isCurrentMatch(index);
             const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(song));
 
+            // --- Sort mode row ---
+            if (sortMode) {
+                return `
+                <div class="sort-row grid grid-cols-12 gap-2 md:gap-4 px-3 py-2 rounded-xl hover:t-bg-panel group transition-colors items-center border border-transparent hover:border-violet-200 dark:hover:border-violet-800 bg-white/50 dark:bg-white/5 cursor-grab active:cursor-grabbing active:shadow-lg active:scale-[1.01] active:border-violet-400"
+                     data-song-id="${String(song.id)}" data-sort-index="${index}">
+                    <!-- Drag handle + position input -->
+                    <div class="col-span-1 sm:col-span-1 text-center flex items-center justify-center gap-1">
+                        <span class="sort-handle text-gray-300 hover:text-violet-400 transition-colors cursor-grab active:cursor-grabbing text-base px-0.5" title="拖动调整序号">
+                            <i class="fas fa-grip-vertical"></i>
+                        </span>
+                        <input type="number" min="1" max="${sortWorkList.length}" value="${displayIdx + 1}"
+                            class="sort-pos-input w-10 text-center text-xs font-mono border border-violet-200 dark:border-violet-700 rounded-lg py-0.5 focus:outline-none focus:ring-1 focus:ring-violet-400 t-bg-panel t-text-main"
+                            title="输入目标序号"
+                            data-song-id="${String(song.id)}"
+                            onkeydown="if(event.key==='Enter'){window.SongListManager.moveSongToPosition(this, this.value);this.blur();}"
+                            onblur="window.SongListManager.moveSongToPosition(this, this.value)"
+                            onclick="event.stopPropagation()"
+                            onfocus="this.select()">
+                    </div>
+                    <!-- Title & Info -->
+                    <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-5 flex items-center gap-3 min-w-0 pr-2">
+                        <div class="w-8 h-8 flex-shrink-0 rounded-lg overflow-hidden shadow-sm border t-border-main">
+                            <img src="${window.getImgUrl ? window.getImgUrl(song) : (song.img || song.albumImg || '/music/assets/logo.svg')}"
+                                 class="w-full h-full object-cover dynamic-logo"
+                                 onerror="this.src='/music/assets/logo.svg'">
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="font-bold text-sm t-text-main truncate">${song.name}</div>
+                            <div class="text-[10px] t-text-muted truncate">${song.singer || ''}</div>
+                        </div>
+                    </div>
+                    <!-- Artist -->
+                    <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center text-xs t-text-muted overflow-hidden min-w-0">
+                        <span class="truncate">${song.singer || ''}</span>
+                    </div>
+                    <!-- Duration -->
+                    <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-xs font-mono t-text-muted min-w-0 text-center">
+                        ${song.interval || '--:--'}
+                    </div>
+                    <!-- Spacer -->
+                    <div class="col-span-4 sm:col-span-1 md:col-span-2 lg:col-span-3"></div>
+                </div>
+                `;
+            }
+
             let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
             if (isDisliked) rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
             if (isCurrentMatch) rowClass += 'search-current ';
@@ -540,6 +591,11 @@ window.SongListManager = (function () {
             </div>
         `}).join('');
 
+        // After render: init Sortable.js if sort mode is on
+        if (sortMode && typeof Sortable !== 'undefined') {
+            _bindSortable(listContainer);
+        }
+
         // Trigger Lazy Load
         if (typeof window.lazyLoadImages === 'function') {
             window.lazyLoadImages();
@@ -549,7 +605,31 @@ window.SongListManager = (function () {
         }
     }
 
+    // --- Sortable binding (private helper) ---
+    function _bindSortable(container) {
+        if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
+        sortableInstance = Sortable.create(container, {
+            animation: 180,
+            handle: '.sort-handle',
+            ghostClass: 'sort-ghost',
+            dragClass: 'sort-drag',
+            onEnd: function (evt) {
+                const { oldIndex, newIndex } = evt;
+                if (oldIndex === newIndex) return;
+                // Reorder sortWorkList
+                const [moved] = sortWorkList.splice(oldIndex, 1);
+                sortWorkList.splice(newIndex, 0, moved);
+                // Re-render to update position inputs
+                const origList = detailState.list;
+                detailState.list = sortWorkList;
+                renderDetail();
+                detailState.list = origList;
+            }
+        });
+    }
+
     function updatePaginationUI() {
+
         const totalPages = Math.max(1, Math.ceil((currentState.total || currentState.list.length) / currentState.limit));
         document.getElementById('songlist-page-info').innerText = `第 ${currentState.page} / ${totalPages} 页`;
         document.getElementById('btn-songlist-first').disabled = currentState.page <= 1;
@@ -802,6 +882,148 @@ window.SongListManager = (function () {
         },
         closeUserPlaylistModal: function () {
             toggleUserPlaylistModal(false);
+        },
+
+        // ---- Sort Mode ----
+        toggleSortMode: function (force) {
+            const enter = force !== undefined ? !!force : !sortMode;
+
+            // Can only sort if viewing a local user list
+            if (enter) {
+                const listId = typeof getCurrentActiveListId === 'function' ? getCurrentActiveListId() : null;
+                if (!listId) {
+                    if (window.showToast) window.showToast('info', '请在我的收藏中打开一个歌单再使用排序功能');
+                    return;
+                }
+                // Disable during batch mode
+                if (window.batchMode) {
+                    if (window.showToast) window.showToast('info', '请先退出批量模式');
+                    return;
+                }
+            }
+
+            sortMode = enter;
+            // Init working copy from current displayed list
+            if (enter) {
+                sortWorkList = [...detailState.list];
+            } else {
+                // Destroy sortable
+                if (sortableInstance) { sortableInstance.destroy(); sortableInstance = null; }
+                sortWorkList = [];
+            }
+
+            // Toggle toolbar
+            const toolbar = document.getElementById('sl-sort-toolbar');
+            const hashBtn = document.getElementById('sl-sort-hash-btn');
+            if (toolbar) toolbar.classList.toggle('hidden', !enter);
+            if (hashBtn) {
+                if (enter) {
+                    hashBtn.classList.add('text-violet-500', 'font-bold');
+                    hashBtn.classList.remove('text-gray-400');
+                } else {
+                    hashBtn.classList.remove('text-violet-500', 'font-bold');
+                    hashBtn.classList.add('text-gray-400');
+                }
+            }
+
+            // Hide other toolbars when entering sort mode
+            if (enter) {
+                const batchToolbar = document.getElementById('sl-batch-toolbar');
+                if (batchToolbar) batchToolbar.classList.add('hidden');
+                const searchBar = document.getElementById('sl-local-search-bar');
+                if (searchBar) searchBar.classList.add('hidden');
+            }
+
+            // Re-render list in sort/normal mode
+            // Temporarily swap detailState.list to sortWorkList for render
+            const origList = detailState.list;
+            if (enter) detailState.list = sortWorkList;
+            renderDetail();
+            if (enter) detailState.list = origList;
+        },
+
+        moveSongToPosition: function (inputEl, rawValue) {
+            const targetPos = parseInt(rawValue, 10);
+            if (isNaN(targetPos)) return;
+            const songId = inputEl.dataset.songId;
+            const clampedPos = Math.max(1, Math.min(sortWorkList.length, targetPos));
+
+            const fromIdx = sortWorkList.findIndex(s => String(s.id) === songId);
+            if (fromIdx === -1) return;
+
+            const [removed] = sortWorkList.splice(fromIdx, 1);
+            sortWorkList.splice(clampedPos - 1, 0, removed);
+
+            // Re-render sort list
+            const origList = detailState.list;
+            detailState.list = sortWorkList;
+            renderDetail();
+            detailState.list = origList;
+
+            // Scroll moved item into view
+            requestAnimationFrame(() => {
+                const listContainer = document.getElementById('sl-detail-list');
+                const rows = listContainer ? listContainer.querySelectorAll('.sort-row') : [];
+                const targetRow = rows[clampedPos - 1];
+                if (targetRow) targetRow.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            });
+        },
+
+        saveSortOrder: async function () {
+            const listId = typeof getCurrentActiveListId === 'function' ? getCurrentActiveListId() : null;
+            if (!listId || sortWorkList.length === 0) {
+                if (window.showToast) window.showToast('info', '无法确定当前歌单');
+                return;
+            }
+
+            const saveBtn = document.getElementById('sl-sort-save-btn');
+            if (saveBtn) { saveBtn.disabled = true; saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span class="hidden sm:inline">保存中...</span>'; }
+
+            try {
+                const authHeaders = typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {};
+                const orderedSongIds = sortWorkList.map(s => String(s.id));
+
+                const send = () => fetch('/api/music/user/list/reorder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...authHeaders },
+                    body: JSON.stringify({ listId, orderedSongIds })
+                });
+
+                let res = await send();
+                if (res.status === 401 && typeof ensureUserAuthToken === 'function') {
+                    const refreshed = await ensureUserAuthToken({ force: true });
+                    if (refreshed) res = await send();
+                }
+
+                if (!res.ok) {
+                    const errText = await res.text();
+                    throw new Error(errText || '保存失败');
+                }
+
+                // Apply new order to detailState.list
+                detailState.list = [...sortWorkList];
+                window.viewingPlaylist = detailState.list;
+
+                if (window.showToast) window.showToast('success', '排序已保存');
+
+                // Reload sidebar counts
+                if (typeof renderMyLists === 'function' && typeof currentListData !== 'undefined' && currentListData) {
+                    const data = await window.SyncManager.sync().catch(() => null);
+                    if (data) {
+                        currentListData = data;
+                        renderMyLists(data);
+                    }
+                }
+
+                // Exit sort mode
+                this.toggleSortMode(false);
+
+            } catch (e) {
+                console.error('[SortOrder] Save failed:', e);
+                if (window.showToast) window.showToast('error', '保存失败: ' + e.message);
+            } finally {
+                if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i><span class="hidden sm:inline">保存排序</span>'; }
+            }
         }
     };
 })();

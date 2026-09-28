@@ -948,6 +948,47 @@ aside {
     background-color: color-mix(in srgb, var(--c-500) 18%, transparent) !important;
 }
 
+/* ---- Sort mode styles ---- */
+.sort-row {
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.sort-ghost {
+    opacity: 0.45 !important;
+    background: color-mix(in srgb, var(--c-500) 15%, var(--bg-panel, #fff)) !important;
+    border: 1.5px dashed var(--c-500) !important;
+    border-radius: 0.75rem !important;
+}
+
+.sort-drag {
+    background: var(--bg-panel, #fff) !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 0 0 1.5px var(--c-500) !important;
+    border-radius: 0.75rem !important;
+    cursor: grabbing !important;
+    transform: scale(1.02);
+}
+
+:root[data-appearance="dark"] .sort-drag {
+    background: color-mix(in srgb, var(--c-500) 20%, #1e1b2e) !important;
+}
+
+/* Hide number arrows on sort inputs */
+.sort-pos-input::-webkit-outer-spin-button,
+.sort-pos-input::-webkit-inner-spin-button,
+.gl-sort-pos-input::-webkit-outer-spin-button,
+.gl-sort-pos-input::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.sort-pos-input,
+.sort-pos-input[type="number"],
+.gl-sort-pos-input,
+.gl-sort-pos-input[type="number"] {
+    appearance: textfield;
+    -moz-appearance: textfield;
+}
+
 /* 响应式侧边栏优化：针对垂直高度不足的情况 */
 @media (max-height: 845px) {
 

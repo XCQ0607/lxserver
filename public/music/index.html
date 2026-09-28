@@ -423,24 +423,50 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Sort Toolbar (Hidden by default) 搜索/我的收藏歌曲排序 -->
+                        <div id="gl-sort-toolbar"
+                            class="hidden bg-emerald-50 dark:bg-emerald-900/30 border-b border-emerald-200 dark:border-emerald-800 p-2.5 px-4 flex items-center justify-between transition-all">
+                            <div class="flex items-center gap-2 text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                                <i class="fas fa-arrows-alt-v text-emerald-500"></i>
+                                <span>排序模式：拖拽手柄调整，或直接修改序号</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button id="gl-sort-save-btn" onclick="saveGlobalSortOrder()"
+                                    class="text-xs px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white rounded shadow-sm transition-all font-medium flex items-center gap-1.5"
+                                    title="保存并应用当前顺序">
+                                    <i class="fas fa-check"></i><span>保存排序</span>
+                                </button>
+                                <button onclick="toggleGlobalSortMode(false)"
+                                    class="text-xs px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white rounded shadow-sm transition-all font-medium flex items-center gap-1.5"
+                                    title="取消排序">
+                                    <i class="fas fa-times"></i><span>取消</span>
+                                </button>
+                            </div>
+                        </div>
                         <!-- Header -->
                         <div id="search-results-header"
                             class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs md:text-sm font-medium items-center flex-shrink-0 pr-6">
                             <div
-                                class="col-span-1 sm:col-span-1 text-center font-mono flex items-center justify-center gap-1 sm:gap-2">
+                                class="col-span-1 sm:col-span-1 text-center font-mono flex items-center justify-center gap-1 sm:gap-1.5">
                                 <button id="search-back-btn" onclick="goBackToSearch()"
                                     class="hidden px-1.5 py-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                                     title="返回列表">
                                     <i class="fas fa-arrow-left text-xs"></i>
                                 </button>
-                                <span>#</span>
+                                <button id="gl-sort-hash-btn" onclick="toggleGlobalSortMode()"
+                                    class="font-mono font-bold text-gray-500 hover:text-emerald-500 hover:bg-emerald-500/10 px-1 py-0.5 rounded transition-all cursor-pointer select-none"
+                                    title="点击进入/退出歌单排序模式">#</button>
                                 <div class="flex items-center gap-1">
+                                    <button id="gl-sort-icon-btn" onclick="toggleGlobalSortMode()"
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5" title="歌曲排序">
+                                        <i class="fas fa-sort-amount-down"></i>
+                                    </button>
                                     <button onclick="toggleBatchMode()"
-                                        class="text-[10px] text-emerald-600 hover:text-emerald-700" title="批量操作">
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5" title="批量操作">
                                         <i class="fas fa-tasks"></i>
                                     </button>
                                     <button onclick="window.ListSearch.toggleBar()"
-                                        class="text-[10px] text-emerald-600 hover:text-emerald-700" title="内搜索 (/)">
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5" title="内搜索 (/)">
                                         <i class="fas fa-search"></i>
                                     </button>
                                 </div>
@@ -758,13 +784,40 @@
                                 </div>
                             </div>
 
+                            <!-- Sort Toolbar (Hidden by default) -->
+                            <div id="sl-sort-toolbar"
+                                class="hidden bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-800 p-3 flex items-center justify-between flex-shrink-0">
+                                <div class="flex items-center gap-3">
+                                    <div class="flex items-center gap-1.5">
+                                        <i class="fas fa-sort text-violet-500 text-sm"></i>
+                                        <span class="text-sm font-semibold text-violet-700 dark:text-violet-300">排序模式</span>
+                                    </div>
+                                    <span class="text-xs text-violet-500 dark:text-violet-400 hidden sm:block">拖动手柄或输入序号调整位置</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="window.SongListManager.saveSortOrder()"
+                                        id="sl-sort-save-btn"
+                                        class="text-xs px-3 md:px-4 py-1.5 bg-violet-500 hover:bg-violet-600 text-white rounded-lg transition-colors font-bold flex items-center gap-1.5 shadow-sm"
+                                        title="保存排序">
+                                        <i class="fas fa-save"></i><span class="hidden sm:inline">保存排序</span>
+                                    </button>
+                                    <button onclick="window.SongListManager.toggleSortMode(false)"
+                                        class="text-xs px-2 md:px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                                        title="退出排序">
+                                        <i class="fas fa-times"></i><span class="hidden sm:inline ml-1">退出</span>
+                                    </button>
+                                </div>
+                            </div>
+
                             <!-- List Section -->
                             <div class="flex-1 flex flex-col overflow-hidden">
                                 <div
                                     class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs font-bold uppercase tracking-wider items-center flex-shrink-0 pr-6">
                                     <div
                                         class="col-span-1 sm:col-span-1 text-center font-mono flex items-center justify-center gap-1 sm:gap-2">
-                                        <span>#</span>
+                                        <button id="sl-sort-hash-btn" onclick="window.SongListManager.toggleSortMode()"
+                                            class="font-mono text-gray-400 hover:text-violet-500 transition-colors cursor-pointer"
+                                            title="点击进入排序模式">#</button>
                                         <div class="flex items-center gap-1">
                                             <button onclick="toggleBatchMode()"
                                                 class="text-[10px] text-emerald-600 hover:text-emerald-700"

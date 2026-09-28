@@ -1652,9 +1652,12 @@ function switchTab(tabId) {
 }
 
 /**
- * 退出列表的二级模式（搜索框和批量模式）
+ * 退出列表的二级模式（搜索框和批量模式、排序模式）
  */
 function exitListSecondaryModes() {
+    if (window.glSortMode && typeof toggleGlobalSortMode === 'function') {
+        toggleGlobalSortMode(false);
+    }
     if (window.ListSearch && window.ListSearch.state.active) {
         window.ListSearch.resetState();
     }
@@ -3458,14 +3461,158 @@ window.getImgUrl = getImgUrl;
 
 // Removed duplicate toggleDislikeSong
 
+// Global Playlist Sort Mode State
+window.glSortMode = false;
+window.glSortWorkList = null;
+window.glSortableInstance = null;
+
+function toggleGlobalSortMode(force) {
+    const activeListId = window.currentViewingListId;
+    const isLocalList = currentSearchScope === 'local_list' && activeListId && (
+        activeListId === 'default' || activeListId === 'love' || (currentListData?.userList?.some(l => l.id === activeListId))
+    );
+
+    if (force !== undefined) {
+        window.glSortMode = Boolean(force);
+    } else {
+        window.glSortMode = !window.glSortMode;
+    }
+
+    if (window.glSortMode && !isLocalList) {
+        window.glSortMode = false;
+        showError('仅支持在我的收藏歌单（如我的喜爱、默认列表、自定义歌单）中调整顺序');
+        return;
+    }
+
+    const sortToolbar = document.getElementById('gl-sort-toolbar');
+    const hashBtn = document.getElementById('gl-sort-hash-btn');
+    const sortIconBtn = document.getElementById('gl-sort-icon-btn');
+    const paginationBar = document.getElementById('search-pagination-bar');
+
+    if (window.glSortMode) {
+        if (window.batchMode && typeof toggleBatchMode === 'function') toggleBatchMode();
+        if (window.ListSearch && window.ListSearch.isOpen) window.ListSearch.closeBar();
+
+        let currentSongs = [];
+        if (activeListId === 'default') currentSongs = currentListData?.defaultList || [];
+        else if (activeListId === 'love') currentSongs = currentListData?.loveList || [];
+        else {
+            const u = currentListData?.userList?.find(l => l.id === activeListId);
+            currentSongs = u ? (u.list || []) : [];
+        }
+
+        if (!currentSongs || currentSongs.length === 0) {
+            window.glSortMode = false;
+            showError('当前歌单为空，无法排序');
+            return;
+        }
+
+        window.glSortWorkList = JSON.parse(JSON.stringify(currentSongs));
+        if (sortToolbar) sortToolbar.classList.remove('hidden');
+        if (hashBtn) hashBtn.classList.add('text-emerald-500', 'bg-emerald-500/10', 'font-bold');
+        if (sortIconBtn) sortIconBtn.classList.add('text-emerald-500', 'font-bold');
+        if (paginationBar) paginationBar.classList.add('hidden');
+
+        renderResults(window.glSortWorkList);
+    } else {
+        if (window.glSortableInstance) {
+            try { window.glSortableInstance.destroy(); } catch (e) {}
+            window.glSortableInstance = null;
+        }
+        window.glSortWorkList = null;
+        if (sortToolbar) sortToolbar.classList.add('hidden');
+        if (hashBtn) hashBtn.classList.remove('text-emerald-500', 'bg-emerald-500/10', 'font-bold');
+        if (sortIconBtn) sortIconBtn.classList.remove('text-emerald-500', 'font-bold');
+        if (paginationBar) paginationBar.classList.remove('hidden');
+
+        let currentSongs = [];
+        if (activeListId === 'default') currentSongs = currentListData?.defaultList || [];
+        else if (activeListId === 'love') currentSongs = currentListData?.loveList || [];
+        else {
+            const u = currentListData?.userList?.find(l => l.id === activeListId);
+            currentSongs = u ? (u.list || []) : [];
+        }
+        renderResults(currentSongs);
+    }
+}
+window.toggleGlobalSortMode = toggleGlobalSortMode;
+
+function moveGlobalSongToPosition(oldIndex, targetPos) {
+    if (!window.glSortWorkList || window.glSortWorkList.length === 0) return;
+    if (isNaN(targetPos) || targetPos < 1) targetPos = 1;
+    if (targetPos > window.glSortWorkList.length) targetPos = window.glSortWorkList.length;
+    const newIndex = targetPos - 1;
+    if (oldIndex === newIndex) return;
+
+    const [item] = window.glSortWorkList.splice(oldIndex, 1);
+    window.glSortWorkList.splice(newIndex, 0, item);
+    renderResults(window.glSortWorkList);
+}
+window.moveGlobalSongToPosition = moveGlobalSongToPosition;
+
+async function saveGlobalSortOrder() {
+    const listId = window.currentViewingListId;
+    if (!listId || !window.glSortWorkList) return;
+
+    const btn = document.getElementById('gl-sort-save-btn');
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>保存中...</span>';
+    }
+
+    try {
+        const orderedSongIds = window.glSortWorkList.map(s => String(s.id || s.songmid || s.songId || s.hash));
+        const res = await fetch('/api/music/user/list/reorder', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getUserAuthHeaders()
+            },
+            body: JSON.stringify({
+                listId: listId,
+                orderedSongIds: orderedSongIds
+            })
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || '保存失败');
+        }
+
+        if (currentListData) {
+            if (listId === 'default') {
+                currentListData.defaultList = window.glSortWorkList;
+            } else if (listId === 'love') {
+                currentListData.loveList = window.glSortWorkList;
+            } else {
+                const target = currentListData.userList?.find(l => l.id === listId);
+                if (target) target.list = window.glSortWorkList;
+            }
+        }
+
+        showSuccess('歌单排序已成功保存');
+        toggleGlobalSortMode(false);
+    } catch (err) {
+        console.error('[Sort] 保存歌单排序失败:', err);
+        showError('保存排序失败: ' + (err.message || '网络错误'));
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+}
+window.saveGlobalSortOrder = saveGlobalSortOrder;
+
 // List search logic is now handled by ListSearch service in list_search.js
 function renderResults(list) {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
     if (header) header.classList.remove('hidden');
-    // 搜索歌曲时恢复底部分页栏显示
+    // 搜索歌曲时恢复底部分页栏显示（非排序模式下）
     const paginationBar = document.getElementById('search-pagination-bar');
-    if (paginationBar) paginationBar.classList.remove('hidden');
+    if (paginationBar && !window.glSortMode) paginationBar.classList.remove('hidden');
     // 重置歌手详情分页（进入歌曲搜索视图时清空）
     window.artistSongsPage = 1;
     // Update Header
@@ -3475,8 +3622,6 @@ function renderResults(list) {
 
     container.innerHTML = '';
 
-    // [Fix] 确保每个歌曲都有唯一的 ID，防止批量操作时因为 ID 缺失(undefined)导致只能选中一个
-    // 很多源(如酷狗、咪咕)返回的原始数据可能只有 hash 或 copyrightsId 而没有 id 字段
     if (list && list.length > 0) {
         list.forEach((item, idx) => {
             if (!item.id || item.id === 'undefined') {
@@ -3494,22 +3639,27 @@ function renderResults(list) {
     }
 
     // Applying Unified Filter with original index preservation BEFORE pagination
-    const indexedDisplayList = window.ListSearch.getDisplayList(list);
+    const indexedDisplayList = (window.glSortMode || !window.ListSearch) ? list.map((item, index) => ({ item, originalIndex: index })) : window.ListSearch.getDisplayList(list);
 
-    // Pagination
+    // Pagination (Sort Mode displays all items to enable dragging & reordering)
     const totalItems = indexedDisplayList.length;
-    let itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
-    if (itemsPerPage <= 0) itemsPerPage = 20;
-    const totalPages = Math.ceil(totalItems / (itemsPerPage || 1));
+    let pageList = indexedDisplayList;
+    let totalPages = 1;
+    let startIndex = 0;
+    let endIndex = totalItems;
 
-    // Bounds check
-    if (currentPage > totalPages) currentPage = totalPages || 1;
-    if (currentPage < 1) currentPage = 1;
+    if (!window.glSortMode) {
+        let itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
+        if (itemsPerPage <= 0) itemsPerPage = 20;
+        totalPages = Math.ceil(totalItems / (itemsPerPage || 1));
 
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+        if (currentPage > totalPages) currentPage = totalPages || 1;
+        if (currentPage < 1) currentPage = 1;
 
-    const pageList = indexedDisplayList.slice(startIndex, endIndex);
+        startIndex = (currentPage - 1) * itemsPerPage;
+        endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+        pageList = indexedDisplayList.slice(startIndex, endIndex);
+    }
 
     pageList.forEach((obj, pageIndex) => {
         const { item, originalIndex: actualIndexInOriginal } = obj;
@@ -3517,13 +3667,14 @@ function renderResults(list) {
         row.id = `gl-row-${actualIndexInOriginal}`;
         row.dataset.songId = String(item.id);
 
-        const isMatched = window.ListSearch.isMatched(actualIndexInOriginal);
-        const isCurrentMatch = window.ListSearch.isCurrentMatch(actualIndexInOriginal);
-        const isSelected = window.selectedItems.has(String(item.id));
+        const isMatched = !window.glSortMode && window.ListSearch && window.ListSearch.isMatched(actualIndexInOriginal);
+        const isCurrentMatch = !window.glSortMode && window.ListSearch && window.ListSearch.isCurrentMatch(actualIndexInOriginal);
+        const isSelected = !window.glSortMode && window.selectedItems && window.selectedItems.has(String(item.id));
 
         const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
 
         let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
+        if (window.glSortMode) rowClass += 'sort-row select-none ';
         if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
         else if (isMatched) rowClass += 'search-match ';
@@ -3533,12 +3684,12 @@ function renderResults(list) {
 
         // Add click listener for the row
         row.onclick = (e) => {
+            if (window.glSortMode) return;
             if (window.batchMode) {
                 const id = String(item.id);
                 const isChecked = !window.selectedItems.has(id);
                 window.handleBatchSelect(id, isChecked);
             } else {
-                // If not in batch mode, clicking row plays the song
                 playFromView(actualIndexInOriginal);
             }
         };
@@ -3547,15 +3698,27 @@ function renderResults(list) {
         const imgUrl = getImgUrl(item);
 
         row.innerHTML = `
-            <!-- Index -->
+            <!-- Index / Drag Handle -->
             <div class="col-span-1 sm:col-span-1 text-center font-mono t-text-muted text-xs md:text-sm flex items-center justify-center">
-                ${window.batchMode ? `
+                ${window.glSortMode ? `
+                    <div class="flex items-center justify-center gap-1 w-full">
+                        <span class="sort-handle cursor-grab active:cursor-grabbing text-emerald-500 hover:text-emerald-400 p-1 flex items-center justify-center touch-none" title="按住拖拽排序">
+                            <i class="fas fa-grip-vertical text-sm"></i>
+                        </span>
+                        <input type="number" min="1" max="${totalItems}" value="${actualIndexInOriginal + 1}"
+                               class="gl-sort-pos-input w-9 text-center bg-gray-100 dark:bg-gray-800 border border-emerald-500/50 rounded text-xs py-0.5 px-0.5 t-text-main font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500 select-all"
+                               title="输入目标序号后按回车跳转"
+                               onclick="event.stopPropagation(); this.select();"
+                               onchange="window.moveGlobalSongToPosition(${actualIndexInOriginal}, parseInt(this.value))"
+                               onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+                    </div>
+                ` : (window.batchMode ? `
                     <input type="checkbox" 
                            class="batch-checkbox w-4 h-4 text-emerald-600 rounded" 
                            data-song-id="${item.id}"
                            ${isSelected ? 'checked' : ''}
                     onclick="event.stopPropagation(); handleBatchSelect('${String(item.id)}', this.checked);">
-                ` : `<span class="index-num">${actualIndexInOriginal + 1}</span>`}
+                ` : `<span class="index-num">${actualIndexInOriginal + 1}</span>`)}
             </div>
 
             <!-- Title (Image + Text) -->
@@ -3649,8 +3812,29 @@ function renderResults(list) {
         container.appendChild(row);
     });
 
+    if (window.glSortMode && typeof Sortable !== 'undefined') {
+        if (window.glSortableInstance) {
+            try { window.glSortableInstance.destroy(); } catch (e) {}
+        }
+        window.glSortableInstance = new Sortable(container, {
+            handle: '.sort-handle',
+            animation: 150,
+            ghostClass: 'sort-ghost',
+            dragClass: 'sort-drag',
+            onEnd: function (evt) {
+                const { oldIndex, newIndex } = evt;
+                if (oldIndex === newIndex || oldIndex == null || newIndex == null) return;
+                const moved = window.glSortWorkList.splice(oldIndex, 1)[0];
+                window.glSortWorkList.splice(newIndex, 0, moved);
+                renderResults(window.glSortWorkList);
+            }
+        });
+    }
+
     // Update pagination info
-    updatePaginationInfo(startIndex + 1, endIndex, totalItems, currentPage, totalPages);
+    if (!window.glSortMode) {
+        updatePaginationInfo(startIndex + 1, endIndex, totalItems, currentPage, totalPages);
+    }
 
     // Init Lazy Loader
     lazyLoadImages(container);
