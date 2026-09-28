@@ -18,7 +18,9 @@
         rocket: '<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.1 2.73-1.68 4.12-1.98"></path><path d="M15 13v5c0 1.8.71 2.93 2 4 1.15-1.46 1.83-2.6 1.98-4.02.26-2.48.51-3.66 1.02-4.98"></path>',
         warning: '<path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line>',
         check: '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline>',
-        info: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>'
+        info: '<circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line>',
+        fileText: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline>',
+        broadcast: '<polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>'
     };
 
     // 队列状态
@@ -56,44 +58,69 @@
 
     // 智能获取样式配置
     function getStyleConfig(type, title) {
-        const t = title.toLowerCase();
+        const t = (title || '').toLowerCase();
+        const typeStr = (type || '').toLowerCase();
 
-        // 1. 版本更新 (Rocket)
-        if (type === 'version' || t.includes('update') || t.includes('更新') || t.includes('版本')) {
+        // 系统当前主题主色
+        const themePrimaryColor = 'var(--c-600, var(--accent-primary, #059669))';
+        const themePrimaryBg = 'color-mix(in srgb, var(--c-500, var(--accent-primary, #10b981)) 14%, var(--bg-item-hover, rgba(0, 0, 0, 0.04)))';
+
+        // 1. 版本更新 (Rocket) - 遵循当前系统主题色
+        if (typeStr === 'version' || t.includes('update') || t.includes('更新') || t.includes('版本')) {
             return {
                 icon: ICONS.rocket,
-                color: 'var(--c-600, #2563eb)', // 主题色
-                bg: 'var(--c-50, #eff6ff)',
-                label: 'New Update'
+                color: themePrimaryColor,
+                bg: themePrimaryBg,
+                label: 'New Update',
+                sectionTitle: '更新内容与日志',
+                sectionIcon: ICONS.fileText
             };
         }
 
-        // 2. 警告/维护 (Warning) - 使用醒目的橙色
-        if (t.includes('维护') || t.includes('警告') || t.includes('失败') || t.includes('error') || t.includes('warning')) {
+        // 2. 警告/维护 (Warning) - 使用醒目的橙色警示
+        if (typeStr === 'warning' || t.includes('维护') || t.includes('警告') || t.includes('失败') || t.includes('error') || t.includes('warning')) {
             return {
                 icon: ICONS.warning,
-                color: '#f59e0b', // Amber 500 (固定橙色，起警示作用)
-                bg: '#fffbeb',    // Amber 50
-                label: 'System Alert'
+                color: '#f59e0b', // Amber 500
+                bg: 'color-mix(in srgb, #f59e0b 14%, var(--bg-item-hover, rgba(0, 0, 0, 0.04)))',
+                label: 'System Alert',
+                sectionTitle: '重要提示与说明',
+                sectionIcon: ICONS.warning
             };
         }
 
-        // 3. 成功/连接 (Success) - 使用绿色
-        if (t.includes('成功') || t.includes('success') || t.includes('完成')) {
+        // 3. 成功/连接 (Success)
+        if (typeStr === 'success' || t.includes('成功') || t.includes('success') || t.includes('完成')) {
             return {
                 icon: ICONS.check,
                 color: '#10b981', // Emerald 500
-                bg: '#ecfdf5',    // Emerald 50
-                label: 'Success'
+                bg: 'color-mix(in srgb, #10b981 14%, var(--bg-item-hover, rgba(0, 0, 0, 0.04)))',
+                label: 'Success',
+                sectionTitle: '详细信息',
+                sectionIcon: ICONS.check
             };
         }
 
-        // 4. 默认/广播 (Bell)
+        // 4. 广播/公告 (Broadcast / Announcement) - 遵循当前系统主题色
+        if (typeStr === 'broadcast' || typeStr === 'announcement' || typeStr === 'notice' || t.includes('公告') || t.includes('通知') || t.includes('欢迎')) {
+            return {
+                icon: ICONS.bell,
+                color: themePrimaryColor,
+                bg: themePrimaryBg,
+                label: 'Announcement',
+                sectionTitle: '公告内容',
+                sectionIcon: ICONS.broadcast
+            };
+        }
+
+        // 5. 默认/通用通知 (Bell) - 遵循当前系统主题色
         return {
             icon: ICONS.bell,
-            color: 'var(--c-600, #4b5563)', // 默认使用主题色或深灰
-            bg: 'var(--c-50, #f3f4f6)',
-            label: 'Notification'
+            color: themePrimaryColor,
+            bg: themePrimaryBg,
+            label: 'Notification',
+            sectionTitle: '通知内容',
+            sectionIcon: ICONS.bell
         };
     }
 
@@ -101,7 +128,7 @@
     function renderModal(item, storageKey, onModalClose) {
         if (document.getElementById('ph-notification-overlay')) return;
 
-        const styleConfig = getStyleConfig(item.type, item.ui.title || '');
+        const styleConfig = getStyleConfig(item.type, item.ui ? item.ui.title : '');
 
         // 版本信息展示逻辑
         const currentVer = CONFIG.getLocalVersion();
@@ -116,15 +143,15 @@
                 targetVer = currentVer;
             }
             versionBadge = `
-                <div style="display: flex; align-items: center; justify-content: space-around; gap: 12px; margin: 16px 0; padding: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; font-size: 13px;">
-                    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                        <span style="color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600; text-transform: uppercase;">当前版本</span>
-                        <span style="color: #fff; font-weight: 700;">${currentVer}</span>
+                <div style="display: flex; align-items: center; justify-content: space-around; gap: 12px; margin: 14px 0; padding: 12px; background: var(--bg-item-hover, rgba(0,0,0,0.03)); border: 1px solid var(--border-dim, rgba(0,0,0,0.08)); border-radius: 14px; font-size: 13px;">
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+                        <span style="color: var(--text-dim, var(--text-muted, #9ca3af)); font-size: 11px; font-weight: 600; text-transform: uppercase;">当前版本</span>
+                        <span style="color: var(--text-main, var(--text-primary, #111827)); font-weight: 700;">${currentVer}</span>
                     </div>
-                    <div style="width: 1px; height: 24px; background: rgba(255,255,255,0.1);"></div>
-                    <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
-                        <span style="color: rgba(255,255,255,0.4); font-size: 10px; font-weight: 600; text-transform: uppercase;">最新版本</span>
-                        <span style="color: ${item.type === 'version' ? styleConfig.color : '#fff'}; font-weight: 700; text-shadow: 0 0 10px ${styleConfig.color}40;">${targetVer}</span>
+                    <div style="width: 1px; height: 24px; background: var(--border-dim, rgba(0,0,0,0.1));"></div>
+                    <div style="display: flex; flex-direction: column; align-items: center; gap: 3px;">
+                        <span style="color: var(--text-dim, var(--text-muted, #9ca3af)); font-size: 11px; font-weight: 600; text-transform: uppercase;">最新版本</span>
+                        <span style="color: ${item.type === 'version' ? styleConfig.color : 'var(--text-main, #111827)'}; font-weight: 700; text-shadow: 0 0 10px color-mix(in srgb, ${styleConfig.color} 30%, transparent);">${targetVer}</span>
                     </div>
                 </div>
             `;
@@ -132,21 +159,21 @@
 
         const overlay = document.createElement('div');
         overlay.id = 'ph-notification-overlay';
-        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.4);z-index:99999;display:flex;justify-content:center;align-items:center;font-family:sans-serif;backdrop-filter:blur(4px);transition:opacity 0.3s;';
+        overlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.45);z-index:99999;display:flex;justify-content:center;align-items:center;font-family:Inter,system-ui,-apple-system,sans-serif;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);transition:opacity 0.3s;';
 
         const modal = document.createElement('div');
         modal.style.cssText = `
-            background: rgba(18, 23, 41, 0.8);
-            backdrop-filter: blur(24px) saturate(180%);
-            -webkit-backdrop-filter: blur(24px) saturate(180%);
-            border: 1px solid rgba(255, 255, 255, 0.12);
+            background: var(--bg-panel, var(--bg-secondary, #ffffff));
+            color: var(--text-main, var(--text-primary, #1f2937));
+            border: 1px solid var(--border-dim, var(--glass-border, rgba(0,0,0,0.08)));
             width: 380px; 
+            max-width: calc(100vw - 32px);
             padding: 0;
-            border-radius: 28px; 
-            box-shadow: 0 20px 40px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255, 255, 255, 0.05);
+            border-radius: 24px; 
+            box-shadow: 0 20px 45px rgba(0, 0, 0, 0.25), 0 0 0 1px var(--border-dim, rgba(0,0,0,0.05));
             text-align: center; 
             overflow: hidden;
-            animation: phFadeIn 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            animation: phFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         `;
 
         // 注入全局动画样式
@@ -164,49 +191,51 @@
 
         const { title, message, confirm_text, cancel_text } = item.ui;
         const hasCancel = cancel_text && cancel_text.length > 0;
+        const sectionTitle = (item.ui && (item.ui.section_title || item.ui.sectionTitle || item.ui.header_label)) || styleConfig.sectionTitle || '详细内容';
+        const sectionIcon = styleConfig.sectionIcon || ICONS.fileText;
 
         // 根据样式配置动态生成头部
         modal.innerHTML = `
-            <div style="padding: 32px 24px 24px;">
+            <div style="padding: 32px 24px 20px;">
                 <div style="
                     margin: 0 auto 16px; 
                     width: 64px; height: 64px; 
-                    border-radius: 24px; 
+                    border-radius: 20px; 
                     background: ${styleConfig.bg}; 
                     color: ${styleConfig.color};
                     display: flex; align-items: center; justify-content: center;
-                    border: 1px solid rgba(255,255,255,0.1);
-                    box-shadow: 0 8px 24px ${styleConfig.color}30;
+                    border: 1px solid color-mix(in srgb, ${styleConfig.color} 25%, var(--border-dim, rgba(0,0,0,0.08)));
+                    box-shadow: 0 8px 24px color-mix(in srgb, ${styleConfig.color} 20%, transparent);
                 ">
-                    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                         ${styleConfig.icon}
                     </svg>
                 </div>
                 
-                <h3 style="margin:0 0 10px; color:#fff; font-size:20px; font-weight:700; letter-spacing: -0.5px;">${title}</h3>
+                <h3 style="margin:0 0 8px; color: var(--text-main, var(--text-primary, #111827)); font-size:19px; font-weight:700; letter-spacing: -0.3px;">${title}</h3>
                 ${versionBadge}
-                ${item.ui.date ? `<p style="margin:0 0 8px; color:rgba(255,255,255,0.5); font-size:12px;">发布日期: ${item.ui.date}</p>` : ''}
+                ${item.ui.date ? `<p style="margin:0 0 8px; color: var(--text-dim, var(--text-muted, #6b7280)); font-size:12px;">发布日期: ${item.ui.date}</p>` : ''}
                 
-                <div style="margin-top: 16px; padding: 16px; background: rgba(0,0,0,0.2); border-radius: 16px; border: 1px solid rgba(255,255,255,0.05); text-align: left; max-height: 200px; overflow-y: auto;">
-                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 10px;">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${styleConfig.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-                        <span style="font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.6); text-transform: uppercase;">更新内容与日志</span>
+                <div style="margin-top: 14px; padding: 16px; background: var(--bg-item-hover, rgba(0,0,0,0.03)); border-radius: 16px; border: 1px solid var(--border-dim, rgba(0,0,0,0.06)); text-align: left; max-height: 200px; overflow-y: auto;">
+                    <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
+                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${styleConfig.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${sectionIcon}</svg>
+                        <span style="font-size: 12px; font-weight: 700; color: var(--text-muted, var(--text-secondary, #4b5563)); text-transform: uppercase;">${sectionTitle}</span>
                     </div>
-                    <p style="margin:0; color:rgba(255,255,255,0.85); font-size:14px; line-height:1.6;">${message.replace(/\n/g, '<br/>')}</p>
+                    <p style="margin:0; color: var(--text-main, var(--text-primary, #374151)); font-size:14px; line-height:1.6;">${message.replace(/\n/g, '<br/>')}</p>
                 </div>
             </div>
 
             <div style="padding: 0 24px 24px; display:flex; gap:12px; justify-content:center;">
                 ${hasCancel ? `
                 <button id="ph-btn-cancel" class="ph-btn" style="
-                    flex:1; padding:14px; border:1px solid rgba(255,255,255,0.1); background:rgba(255,255,255,0.05); 
-                    border-radius:16px; cursor:pointer; color:rgba(255,255,255,0.6); font-weight:600; font-size:15px;
+                    flex:1; padding:12px; border:1px solid var(--border-dim, rgba(0,0,0,0.1)); background: var(--bg-item-hover, rgba(0,0,0,0.04)); 
+                    border-radius:14px; cursor:pointer; color: var(--text-muted, var(--text-secondary, #4b5563)); font-weight:600; font-size:14px;
                 ">${cancel_text}</button>` : ''}
                 
                 <button id="ph-btn-confirm" class="ph-btn" style="
-                    flex:1; padding:14px; border:none; background:${styleConfig.color}; 
-                    color:#ffffff; border-radius:16px; cursor:pointer; font-weight:600; font-size:15px;
-                    box-shadow: 0 4px 16px ${styleConfig.color}40; letter-spacing: 0.5px;
+                    flex:1; padding:12px; border:none; background:${styleConfig.color}; 
+                    color:#ffffff; border-radius:14px; cursor:pointer; font-weight:600; font-size:14px;
+                    box-shadow: 0 4px 16px color-mix(in srgb, ${styleConfig.color} 35%, transparent); letter-spacing: 0.3px;
                 ">${confirm_text}</button>
             </div>
         `;
