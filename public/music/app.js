@@ -12646,10 +12646,21 @@ async function renderCustomSources() {
             const isPublic = source.owner === 'open';
             const canManageSource = isAdmin || (!isPublic && isUser);
 
+            const isBatchContainer = window._sourceBatchMode === containerId;
             div.innerHTML = `
+            ${isBatchContainer ? `
+            <div class="flex items-center self-stretch pr-2 md:pr-4 -ml-1 md:-ml-2 touch-none" onclick="toggleSourceBatchSelect('${source.id}', '${containerId}')">
+                <div class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer
+                    ${window._sourceBatchSelected?.has(source.id)
+                        ? 'bg-blue-500 border-blue-500 text-white'
+                        : 'border-gray-300 dark:border-neutral-600 t-bg-panel hover:border-blue-400'}"
+                    id="source-batch-check-${containerId}-${source.id}">
+                    ${window._sourceBatchSelected?.has(source.id) ? '<i class="fas fa-check text-[10px]"></i>' : ''}
+                </div>
+            </div>` : `
             <div class="flex items-center self-stretch cursor-grab custom-source-handle t-text-muted hover:text-emerald-500 pr-2 md:pr-4 -ml-1 md:-ml-2 transition-all active:scale-110 touch-none" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-base md:text-lg"></i>
-            </div>
+            </div>`}
             <div class="flex justify-between items-start flex-1 min-w-0">
                 <div class="flex-1 pr-2 md:pr-4 min-w-0">
                     <div class="flex flex-wrap items-center gap-1.5 md:gap-2 mb-1">
@@ -12670,31 +12681,33 @@ async function renderCustomSources() {
                 </div>
                 
                 <div class="flex flex-col items-end gap-1.5 md:gap-2 shrink-0">
-                    <button onclick="toggleSource('${source.id}', ${source.enabled})" 
+                    <button onclick="${isBatchContainer ? '' : `toggleSource('${source.id}', ${source.enabled})`}" 
                             class="px-2 md:px-3 py-1 rounded-lg text-[11px] md:text-xs font-medium transition-colors whitespace-nowrap w-16 md:w-20 flex justify-center items-center ${source.enabled
-                    ? (source.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/30')
-                    : 't-bg-track t-text-muted hover:t-bg-item-hover'}">
+                    ? (source.status === 'failed'
+                        ? (isBatchContainer ? 'bg-red-100/50 text-red-400 dark:bg-red-500/10 dark:text-red-600 opacity-50 cursor-not-allowed' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30')
+                        : (isBatchContainer ? 'bg-emerald-100/50 text-emerald-500/60 dark:bg-emerald-500/10 dark:text-emerald-600/60 opacity-60 cursor-not-allowed' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/30'))
+                    : (isBatchContainer ? 't-bg-track/50 t-text-muted opacity-40 cursor-not-allowed' : 't-bg-track t-text-muted hover:t-bg-item-hover')} ${isBatchContainer ? 'pointer-events-none select-none' : ''}">
                         ${source.enabled ? '已启用' : '已禁用'}
                     </button>
                     
                     <div class="flex items-center gap-1">
                         ${source.enabled && source.status === 'failed' && canManageSource ? `
-                        <button onclick="reloadSource('${source.id}')" 
-                                class="p-1 md:p-1.5 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
-                                title="尝试重新加载">
+                        <button ${isBatchContainer ? 'disabled' : `onclick="reloadSource('${source.id}')"`}
+                                class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 'text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40'} rounded-lg transition-colors"
+                                title="${isBatchContainer ? '' : '尝试重新加载'}">
                             <i class="fas fa-sync-alt text-xs md:text-sm"></i>
                         </button>` : ''}
 
-                        <button data-id="${encodeURIComponent(source.id)}" onclick="openEditSourceModal(decodeURIComponent(this.dataset.id))"
-                                class="p-1 md:p-1.5 t-text-muted hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
-                                title="编辑音源平台">
+                        <button ${isBatchContainer ? 'disabled' : `data-id="${encodeURIComponent(source.id)}" onclick="openEditSourceModal(decodeURIComponent(this.dataset.id))"`}
+                                class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 't-text-muted hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/40'} rounded-lg transition-colors"
+                                title="${isBatchContainer ? '' : '编辑音源平台'}">
                             <i class="fas fa-edit text-xs md:text-sm"></i>
                         </button>
                         
                         ${canManageSource ? `
-                        <button onclick="deleteSource('${source.id}')" 
-                                class="p-1 md:p-1.5 t-text-muted hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40 rounded-lg transition-colors"
-                                title="删除">
+                        <button ${isBatchContainer ? 'disabled' : `onclick="deleteSource('${source.id}')"`}
+                                class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 't-text-muted hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40'} rounded-lg transition-colors"
+                                title="${isBatchContainer ? '' : '删除'}">
                             <i class="fas fa-trash-alt text-xs md:text-sm"></i>
                         </button>` : ''}
                     </div>
@@ -12706,7 +12719,7 @@ async function renderCustomSources() {
 
         // Add Sortable for both the modal list and the settings panel list
         const isSortableContainer = (containerId === 'custom-sources-list' || containerId === 'settings-custom-sources-list') && typeof Sortable !== 'undefined';
-        if (isSortableContainer) {
+        if (isSortableContainer && window._sourceBatchMode !== containerId) {
             try {
                 const oldSortable = Sortable.get(container);
                 if (oldSortable) oldSortable.destroy();
@@ -12888,6 +12901,186 @@ async function deleteSource(sourceId) {
         console.error('[CustomSource] 删除失败:', error);
         showError(`删除失败: ${error.message}`);
     }
+}
+
+// ========================================
+// Source Batch Mode
+// ========================================
+
+// containerId: 'modal' | 'settings'
+// maps to actual DOM list IDs
+const SOURCE_BATCH_CONTAINER_MAP = {
+    modal: 'custom-sources-list',
+    settings: 'settings-custom-sources-list'
+};
+
+window._sourceBatchMode = null;   // which containerId is in batch mode
+window._sourceBatchSelected = new Set();
+
+function enterSourceBatchMode(scope) {
+    window._sourceBatchMode = SOURCE_BATCH_CONTAINER_MAP[scope];
+    window._sourceBatchSelected = new Set();
+    // Show the batch bar and hide entry button
+    const bar = document.getElementById(scope === 'modal' ? 'modal-source-batch-bar' : 'settings-source-batch-bar');
+    if (bar) bar.classList.remove('hidden');
+    const entryBtn = document.getElementById(scope === 'modal' ? 'btn-modal-source-batch' : 'btn-settings-source-batch');
+    if (entryBtn) entryBtn.classList.add('hidden');
+    // Disable sortable and re-render to show checkboxes
+    const container = document.getElementById(window._sourceBatchMode);
+    if (container && typeof Sortable !== 'undefined') {
+        try { const s = Sortable.get(container); if (s) s.option('disabled', true); } catch(e){}
+    }
+    renderCustomSources();
+    updateSourceBatchCount(scope);
+}
+
+function exitSourceBatchMode(scope) {
+    window._sourceBatchMode = null;
+    window._sourceBatchSelected = new Set();
+    const bar = document.getElementById(scope === 'modal' ? 'modal-source-batch-bar' : 'settings-source-batch-bar');
+    if (bar) bar.classList.add('hidden');
+    const entryBtn = document.getElementById(scope === 'modal' ? 'btn-modal-source-batch' : 'btn-settings-source-batch');
+    if (entryBtn) entryBtn.classList.remove('hidden');
+    // Re-enable sortable
+    const containerId = SOURCE_BATCH_CONTAINER_MAP[scope];
+    const container = document.getElementById(containerId);
+    if (container && typeof Sortable !== 'undefined') {
+        try { const s = Sortable.get(container); if (s) s.option('disabled', false); } catch(e){}
+    }
+    renderCustomSources();
+}
+
+function toggleSourceBatchSelect(sourceId, containerId) {
+    if (!window._sourceBatchSelected) window._sourceBatchSelected = new Set();
+    if (window._sourceBatchSelected.has(sourceId)) {
+        window._sourceBatchSelected.delete(sourceId);
+    } else {
+        window._sourceBatchSelected.add(sourceId);
+    }
+    // Update checkbox UI in both containers (they share same selected set)
+    ['modal', 'settings'].forEach(scope => {
+        const cid = SOURCE_BATCH_CONTAINER_MAP[scope];
+        const checkEl = document.getElementById(`source-batch-check-${cid}-${sourceId}`);
+        if (checkEl) {
+            const isChecked = window._sourceBatchSelected.has(sourceId);
+            checkEl.className = `w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer ${
+                isChecked ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 dark:border-neutral-600 t-bg-panel hover:border-blue-400'
+            }`;
+            checkEl.innerHTML = isChecked ? '<i class="fas fa-check text-[10px]"></i>' : '';
+        }
+        updateSourceBatchCount(scope);
+    });
+}
+
+function selectAllSourceBatch(scope) {
+    const list = window._currentCustomSourcesList || [];
+    const allSelected = list.every(s => window._sourceBatchSelected.has(s.id));
+    if (allSelected) {
+        window._sourceBatchSelected.clear();
+    } else {
+        list.forEach(s => window._sourceBatchSelected.add(s.id));
+    }
+    renderCustomSources();
+    updateSourceBatchCount(scope);
+}
+
+function updateSourceBatchCount(scope) {
+    const countEl = document.getElementById(scope === 'modal' ? 'modal-source-batch-count' : 'settings-source-batch-count');
+    if (countEl) countEl.textContent = window._sourceBatchSelected?.size || 0;
+}
+
+async function batchSourceEnable(scope, enable) {
+    const selected = [...(window._sourceBatchSelected || [])];
+    if (!selected.length) { showInfo('请先选择要操作的源'); return; }
+    const label = enable ? '启用' : '禁用';
+    if (!(await showSelect(`批量${label}`, `确定要${label} ${selected.length} 个源吗？`, {}))) return;
+
+    const username = currentListData?.username || 'default';
+    const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+    const adminPass = localStorage.getItem('lx_admin_password');
+    if (adminPass) headers['x-frontend-auth'] = adminPass;
+
+    let successCount = 0;
+    for (const sourceId of selected) {
+        try {
+            const response = await fetch('/api/custom-source/toggle', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ username, sourceId, enabled: enable })
+            });
+            if (response.ok) successCount++;
+        } catch(e) { console.error('[BatchSource] toggle error', sourceId, e); }
+    }
+    showSuccess(`已${label} ${successCount} 个源`);
+    exitSourceBatchMode(scope);
+}
+
+async function batchSourceDelete(scope) {
+    const selected = [...(window._sourceBatchSelected || [])];
+    if (!selected.length) { showInfo('请先选择要删除的源'); return; }
+    if (!(await showSelect('批量删除', `确定要删除 ${selected.length} 个源吗？此操作不可撤销。`, { danger: true }))) return;
+
+    const username = currentListData?.username || 'default';
+    const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+    const adminPass = localStorage.getItem('lx_admin_password');
+    if (adminPass) headers['x-frontend-auth'] = adminPass;
+
+    // 从缓存列表找到源名称（用于错误提示）
+    const sourceList = window._currentCustomSourcesList || [];
+    const sourceNameMap = {};
+    sourceList.forEach(s => { sourceNameMap[s.id] = s.name || s.id; });
+
+    let successCount = 0;
+    const failedNoPermission = []; // 403 权限不足的源名称
+    const failedOther = [];        // 其他错误
+
+    for (const sourceId of selected) {
+        try {
+            const response = await fetch('/api/custom-source/delete', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ username, sourceId })
+            });
+            if (response.ok) {
+                successCount++;
+            } else if (response.status === 403) {
+                failedNoPermission.push(sourceNameMap[sourceId] || sourceId);
+            } else {
+                failedOther.push(sourceNameMap[sourceId] || sourceId);
+            }
+        } catch(e) {
+            console.error('[BatchSource] delete error', sourceId, e);
+            failedOther.push(sourceNameMap[sourceId] || sourceId);
+        }
+    }
+
+    // 组合提示
+    const allFailed = successCount === 0;
+    const hasPermFail = failedNoPermission.length > 0;
+    const hasOtherFail = failedOther.length > 0;
+
+    if (allFailed && hasPermFail && !hasOtherFail) {
+        // 全部是权限问题
+        showError(`无权限删除：${failedNoPermission.join('、')}（公开源需要管理员权限）`);
+    } else if (allFailed && !hasPermFail && hasOtherFail) {
+        showError(`删除失败：${failedOther.join('、')}`);
+    } else if (allFailed) {
+        // 混合失败
+        let msg = '全部删除失败。';
+        if (hasPermFail) msg += ` 无权限：${failedNoPermission.join('、')}。`;
+        if (hasOtherFail) msg += ` 其他错误：${failedOther.join('、')}。`;
+        showError(msg);
+    } else if (hasPermFail || hasOtherFail) {
+        // 部分成功
+        let msg = `已删除 ${successCount} 个源。`;
+        if (hasPermFail) msg += ` 无对应权限：${failedNoPermission.join('、')}。`;
+        if (hasOtherFail) msg += ` 删除失败：${failedOther.join('、')}。`;
+        showError(msg);
+    } else {
+        showSuccess(`已删除 ${successCount} 个源`);
+    }
+
+    exitSourceBatchMode(scope);
 }
 
 // 模态框控制
@@ -13907,6 +14100,14 @@ window.toggleSongInList = toggleSongInList;
 window.toggleSource = toggleSource;
 window.deleteSource = deleteSource;
 window.reloadSource = reloadSource;
+
+// Source Batch Mode
+window.enterSourceBatchMode = enterSourceBatchMode;
+window.exitSourceBatchMode = exitSourceBatchMode;
+window.toggleSourceBatchSelect = toggleSourceBatchSelect;
+window.selectAllSourceBatch = selectAllSourceBatch;
+window.batchSourceEnable = batchSourceEnable;
+window.batchSourceDelete = batchSourceDelete;
 
 // 兼容旧版函数名 (Alias)
 window.toggleCustomSource = toggleSource;

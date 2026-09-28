@@ -1650,12 +1650,32 @@
                                             class="ml-auto flex-shrink-0 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-lg shadow shadow-emerald-200/50 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
                                             <i class="fas fa-plus-circle"></i> 管理 / 添加
                                         </button>
+                                        <button id="btn-settings-source-batch" onclick="enterSourceBatchMode('settings')"
+                                            class="flex-shrink-0 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:hover:bg-blue-500/25 dark:text-blue-400 font-bold text-xs rounded-lg border border-blue-100 dark:border-blue-500/30 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
+                                            <i class="fas fa-tasks"></i> 批量
+                                        </button>
+                                    </div>
+
+                                    <!-- 批量操作工具栏 (Settings) — 在列表上方 -->
+                                    <div id="settings-source-batch-bar" class="hidden mb-3 flex flex-wrap items-center gap-2 p-3 bg-blue-50 dark:bg-blue-500/10 rounded-xl border border-blue-100 dark:border-blue-500/25">
+                                        <span class="text-xs text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
+                                            <i class="fas fa-check-square"></i>
+                                            已选 <strong id="settings-source-batch-count">0</strong> 项
+                                        </span>
+                                        <div class="flex flex-wrap gap-1.5 ml-auto">
+                                            <button onclick="selectAllSourceBatch('settings')" class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/20 transition-colors"><i class="fas fa-check-double mr-1"></i>全选</button>
+                                            <button onclick="batchSourceEnable('settings', true)" class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-on mr-1"></i>批量启用</button>
+                                            <button onclick="batchSourceEnable('settings', false)" class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-off mr-1"></i>批量禁用</button>
+                                            <button onclick="batchSourceDelete('settings')" class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i class="fas fa-trash-alt mr-1"></i>批量删除</button>
+                                            <button onclick="exitSourceBatchMode('settings')" class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i class="fas fa-times mr-1"></i>退出</button>
+                                        </div>
                                     </div>
 
                                     <!-- 已上传的源列表 -->
                                     <div id="settings-custom-sources-list" class="space-y-2">
                                         <div class="text-xs t-text-muted text-center py-2">暂无数据 (JS未加载)</div>
                                     </div>
+
                                 </div>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -4170,7 +4190,7 @@
             </div>
 
             <!-- Toolbar -->
-            <div id="custom-source-toolbar" class="p-4 border-b t-border-main flex gap-3 t-bg-panel">
+            <div id="custom-source-toolbar" class="p-4 border-b t-border-main flex gap-3 t-bg-panel flex-wrap">
                 <input type="file" id="script-file" accept=".js" class="hidden" onchange="handleFileUpload(this)">
                 <button onclick="document.getElementById('script-file').click()"
                     class="flex-1 flex items-center justify-center px-4 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-colors font-medium">
@@ -4180,6 +4200,25 @@
                     class="flex-1 flex items-center justify-center px-4 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl hover:bg-blue-100 transition-colors font-medium">
                     <i class="fas fa-link mr-2"></i>从 URL 导入
                 </button>
+                <button onclick="enterSourceBatchMode('modal')" id="btn-modal-source-batch"
+                    class="flex items-center gap-2 px-4 py-2.5 bg-purple-50 text-purple-600 dark:bg-purple-500/15 dark:text-purple-400 border border-purple-100 dark:border-purple-500/30 rounded-xl hover:bg-purple-100 dark:hover:bg-purple-500/25 transition-colors font-medium whitespace-nowrap">
+                    <i class="fas fa-tasks"></i>批量
+                </button>
+            </div>
+
+            <!-- 批量操作工具栏 (Modal) -->
+            <div id="modal-source-batch-bar" class="hidden px-4 py-3 border-b t-border-main flex flex-wrap items-center gap-2 bg-purple-50 dark:bg-purple-500/10">
+                <span class="text-xs text-purple-600 dark:text-purple-400 font-medium flex items-center gap-1.5">
+                    <i class="fas fa-check-square"></i>
+                    已选 <strong id="modal-source-batch-count">0</strong> 项
+                </span>
+                <div class="flex flex-wrap gap-1.5 ml-auto">
+                    <button onclick="selectAllSourceBatch('modal')" class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-purple-200 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/20 transition-colors"><i class="fas fa-check-double mr-1"></i>全选</button>
+                    <button onclick="batchSourceEnable('modal', true)" class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-on mr-1"></i>批量启用</button>
+                    <button onclick="batchSourceEnable('modal', false)" class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-off mr-1"></i>批量禁用</button>
+                    <button onclick="batchSourceDelete('modal')" class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i class="fas fa-trash-alt mr-1"></i>批量删除</button>
+                    <button onclick="exitSourceBatchMode('modal')" class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i class="fas fa-times mr-1"></i>退出</button>
+                </div>
             </div>
 
             <!-- List -->
