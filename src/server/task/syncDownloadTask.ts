@@ -33,6 +33,8 @@ export interface SyncDownloadData {
   preferredQuality?: string // 歌单同步下载指定音质 ('128k' | '320k' | 'flac' | 'flac24bit' 等，默认 '320k')
   storageLocation?: 'root' | 'data' | 'custom' // 同步下载存储位置，默认 'data'
   lastCustomMusicDir?: string // 上次记录/生效的自定义音乐目录物理路径
+  downloadLyric?: boolean // 同步下载时是否下载 .lrc 歌词文件，默认 true
+  embedLyric?: boolean   // 同步下载时是否将歌词写入音频文件的 USLT 标签，默认 true
   playlists: Record<string, SyncDownloadPlaylistConfig>
   lastSyncTime: number | null
   lastSyncResult: string | null
@@ -761,6 +763,9 @@ export const downloadSongToSubPath = async (
     touchGlobalLock()
 
     const songInfoWithSubPath = { ...finalSongInfo, __syncSubPath__: subPath }
+    const syncData = getSyncDownloadData(username)
+    const shouldCacheLyric = syncData.downloadLyric !== false // 默认 true
+    const shouldEmbedLyric = syncData.embedLyric !== false    // 默认 true
     await withTimeout(
       fileCache.downloadAndCache(
         songInfoWithSubPath,
@@ -768,9 +773,9 @@ export const downloadSongToSubPath = async (
         finalQuality,
         username,
         signal,
-        true,   // isOnlyDownload
-        true,   // cacheLyric
-        true,   // embedLyric
+        true,              // isOnlyDownload
+        shouldCacheLyric,  // cacheLyric (.lrc 文件)
+        shouldEmbedLyric,  // embedLyric (USLT 标签)
         {
           requestedSource: finalSongInfo.requestedSource || finalSongInfo.source,
           downloadSource: finalSongInfo.downloadSource,

@@ -2782,6 +2782,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               syncDownload: {
                 enabled: syncData.enabled,
                 preferredQuality: syncData.preferredQuality || '320k',
+                downloadLyric: syncData.downloadLyric !== false, // 默认 true
+                embedLyric: syncData.embedLyric !== false,       // 默认 true
                 lastSyncTime: syncData.lastSyncTime,
                 lastSyncResult: syncData.lastSyncResult,
               },
@@ -2824,6 +2826,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (typeof payload.preferredQuality === 'string' && ['128k', '320k', 'flac', 'flac24bit'].includes(payload.preferredQuality)) {
               syncData.preferredQuality = payload.preferredQuality
             }
+            if (typeof payload.downloadLyric === 'boolean') syncData.downloadLyric = payload.downloadLyric
+            if (typeof payload.embedLyric === 'boolean') syncData.embedLyric = payload.embedLyric
             if (payload.playlists && typeof payload.playlists === 'object') {
               for (const [id, cfg] of Object.entries(payload.playlists) as any) {
                 if (!syncData.playlists[id]) {

@@ -5896,6 +5896,44 @@
                     </div>
                 </div>
 
+                <!-- 下载歌词文件开关 -->
+                <div
+                    class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <i class="fas fa-file-alt text-emerald-500 text-xs"></i>
+                            <span class="text-xs font-bold text-gray-800 dark:text-gray-100">下载歌词文件</span>
+                        </div>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">同步时自动下载 .lrc 歌词文件至歌曲同目录</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input type="checkbox" id="sd-download-lyric-switch" class="sr-only peer"
+                            onchange="window.SyncDownloadPanel.onDownloadLyricChange(this.checked)">
+                        <div
+                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500 shadow-inner">
+                        </div>
+                    </label>
+                </div>
+
+                <!-- 嵌入 USLT 标签开关 -->
+                <div
+                    class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <i class="fas fa-tag text-emerald-500 text-xs"></i>
+                            <span class="text-xs font-bold text-gray-800 dark:text-gray-100">嵌入 USLT 标签</span>
+                        </div>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">将歌词写入音频文件元信息，方便播放器直接读取</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input type="checkbox" id="sd-embed-lyric-switch" class="sr-only peer"
+                            onchange="window.SyncDownloadPanel.onEmbedLyricChange(this.checked)">
+                        <div
+                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500 shadow-inner">
+                        </div>
+                    </label>
+                </div>
+
                 <!-- 存储位置设置 -->
                 <div id="sd-storage-row"
                     class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">

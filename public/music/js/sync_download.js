@@ -130,6 +130,14 @@
     const sw = $('sd-master-switch')
     if (sw) sw.checked = !!data.syncDownload?.enabled
 
+    // 下载歌词文件开关（默认 true）
+    const lyricSw = $('sd-download-lyric-switch')
+    if (lyricSw) lyricSw.checked = data.syncDownload?.downloadLyric !== false
+
+    // 嵌入 USLT 标签开关（默认 true）
+    const embedSw = $('sd-embed-lyric-switch')
+    if (embedSw) embedSw.checked = data.syncDownload?.embedLyric !== false
+
     // 同步目标音质
     const qualitySelect = $('sd-quality-select')
     if (qualitySelect) {
@@ -630,6 +638,34 @@
     }
   }
 
+  const onDownloadLyricChange = async (enabled) => {
+    try {
+      await apiFetch('/api/user/sync-download/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ downloadLyric: enabled }),
+      })
+      if (_currentData?.syncDownload) _currentData.syncDownload.downloadLyric = enabled
+    } catch (e) {
+      console.warn('[SyncDownload] 保存下载歌词开关失败:', e)
+      const sw = $('sd-download-lyric-switch')
+      if (sw) sw.checked = !enabled
+    }
+  }
+
+  const onEmbedLyricChange = async (enabled) => {
+    try {
+      await apiFetch('/api/user/sync-download/settings', {
+        method: 'PUT',
+        body: JSON.stringify({ embedLyric: enabled }),
+      })
+      if (_currentData?.syncDownload) _currentData.syncDownload.embedLyric = enabled
+    } catch (e) {
+      console.warn('[SyncDownload] 保存嵌入 USLT 开关失败:', e)
+      const sw = $('sd-embed-lyric-switch')
+      if (sw) sw.checked = !enabled
+    }
+  }
+
   const onPlaylistToggle = async (listId, enabled) => {
     try {
       await apiFetch('/api/user/sync-download/settings', {
@@ -874,6 +910,8 @@
     close,
     onMasterSwitch,
     onQualityChange,
+    onDownloadLyricChange,
+    onEmbedLyricChange,
     onPlaylistToggle,
     triggerSync,
     cancelSync,
