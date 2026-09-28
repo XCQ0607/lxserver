@@ -5046,6 +5046,7 @@ async function triggerServerCache(song, url, quality) {
 }
 
 let lastNamingPattern = window.settings?.serverCacheNamingPattern || 'simple';
+let serverCacheConfigInitialized = false; // 首次初始化同步完成前不弹命名格式变更弹窗
 
 async function updateServerCacheConfig(location, pattern) {
     const loc = location || window.settings?.serverCacheLocation || 'root';
@@ -5078,7 +5079,8 @@ async function updateServerCacheConfig(location, pattern) {
             console.log('[Cache] 服务器配置已同步:', loc, pat);
 
             // 如果命名模式真的发生了变化（且不是初始化同步）
-            if (pattern && oldPattern && pattern !== oldPattern) {
+            // serverCacheConfigInitialized 为 false 时说明是页面首次加载/登录后初始化同步，不应弹窗
+            if (pattern && oldPattern && pattern !== oldPattern && serverCacheConfigInitialized) {
                 const confirmed = await showSelect('歌曲命名格式变更', `检测到命名方式已更改为 "${pat}"。是否将服务器上已下载的本地歌曲重新命名为新的格式？<br><br><span class="text-xs opacity-70">注：这会同时移动对应的歌词文件，确保播放器能正常识别。</span>`, {
                     confirmText: '现在重命名',
                     cancelText: '保持现状',
@@ -5109,6 +5111,7 @@ async function updateServerCacheConfig(location, pattern) {
                 }
             }
             lastNamingPattern = pat; // 更新最后同步的模式
+            serverCacheConfigInitialized = true; // 首次同步完成，后续变更才允许弹窗
         }
     } catch (e) {
         console.error('[ServerCache] Config update failed:', e);
