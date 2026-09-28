@@ -5689,10 +5689,14 @@
                         <select id="sd-quality-select"
                             onchange="window.SyncDownloadPanel.onQualityChange(this.value)"
                             class="px-3 py-1.5 text-xs font-semibold rounded-xl bg-white dark:bg-gray-700/80 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-600 shadow-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/40 cursor-pointer">
+                            <option value="master">母带音质</option>
+                            <option value="atmos_plus">增强空间音频</option>
+                            <option value="atmos">空间音频</option>
+                            <option value="hires">高解析度</option>
+                            <option value="flac24bit">24bit无损</option>
+                            <option value="flac">无损音质</option>
                             <option value="320k">高品质 (320k)</option>
                             <option value="128k">标准 (128k)</option>
-                            <option value="flac">无损 (FLAC)</option>
-                            <option value="flac24bit">Hi-Res (FLAC 24bit)</option>
                         </select>
                     </div>
                 </div>
