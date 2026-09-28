@@ -5377,179 +5377,230 @@
     </div>
 
     <!-- Local music remaster modal -->
-    <div id="lm-remaster-modal" class="fixed inset-0 z-[110] hidden items-center justify-center p-3 md:p-6">
-        <div class="absolute inset-0 bg-black/65 backdrop-blur-sm" onclick="LocalMusicManager.closeRemasterModal()">
+    <div id="lm-remaster-modal" class="fixed inset-0 z-[110] hidden items-center justify-center p-2.5 md:p-6 transition-all duration-300">
+        <div class="absolute inset-0 bg-black/75 backdrop-blur-md transition-opacity" onclick="LocalMusicManager.closeRemasterModal()">
         </div>
         <div
-            class="relative t-bg-panel border t-border-main rounded-xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col overflow-hidden">
-            <div class="px-4 py-3 md:px-5 border-b t-border-main flex items-center justify-between shrink-0">
+            class="relative t-bg-panel border t-border-main rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:h-[86vh] md:max-h-[780px] flex flex-col overflow-hidden backdrop-blur-xl bg-opacity-95">
+            <!-- Modal Header -->
+            <div class="px-5 py-3.5 border-b t-border-main flex items-center justify-between shrink-0 bg-gray-50/50 dark:bg-white/[0.02]">
                 <div class="flex items-center gap-3 min-w-0">
                     <div
-                        class="w-9 h-9 rounded-lg bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center shrink-0">
-                        <i class="fas fa-exchange-alt"></i>
+                        class="w-9 h-9 rounded-xl bg-gradient-to-tr from-red-600 via-rose-500 to-orange-400 text-white flex items-center justify-center shadow-lg shadow-red-500/20 shrink-0">
+                        <i class="fas fa-wand-magic-sparkles text-xs"></i>
                     </div>
                     <div class="min-w-0">
-                        <h3 class="text-base font-bold t-text-main">歌曲洗版</h3>
-                        <p id="lm-remaster-modal-subtitle" class="text-[11px] t-text-muted truncate">仅处理服务器下载目录，不处理缓存目录</p>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-base font-bold t-text-main tracking-tight">歌曲洗版</h3>
+                            <span id="lm-remaster-source-badge" class="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">下载目录</span>
+                        </div>
+                        <p id="lm-remaster-modal-subtitle" class="text-[11px] t-text-muted truncate mt-0.5">批量升级音质并自动校验替换，已内置低音质缩水保护机制</p>
                     </div>
                 </div>
                 <button onclick="LocalMusicManager.closeRemasterModal()"
-                    class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                    class="w-8 h-8 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all duration-200"
                     title="关闭">
-                    <i class="fas fa-times"></i>
+                    <i class="fas fa-times text-sm"></i>
                 </button>
             </div>
 
-            <div class="p-4 md:p-5 overflow-y-auto custom-scrollbar space-y-4">
-                <div class="flex flex-col md:flex-row md:items-end gap-3">
-                    <div class="flex-1">
-                        <label for="lm-remaster-quality" class="block text-xs font-bold t-text-main mb-2">目标音质</label>
-                        <select id="lm-remaster-quality" class="lm-select !w-full !py-2.5">
-                            <option value="128k">标准音质</option>
-                            <option value="320k">高音质</option>
-                            <option value="flac">无损音质</option>
-                            <option value="flac24bit">24bit无损</option>
-                            <option value="hires">高解析度</option>
-                            <option value="atmos">空间音频</option>
-                            <option value="atmos_plus">增强空间音频</option>
-                            <option value="master">母带音质</option>
-                        </select>
-                    </div>
-                    <button id="lm-remaster-start" onclick="LocalMusicManager.startRemaster()" disabled
-                        class="h-10 px-5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <i class="fas fa-play"></i><span>开始洗版</span>
-                    </button>
-                    <button id="lm-remaster-cancel" onclick="LocalMusicManager.cancelRemaster()"
-                        class="hidden h-10 px-5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-bold text-sm items-center justify-center gap-2">
-                        <i class="fas fa-stop"></i><span>停止</span>
-                    </button>
-                </div>
-
-                <div class="border t-border-main rounded-lg overflow-hidden">
-                    <div
-                        class="px-3 py-2.5 t-bg-main border-b t-border-main flex flex-col md:flex-row md:items-center gap-2 md:justify-between">
-                        <div class="text-xs font-bold t-text-main">
-                            选择歌曲
-                            <span class="ml-1 font-normal t-text-muted">已选 <span
-                                    id="lm-remaster-selected-count">0</span> / <span
-                                    id="lm-remaster-available-count">0</span> 首</span>
+            <!-- Modal Body: Responsive Split Layout -->
+            <div class="p-4 md:p-5 flex-1 min-h-0 overflow-y-auto md:overflow-hidden grid grid-cols-1 md:grid-cols-12 gap-4">
+                
+                <!-- Left Panel: Song Selection & Search (7 cols) -->
+                <div class="md:col-span-7 flex flex-col min-h-[360px] md:min-h-0 border t-border-main rounded-xl overflow-hidden shadow-xs bg-gray-50/20 dark:bg-white/[0.01]">
+                    <!-- Top Toolbar -->
+                    <div class="px-3.5 py-2.5 t-bg-main border-b t-border-main flex items-center justify-between gap-2 shrink-0">
+                        <div class="flex items-center gap-1.5 text-xs font-bold t-text-main min-w-0">
+                            <i class="fas fa-list-check text-red-500 text-xs shrink-0"></i>
+                            <span class="truncate">待选歌曲</span>
+                            <span class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 dark:bg-white/10 t-text-muted shrink-0">
+                                已选 <b id="lm-remaster-selected-count" class="text-red-500 mx-1">0</b> / <span
+                                    id="lm-remaster-available-count" class="ml-1">0</span>
+                            </span>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1.5 shrink-0">
                             <button id="lm-remaster-select-all" onclick="LocalMusicManager.selectAllRemasterResults()"
-                                class="h-7 px-2.5 text-[11px] border t-border-main rounded-md hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed">
-                                全选结果
+                                class="h-6.5 px-2 text-[11px] font-medium border t-border-main rounded-md hover:t-bg-track hover:border-red-400/50 flex items-center gap-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                                <i class="fas fa-check-double text-[9px]"></i>
+                                全选
                             </button>
                             <button id="lm-remaster-clear-selection"
                                 onclick="LocalMusicManager.clearRemasterSelection()" disabled
-                                class="h-7 px-2.5 text-[11px] border t-border-main rounded-md hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed">
+                                class="h-6.5 px-2 text-[11px] font-medium border t-border-main rounded-md hover:t-bg-track flex items-center gap-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                                <i class="fas fa-times text-[9px]"></i>
                                 清空
                             </button>
                         </div>
                     </div>
-                    <div class="p-2 border-b t-border-main">
+                    
+                    <!-- Search Bar -->
+                    <div class="p-2 border-b t-border-main t-bg-main shrink-0">
                         <div class="relative">
                             <i
-                                class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[10px] t-text-muted pointer-events-none z-10"></i>
+                                class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none z-10"></i>
                             <div id="lm-remaster-search" contenteditable="true"
-                                data-placeholder="搜索歌曲、歌手、专辑或音质... (加空格激活 & | ! 逻辑)"
+                                data-placeholder="搜索歌曲、歌手、专辑或音质... (空格激活 & | !)"
                                 oninput="LocalMusicManager.setRemasterSearch(this)"
                                 onkeydown="LocalMusicManager.handleRichKeydown(event, this)"
                                 onpaste="LocalMusicManager.handleRichPaste(event, this)"
                                 oncopy="LocalMusicManager.handleRichCopy(event, this)"
                                 oncut="LocalMusicManager.handleRichCopy(event, this)"
-                                class="lm-rich-search-input w-full h-9 pl-8 pr-3 t-bg-main border t-border-main rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-red-500/30 overflow-x-auto whitespace-nowrap flex items-center">
+                                class="lm-rich-search-input w-full h-8 pl-7.5 pr-2.5 t-bg-main border t-border-main rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-red-500/30 overflow-x-auto whitespace-nowrap flex items-center transition-all">
                             </div>
                         </div>
                     </div>
-                    <div id="lm-remaster-song-list" class="h-52 overflow-y-auto custom-scrollbar">
-                        <div class="h-full flex items-center justify-center text-xs t-text-muted">正在加载下载歌曲...</div>
+
+                    <!-- Song List -->
+                    <div id="lm-remaster-song-list" class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-gray-100 dark:divide-white/[0.04] min-h-[220px]">
+                        <div class="h-full flex items-center justify-center text-xs t-text-muted">正在加载歌曲...</div>
                     </div>
-                    <div class="h-9 px-3 t-bg-main border-t t-border-main flex items-center justify-between">
-                        <span id="lm-remaster-source-hint" class="text-[10px] t-text-muted">仅列出下载目录中的歌曲</span>
-                        <div class="flex items-center gap-2">
+
+                    <!-- Bottom Pagination -->
+                    <div class="h-8.5 px-3 t-bg-main border-t t-border-main flex items-center justify-between shrink-0">
+                        <span id="lm-remaster-source-hint" class="text-[10px] t-text-muted flex items-center gap-1 truncate">
+                            <i class="fas fa-circle-info text-[9px]"></i>
+                            <span>仅列出下载目录中的歌曲</span>
+                        </span>
+                        <div class="flex items-center gap-1 shrink-0">
                             <button id="lm-remaster-selection-prev"
                                 onclick="LocalMusicManager.changeRemasterSelectionPage(-1)"
-                                class="w-7 h-7 flex items-center justify-center rounded-md hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed"
+                                class="w-6 h-6 flex items-center justify-center rounded-md border t-border-main hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                 title="上一页">
-                                <i class="fas fa-chevron-left text-[10px]"></i>
+                                <i class="fas fa-chevron-left text-[9px]"></i>
                             </button>
                             <span id="lm-remaster-selection-page-info"
-                                class="min-w-12 text-center text-[10px] t-text-muted">1 / 1</span>
+                                class="min-w-10 text-center text-[10px] font-mono t-text-muted font-medium">1 / 1</span>
                             <button id="lm-remaster-selection-next"
                                 onclick="LocalMusicManager.changeRemasterSelectionPage(1)"
-                                class="w-7 h-7 flex items-center justify-center rounded-md hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed"
+                                class="w-6 h-6 flex items-center justify-center rounded-md border t-border-main hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                 title="下一页">
-                                <i class="fas fa-chevron-right text-[10px]"></i>
+                                <i class="fas fa-chevron-right text-[9px]"></i>
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <div
-                    class="text-xs leading-relaxed text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-3 rounded-lg">
-                    升级时若无法取得高于当前文件的音质，该歌曲会跳过；目标音质不可用但仍可取得有效的较低音质时，结果会显示实际采用音质。处理期间请勿手动移动或删除下载目录中的歌曲。
+                <!-- Right Panel: Controls, Progress & Results (5 cols) -->
+                <div class="md:col-span-5 flex flex-col gap-3 min-h-0">
+                    <!-- Target Quality & Trigger Console -->
+                    <div class="p-3 rounded-xl border t-border-main bg-gray-50/60 dark:bg-white/[0.02] shadow-xs shrink-0 space-y-2.5">
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label for="lm-remaster-quality" class="text-xs font-bold t-text-main flex items-center gap-1.5">
+                                    <i class="fas fa-sliders text-[11px] text-red-500"></i>
+                                    目标音质
+                                </label>
+                                <span class="text-[10px] t-text-muted">无更高音质将智能跳过</span>
+                            </div>
+                            <select id="lm-remaster-quality" class="lm-select !w-full !py-2 !pl-3 !pr-8 rounded-lg text-xs font-semibold t-bg-main border t-border-main focus:ring-2 focus:ring-red-500/30 transition-all">
+                                <option value="128k">标准音质 (128Kbps MP3)</option>
+                                <option value="320k">高音质 (320Kbps MP3)</option>
+                                <option value="flac">无损音质 (FLAC Lossless)</option>
+                                <option value="flac24bit">24bit 无损 (FLAC Hi-Res 24bit)</option>
+                                <option value="hires">高解析度 (Hi-Res Audio)</option>
+                                <option value="atmos">空间音频 (Dolby Atmos)</option>
+                                <option value="atmos_plus">增强空间音频 (Dolby Atmos Plus)</option>
+                                <option value="master">母带音质 (Master Quality)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="flex items-center gap-2">
+                            <button id="lm-remaster-start" onclick="LocalMusicManager.startRemaster()" disabled
+                                class="w-full h-9 px-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-red-500/20 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200">
+                                <i class="fas fa-play text-[10px]"></i><span>开始洗版任务</span>
+                            </button>
+                            <button id="lm-remaster-cancel" onclick="LocalMusicManager.cancelRemaster()"
+                                class="hidden w-full h-9 px-4 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-bold text-xs items-center justify-center gap-2 transition-all">
+                                <i class="fas fa-stop text-[10px]"></i><span>停止任务</span>
+                            </button>
+                        </div>
+
+                        <!-- Mini Protection Hint -->
+                        <div class="text-[10px] leading-normal text-amber-800/90 dark:text-amber-200/80 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                            <i class="fas fa-shield-halved text-amber-500 text-[10px] shrink-0"></i>
+                            <span>新文件若体积缩水将拒绝替换，原文件安全无忧。</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Progress & Metrics Dashboard -->
+                    <div class="p-3 rounded-xl border t-border-main bg-gray-50/40 dark:bg-white/[0.01] shadow-xs shrink-0 space-y-2.5">
+                        <div>
+                            <div class="flex items-center justify-between text-xs mb-1.5">
+                                <span id="lm-remaster-status" class="font-bold t-text-main flex items-center gap-1.5 text-xs">
+                                    <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                                    尚未开始
+                                </span>
+                                <span id="lm-remaster-progress-text" class="font-mono font-semibold text-[11px] text-red-500 bg-red-50 dark:bg-red-950/40 px-2 py-0.2 rounded-full border border-red-200 dark:border-red-900/40">0 / 0</span>
+                            </div>
+                            <div class="h-2 bg-gray-200/80 dark:bg-gray-800/80 rounded-full overflow-hidden border t-border-main p-0.2 shadow-inner">
+                                <div id="lm-remaster-progress" class="h-full bg-gradient-to-r from-red-500 via-rose-500 to-amber-500 rounded-full transition-all duration-300 shadow-sm"
+                                    style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- 5 Stats Filter Buttons (Grid 5 cols) -->
+                        <div class="grid grid-cols-5 gap-1.5 text-center">
+                            <button type="button" data-remaster-result-filter="all"
+                                onclick="LocalMusicManager.setRemasterResultFilter('all')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-gray-50/40 dark:bg-white/[0.01]"
+                                aria-pressed="true" title="全部">
+                                <div class="text-[9px] font-medium t-text-muted truncate">总数</div>
+                                <div id="lm-remaster-total" class="text-xs font-black t-text-main font-mono mt-0.5">0</div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="successful"
+                                onclick="LocalMusicManager.setRemasterResultFilter('successful')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-emerald-500/[0.02]"
+                                aria-pressed="false" title="成功">
+                                <div class="text-[9px] font-medium text-emerald-600 dark:text-emerald-400 truncate">成功</div>
+                                <div id="lm-remaster-replaced" class="text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">0</div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="downgraded"
+                                onclick="LocalMusicManager.setRemasterResultFilter('downgraded')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-amber-500/[0.02]"
+                                aria-pressed="false" title="降级">
+                                <div class="text-[9px] font-medium text-amber-600 dark:text-amber-400 truncate">降级</div>
+                                <div id="lm-remaster-downgraded" class="text-xs font-black text-amber-600 dark:text-amber-400 font-mono mt-0.5">0</div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="skipped"
+                                onclick="LocalMusicManager.setRemasterResultFilter('skipped')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-gray-500/[0.02]"
+                                aria-pressed="false" title="已跳过">
+                                <div class="text-[9px] font-medium text-gray-500 dark:text-gray-400 truncate">跳过</div>
+                                <div id="lm-remaster-skipped" class="text-xs font-black text-gray-500 dark:text-gray-400 font-mono mt-0.5">0</div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="failed"
+                                onclick="LocalMusicManager.setRemasterResultFilter('failed')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-red-500/[0.02]"
+                                aria-pressed="false" title="失败">
+                                <div class="text-[9px] font-medium text-red-600 dark:text-red-400 truncate">失败</div>
+                                <div id="lm-remaster-failed" class="text-xs font-black text-red-600 dark:text-red-400 font-mono mt-0.5">0</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Live Results List -->
+                    <div class="flex-1 min-h-[160px] flex flex-col border t-border-main rounded-xl overflow-hidden shadow-xs bg-gray-50/20 dark:bg-white/[0.01]">
+                        <div id="lm-remaster-results-title"
+                            class="px-3 py-2 t-bg-main border-b t-border-main text-xs font-bold flex items-center gap-1.5 shrink-0">
+                            <i class="fas fa-square-poll-vertical text-red-500 text-xs"></i>
+                            <span>处理结果</span>
+                        </div>
+                        <div id="lm-remaster-results"
+                            class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-gray-100 dark:divide-white/[0.04] min-h-0">
+                            <div class="h-full min-h-[120px] flex flex-col items-center justify-center text-xs t-text-muted gap-1.5">
+                                <i class="fas fa-clipboard-list text-xl opacity-20"></i>
+                                <span>暂无处理结果</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div>
-                    <div class="flex items-center justify-between text-xs mb-2">
-                        <span id="lm-remaster-status" class="font-bold t-text-main">尚未开始</span>
-                        <span id="lm-remaster-progress-text" class="t-text-muted">0 / 0</span>
-                    </div>
-                    <div class="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                        <div id="lm-remaster-progress" class="h-full bg-red-500 transition-all duration-300"
-                            style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-center">
-                    <button type="button" data-remaster-result-filter="all"
-                        onclick="LocalMusicManager.setRemasterResultFilter('all')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="true">
-                        <div id="lm-remaster-total" class="text-lg font-bold">0</div>
-                        <div class="text-[10px] t-text-muted">总数</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="successful"
-                        onclick="LocalMusicManager.setRemasterResultFilter('successful')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-replaced" class="text-lg font-bold text-emerald-600">0</div>
-                        <div class="text-[10px] t-text-muted">成功</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="downgraded"
-                        onclick="LocalMusicManager.setRemasterResultFilter('downgraded')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-downgraded" class="text-lg font-bold text-amber-600">0</div>
-                        <div class="text-[10px] t-text-muted">发生降级</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="skipped"
-                        onclick="LocalMusicManager.setRemasterResultFilter('skipped')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-skipped" class="text-lg font-bold text-gray-500">0</div>
-                        <div class="text-[10px] t-text-muted">已跳过</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="failed"
-                        onclick="LocalMusicManager.setRemasterResultFilter('failed')"
-                        class="border t-border-main rounded-lg p-2 col-span-2 md:col-span-1 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-failed" class="text-lg font-bold text-red-600">0</div>
-                        <div class="text-[10px] t-text-muted">失败</div>
-                    </button>
-                </div>
-
-                <div class="border t-border-main rounded-lg overflow-hidden">
-                    <div id="lm-remaster-results-title"
-                        class="px-3 py-2 t-bg-main border-b t-border-main text-xs font-bold">处理结果</div>
-                    <div id="lm-remaster-results"
-                        class="max-h-72 overflow-y-auto custom-scrollbar divide-y t-border-main">
-                        <div class="p-6 text-center text-xs t-text-muted">暂无结果</div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
+
+
 
     <!-- Project Agreement Modal Overlay -->
     <div id="project-agreement-modal"

@@ -98,6 +98,7 @@ const isRetryableError = (err: any) => {
     '原文件已不存在',
     '实际音质与原音质相同，无需替换',
     'Invalid music file path',
+    '新文件（',
   ].some(value => message.includes(value))
 }
 

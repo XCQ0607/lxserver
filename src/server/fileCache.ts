@@ -2339,6 +2339,7 @@ export const replaceDownloadedMusicItem = async (
 
     const oldAudioPath = resolveMusicPath(root, currentItem.filename)
     if (!fs.existsSync(oldAudioPath)) throw new Error('原文件已不存在')
+    const oldAudioSize = fs.statSync(oldAudioPath).size
 
     const stageId = crypto.randomBytes(12).toString('hex')
     const stageUsername = `.remaster-staging/${stageId}`
@@ -2370,6 +2371,9 @@ export const replaceDownloadedMusicItem = async (
         const sourceAudioPath = resolveMusicPath(stageRoot, downloadedItem.filename)
         const sourceStats = fs.existsSync(sourceAudioPath) ? fs.statSync(sourceAudioPath) : null
         if (!sourceStats?.isFile() || sourceStats.size <= 0) throw new Error('新音质文件无效或为空')
+        if (sourceStats.size < oldAudioSize) {
+            throw new Error(`新文件（${sourceStats.size} 字节）小于原文件（${oldAudioSize} 字节），音源可能返回了低质量文件，已拒绝替换`)
+        }
         const stagedHasCover = readEmbeddedCoverState(sourceAudioPath)
         const originalCover = stagedHasCover
             ? null
