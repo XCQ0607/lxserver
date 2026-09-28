@@ -18,7 +18,8 @@
     "prd": "pm2 start ecosystem.config.js --env production",
     "publish": "node publish",
     "electron:build": "npm run build",
-    "electron:dist": "npm run electron:build && electron-builder"
+    "electron:dist": "npm run electron:build && electron-builder",
+    "prepare": "husky"
   },
   "engines": {
     "node": ">= 20",
@@ -61,6 +62,8 @@
     "ws": "8.21.3"
   },
   "devDependencies": {
+    "@commitlint/cli": "^21.2.3",
+    "@commitlint/config-conventional": "^21.2.3",
     "@tsconfig/node16": "^16.1.1",
     "@tsconfig/recommended": "^1.0.13",
     "@types/archiver": "^8.0.0",
@@ -72,6 +75,7 @@
     "changelog-parser": "^4.1.0",
     "electron": "^43.7.5",
     "electron-builder": "^26.15.3",
+    "husky": "^9.1.7",
     "nodemon": "^3.1.14",
     "rimraf": "^5.0.5",
     "sharp": "^0.35.4",
