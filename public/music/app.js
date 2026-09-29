@@ -14202,7 +14202,7 @@ function showInput(title, message, options = {}) {
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
-        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
