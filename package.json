@@ -84,7 +84,7 @@
     "ts-node": "^10.9.2",
     "tsc-alias": "^1.9.5",
     "tsconfig-paths": "^4.2.0",
-    "tsx": "^4.23.1",
+    "tsx": "^4.23.15",
     "typescript": "^7.0.2"
   },
   "nodemonConfig": {
