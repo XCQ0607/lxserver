@@ -59,7 +59,7 @@
     "utf-8-validate": "^6.0.6",
     "vm2": "^3.12.2",
     "webdav": "^5.11.0",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
