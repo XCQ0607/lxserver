@@ -42,6 +42,9 @@ export const CACHE_ROOTS = {
 
 let currentCacheLocation = CACHE_ROOTS.ROOT
 const CACHE_LIST_SYNC_TTL = 30 * 1000
+// 歌词先于音频落盘时没有真实音质可写，音质段用这个占位值；
+// 音频定名后的对齐候选（见 alignStaleLyricName 调用点）必须引用同一个常量
+const LYRIC_PENDING_QUALITY = 'unknown'
 const cacheListSyncState: Map<string, { lastSync: number, pending?: Promise<void> }> = new Map()
 
 // Helper to get actual directory path
@@ -135,6 +138,7 @@ export interface DownloadProvenance {
     requestedSource?: string
     downloadSource?: string
     sourceName?: string
+    customTargetDir?: string
 }
 
 class CacheIndexManager {
@@ -1019,6 +1023,75 @@ export const getCacheList = async (username?: string) => {
 }
 
 /**
+ * 磁盘上存在、但索引里没有任何条目引用的歌词文件。
+ * 歌词先于音频落盘时用的是兜底音质名，与音频最终名不同名，因此既不被 syncCacheIndex 认领、
+ * 也不被 removeCacheFile 的「同名 .lrc」分支命中，删除歌曲后会永久残留。
+ * 只读：不写索引、不改 mtime；返回的 filename 可直接传给 /api/music/cache/remove。
+ */
+export const getOrphanLyricFiles = async (username?: string): Promise<Array<{ filename: string, folder: CacheFolder, size: number, mtime: number }>> => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const folders: Array<'cache' | 'music'> = ['cache', 'music']
+    const audioExtensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav']
+
+    // 两个目录的索引都要收：lyricFilename 可能是相对自身根目录的路径，也可能带 ../ 跨到另一侧
+    const referencedPaths = new Set<string>()
+    for (const folder of folders) {
+        const root = getCacheDir(normalizedUsername, folder === 'music')
+        for (const item of indexManager.getAll(normalizedUsername, folder)) {
+            if (!item.lyricFilename) continue
+            const safe = resolveCacheRelativePath(root, item.lyricFilename)
+            referencedPaths.add(path.resolve(safe ?? path.join(root, item.lyricFilename)))
+        }
+    }
+
+    const orphans: Array<{ filename: string, folder: CacheFolder, size: number, mtime: number }> = []
+    for (const folder of folders) {
+        const dir = getCacheDir(normalizedUsername, folder === 'music')
+        if (!fs.existsSync(dir)) continue
+
+        const lyricFiles: string[] = []
+        const audioBaseNames = new Set<string>()
+        const walk = async (rel: string) => {
+            let entries: fs.Dirent[]
+            try {
+                entries = await fs.promises.readdir(path.join(dir, rel), { withFileTypes: true })
+            } catch (e) {
+                return
+            }
+            for (const entry of entries) {
+                const childRel = rel ? `${rel}/${entry.name}` : entry.name
+                if (entry.isDirectory()) {
+                    await walk(childRel)
+                    continue
+                }
+                if (entry.name.endsWith('.lrc')) {
+                    lyricFiles.push(childRel)
+                    continue
+                }
+                const ext = path.extname(entry.name).toLowerCase()
+                if (audioExtensions.includes(ext)) {
+                    audioBaseNames.add(childRel.substring(0, childRel.length - path.extname(childRel).length))
+                }
+            }
+        }
+        await walk('')
+
+        for (const lyricRel of lyricFiles) {
+            const lyricAbs = path.resolve(path.join(dir, lyricRel))
+            if (referencedPaths.has(lyricAbs)) continue
+            // 同名音频就在旁边：syncCacheIndex 会把它认领成那条音频的歌词，不算残留
+            if (audioBaseNames.has(lyricRel.substring(0, lyricRel.length - '.lrc'.length))) continue
+            try {
+                const stats = await fs.promises.stat(lyricAbs)
+                orphans.push({ filename: lyricRel, folder, size: stats.size, mtime: stats.mtimeMs })
+            } catch (e) { }
+        }
+    }
+
+    return orphans.sort((a, b) => b.mtime - a.mtime)
+}
+
+/**
  * Batch rename existing files to the current naming pattern
  */
 export const batchRenameCacheFiles = async (username: string | undefined) => {
@@ -1479,6 +1552,10 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
         coverCacheHash = getCoverCacheHash(filename, fs.statSync(filePath))
     } catch (e) { }
 
+    // 索引条目要先取：歌词可能记在 item.lyricFilename 上，与「音频同名 .lrc」并不是同一个文件
+    const items = indexManager.getAll(normalizedUsername, folder)
+    const item = items.find(i => i.filename === filename)
+
     try {
         fs.unlinkSync(filePath)
     } catch (e: any) {
@@ -1490,8 +1567,12 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
     const ext = path.extname(filename)
     if (ext !== '.lrc') {
         const baseWithoutExt = filename.substring(0, filename.length - ext.length)
-        const lrcPath = resolveCacheRelativePath(dir, baseWithoutExt + '.lrc')
-        if (lrcPath && fs.existsSync(lrcPath)) {
+        const companionLrcPath = resolveCacheRelativePath(dir, baseWithoutExt + '.lrc')
+        const indexedLrcPath = item?.lyricFilename ? resolveCacheRelativePath(dir, item.lyricFilename) : null
+        const lrcPaths = [companionLrcPath, indexedLrcPath]
+            .filter((p, i, all): p is string => !!p && all.indexOf(p) === i)
+        for (const lrcPath of lrcPaths) {
+            if (!fs.existsSync(lrcPath)) continue
             try {
                 fs.unlinkSync(lrcPath)
             } catch (e: any) {
@@ -1503,8 +1584,6 @@ export const removeCacheFile = (filename: string, username?: string, requestedFo
     // 删除音频与歌词后，清理可能变空的父级歌单分类目录
     cleanEmptyParentDirs(filePath, dir)
 
-    const items = indexManager.getAll(normalizedUsername, folder)
-    const item = items.find(i => i.filename === filename)
     if (item) indexManager.remove(normalizedUsername, item.id, folder, item.quality)
 
     // Cover cache is shared by filename. Preserve it while the same relative file
@@ -1728,10 +1807,10 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
     return { exists: false }
 }
 
-export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string, isOnlyDownload?: boolean) => {
+export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string, isOnlyDownload?: boolean, lyricQuality?: string) => {
     try {
         let baseName: string
-        let quality = songInfo.quality || 'unknown'
+        let quality = lyricQuality || songInfo.quality || LYRIC_PENDING_QUALITY
         let dir: string
 
         const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
@@ -1763,11 +1842,7 @@ export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string,
         } else {
             // Audio not found, fallback to target dir
             dir = ensureDir(username, isOnlyDownload)
-            if (songInfo.quality) {
-                baseName = getFileName(songInfo, songInfo.quality, isOnlyDownload, username)
-            } else {
-                baseName = getFileName(songInfo, 'unknown', isOnlyDownload, username)
-            }
+            baseName = getFileName(songInfo, quality, isOnlyDownload, username)
         }
 
         const lyricFile = baseName + '.lrc'
@@ -1908,11 +1983,27 @@ const ensureCachedLyrics = async (
     }
 }
 
-export interface DownloadProvenance {
-    requestedSource?: string
-    downloadSource?: string
-    sourceName?: string
-    customTargetDir?: string
+// 歌词先于音频落盘时，saveLyricCache 在索引里找不到音频，会用兜底音质名（通常是 unknown，
+// 也可能是修正前的期望音质）命名歌词。此后目录同步与删除逻辑都只按「与音频同名」配对，
+// 这类歌词既进不了索引、也无法被删除功能命中，会永久留在磁盘上。
+// 音频最终定名后，用同一套兜底规则反查一次，把歌词改成与音频同名，交给 ensureCachedLyrics 登记。
+const alignStaleLyricName = (songInfo: any, dir: string, finalBaseName: string, fallbackQualities: Array<string | undefined>, isOnlyDownload?: boolean, username?: string) => {
+    const target = path.join(dir, finalBaseName + '.lrc')
+    if (fs.existsSync(target)) return
+
+    for (const q of [...new Set(fallbackQualities.filter(Boolean))]) {
+        const staleBaseName = getFileName(songInfo, q, isOnlyDownload, username)
+        if (!staleBaseName || staleBaseName === finalBaseName) continue
+        const stalePath = path.join(dir, staleBaseName + '.lrc')
+        if (!fs.existsSync(stalePath)) continue
+        try {
+            safeRenameSync(stalePath, target)
+            console.log(`[文件缓存] 歌词文件名已与音频对齐: ${staleBaseName}.lrc -> ${finalBaseName}.lrc`)
+            return
+        } catch (e: any) {
+            console.warn(`[文件缓存] 歌词文件名对齐失败 (${staleBaseName}.lrc): ${e?.message || e}`)
+        }
+    }
 }
 
 export const downloadAndCache = async (songInfo: any, url: string, quality?: string, username?: string, signal?: AbortSignal, isOnlyDownload?: boolean, shouldCacheLyric: boolean = true, shouldEmbedLyric: boolean = true, provenance: DownloadProvenance = {}) => {
@@ -2275,6 +2366,8 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         taggedItem.size = taggedStats.size
                         indexManager.save(normalizedUsername, folderType)
                     }
+
+                    alignStaleLyricName(songInfo, dir, finalBaseName, [LYRIC_PENDING_QUALITY, quality, songInfo.quality], isOnlyDownload, username)
 
                     await ensureCachedLyrics(songInfo, actualQuality, username, isOnlyDownload, finalPath, folderType, shouldCacheLyric, shouldEmbedLyric)
 

@@ -4379,12 +4379,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           }
           username = verified
         }
-        void fileCache.getCacheList(username).then(list => {
+        void Promise.all([fileCache.getCacheList(username), fileCache.getOrphanLyricFiles(username).catch(() => [])]).then(([list, orphanLyrics]) => {
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
           })
-          res.end(JSON.stringify({ success: true, data: list }))
+          res.end(JSON.stringify({ success: true, data: list, orphanLyrics }))
         }).catch(err => {
           res.writeHead(500)
           res.end(err.message)
@@ -5313,7 +5313,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/lyric' && req.method === 'POST') {
         void readBody(req).then(body => {
           try {
-            const { songInfo, lyricsObj, enableOnlyDownloadMode } = JSON.parse(body)
+            const { songInfo, lyricsObj, enableOnlyDownloadMode, quality } = JSON.parse(body)
             const reqUsername = (req.headers['x-user-name'] as string) || ''
             const isPublic = !reqUsername || reqUsername === 'default'
             let username = '_open'
@@ -5338,7 +5338,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (songInfo?.folder === 'custom') {
               success = customMusicManager.saveCustomLyricCache(songInfo, lyricsObj, username)
             } else {
-              success = fileCache.saveLyricCache(songInfo, lyricsObj, username, !!enableOnlyDownloadMode)
+              success = fileCache.saveLyricCache(songInfo, lyricsObj, username, !!enableOnlyDownloadMode, quality)
               if (!success) {
                 // 如果在常规缓存没找到，尝试在自定义目录匹配
                 success = customMusicManager.saveCustomLyricCache(songInfo, lyricsObj, username)
