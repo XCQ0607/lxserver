@@ -19,7 +19,7 @@
     "publish": "node publish",
     "electron:build": "npm run build",
     "electron:dist": "npm run electron:build && electron-builder",
-    "prepare": "husky"
+    "prepare": "husky || true"
   },
   "engines": {
     "node": ">= 20",
