@@ -8556,6 +8556,7 @@ async function updateServerCacheSize() {
 
 // --- 服务器缓存管理 (Server Cache Management) ---
 let currentCacheList = [];
+let currentOrphanLyrics = [];
 let selectedCacheFiles = new Set();
 let cacheBatchMode = false;
 
@@ -8599,6 +8600,7 @@ async function refreshCacheList() {
 
         if (data.success) {
             currentCacheList = data.data;
+            currentOrphanLyrics = data.orphanLyrics || [];
             renderCacheList();
             updateCacheHeaderStats();
         } else {
@@ -8623,7 +8625,7 @@ function updateCacheHeaderStats() {
 
 function renderCacheList() {
     const container = document.getElementById('cache-list-container');
-    if (currentCacheList.length === 0) {
+    if (currentCacheList.length === 0 && currentOrphanLyrics.length === 0) {
         container.innerHTML = window.SystemDownloadManager.getStatusHtml('fa-cloud-download-alt', '暂无服务器缓存歌曲');
         return;
     }
@@ -8723,7 +8725,41 @@ function renderCacheList() {
                 </div>
             </div>
         `;
-    }).join('');
+    }).join('') + renderOrphanLyricSection();
+}
+
+/**
+ * 未引用歌词：磁盘上有 .lrc，但没有任何音频索引条目引用它（歌词先于音频落盘时用的是兜底音质名，
+ * 与音频最终名不同名，因此目录同步不认领、按音频删除的配套逻辑也碰不到它）。
+ * 这类文件不会被播放命中；删除与缓存文件走同一个 cache/remove 接口。
+ */
+function renderOrphanLyricSection() {
+    if (currentOrphanLyrics.length === 0) return '';
+    const totalSize = currentOrphanLyrics.reduce((acc, curr) => acc + (curr.size || 0), 0);
+    const rows = currentOrphanLyrics.map((item, idx) => `
+        <div class="flex items-center gap-3 p-2.5 rounded-2xl hover:t-bg-panel-light transition-all duration-300">
+            <div class="flex-shrink-0 w-5 flex items-center justify-center t-text-muted">
+                <i class="fas fa-file-alt text-xs"></i>
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="text-xs t-text-main truncate" title="${item.filename}">${item.filename}</div>
+                <div class="text-[10px] t-text-muted">${item.folder === 'music' ? '下载目录' : '缓存目录'} · ${(item.size / 1024).toFixed(1)} KB</div>
+            </div>
+            <button onclick="event.stopPropagation(); removeCacheItem(${idx}, true)"
+                    class="p-2 t-text-muted hover:text-red-500 transition-colors" title="删除">
+                <i class="fas fa-trash-alt text-xs"></i>
+            </button>
+        </div>
+    `).join('');
+
+    return `
+        <div class="mt-4 pt-3 border-t t-border-main">
+            <div class="flex items-center justify-between px-1 mb-2">
+                <div class="text-[10px] font-bold t-text-muted tracking-wider">未引用歌词 · ${currentOrphanLyrics.length} 个 · ${(totalSize / 1024).toFixed(1)} KB</div>
+            </div>
+            ${rows}
+        </div>
+    `;
 }
 
 function openCacheItemPlaylist(index) {
@@ -8865,8 +8901,8 @@ function updateCacheBatchCount() {
     if (el) el.textContent = selectedCacheFiles.size;
 }
 
-async function removeCacheItem(index) {
-    const item = currentCacheList[index];
+async function removeCacheItem(index, fromOrphanLyrics) {
+    const item = fromOrphanLyrics ? currentOrphanLyrics[index] : currentCacheList[index];
     if (!item) {
         showError('文件信息已失效，请刷新后重试');
         return;

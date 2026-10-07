@@ -128,11 +128,11 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 用户可以通过接口管理缓存在服务器上的音乐文件和歌词。
 
 - `GET /api/music/cache/stats`: 获取当前用户的缓存统计（文件数、占用空间）。
-- `GET /api/music/cache/list`: 获取详细的缓存文件列表。
+- `GET /api/music/cache/list`: 获取详细的缓存文件列表。响应除 `data`（音频条目）外还含 `orphanLyrics`：磁盘上存在但没有任何索引条目引用的歌词文件（`{ filename, folder, size, mtime }`，`filename` 为相对所在目录的路径），可用 `cache/remove` 按 `{ filename, folder }` 直接删除。
 - `POST /api/music/cache/download`: 触发服务器后台下载歌曲并缓存。
 - `POST /api/music/cache/remove`: 删除指定的缓存文件。
 - `POST /api/music/cache/clear`: 清理所有音乐缓存。
-- `POST /api/music/cache/lyric`: 保存或读取歌词缓存。
+- `POST /api/music/cache/lyric`: 保存或读取歌词缓存。请求体支持可选的 `quality`（音质）；服务端按 `quality` → `songInfo.quality` → `unknown` 占位值决定歌词文件名的音质段，不传时与旧行为一致。
 
 ### 5.1 自定义音乐目录与洗版 (`/api/music/custom/*`)
 

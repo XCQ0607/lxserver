@@ -165,7 +165,7 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 - **`GET /api/music/cache/directories`**: Get real physical absolute paths for cache and download directories.
 - **`POST /api/music/cache/sync`**: Rebuild and synchronize local cache index.
 - **`GET /api/music/cache/stats`**: Get user's cache statistics (total count, disk bytes).
-- **`GET /api/music/cache/list`**: Get detailed list of all cached audio files.
+- **`GET /api/music/cache/list`**: Get detailed list of all cached audio files. The response also carries `orphanLyrics`: `.lrc` files present on disk but referenced by no index entry (`{ filename, folder, size, mtime }`, `filename` relative to its folder); delete them through `cache/remove` with `{ filename, folder }`.
 - **`GET /api/music/cache/check`**: Check if a song is already cached on the server.
 - **`GET /api/music/cache/cover`**: Get embedded artwork image stream (`?filename=...`).
 - **`GET /api/music/cache/file/<user>/<filename>`**: Stream cached audio files (supports HTTP Range).
@@ -193,7 +193,7 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 ### 5.4 File Operations & Tagging
 - **`POST /api/music/cache/remove`**: Delete cached audio files.
 - **`POST /api/music/cache/clear`**: Clear all cached music files for the user.
-- **`GET /api/music/cache/lyric` / `POST /api/music/cache/lyric`**: Read or update local lyric cache.
+- **`GET /api/music/cache/lyric` / `POST /api/music/cache/lyric`**: Read or update local lyric cache. The POST body accepts an optional `quality`; the lyric file name uses `quality` → `songInfo.quality` → the `unknown` placeholder in that order, so omitting it keeps the legacy behavior.
 - **`POST /api/music/cache/lyric/clear`**: Clear local lyric cache.
 - **`POST /api/music/cache/link`**: Manually link song metadata and rewrite ID3 tags.
 - **`POST /api/music/cache/updateMetadata`**: Batch search and overwrite ID3 metadata & cover art.
