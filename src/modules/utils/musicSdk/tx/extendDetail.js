@@ -107,7 +107,12 @@ export default {
                 list: formattedList,
                 total: formattedList.length,
                 name: data.name,
-                publishTime: data.aDate,
+                artistName: data.singername || (formattedList[0] && formattedList[0].singer) || '',
+                artistId: data.singermid || (data.singerid ? String(data.singerid) : '') || '',
+                desc: data.desc || '',
+                img: id ? `https://y.gtimg.cn/music/photo_new/T002R800x800M000${id}.jpg` : '',
+                picUrl: id ? `https://y.gtimg.cn/music/photo_new/T002R800x800M000${id}.jpg` : '',
+                publishTime: data.aDate || '',
                 source: 'tx',
             }
         })

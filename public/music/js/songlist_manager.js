@@ -7,6 +7,7 @@ window.SongListManager = (function () {
     const API_BASE = '/api/music';
     let currentState = {
         source: 'wy',
+        viewMode: localStorage.getItem('songlist-view-mode') || 'grid', // 'grid' | 'row'
         tagId: '',
         tagName: '全部分类',
         sortId: 'hot',
@@ -47,6 +48,7 @@ window.SongListManager = (function () {
             if (sel) sel.value = cachedSource;
         }
 
+        updateViewModeUI();
         renderSortTabs();
         await loadTags();
         if (window.DislikeManager) window.DislikeManager.load();
@@ -156,6 +158,15 @@ window.SongListManager = (function () {
 
     async function loadTags() {
         const source = currentState.source;
+        if (source === 'all') {
+            currentState.tags = [];
+            currentState.hotTags = [];
+            currentState.sortList = [{ name: '最热', id: 'hot' }];
+            currentState.sortId = 'hot';
+            renderSortTabs();
+            renderTags();
+            return;
+        }
         try {
             const res = await fetch(`${API_BASE}/songList/tags?source=${source}`);
             const data = await res.json();
@@ -180,18 +191,42 @@ window.SongListManager = (function () {
         container.innerHTML = `
             <div class="col-span-full py-20 text-center t-text-muted">
                 <i class="fas fa-spinner fa-spin text-4xl mb-4 text-emerald-500"></i>
-                <p>正在拉取 ${source.toUpperCase()} 歌单...</p>
+                <p>正在拉取 ${source === 'all' ? '聚合' : source.toUpperCase()} 歌单...</p>
             </div>
         `;
 
         try {
-            const url = `${API_BASE}/songList/list?source=${source}&tagId=${encodeURIComponent(tagId)}&sortId=${encodeURIComponent(sortId)}&page=${page}`;
-            const res = await fetch(url);
-            const data = await res.json();
+            if (source === 'all') {
+                const sources = ['wy', 'tx', 'kg', 'kw', 'mg'];
+                const promises = sources.map(s =>
+                    fetch(`${API_BASE}/songList/list?source=${s}&tagId=${encodeURIComponent(tagId)}&sortId=${encodeURIComponent(sortId || 'hot')}&page=${page}`)
+                        .then(r => r.json())
+                        .then(d => (d.list || []).map(item => ({ ...item, source: s })))
+                        .catch(e => {
+                            console.warn(`[SongList] ${s} load failed:`, e);
+                            return [];
+                        })
+                );
+                const results = await Promise.all(promises);
+                const combined = [];
+                const maxLen = Math.max(...results.map(r => r.length), 0);
+                for (let i = 0; i < maxLen; i++) {
+                    for (const resList of results) {
+                        if (resList[i]) combined.push(resList[i]);
+                    }
+                }
+                currentState.list = combined;
+                currentState.total = combined.length;
+                currentState.limit = 30;
+            } else {
+                const url = `${API_BASE}/songList/list?source=${source}&tagId=${encodeURIComponent(tagId)}&sortId=${encodeURIComponent(sortId)}&page=${page}`;
+                const res = await fetch(url);
+                const data = await res.json();
 
-            currentState.list = data.list || [];
-            currentState.total = data.total || 0;
-            currentState.limit = data.limit || 30;
+                currentState.list = data.list || [];
+                currentState.total = data.total || 0;
+                currentState.limit = data.limit || 30;
+            }
 
             renderList();
             updatePaginationUI();
@@ -327,36 +362,115 @@ window.SongListManager = (function () {
         container.innerHTML = html;
     }
 
+    const SOURCE_LABELS = {
+        wy: '网易',
+        tx: 'QQ',
+        kg: '酷狗',
+        kw: '酷我',
+        mg: '咪咕'
+    };
+
+    function updateViewModeUI() {
+        const icon = document.getElementById('songlist-view-mode-icon');
+        const container = document.getElementById('songlist-container');
+        const btn = document.getElementById('songlist-view-mode-btn');
+
+        if (currentState.viewMode === 'row') {
+            if (icon) {
+                icon.className = 'fas fa-list text-emerald-500';
+            }
+            if (btn) btn.title = '当前：行列模式（点击切换为方块）';
+            if (container) {
+                container.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 md:gap-4';
+            }
+        } else {
+            if (icon) {
+                icon.className = 'fas fa-th-large';
+            }
+            if (btn) btn.title = '当前：方块模式（点击切换为行列）';
+            if (container) {
+                container.className = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 md:gap-6';
+            }
+        }
+    }
+
+    function toggleViewMode() {
+        currentState.viewMode = currentState.viewMode === 'grid' ? 'row' : 'grid';
+        localStorage.setItem('songlist-view-mode', currentState.viewMode);
+        updateViewModeUI();
+        renderList();
+    }
+
     function renderList() {
         const container = document.getElementById('songlist-container');
+        if (!container) return;
+        updateViewModeUI();
+
         if (currentState.list.length === 0) {
             container.innerHTML = '<div class="col-span-full py-20 text-center t-text-muted">暂无数据</div>';
             return;
         }
 
-        container.innerHTML = currentState.list.map(item => `
-            <div class="group cursor-pointer" onclick="window.SongListManager.openDetail('${item.id}', '${currentState.source}')">
-                <div class="relative aspect-square overflow-hidden rounded-2xl shadow-md transition-all group-hover:shadow-xl group-hover:-translate-y-1">
-                    <img data-src="${item.img || '/music/assets/logo.svg'}" src="/music/assets/logo.svg" 
-                         class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder" 
-                         onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
-                    <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                        <div class="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg transform scale-50 group-hover:scale-100 transition-transform duration-300">
-                            <i class="fas fa-play ml-1"></i>
+        if (currentState.viewMode === 'row') {
+            // 行列模式 (自适应多列/单列条形卡片)
+            container.innerHTML = currentState.list.map(item => {
+                const itemSource = item.source || currentState.source;
+                const sourceLabel = SOURCE_LABELS[itemSource] || itemSource;
+                return `
+                <div class="group cursor-pointer flex items-center gap-3.5 p-3 rounded-2xl t-bg-panel border t-border-main hover:border-emerald-500/40 hover:shadow-md transition-all hover:-translate-y-0.5" 
+                     onclick="window.SongListManager.openDetail('${item.id}', '${itemSource}')">
+                    <div class="relative w-16 h-16 md:w-20 md:h-20 flex-shrink-0 overflow-hidden rounded-xl shadow-sm">
+                        <img data-src="${item.img || '/music/assets/logo.svg'}" src="/music/assets/logo.svg" 
+                             class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder" 
+                             onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
+                        ${itemSource ? `<span class="absolute top-1 left-1 px-1.5 py-0.5 text-[9px] font-semibold bg-black/60 backdrop-blur-md text-white rounded shadow-sm z-10">${sourceLabel}</span>` : ''}
+                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div class="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow transform scale-50 group-hover:scale-100 transition-transform duration-300">
+                                <i class="fas fa-play text-xs ml-0.5"></i>
+                            </div>
                         </div>
                     </div>
-                </div>
-                <div class="mt-3">
-                    <h3 class="text-sm font-bold t-text-main line-clamp-2 leading-snug group-hover:text-emerald-500 transition-colors" title="${item.name}">${item.name}</h3>
-                    ${item.author ? `<p class="text-xs t-text-muted mt-1.5 truncate">${item.author}</p>` : ''}
-                    ${item.time ? `<p class="text-[11px] text-gray-400 mt-0.5 truncate">${item.time}</p>` : ''}
-                    <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
-                        ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${item.total}</span>` : ''}
-                        ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${item.play_count || formatPlayCount(item.playCount)}</span>` : ''}
+                    <div class="flex-1 min-w-0 flex flex-col justify-center">
+                        <h3 class="text-sm md:text-base font-bold t-text-main truncate group-hover:text-emerald-500 transition-colors" title="${item.name}">${item.name}</h3>
+                        ${item.author ? `<p class="text-xs t-text-muted mt-1 truncate">${item.author}</p>` : ''}
+                        <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
+                            ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${item.total}首</span>` : ''}
+                            ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${item.play_count || formatPlayCount(item.playCount)}</span>` : ''}
+                            ${item.time ? `<span class="truncate"><i class="far fa-calendar-alt text-[10px] mr-1"></i>${item.time}</span>` : ''}
+                        </div>
                     </div>
-                </div>
-            </div>
-        `).join('');
+                </div>`;
+            }).join('');
+        } else {
+            // 方块 (Grid) 模式
+            container.innerHTML = currentState.list.map(item => {
+                const itemSource = item.source || currentState.source;
+                const sourceLabel = SOURCE_LABELS[itemSource] || itemSource;
+                return `
+                <div class="group cursor-pointer" onclick="window.SongListManager.openDetail('${item.id}', '${itemSource}')">
+                    <div class="relative aspect-square overflow-hidden rounded-2xl shadow-md transition-all group-hover:shadow-xl group-hover:-translate-y-1">
+                        <img data-src="${item.img || '/music/assets/logo.svg'}" src="/music/assets/logo.svg" 
+                             class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder" 
+                             onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');">
+                        ${itemSource ? `<span class="absolute top-2 right-2 px-2 py-0.5 text-[10px] font-medium bg-black/60 backdrop-blur-md text-white rounded-md shadow-sm z-10">${sourceLabel}</span>` : ''}
+                        <div class="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                            <div class="w-12 h-12 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg transform scale-50 group-hover:scale-100 transition-transform duration-300">
+                                <i class="fas fa-play ml-1"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="mt-3">
+                        <h3 class="text-sm font-bold t-text-main line-clamp-2 leading-snug group-hover:text-emerald-500 transition-colors" title="${item.name}">${item.name}</h3>
+                        ${item.author ? `<p class="text-xs t-text-muted mt-1.5 truncate">${item.author}</p>` : ''}
+                        ${item.time ? `<p class="text-[11px] text-gray-400 mt-0.5 truncate">${item.time}</p>` : ''}
+                        <div class="flex items-center gap-3 mt-1.5 text-[11px] text-gray-400 font-medium">
+                            ${item.total ? `<span><i class="fas fa-music text-[10px] mr-1"></i>${item.total}</span>` : ''}
+                            ${(item.play_count || item.playCount) ? `<span><i class="fas fa-headphones text-[10px] mr-1"></i>${item.play_count || formatPlayCount(item.playCount)}</span>` : ''}
+                        </div>
+                    </div>
+                </div>`;
+            }).join('');
+        }
 
         // Trigger Lazy Load
         if (typeof window.lazyLoadImages === 'function') {
@@ -751,11 +865,32 @@ window.SongListManager = (function () {
             container.innerHTML = '<div class="col-span-full py-20 text-center t-text-muted"><i class="fas fa-spinner fa-spin text-4xl mb-4 text-emerald-500"></i><p>正在搜索歌单...</p></div>';
 
             try {
-                const url = `${API_BASE}/songList/search?source=${currentState.source}&text=${encodeURIComponent(text)}&page=1`;
-                const res = await fetch(url);
-                const data = await res.json();
-                currentState.list = data.list || [];
-                currentState.total = data.total || 0;
+                if (currentState.source === 'all') {
+                    const sources = ['wy', 'tx', 'kg', 'kw', 'mg'];
+                    const promises = sources.map(s =>
+                        fetch(`${API_BASE}/songList/search?source=${s}&text=${encodeURIComponent(text)}&page=1`)
+                            .then(r => r.json())
+                            .then(d => (d.list || []).map(item => ({ ...item, source: s })))
+                            .catch(e => {
+                                console.warn(`[SongList] ${s} search failed:`, e);
+                                return [];
+                            })
+                    );
+                    const results = await Promise.all(promises);
+                    const flatList = results.flat();
+                    if (typeof window.sortSearchResults === 'function') {
+                        currentState.list = window.sortSearchResults(flatList, text, false);
+                    } else {
+                        currentState.list = flatList;
+                    }
+                    currentState.total = currentState.list.length;
+                } else {
+                    const url = `${API_BASE}/songList/search?source=${currentState.source}&text=${encodeURIComponent(text)}&page=1`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    currentState.list = data.list || [];
+                    currentState.total = data.total || 0;
+                }
                 renderList();
                 document.getElementById('songlist-pagination').classList.add('hidden');
             } catch (e) {
@@ -1024,6 +1159,10 @@ window.SongListManager = (function () {
             } finally {
                 if (saveBtn) { saveBtn.disabled = false; saveBtn.innerHTML = '<i class="fas fa-save"></i><span class="hidden sm:inline">保存排序</span>'; }
             }
+        },
+        toggleViewMode,
+        getViewMode: function () {
+            return currentState.viewMode;
         }
     };
 })();
@@ -1033,6 +1172,8 @@ function toggleTagSelector() { window.SongListManager.toggleTagSelector(); }
 function changeSongListSource() { window.SongListManager.changeSource(); }
 function changeSongListSort(sort) { window.SongListManager.changeSort(sort); }
 function changeSongListPage(delta) { window.SongListManager.changePage(delta); }
+function toggleSongListViewMode() { window.SongListManager.toggleViewMode(); }
+
 function closeSongListDetail() { window.SongListManager.closeDetail(); }
 function playAllInSongList() { window.SongListManager.playAll(); }
 function handleSongListSearchKeyPress(e) { if (e.key === 'Enter') window.SongListManager.search(); }

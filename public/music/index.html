@@ -371,6 +371,7 @@
 
                             <select id="search-source" onchange="doSearch()"
                                 class="flex-1 md:flex-none px-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm t-text-main font-medium text-sm md:text-base">
+                                <option value="all">聚合</option>
                                 <option value="wy">网易云</option>
                                 <option value="tx">QQ</option>
                                 <option value="kg">酷狗</option>
@@ -426,7 +427,8 @@
                         <!-- Sort Toolbar (Hidden by default) 搜索/我的收藏歌曲排序 -->
                         <div id="gl-sort-toolbar"
                             class="hidden bg-emerald-50 dark:bg-emerald-900/30 border-b border-emerald-200 dark:border-emerald-800 p-2.5 px-4 flex items-center justify-between transition-all">
-                            <div class="flex items-center gap-2 text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                            <div
+                                class="flex items-center gap-2 text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
                                 <i class="fas fa-arrows-alt-v text-emerald-500"></i>
                                 <span>排序模式：拖拽手柄调整，或直接修改序号</span>
                             </div>
@@ -443,6 +445,15 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Artist Detail Floating Mini Bar (Shown when scrolling down inside an artist page) -->
+                        <div id="artist-mini-bar" class="hidden flex-shrink-0 border-b t-border-main t-bg-panel/90 backdrop-blur-xl px-3 md:px-5 py-2.5 transition-all duration-300 ease-out transform -translate-y-2 opacity-0 pointer-events-none z-20"></div>
+                        <!-- Artist Detail Header (Shown when entering an artist) -->
+                        <div id="artist-detail-header" class="hidden flex-shrink-0 transition-all duration-300"></div>
+                        <!-- Album Detail Floating Mini Bar (Shown when scrolling down inside an album) -->
+                        <div id="album-mini-bar" class="hidden flex-shrink-0 border-b t-border-main t-bg-panel/90 backdrop-blur-xl px-3 md:px-5 py-2.5 transition-all duration-300 ease-out transform -translate-y-2 opacity-0 pointer-events-none z-20"></div>
+                        <!-- Album Detail Header (Shown when entering an album) -->
+                        <div id="album-detail-header" class="hidden flex-shrink-0 transition-all duration-300"></div>
+
                         <!-- Header -->
                         <div id="search-results-header"
                             class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs md:text-sm font-medium items-center flex-shrink-0 pr-6">
@@ -466,7 +477,8 @@
                                         <i class="fas fa-tasks"></i>
                                     </button>
                                     <button onclick="window.ListSearch.toggleBar()"
-                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5" title="内搜索 (/)">
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5"
+                                        title="内搜索 (/)">
                                         <i class="fas fa-search"></i>
                                     </button>
                                 </div>
@@ -535,7 +547,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div id="search-results" class="flex-1 overflow-y-auto p-2 space-y-1 pb-20">
+                        <div id="search-results" class="flex-1 overflow-y-auto p-2 space-y-1 min-h-[calc(100vh-200px)] pb-60">
                             <!-- Items will be injected here -->
                             <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
                                 <i class="fas fa-music text-6xl opacity-20"></i>
@@ -625,6 +637,7 @@
                             class="flex items-center gap-2 md:justify-end overflow-x-auto hide-scrollbar w-full md:w-auto pb-1 -mb-1">
                             <select id="songlist-source" onchange="changeSongListSource()"
                                 class="flex-shrink-0 px-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm t-text-main font-medium text-sm md:text-base">
+                                <option value="all">聚合</option>
                                 <option value="wy">网易云</option>
                                 <option value="tx">QQ</option>
                                 <option value="kg">酷狗</option>
@@ -636,6 +649,12 @@
                                 class="flex flex-shrink-0 p-1 t-bg-panel border t-border-main rounded-xl shadow-sm">
                                 <!-- Dynamic sort buttons will be injected by songlist_manager.js -->
                             </div>
+
+                            <button id="songlist-view-mode-btn" onclick="window.SongListManager.toggleViewMode()"
+                                class="flex-shrink-0 p-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-muted hover:text-emerald-500 transition-colors shadow-sm flex items-center justify-center"
+                                title="切换显示方式 (方块/行列)">
+                                <i class="fas fa-th-large" id="songlist-view-mode-icon"></i>
+                            </button>
 
                             <button onclick="openExternalListModal()"
                                 class="flex-shrink-0 p-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-muted hover:text-emerald-600 transition-colors shadow-sm"
@@ -790,13 +809,14 @@
                                 <div class="flex items-center gap-3">
                                     <div class="flex items-center gap-1.5">
                                         <i class="fas fa-sort text-violet-500 text-sm"></i>
-                                        <span class="text-sm font-semibold text-violet-700 dark:text-violet-300">排序模式</span>
+                                        <span
+                                            class="text-sm font-semibold text-violet-700 dark:text-violet-300">排序模式</span>
                                     </div>
-                                    <span class="text-xs text-violet-500 dark:text-violet-400 hidden sm:block">拖动手柄或输入序号调整位置</span>
+                                    <span
+                                        class="text-xs text-violet-500 dark:text-violet-400 hidden sm:block">拖动手柄或输入序号调整位置</span>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <button onclick="window.SongListManager.saveSortOrder()"
-                                        id="sl-sort-save-btn"
+                                    <button onclick="window.SongListManager.saveSortOrder()" id="sl-sort-save-btn"
                                         class="text-xs px-3 md:px-4 py-1.5 bg-violet-500 hover:bg-violet-600 text-white rounded-lg transition-colors font-bold flex items-center gap-1.5 shadow-sm"
                                         title="保存排序">
                                         <i class="fas fa-save"></i><span class="hidden sm:inline">保存排序</span>
@@ -1650,24 +1670,37 @@
                                             class="ml-auto flex-shrink-0 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-lg shadow shadow-emerald-200/50 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
                                             <i class="fas fa-plus-circle"></i> 管理 / 添加
                                         </button>
-                                        <button id="btn-settings-source-batch" onclick="enterSourceBatchMode('settings')"
+                                        <button id="btn-settings-source-batch"
+                                            onclick="enterSourceBatchMode('settings')"
                                             class="flex-shrink-0 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:hover:bg-blue-500/25 dark:text-blue-400 font-bold text-xs rounded-lg border border-blue-100 dark:border-blue-500/30 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
                                             <i class="fas fa-tasks"></i> 批量
                                         </button>
                                     </div>
 
                                     <!-- 批量操作工具栏 (Settings) — 在列表上方 -->
-                                    <div id="settings-source-batch-bar" class="hidden mb-3 flex flex-wrap items-center gap-2 p-3 bg-blue-50 dark:bg-blue-500/10 rounded-xl border border-blue-100 dark:border-blue-500/25">
-                                        <span class="text-xs text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
+                                    <div id="settings-source-batch-bar"
+                                        class="hidden mb-3 flex flex-wrap items-center gap-2 p-3 bg-blue-50 dark:bg-blue-500/10 rounded-xl border border-blue-100 dark:border-blue-500/25">
+                                        <span
+                                            class="text-xs text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
                                             <i class="fas fa-check-square"></i>
                                             已选 <strong id="settings-source-batch-count">0</strong> 项
                                         </span>
                                         <div class="flex flex-wrap gap-1.5 ml-auto">
-                                            <button onclick="selectAllSourceBatch('settings')" class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/20 transition-colors"><i class="fas fa-check-double mr-1"></i>全选</button>
-                                            <button onclick="batchSourceEnable('settings', true)" class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-on mr-1"></i>批量启用</button>
-                                            <button onclick="batchSourceEnable('settings', false)" class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-off mr-1"></i>批量禁用</button>
-                                            <button onclick="batchSourceDelete('settings')" class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i class="fas fa-trash-alt mr-1"></i>批量删除</button>
-                                            <button onclick="exitSourceBatchMode('settings')" class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i class="fas fa-times mr-1"></i>退出</button>
+                                            <button onclick="selectAllSourceBatch('settings')"
+                                                class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/20 transition-colors"><i
+                                                    class="fas fa-check-double mr-1"></i>全选</button>
+                                            <button onclick="batchSourceEnable('settings', true)"
+                                                class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i
+                                                    class="fas fa-toggle-on mr-1"></i>批量启用</button>
+                                            <button onclick="batchSourceEnable('settings', false)"
+                                                class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i
+                                                    class="fas fa-toggle-off mr-1"></i>批量禁用</button>
+                                            <button onclick="batchSourceDelete('settings')"
+                                                class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i
+                                                    class="fas fa-trash-alt mr-1"></i>批量删除</button>
+                                            <button onclick="exitSourceBatchMode('settings')"
+                                                class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i
+                                                    class="fas fa-times mr-1"></i>退出</button>
                                         </div>
                                     </div>
 
@@ -4207,17 +4240,28 @@
             </div>
 
             <!-- 批量操作工具栏 (Modal) -->
-            <div id="modal-source-batch-bar" class="hidden px-4 py-3 border-b t-border-main flex flex-wrap items-center gap-2 bg-purple-50 dark:bg-purple-500/10">
+            <div id="modal-source-batch-bar"
+                class="hidden px-4 py-3 border-b t-border-main flex flex-wrap items-center gap-2 bg-purple-50 dark:bg-purple-500/10">
                 <span class="text-xs text-purple-600 dark:text-purple-400 font-medium flex items-center gap-1.5">
                     <i class="fas fa-check-square"></i>
                     已选 <strong id="modal-source-batch-count">0</strong> 项
                 </span>
                 <div class="flex flex-wrap gap-1.5 ml-auto">
-                    <button onclick="selectAllSourceBatch('modal')" class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-purple-200 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/20 transition-colors"><i class="fas fa-check-double mr-1"></i>全选</button>
-                    <button onclick="batchSourceEnable('modal', true)" class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-on mr-1"></i>批量启用</button>
-                    <button onclick="batchSourceEnable('modal', false)" class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i class="fas fa-toggle-off mr-1"></i>批量禁用</button>
-                    <button onclick="batchSourceDelete('modal')" class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i class="fas fa-trash-alt mr-1"></i>批量删除</button>
-                    <button onclick="exitSourceBatchMode('modal')" class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i class="fas fa-times mr-1"></i>退出</button>
+                    <button onclick="selectAllSourceBatch('modal')"
+                        class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-purple-200 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/20 transition-colors"><i
+                            class="fas fa-check-double mr-1"></i>全选</button>
+                    <button onclick="batchSourceEnable('modal', true)"
+                        class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i
+                            class="fas fa-toggle-on mr-1"></i>批量启用</button>
+                    <button onclick="batchSourceEnable('modal', false)"
+                        class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i
+                            class="fas fa-toggle-off mr-1"></i>批量禁用</button>
+                    <button onclick="batchSourceDelete('modal')"
+                        class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i
+                            class="fas fa-trash-alt mr-1"></i>批量删除</button>
+                    <button onclick="exitSourceBatchMode('modal')"
+                        class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i
+                            class="fas fa-times mr-1"></i>退出</button>
                 </div>
             </div>
 

@@ -111,8 +111,8 @@ export default {
         if (!rawList || !rawList.length) return []
         return rawList.map(item => {
             const mid = item.albumMID || item.mid || ''
-            const singerName = item.singerName || (item.singer && item.singer[0] && item.singer[0].name) || ''
-            const singerId = (item.singer && item.singer[0] && item.singer[0].mid) || ''
+            const singerName = item.singerName || (item.singer_list && item.singer_list[0] && item.singer_list[0].name) || (item.singer && item.singer[0] && item.singer[0].name) || ''
+            const singerId = item.singerMID || (item.singer_list && item.singer_list[0] && item.singer_list[0].mid) || (item.singer && item.singer[0] && item.singer[0].mid) || (item.singerID ? String(item.singerID) : '')
             return {
                 id: mid,
                 mid,
@@ -121,7 +121,7 @@ export default {
                 artistName: singerName,
                 artistId: singerId,
                 size: item.song_count || item.songNum || 0,
-                publishTime: item.pubTime || '',
+                publishTime: item.publicTime || item.pubTime || '',
                 source: 'tx',
             }
         })
