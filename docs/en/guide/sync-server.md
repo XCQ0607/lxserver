@@ -1,13 +1,36 @@
-# Sync Management Console Guide
+# Sync Service & Management Console Guide
 
-LX Music Sync Server includes a Web Management Console (located at the system root path `/`), mainly used for viewing service status, managing user data, and configuring server-side functions.
+LX Music Sync Server includes a professional Web Management Console (located by default at `/admin`, i.e., `http://IP:9527/admin`), used for monitoring service status, managing user accounts and multi-device connections, inspecting playlists and snapshots, and configuring server options.
 
 ## Login and Authentication
 
-Accessing the management console (default `http://IP:9527`) requires entering the administrator password.
+Accessing the management console (default `http://IP:9527/admin`) requires entering the administrator password.
 
 - **Default Password**: `123456`
-- **Modify Password**: You can override the default password by setting the environment variable `FRONTEND_PASSWORD`, or go to the settings page to modify it after the first login. The password will be persisted in the `data/config.js` file on the server.
+- **Modify Password**: You can override the default password by setting the environment variable `FRONTEND_PASSWORD`, or go to the "System Config" page to modify it after logging in. The password will be persisted in the `data/config.js` file on the server.
+
+## 🔗 Client Sync & Connection Setup
+
+The server provides flexible connection methods for various clients:
+
+### 1. LX Music Client Synchronization (Desktop / Mobile)
+Go to client "Settings → Sync Settings" and choose Custom Server:
+- **User Path Mode (Recommended, enabled by default `USER_ENABLE_PATH=true`)**:
+  - **Connection URL**: `http://<server-ip>:9527/<username>` (e.g. `http://192.168.1.100:9527/user1`)
+  - **Connection Password**: Password of the corresponding user.
+  - **Mechanism**: The server routes requests directly to the user's isolated data sandbox based on the username in the URL. **Allows different users to use identical passwords**.
+- **Root Path Mode (Requires enabling `USER_ENABLE_ROOT=true` in System Config)**:
+  - **Connection URL**: `http://<server-ip>:9527` (without username in URL)
+  - **Connection Password**: Password of the corresponding user.
+  - **Mechanism**: The connection URL is the root path; the server auto-matches the user via the handshake password. **Note: In this mode, all user passwords must remain strictly unique**.
+
+### 2. Subsonic Music Client Connection (Yinliu / Feishin / Symfonium, etc.)
+Fully compatible with Subsonic / OpenSubsonic protocols:
+- **Server Address (Server URL)**:
+  - **Default Shared Main Port**: `http://<server-ip>:9527/rest` (Subpath controlled by `SUBSONIC_PATH`, default `/rest`).
+  - **Standalone Listening Port** (if `SUBSONIC_PORT` > 0, e.g., `4533`): `http://<server-ip>:4533/rest`.
+- **Username & Password**: The username and password created in the "User Management" dashboard.
+- **Global Online Search**: Search and stream tracks across platforms directly inside Subsonic clients. Prefix with `wy:`, `tx:`, `kw:`, `kg:`, `mg:` to select platforms, or `online:` / `local:` to toggle search modes.
 
 ## Functional Module Description
 
