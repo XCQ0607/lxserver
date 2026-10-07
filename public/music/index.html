@@ -141,8 +141,10 @@
                                                 onclick="handleDislikeSongsClick(); event.stopPropagation();">
                                                 <i
                                                     class="fas fa-music w-5 t-text-muted sidebar-item-icon flex-shrink-0 text-center"></i>
-                                                <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="不喜欢歌曲">
-                                                    <span class="playlist-name-text truncate block w-full select-none">不喜欢歌曲</span>
+                                                <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden"
+                                                    title="不喜欢歌曲">
+                                                    <span
+                                                        class="playlist-name-text truncate block w-full select-none">不喜欢歌曲</span>
                                                 </div>
                                                 <span id="dislike-song-count"
                                                     class="text-[11px] text-gray-400 group-hover:t-text-muted mr-1 flex-shrink-0">0</span>
@@ -153,8 +155,10 @@
                                                 onclick="handleDislikeArtistsClick(); event.stopPropagation();">
                                                 <i
                                                     class="fas fa-user w-5 t-text-muted sidebar-item-icon flex-shrink-0 text-center"></i>
-                                                <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="不喜欢歌手">
-                                                    <span class="playlist-name-text truncate block w-full select-none">不喜欢歌手</span>
+                                                <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden"
+                                                    title="不喜欢歌手">
+                                                    <span
+                                                        class="playlist-name-text truncate block w-full select-none">不喜欢歌手</span>
                                                 </div>
                                                 <span id="dislike-artist-count"
                                                     class="text-[11px] text-gray-400 group-hover:t-text-muted mr-1 flex-shrink-0">0</span>
@@ -165,8 +169,10 @@
                                                 onclick="handleDislikeAlbumsClick(); event.stopPropagation();">
                                                 <i
                                                     class="fas fa-compact-disc w-5 t-text-muted sidebar-item-icon flex-shrink-0 text-center"></i>
-                                                <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden" title="不喜欢专辑">
-                                                    <span class="playlist-name-text truncate block w-full select-none">不喜欢专辑</span>
+                                                <div class="playlist-name-wrapper ml-1.5 flex-1 min-w-0 overflow-hidden"
+                                                    title="不喜欢专辑">
+                                                    <span
+                                                        class="playlist-name-text truncate block w-full select-none">不喜欢专辑</span>
                                                 </div>
                                                 <span id="dislike-album-count"
                                                     class="text-[11px] text-gray-400 group-hover:t-text-muted mr-1 flex-shrink-0">0</span>
@@ -365,6 +371,7 @@
 
                             <select id="search-source" onchange="doSearch()"
                                 class="flex-1 md:flex-none px-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm t-text-main font-medium text-sm md:text-base">
+                                <option value="all">聚合</option>
                                 <option value="wy">网易云</option>
                                 <option value="tx">QQ</option>
                                 <option value="kg">酷狗</option>
@@ -417,33 +424,74 @@
                                 </button>
                             </div>
                         </div>
+                        <!-- Sort Toolbar (Hidden by default) 搜索/我的收藏歌曲排序 -->
+                        <div id="gl-sort-toolbar"
+                            class="hidden bg-emerald-50 dark:bg-emerald-900/30 border-b border-emerald-200 dark:border-emerald-800 p-2.5 px-4 flex items-center justify-between transition-all">
+                            <div
+                                class="flex items-center gap-2 text-xs md:text-sm text-emerald-700 dark:text-emerald-300 font-medium">
+                                <i class="fas fa-arrows-alt-v text-emerald-500"></i>
+                                <span>排序模式：拖拽手柄调整，或直接修改序号</span>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button id="gl-sort-save-btn" onclick="saveGlobalSortOrder()"
+                                    class="text-xs px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 active:bg-emerald-700 text-white rounded shadow-sm transition-all font-medium flex items-center gap-1.5"
+                                    title="保存并应用当前顺序">
+                                    <i class="fas fa-check"></i><span>保存排序</span>
+                                </button>
+                                <button onclick="toggleGlobalSortMode(false)"
+                                    class="text-xs px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white rounded shadow-sm transition-all font-medium flex items-center gap-1.5"
+                                    title="取消排序">
+                                    <i class="fas fa-times"></i><span>取消</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Artist Detail Floating Mini Bar (Shown when scrolling down inside an artist page) -->
+                        <div id="artist-mini-bar" class="hidden flex-shrink-0 border-b t-border-main t-bg-panel/90 backdrop-blur-xl px-3 md:px-5 py-2.5 transition-all duration-300 ease-out transform -translate-y-2 opacity-0 pointer-events-none z-20"></div>
+                        <!-- Artist Detail Header (Shown when entering an artist) -->
+                        <div id="artist-detail-header" class="hidden flex-shrink-0 transition-all duration-300"></div>
+                        <!-- Album Detail Floating Mini Bar (Shown when scrolling down inside an album) -->
+                        <div id="album-mini-bar" class="hidden flex-shrink-0 border-b t-border-main t-bg-panel/90 backdrop-blur-xl px-3 md:px-5 py-2.5 transition-all duration-300 ease-out transform -translate-y-2 opacity-0 pointer-events-none z-20"></div>
+                        <!-- Album Detail Header (Shown when entering an album) -->
+                        <div id="album-detail-header" class="hidden flex-shrink-0 transition-all duration-300"></div>
+
                         <!-- Header -->
                         <div id="search-results-header"
                             class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs md:text-sm font-medium items-center flex-shrink-0 pr-6">
                             <div
-                                class="col-span-1 sm:col-span-1 text-center font-mono flex items-center justify-center gap-1 sm:gap-2">
+                                class="col-span-1 sm:col-span-1 text-center font-mono flex items-center justify-center gap-1 sm:gap-1.5">
                                 <button id="search-back-btn" onclick="goBackToSearch()"
                                     class="hidden px-1.5 py-1 text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                                     title="返回列表">
                                     <i class="fas fa-arrow-left text-xs"></i>
                                 </button>
-                                <span>#</span>
+                                <button id="gl-sort-hash-btn" onclick="toggleGlobalSortMode()"
+                                    class="font-mono font-bold text-gray-500 hover:text-emerald-500 hover:bg-emerald-500/10 px-1 py-0.5 rounded transition-all cursor-pointer select-none"
+                                    title="点击进入/退出歌单排序模式">#</button>
                                 <div class="flex items-center gap-1">
+                                    <button id="gl-sort-icon-btn" onclick="toggleGlobalSortMode()"
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5" title="歌曲排序">
+                                        <i class="fas fa-sort-amount-down"></i>
+                                    </button>
                                     <button onclick="toggleBatchMode()"
-                                        class="text-[10px] text-emerald-600 hover:text-emerald-700" title="批量操作">
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5" title="批量操作">
                                         <i class="fas fa-tasks"></i>
                                     </button>
                                     <button onclick="window.ListSearch.toggleBar()"
-                                        class="text-[10px] text-emerald-600 hover:text-emerald-700" title="内搜索 (/)">
+                                        class="text-[10px] text-emerald-600 hover:text-emerald-700 p-0.5"
+                                        title="内搜索 (/)">
                                         <i class="fas fa-search"></i>
                                     </button>
                                 </div>
                             </div>
-                            <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0" id="header-title">歌曲标题</div>
-                            <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0" id="header-artist">歌手</div>
+                            <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0"
+                                id="header-title">歌曲标题</div>
+                            <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0"
+                                id="header-artist">歌手</div>
                             <div class="hidden lg:flex lg:col-span-2 items-center min-w-0" id="header-album">专辑</div>
-                            <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0" id="header-duration">时长</div>
-                            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0" id="header-actions">操作</div>
+                            <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0"
+                                id="header-duration">时长</div>
+                            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0"
+                                id="header-actions">操作</div>
                         </div>
 
                         <!-- Global Local Search Bar (Hidden by default) -->
@@ -499,7 +547,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div id="search-results" class="flex-1 overflow-y-auto p-2 space-y-1 pb-20">
+                        <div id="search-results" class="flex-1 overflow-y-auto p-2 space-y-1 min-h-[calc(100vh-200px)] pb-60">
                             <!-- Items will be injected here -->
                             <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
                                 <i class="fas fa-music text-6xl opacity-20"></i>
@@ -589,6 +637,7 @@
                             class="flex items-center gap-2 md:justify-end overflow-x-auto hide-scrollbar w-full md:w-auto pb-1 -mb-1">
                             <select id="songlist-source" onchange="changeSongListSource()"
                                 class="flex-shrink-0 px-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm t-text-main font-medium text-sm md:text-base">
+                                <option value="all">聚合</option>
                                 <option value="wy">网易云</option>
                                 <option value="tx">QQ</option>
                                 <option value="kg">酷狗</option>
@@ -600,6 +649,12 @@
                                 class="flex flex-shrink-0 p-1 t-bg-panel border t-border-main rounded-xl shadow-sm">
                                 <!-- Dynamic sort buttons will be injected by songlist_manager.js -->
                             </div>
+
+                            <button id="songlist-view-mode-btn" onclick="window.SongListManager.toggleViewMode()"
+                                class="flex-shrink-0 p-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-muted hover:text-emerald-500 transition-colors shadow-sm flex items-center justify-center"
+                                title="切换显示方式 (方块/行列)">
+                                <i class="fas fa-th-large" id="songlist-view-mode-icon"></i>
+                            </button>
 
                             <button onclick="openExternalListModal()"
                                 class="flex-shrink-0 p-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-muted hover:text-emerald-600 transition-colors shadow-sm"
@@ -748,13 +803,41 @@
                                 </div>
                             </div>
 
+                            <!-- Sort Toolbar (Hidden by default) -->
+                            <div id="sl-sort-toolbar"
+                                class="hidden bg-violet-50 dark:bg-violet-900/20 border-b border-violet-200 dark:border-violet-800 p-3 flex items-center justify-between flex-shrink-0">
+                                <div class="flex items-center gap-3">
+                                    <div class="flex items-center gap-1.5">
+                                        <i class="fas fa-sort text-violet-500 text-sm"></i>
+                                        <span
+                                            class="text-sm font-semibold text-violet-700 dark:text-violet-300">排序模式</span>
+                                    </div>
+                                    <span
+                                        class="text-xs text-violet-500 dark:text-violet-400 hidden sm:block">拖动手柄或输入序号调整位置</span>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <button onclick="window.SongListManager.saveSortOrder()" id="sl-sort-save-btn"
+                                        class="text-xs px-3 md:px-4 py-1.5 bg-violet-500 hover:bg-violet-600 text-white rounded-lg transition-colors font-bold flex items-center gap-1.5 shadow-sm"
+                                        title="保存排序">
+                                        <i class="fas fa-save"></i><span class="hidden sm:inline">保存排序</span>
+                                    </button>
+                                    <button onclick="window.SongListManager.toggleSortMode(false)"
+                                        class="text-xs px-2 md:px-3 py-1.5 bg-gray-500 hover:bg-gray-600 text-white rounded-lg transition-colors"
+                                        title="退出排序">
+                                        <i class="fas fa-times"></i><span class="hidden sm:inline ml-1">退出</span>
+                                    </button>
+                                </div>
+                            </div>
+
                             <!-- List Section -->
                             <div class="flex-1 flex flex-col overflow-hidden">
                                 <div
                                     class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs font-bold uppercase tracking-wider items-center flex-shrink-0 pr-6">
                                     <div
                                         class="col-span-1 sm:col-span-1 text-center font-mono flex items-center justify-center gap-1 sm:gap-2">
-                                        <span>#</span>
+                                        <button id="sl-sort-hash-btn" onclick="window.SongListManager.toggleSortMode()"
+                                            class="font-mono text-gray-400 hover:text-violet-500 transition-colors cursor-pointer"
+                                            title="点击进入排序模式">#</button>
                                         <div class="flex items-center gap-1">
                                             <button onclick="toggleBatchMode()"
                                                 class="text-[10px] text-emerald-600 hover:text-emerald-700"
@@ -768,11 +851,19 @@
                                             </button>
                                         </div>
                                     </div>
-                                    <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0">歌曲</div>
-                                    <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0">歌手</div>
+                                    <div
+                                        class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0">
+                                        歌曲</div>
+                                    <div
+                                        class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0">
+                                        歌手</div>
                                     <div class="hidden lg:flex lg:col-span-2 items-center min-w-0">专辑</div>
-                                    <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0">时长</div>
-                                    <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0">操作</div>
+                                    <div
+                                        class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0">
+                                        时长</div>
+                                    <div
+                                        class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0">
+                                        操作</div>
                                 </div>
 
                                 <!-- Local Search Bar (Hidden by default) -->
@@ -1015,11 +1106,19 @@
                                         </button>
                                     </div>
                                 </div>
-                                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0">歌曲</div>
-                                <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0">歌手</div>
+                                <div
+                                    class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0">
+                                    歌曲</div>
+                                <div
+                                    class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0">
+                                    歌手</div>
                                 <div class="hidden lg:flex lg:col-span-2 items-center min-w-0">专辑</div>
-                                <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0">时长</div>
-                                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0">操作</div>
+                                <div
+                                    class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0">
+                                    时长</div>
+                                <div
+                                    class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0">
+                                    操作</div>
                             </div>
 
                             <!-- 歌曲列表 -->
@@ -1571,12 +1670,45 @@
                                             class="ml-auto flex-shrink-0 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-lg shadow shadow-emerald-200/50 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
                                             <i class="fas fa-plus-circle"></i> 管理 / 添加
                                         </button>
+                                        <button id="btn-settings-source-batch"
+                                            onclick="enterSourceBatchMode('settings')"
+                                            class="flex-shrink-0 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 dark:bg-blue-500/15 dark:hover:bg-blue-500/25 dark:text-blue-400 font-bold text-xs rounded-lg border border-blue-100 dark:border-blue-500/30 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
+                                            <i class="fas fa-tasks"></i> 批量
+                                        </button>
+                                    </div>
+
+                                    <!-- 批量操作工具栏 (Settings) — 在列表上方 -->
+                                    <div id="settings-source-batch-bar"
+                                        class="hidden mb-3 flex flex-wrap items-center gap-2 p-3 bg-blue-50 dark:bg-blue-500/10 rounded-xl border border-blue-100 dark:border-blue-500/25">
+                                        <span
+                                            class="text-xs text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
+                                            <i class="fas fa-check-square"></i>
+                                            已选 <strong id="settings-source-batch-count">0</strong> 项
+                                        </span>
+                                        <div class="flex flex-wrap gap-1.5 ml-auto">
+                                            <button onclick="selectAllSourceBatch('settings')"
+                                                class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-500/20 transition-colors"><i
+                                                    class="fas fa-check-double mr-1"></i>全选</button>
+                                            <button onclick="batchSourceEnable('settings', true)"
+                                                class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i
+                                                    class="fas fa-toggle-on mr-1"></i>批量启用</button>
+                                            <button onclick="batchSourceEnable('settings', false)"
+                                                class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i
+                                                    class="fas fa-toggle-off mr-1"></i>批量禁用</button>
+                                            <button onclick="batchSourceDelete('settings')"
+                                                class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i
+                                                    class="fas fa-trash-alt mr-1"></i>批量删除</button>
+                                            <button onclick="exitSourceBatchMode('settings')"
+                                                class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i
+                                                    class="fas fa-times mr-1"></i>退出</button>
+                                        </div>
                                     </div>
 
                                     <!-- 已上传的源列表 -->
                                     <div id="settings-custom-sources-list" class="space-y-2">
                                         <div class="text-xs t-text-muted text-center py-2">暂无数据 (JS未加载)</div>
                                     </div>
+
                                 </div>
 
                                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1893,7 +2025,8 @@
                                                     <i class="fas fa-question-circle"></i>
                                                     <span class="setting-tooltip-content">
                                                         <b>总开关：同时控制以下两种自动更新行为</b><br><br>
-                                                        ① <b>服务端后台定时同步</b>：按下方设置的检测间隔，服务器自动拉取所有账号的网络歌单，发现变化时覆盖更新并在侧栏显示红点提示。<br><br>
+                                                        ①
+                                                        <b>服务端后台定时同步</b>：按下方设置的检测间隔，服务器自动拉取所有账号的网络歌单，发现变化时覆盖更新并在侧栏显示红点提示。<br><br>
                                                         ② <b>点击歌单时自动同步</b>：进入网络歌单时，自动尝试从原始地址拉取最新内容。<br><br>
                                                         注意：自动更新会覆盖本地对该歌单的修改。
                                                     </span>
@@ -1916,11 +2049,13 @@
                                                 网络歌单自动检测间隔
                                             </div>
                                             <div class="flex items-center gap-2 mt-1.5 flex-wrap">
-                                                <span id="task-last-run-badge" class="text-[11px] px-2 py-0.5 rounded-lg border t-border-main text-gray-500 dark:text-gray-400 font-normal bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-1">
+                                                <span id="task-last-run-badge"
+                                                    class="text-[11px] px-2 py-0.5 rounded-lg border t-border-main text-gray-500 dark:text-gray-400 font-normal bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-1">
                                                     <i class="fas fa-history text-[9px] text-emerald-500"></i>
                                                     <span id="task-last-run-text">上次执行: 加载中...</span>
                                                 </span>
-                                                <span id="task-next-run-badge" class="text-[11px] px-2 py-0.5 rounded-lg border t-border-main text-gray-500 dark:text-gray-400 font-normal bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-1">
+                                                <span id="task-next-run-badge"
+                                                    class="text-[11px] px-2 py-0.5 rounded-lg border t-border-main text-gray-500 dark:text-gray-400 font-normal bg-gray-50/50 dark:bg-gray-800/50 flex items-center gap-1">
                                                     <i class="far fa-clock text-[9px] text-emerald-500"></i>
                                                     <span id="task-next-run-text">下次执行: 加载中...</span>
                                                 </span>
@@ -1932,27 +2067,35 @@
                                         <div class="relative flex flex-col items-end gap-1.5">
                                             <div class="flex items-center gap-2">
                                                 <input id="setting-network-list-auto-check-interval" type="hidden"
-                                                    value="6h" onchange="updateSetting('networkListAutoCheckInterval', this.value)">
-                                                <button type="button" id="btn-open-interval-popover" onclick="toggleIntervalPopover(event)"
+                                                    value="6h"
+                                                    onchange="updateSetting('networkListAutoCheckInterval', this.value)">
+                                                <button type="button" id="btn-open-interval-popover"
+                                                    onclick="toggleIntervalPopover(event)"
                                                     class="flex items-center gap-2 px-3.5 py-2 rounded-xl border t-border-main bg-white/60 dark:bg-gray-800/60 hover:border-emerald-500/50 hover:bg-emerald-50/30 dark:hover:bg-emerald-950/20 text-sm font-medium transition-all shadow-sm">
                                                     <i class="far fa-clock text-emerald-500 text-sm"></i>
-                                                    <span id="interval-trigger-label" class="t-text-main font-semibold tracking-wide">6小时</span>
-                                                    <i class="fas fa-chevron-down text-xs t-text-muted ml-1 transition-transform duration-200" id="interval-chevron-icon"></i>
+                                                    <span id="interval-trigger-label"
+                                                        class="t-text-main font-semibold tracking-wide">6小时</span>
+                                                    <i class="fas fa-chevron-down text-xs t-text-muted ml-1 transition-transform duration-200"
+                                                        id="interval-chevron-icon"></i>
                                                 </button>
                                             </div>
 
                                             <div id="interval-popover-panel"
                                                 class="hidden absolute right-0 top-full mt-2 w-72 p-4 rounded-2xl shadow-2xl border t-border-main bg-white dark:bg-gray-900 z-50 animate-fade-in backdrop-blur-md">
-                                                <div class="flex items-center justify-between pb-2.5 mb-3 border-b t-border-main">
-                                                    <div class="text-xs font-bold t-text-main flex items-center gap-1.5">
+                                                <div
+                                                    class="flex items-center justify-between pb-2.5 mb-3 border-b t-border-main">
+                                                    <div
+                                                        class="text-xs font-bold t-text-main flex items-center gap-1.5">
                                                         <i class="far fa-hourglass-half text-emerald-500"></i> 检测间隔设置
                                                     </div>
                                                     <span class="text-[11px] text-gray-400">最小 30秒</span>
                                                 </div>
 
                                                 <div class="mb-3">
-                                                    <div class="text-[11px] font-semibold text-gray-400 mb-1.5">快捷预设</div>
-                                                    <div class="grid grid-cols-4 gap-1.5" id="interval-presets-container">
+                                                    <div class="text-[11px] font-semibold text-gray-400 mb-1.5">快捷预设
+                                                    </div>
+                                                    <div class="grid grid-cols-4 gap-1.5"
+                                                        id="interval-presets-container">
                                                         <button type="button" onclick="selectIntervalPreset('30m')"
                                                             class="interval-preset-btn px-2 py-1.5 text-xs rounded-lg border t-border-main hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-50/50 dark:hover:bg-emerald-950/30 transition-all font-medium text-center">30分</button>
                                                         <button type="button" onclick="selectIntervalPreset('1h')"
@@ -1973,25 +2116,32 @@
                                                 </div>
 
                                                 <div class="mb-3 pt-2.5 border-t t-border-main">
-                                                    <div class="flex items-center justify-between text-[11px] font-semibold text-gray-400 mb-2">
+                                                    <div
+                                                        class="flex items-center justify-between text-[11px] font-semibold text-gray-400 mb-2">
                                                         <span>自定义复合时长</span>
-                                                        <span class="text-[10px] text-gray-400 font-normal">支持组合天/时/分</span>
+                                                        <span
+                                                            class="text-[10px] text-gray-400 font-normal">支持组合天/时/分</span>
                                                     </div>
                                                     <div class="grid grid-cols-3 gap-2">
                                                         <!-- 天 -->
                                                         <div class="flex flex-col items-center">
-                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">天</div>
-                                                            <div class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
-                                                                <button type="button" onclick="stepCompoundInterval('d', -1)"
+                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">天
+                                                            </div>
+                                                            <div
+                                                                class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
+                                                                <button type="button"
+                                                                    onclick="stepCompoundInterval('d', -1)"
                                                                     class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
                                                                     <i class="fas fa-minus"></i>
                                                                 </button>
-                                                                <input type="number" id="compound-interval-days" min="0" max="365" value="0"
+                                                                <input type="number" id="compound-interval-days" min="0"
+                                                                    max="365" value="0"
                                                                     oninput="onCompoundIntervalInput('d')"
                                                                     onchange="onCompoundIntervalChange('d')"
                                                                     onblur="onCompoundIntervalChange('d')"
                                                                     class="w-full text-center bg-transparent text-xs font-bold t-text-main focus:outline-none py-1">
-                                                                <button type="button" onclick="stepCompoundInterval('d', 1)"
+                                                                <button type="button"
+                                                                    onclick="stepCompoundInterval('d', 1)"
                                                                     class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
                                                                     <i class="fas fa-plus"></i>
                                                                 </button>
@@ -2000,18 +2150,23 @@
 
                                                         <!-- 小时 -->
                                                         <div class="flex flex-col items-center">
-                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">小时</div>
-                                                            <div class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
-                                                                <button type="button" onclick="stepCompoundInterval('h', -1)"
+                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">小时
+                                                            </div>
+                                                            <div
+                                                                class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
+                                                                <button type="button"
+                                                                    onclick="stepCompoundInterval('h', -1)"
                                                                     class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
                                                                     <i class="fas fa-minus"></i>
                                                                 </button>
-                                                                <input type="number" id="compound-interval-hours" min="0" max="23" value="6"
+                                                                <input type="number" id="compound-interval-hours"
+                                                                    min="0" max="23" value="6"
                                                                     oninput="onCompoundIntervalInput('h')"
                                                                     onchange="onCompoundIntervalChange('h')"
                                                                     onblur="onCompoundIntervalChange('h')"
                                                                     class="w-full text-center bg-transparent text-xs font-bold t-text-main focus:outline-none py-1">
-                                                                <button type="button" onclick="stepCompoundInterval('h', 1)"
+                                                                <button type="button"
+                                                                    onclick="stepCompoundInterval('h', 1)"
                                                                     class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
                                                                     <i class="fas fa-plus"></i>
                                                                 </button>
@@ -2020,18 +2175,23 @@
 
                                                         <!-- 分钟 -->
                                                         <div class="flex flex-col items-center">
-                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">分钟</div>
-                                                            <div class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
-                                                                <button type="button" onclick="stepCompoundInterval('m', -1)"
+                                                            <div class="text-[10px] text-gray-400 mb-1 font-medium">分钟
+                                                            </div>
+                                                            <div
+                                                                class="flex items-center w-full border t-border-main rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800/50">
+                                                                <button type="button"
+                                                                    onclick="stepCompoundInterval('m', -1)"
                                                                     class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
                                                                     <i class="fas fa-minus"></i>
                                                                 </button>
-                                                                <input type="number" id="compound-interval-minutes" min="0" max="59" value="0"
+                                                                <input type="number" id="compound-interval-minutes"
+                                                                    min="0" max="59" value="0"
                                                                     oninput="onCompoundIntervalInput('m')"
                                                                     onchange="onCompoundIntervalChange('m')"
                                                                     onblur="onCompoundIntervalChange('m')"
                                                                     class="w-full text-center bg-transparent text-xs font-bold t-text-main focus:outline-none py-1">
-                                                                <button type="button" onclick="stepCompoundInterval('m', 1)"
+                                                                <button type="button"
+                                                                    onclick="stepCompoundInterval('m', 1)"
                                                                     class="w-6 py-1.5 text-gray-400 hover:text-emerald-500 hover:bg-gray-200 dark:hover:bg-gray-700 active:scale-95 transition-all text-[10px] flex items-center justify-center">
                                                                     <i class="fas fa-plus"></i>
                                                                 </button>
@@ -2040,9 +2200,11 @@
                                                     </div>
                                                 </div>
 
-                                                <div class="flex items-center justify-between gap-2 pt-2.5 border-t t-border-main">
+                                                <div
+                                                    class="flex items-center justify-between gap-2 pt-2.5 border-t t-border-main">
                                                     <div class="text-[11px] text-gray-400">
-                                                        预览: <span id="interval-preview-text" class="font-semibold text-emerald-500">6 小时</span>
+                                                        预览: <span id="interval-preview-text"
+                                                            class="font-semibold text-emerald-500">6 小时</span>
                                                     </div>
                                                     <div class="flex gap-1.5">
                                                         <button type="button" onclick="closeIntervalPopover()"
@@ -4061,7 +4223,7 @@
             </div>
 
             <!-- Toolbar -->
-            <div id="custom-source-toolbar" class="p-4 border-b t-border-main flex gap-3 t-bg-panel">
+            <div id="custom-source-toolbar" class="p-4 border-b t-border-main flex gap-3 t-bg-panel flex-wrap">
                 <input type="file" id="script-file" accept=".js" class="hidden" onchange="handleFileUpload(this)">
                 <button onclick="document.getElementById('script-file').click()"
                     class="flex-1 flex items-center justify-center px-4 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-colors font-medium">
@@ -4071,6 +4233,36 @@
                     class="flex-1 flex items-center justify-center px-4 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl hover:bg-blue-100 transition-colors font-medium">
                     <i class="fas fa-link mr-2"></i>从 URL 导入
                 </button>
+                <button onclick="enterSourceBatchMode('modal')" id="btn-modal-source-batch"
+                    class="flex items-center gap-2 px-4 py-2.5 bg-purple-50 text-purple-600 dark:bg-purple-500/15 dark:text-purple-400 border border-purple-100 dark:border-purple-500/30 rounded-xl hover:bg-purple-100 dark:hover:bg-purple-500/25 transition-colors font-medium whitespace-nowrap">
+                    <i class="fas fa-tasks"></i>批量
+                </button>
+            </div>
+
+            <!-- 批量操作工具栏 (Modal) -->
+            <div id="modal-source-batch-bar"
+                class="hidden px-4 py-3 border-b t-border-main flex flex-wrap items-center gap-2 bg-purple-50 dark:bg-purple-500/10">
+                <span class="text-xs text-purple-600 dark:text-purple-400 font-medium flex items-center gap-1.5">
+                    <i class="fas fa-check-square"></i>
+                    已选 <strong id="modal-source-batch-count">0</strong> 项
+                </span>
+                <div class="flex flex-wrap gap-1.5 ml-auto">
+                    <button onclick="selectAllSourceBatch('modal')"
+                        class="px-2.5 py-1 text-xs bg-white dark:bg-neutral-800 border border-purple-200 dark:border-purple-500/30 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-50 dark:hover:bg-purple-500/20 transition-colors"><i
+                            class="fas fa-check-double mr-1"></i>全选</button>
+                    <button onclick="batchSourceEnable('modal', true)"
+                        class="px-2.5 py-1 text-xs bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg transition-colors"><i
+                            class="fas fa-toggle-on mr-1"></i>批量启用</button>
+                    <button onclick="batchSourceEnable('modal', false)"
+                        class="px-2.5 py-1 text-xs bg-amber-500 hover:bg-amber-600 text-white rounded-lg transition-colors"><i
+                            class="fas fa-toggle-off mr-1"></i>批量禁用</button>
+                    <button onclick="batchSourceDelete('modal')"
+                        class="px-2.5 py-1 text-xs bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors"><i
+                            class="fas fa-trash-alt mr-1"></i>批量删除</button>
+                    <button onclick="exitSourceBatchMode('modal')"
+                        class="px-2.5 py-1 text-xs bg-gray-200 dark:bg-neutral-700 hover:bg-gray-300 dark:hover:bg-neutral-600 t-text-muted rounded-lg transition-colors"><i
+                            class="fas fa-times mr-1"></i>退出</button>
+                </div>
             </div>
 
             <!-- List -->
@@ -5377,179 +5569,261 @@
     </div>
 
     <!-- Local music remaster modal -->
-    <div id="lm-remaster-modal" class="fixed inset-0 z-[110] hidden items-center justify-center p-3 md:p-6">
-        <div class="absolute inset-0 bg-black/65 backdrop-blur-sm" onclick="LocalMusicManager.closeRemasterModal()">
+    <div id="lm-remaster-modal"
+        class="fixed inset-0 z-[110] hidden items-center justify-center p-2.5 md:p-6 transition-all duration-300">
+        <div class="absolute inset-0 bg-black/75 backdrop-blur-md transition-opacity"
+            onclick="LocalMusicManager.closeRemasterModal()">
         </div>
         <div
-            class="relative t-bg-panel border t-border-main rounded-xl shadow-2xl w-full max-w-4xl max-h-[88vh] flex flex-col overflow-hidden">
-            <div class="px-4 py-3 md:px-5 border-b t-border-main flex items-center justify-between shrink-0">
+            class="relative t-bg-panel border t-border-main rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:h-[86vh] md:max-h-[780px] flex flex-col overflow-hidden backdrop-blur-xl bg-opacity-95">
+            <!-- Modal Header -->
+            <div
+                class="px-5 py-3.5 border-b t-border-main flex items-center justify-between shrink-0 bg-gray-50/50 dark:bg-white/[0.02]">
                 <div class="flex items-center gap-3 min-w-0">
                     <div
-                        class="w-9 h-9 rounded-lg bg-red-50 dark:bg-red-950/40 text-red-600 flex items-center justify-center shrink-0">
-                        <i class="fas fa-exchange-alt"></i>
+                        class="w-9 h-9 rounded-xl bg-gradient-to-tr from-red-600 via-rose-500 to-orange-400 text-white flex items-center justify-center shadow-lg shadow-red-500/20 shrink-0">
+                        <i class="fas fa-wand-magic-sparkles text-xs"></i>
                     </div>
                     <div class="min-w-0">
-                        <h3 class="text-base font-bold t-text-main">歌曲洗版</h3>
-                        <p id="lm-remaster-modal-subtitle" class="text-[11px] t-text-muted truncate">仅处理服务器下载目录，不处理缓存目录</p>
+                        <div class="flex items-center gap-2">
+                            <h3 class="text-base font-bold t-text-main tracking-tight">歌曲洗版</h3>
+                            <span id="lm-remaster-source-badge"
+                                class="px-2 py-0.5 text-[10px] font-semibold rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20">下载目录</span>
+                        </div>
+                        <p id="lm-remaster-modal-subtitle" class="text-[11px] t-text-muted truncate mt-0.5">
+                            批量升级音质并自动校验替换，已内置低音质缩水保护机制</p>
                     </div>
                 </div>
                 <button onclick="LocalMusicManager.closeRemasterModal()"
-                    class="w-8 h-8 flex items-center justify-center rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800"
+                    class="w-8 h-8 flex items-center justify-center rounded-xl text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-all duration-200"
                     title="关闭">
-                    <i class="fas fa-times"></i>
+                    <i class="fas fa-times text-sm"></i>
                 </button>
             </div>
 
-            <div class="p-4 md:p-5 overflow-y-auto custom-scrollbar space-y-4">
-                <div class="flex flex-col md:flex-row md:items-end gap-3">
-                    <div class="flex-1">
-                        <label for="lm-remaster-quality" class="block text-xs font-bold t-text-main mb-2">目标音质</label>
-                        <select id="lm-remaster-quality" class="lm-select !w-full !py-2.5">
-                            <option value="128k">标准音质</option>
-                            <option value="320k">高音质</option>
-                            <option value="flac">无损音质</option>
-                            <option value="flac24bit">24bit无损</option>
-                            <option value="hires">高解析度</option>
-                            <option value="atmos">空间音频</option>
-                            <option value="atmos_plus">增强空间音频</option>
-                            <option value="master">母带音质</option>
-                        </select>
-                    </div>
-                    <button id="lm-remaster-start" onclick="LocalMusicManager.startRemaster()" disabled
-                        class="h-10 px-5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                        <i class="fas fa-play"></i><span>开始洗版</span>
-                    </button>
-                    <button id="lm-remaster-cancel" onclick="LocalMusicManager.cancelRemaster()"
-                        class="hidden h-10 px-5 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-bold text-sm items-center justify-center gap-2">
-                        <i class="fas fa-stop"></i><span>停止</span>
-                    </button>
-                </div>
+            <!-- Modal Body: Responsive Split Layout -->
+            <div
+                class="p-4 md:p-5 flex-1 min-h-0 overflow-y-auto md:overflow-hidden grid grid-cols-1 md:grid-cols-12 gap-4">
 
-                <div class="border t-border-main rounded-lg overflow-hidden">
+                <!-- Left Panel: Song Selection & Search (7 cols) -->
+                <div
+                    class="md:col-span-7 flex flex-col min-h-[360px] md:min-h-0 border t-border-main rounded-xl overflow-hidden shadow-xs bg-gray-50/20 dark:bg-white/[0.01]">
+                    <!-- Top Toolbar -->
                     <div
-                        class="px-3 py-2.5 t-bg-main border-b t-border-main flex flex-col md:flex-row md:items-center gap-2 md:justify-between">
-                        <div class="text-xs font-bold t-text-main">
-                            选择歌曲
-                            <span class="ml-1 font-normal t-text-muted">已选 <span
-                                    id="lm-remaster-selected-count">0</span> / <span
-                                    id="lm-remaster-available-count">0</span> 首</span>
+                        class="px-3.5 py-2.5 t-bg-main border-b t-border-main flex items-center justify-between gap-2 shrink-0">
+                        <div class="flex items-center gap-1.5 text-xs font-bold t-text-main min-w-0">
+                            <i class="fas fa-list-check text-red-500 text-xs shrink-0"></i>
+                            <span class="truncate">待选歌曲</span>
+                            <span
+                                class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-gray-100 dark:bg-white/10 t-text-muted shrink-0">
+                                已选 <b id="lm-remaster-selected-count" class="text-red-500 mx-1">0</b> / <span
+                                    id="lm-remaster-available-count" class="ml-1">0</span>
+                            </span>
                         </div>
-                        <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-1.5 shrink-0">
                             <button id="lm-remaster-select-all" onclick="LocalMusicManager.selectAllRemasterResults()"
-                                class="h-7 px-2.5 text-[11px] border t-border-main rounded-md hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed">
-                                全选结果
+                                class="h-6.5 px-2 text-[11px] font-medium border t-border-main rounded-md hover:t-bg-track hover:border-red-400/50 flex items-center gap-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                                <i class="fas fa-check-double text-[9px]"></i>
+                                全选
                             </button>
                             <button id="lm-remaster-clear-selection"
                                 onclick="LocalMusicManager.clearRemasterSelection()" disabled
-                                class="h-7 px-2.5 text-[11px] border t-border-main rounded-md hover:t-bg-track disabled:opacity-40 disabled:cursor-not-allowed">
+                                class="h-6.5 px-2 text-[11px] font-medium border t-border-main rounded-md hover:t-bg-track flex items-center gap-1 transition-all disabled:opacity-40 disabled:cursor-not-allowed">
+                                <i class="fas fa-times text-[9px]"></i>
                                 清空
                             </button>
                         </div>
                     </div>
-                    <div class="p-2 border-b t-border-main">
+
+                    <!-- Search Bar -->
+                    <div class="p-2 border-b t-border-main t-bg-main shrink-0">
                         <div class="relative">
                             <i
-                                class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-[10px] t-text-muted pointer-events-none z-10"></i>
+                                class="fas fa-search absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-gray-400 pointer-events-none z-10"></i>
                             <div id="lm-remaster-search" contenteditable="true"
-                                data-placeholder="搜索歌曲、歌手、专辑或音质... (加空格激活 & | ! 逻辑)"
+                                data-placeholder="搜索歌曲、歌手、专辑或音质... (空格激活 & | !)"
                                 oninput="LocalMusicManager.setRemasterSearch(this)"
                                 onkeydown="LocalMusicManager.handleRichKeydown(event, this)"
                                 onpaste="LocalMusicManager.handleRichPaste(event, this)"
                                 oncopy="LocalMusicManager.handleRichCopy(event, this)"
                                 oncut="LocalMusicManager.handleRichCopy(event, this)"
-                                class="lm-rich-search-input w-full h-9 pl-8 pr-3 t-bg-main border t-border-main rounded-md text-xs focus:outline-none focus:ring-2 focus:ring-red-500/30 overflow-x-auto whitespace-nowrap flex items-center">
+                                class="lm-rich-search-input w-full h-8 pl-7.5 pr-2.5 t-bg-main border t-border-main rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-red-500/30 overflow-x-auto whitespace-nowrap flex items-center transition-all">
                             </div>
                         </div>
                     </div>
-                    <div id="lm-remaster-song-list" class="h-52 overflow-y-auto custom-scrollbar">
-                        <div class="h-full flex items-center justify-center text-xs t-text-muted">正在加载下载歌曲...</div>
+
+                    <!-- Song List -->
+                    <div id="lm-remaster-song-list"
+                        class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-gray-100 dark:divide-white/[0.04] min-h-[220px]">
+                        <div class="h-full flex items-center justify-center text-xs t-text-muted">正在加载歌曲...</div>
                     </div>
-                    <div class="h-9 px-3 t-bg-main border-t t-border-main flex items-center justify-between">
-                        <span id="lm-remaster-source-hint" class="text-[10px] t-text-muted">仅列出下载目录中的歌曲</span>
-                        <div class="flex items-center gap-2">
+
+                    <!-- Bottom Pagination -->
+                    <div class="h-8.5 px-3 t-bg-main border-t t-border-main flex items-center justify-between shrink-0">
+                        <span id="lm-remaster-source-hint"
+                            class="text-[10px] t-text-muted flex items-center gap-1 truncate">
+                            <i class="fas fa-circle-info text-[9px]"></i>
+                            <span>仅列出下载目录中的歌曲</span>
+                        </span>
+                        <div class="flex items-center gap-1 shrink-0">
                             <button id="lm-remaster-selection-prev"
                                 onclick="LocalMusicManager.changeRemasterSelectionPage(-1)"
-                                class="w-7 h-7 flex items-center justify-center rounded-md hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed"
+                                class="w-6 h-6 flex items-center justify-center rounded-md border t-border-main hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                 title="上一页">
-                                <i class="fas fa-chevron-left text-[10px]"></i>
+                                <i class="fas fa-chevron-left text-[9px]"></i>
                             </button>
                             <span id="lm-remaster-selection-page-info"
-                                class="min-w-12 text-center text-[10px] t-text-muted">1 / 1</span>
+                                class="min-w-10 text-center text-[10px] font-mono t-text-muted font-medium">1 / 1</span>
                             <button id="lm-remaster-selection-next"
                                 onclick="LocalMusicManager.changeRemasterSelectionPage(1)"
-                                class="w-7 h-7 flex items-center justify-center rounded-md hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed"
+                                class="w-6 h-6 flex items-center justify-center rounded-md border t-border-main hover:t-bg-track disabled:opacity-30 disabled:cursor-not-allowed transition-all"
                                 title="下一页">
-                                <i class="fas fa-chevron-right text-[10px]"></i>
+                                <i class="fas fa-chevron-right text-[9px]"></i>
                             </button>
                         </div>
                     </div>
                 </div>
 
-                <div
-                    class="text-xs leading-relaxed text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-900 p-3 rounded-lg">
-                    升级时若无法取得高于当前文件的音质，该歌曲会跳过；目标音质不可用但仍可取得有效的较低音质时，结果会显示实际采用音质。处理期间请勿手动移动或删除下载目录中的歌曲。
+                <!-- Right Panel: Controls, Progress & Results (5 cols) -->
+                <div class="md:col-span-5 flex flex-col gap-3 min-h-0">
+                    <!-- Target Quality & Trigger Console -->
+                    <div
+                        class="p-3 rounded-xl border t-border-main bg-gray-50/60 dark:bg-white/[0.02] shadow-xs shrink-0 space-y-2.5">
+                        <div>
+                            <div class="flex items-center justify-between mb-1.5">
+                                <label for="lm-remaster-quality"
+                                    class="text-xs font-bold t-text-main flex items-center gap-1.5">
+                                    <i class="fas fa-sliders text-[11px] text-red-500"></i>
+                                    目标音质
+                                </label>
+                                <span class="text-[10px] t-text-muted">无更高音质将智能跳过</span>
+                            </div>
+                            <select id="lm-remaster-quality"
+                                class="lm-select !w-full !py-2 !pl-3 !pr-8 rounded-lg text-xs font-semibold t-bg-main border t-border-main focus:ring-2 focus:ring-red-500/30 transition-all">
+                                <option value="128k">标准音质 (128Kbps MP3)</option>
+                                <option value="320k">高音质 (320Kbps MP3)</option>
+                                <option value="flac">无损音质 (FLAC Lossless)</option>
+                                <option value="flac24bit">24bit 无损 (FLAC Hi-Res 24bit)</option>
+                                <option value="hires">高解析度 (Hi-Res Audio)</option>
+                                <option value="atmos">空间音频 (Dolby Atmos)</option>
+                                <option value="atmos_plus">增强空间音频 (Dolby Atmos Plus)</option>
+                                <option value="master">母带音质 (Master Quality)</option>
+                            </select>
+                        </div>
+
+                        <div class="flex items-center gap-2">
+                            <button id="lm-remaster-start" onclick="LocalMusicManager.startRemaster()" disabled
+                                class="w-full h-9 px-4 bg-gradient-to-r from-red-600 via-rose-600 to-red-500 hover:from-red-500 hover:to-rose-500 text-white rounded-lg font-bold text-xs flex items-center justify-center gap-2 shadow-md shadow-red-500/20 disabled:opacity-50 disabled:shadow-none disabled:cursor-not-allowed active:scale-[0.98] transition-all duration-200">
+                                <i class="fas fa-play text-[10px]"></i><span>开始洗版任务</span>
+                            </button>
+                            <button id="lm-remaster-cancel" onclick="LocalMusicManager.cancelRemaster()"
+                                class="hidden w-full h-9 px-4 bg-gray-700 hover:bg-gray-800 text-white rounded-lg font-bold text-xs items-center justify-center gap-2 transition-all">
+                                <i class="fas fa-stop text-[10px]"></i><span>停止任务</span>
+                            </button>
+                        </div>
+
+                        <!-- Mini Protection Hint -->
+                        <div
+                            class="text-[10px] leading-normal text-amber-800/90 dark:text-amber-200/80 bg-amber-500/10 border border-amber-500/20 px-2.5 py-1.5 rounded-lg flex items-center gap-1.5">
+                            <i class="fas fa-shield-halved text-amber-500 text-[10px] shrink-0"></i>
+                            <span>新文件若体积缩水将拒绝替换，原文件安全无忧。</span>
+                        </div>
+                    </div>
+
+                    <!-- Live Progress & Metrics Dashboard -->
+                    <div
+                        class="p-3 rounded-xl border t-border-main bg-gray-50/40 dark:bg-white/[0.01] shadow-xs shrink-0 space-y-2.5">
+                        <div>
+                            <div class="flex items-center justify-between text-xs mb-1.5">
+                                <span id="lm-remaster-status"
+                                    class="font-bold t-text-main flex items-center gap-1.5 text-xs">
+                                    <span class="w-2 h-2 rounded-full bg-gray-400"></span>
+                                    尚未开始
+                                </span>
+                                <span id="lm-remaster-progress-text"
+                                    class="font-mono font-semibold text-[11px] text-red-500 bg-red-50 dark:bg-red-950/40 px-2 py-0.2 rounded-full border border-red-200 dark:border-red-900/40">0
+                                    / 0</span>
+                            </div>
+                            <div
+                                class="h-2 bg-gray-200/80 dark:bg-gray-800/80 rounded-full overflow-hidden border t-border-main p-0.2 shadow-inner">
+                                <div id="lm-remaster-progress"
+                                    class="h-full bg-gradient-to-r from-red-500 via-rose-500 to-amber-500 rounded-full transition-all duration-300 shadow-sm"
+                                    style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <!-- 5 Stats Filter Buttons (Grid 5 cols) -->
+                        <div class="grid grid-cols-5 gap-1.5 text-center">
+                            <button type="button" data-remaster-result-filter="all"
+                                onclick="LocalMusicManager.setRemasterResultFilter('all')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-gray-50/40 dark:bg-white/[0.01]"
+                                aria-pressed="true" title="全部">
+                                <div class="text-[9px] font-medium t-text-muted truncate">总数</div>
+                                <div id="lm-remaster-total" class="text-xs font-black t-text-main font-mono mt-0.5">0
+                                </div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="successful"
+                                onclick="LocalMusicManager.setRemasterResultFilter('successful')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-emerald-500/[0.02]"
+                                aria-pressed="false" title="成功">
+                                <div class="text-[9px] font-medium text-emerald-600 dark:text-emerald-400 truncate">成功
+                                </div>
+                                <div id="lm-remaster-replaced"
+                                    class="text-xs font-black text-emerald-600 dark:text-emerald-400 font-mono mt-0.5">0
+                                </div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="downgraded"
+                                onclick="LocalMusicManager.setRemasterResultFilter('downgraded')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-amber-500/[0.02]"
+                                aria-pressed="false" title="降级">
+                                <div class="text-[9px] font-medium text-amber-600 dark:text-amber-400 truncate">降级</div>
+                                <div id="lm-remaster-downgraded"
+                                    class="text-xs font-black text-amber-600 dark:text-amber-400 font-mono mt-0.5">0
+                                </div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="skipped"
+                                onclick="LocalMusicManager.setRemasterResultFilter('skipped')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-gray-500/[0.02]"
+                                aria-pressed="false" title="已跳过">
+                                <div class="text-[9px] font-medium text-gray-500 dark:text-gray-400 truncate">跳过</div>
+                                <div id="lm-remaster-skipped"
+                                    class="text-xs font-black text-gray-500 dark:text-gray-400 font-mono mt-0.5">0</div>
+                            </button>
+                            <button type="button" data-remaster-result-filter="failed"
+                                onclick="LocalMusicManager.setRemasterResultFilter('failed')"
+                                class="border t-border-main rounded-lg p-1.5 transition-all duration-200 hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed group relative overflow-hidden bg-red-500/[0.02]"
+                                aria-pressed="false" title="失败">
+                                <div class="text-[9px] font-medium text-red-600 dark:text-red-400 truncate">失败</div>
+                                <div id="lm-remaster-failed"
+                                    class="text-xs font-black text-red-600 dark:text-red-400 font-mono mt-0.5">0</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Live Results List -->
+                    <div
+                        class="flex-1 min-h-[160px] flex flex-col border t-border-main rounded-xl overflow-hidden shadow-xs bg-gray-50/20 dark:bg-white/[0.01]">
+                        <div id="lm-remaster-results-title"
+                            class="px-3 py-2 t-bg-main border-b t-border-main text-xs font-bold flex items-center gap-1.5 shrink-0">
+                            <i class="fas fa-square-poll-vertical text-red-500 text-xs"></i>
+                            <span>处理结果</span>
+                        </div>
+                        <div id="lm-remaster-results"
+                            class="flex-1 overflow-y-auto custom-scrollbar divide-y divide-gray-100 dark:divide-white/[0.04] min-h-0">
+                            <div
+                                class="h-full min-h-[120px] flex flex-col items-center justify-center text-xs t-text-muted gap-1.5">
+                                <i class="fas fa-clipboard-list text-xl opacity-20"></i>
+                                <span>暂无处理结果</span>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div>
-                    <div class="flex items-center justify-between text-xs mb-2">
-                        <span id="lm-remaster-status" class="font-bold t-text-main">尚未开始</span>
-                        <span id="lm-remaster-progress-text" class="t-text-muted">0 / 0</span>
-                    </div>
-                    <div class="h-2 bg-gray-100 dark:bg-gray-800 rounded-full overflow-hidden">
-                        <div id="lm-remaster-progress" class="h-full bg-red-500 transition-all duration-300"
-                            style="width: 0%"></div>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-2 md:grid-cols-5 gap-2 text-center">
-                    <button type="button" data-remaster-result-filter="all"
-                        onclick="LocalMusicManager.setRemasterResultFilter('all')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="true">
-                        <div id="lm-remaster-total" class="text-lg font-bold">0</div>
-                        <div class="text-[10px] t-text-muted">总数</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="successful"
-                        onclick="LocalMusicManager.setRemasterResultFilter('successful')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-replaced" class="text-lg font-bold text-emerald-600">0</div>
-                        <div class="text-[10px] t-text-muted">成功</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="downgraded"
-                        onclick="LocalMusicManager.setRemasterResultFilter('downgraded')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-downgraded" class="text-lg font-bold text-amber-600">0</div>
-                        <div class="text-[10px] t-text-muted">发生降级</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="skipped"
-                        onclick="LocalMusicManager.setRemasterResultFilter('skipped')"
-                        class="border t-border-main rounded-lg p-2 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-skipped" class="text-lg font-bold text-gray-500">0</div>
-                        <div class="text-[10px] t-text-muted">已跳过</div>
-                    </button>
-                    <button type="button" data-remaster-result-filter="failed"
-                        onclick="LocalMusicManager.setRemasterResultFilter('failed')"
-                        class="border t-border-main rounded-lg p-2 col-span-2 md:col-span-1 transition-colors hover:t-bg-track focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed"
-                        aria-pressed="false">
-                        <div id="lm-remaster-failed" class="text-lg font-bold text-red-600">0</div>
-                        <div class="text-[10px] t-text-muted">失败</div>
-                    </button>
-                </div>
-
-                <div class="border t-border-main rounded-lg overflow-hidden">
-                    <div id="lm-remaster-results-title"
-                        class="px-3 py-2 t-bg-main border-b t-border-main text-xs font-bold">处理结果</div>
-                    <div id="lm-remaster-results"
-                        class="max-h-72 overflow-y-auto custom-scrollbar divide-y t-border-main">
-                        <div class="p-6 text-center text-xs t-text-muted">暂无结果</div>
-                    </div>
-                </div>
             </div>
         </div>
     </div>
+
+
 
     <!-- Project Agreement Modal Overlay -->
     <div id="project-agreement-modal"
@@ -5653,17 +5927,20 @@
                 <i class="fas fa-exclamation-triangle text-amber-500 text-base mt-0.5 shrink-0"></i>
                 <div>
                     <p class="text-xs font-bold text-amber-700 dark:text-amber-300">需先开启「自动更新网络歌单」</p>
-                    <p class="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5 leading-relaxed">同步下载功能由网络歌单自动检查驱动。请前往设置 → 本地音乐，开启该选项后即可自动定时同步。</p>
+                    <p class="text-[11px] text-amber-600 dark:text-amber-400 mt-0.5 leading-relaxed">
+                        同步下载功能由网络歌单自动检查驱动。请前往设置 → 本地音乐，开启该选项后即可自动定时同步。</p>
                 </div>
             </div>
 
             <!-- 总开关卡片 -->
-            <div id="sd-settings-area" class="p-4 rounded-2xl bg-gray-50/80 dark:bg-gray-800/60 border border-gray-200/60 dark:border-gray-700/60 shadow-xs transition-opacity duration-200">
+            <div id="sd-settings-area"
+                class="p-4 rounded-2xl bg-gray-50/80 dark:bg-gray-800/60 border border-gray-200/60 dark:border-gray-700/60 shadow-xs transition-opacity duration-200">
                 <div class="flex items-center justify-between gap-3">
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-2">
                             <span class="text-xs font-bold text-gray-800 dark:text-gray-100">启用同步下载</span>
-                            <span class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">后台自动</span>
+                            <span
+                                class="text-[9px] px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-semibold border border-emerald-500/20">后台自动</span>
                         </div>
                         <p class="text-[11px] text-gray-500 dark:text-gray-400 mt-0.5">开启后，歌单检查更新时自动下载歌曲并保持本地一致</p>
                     </div>
@@ -5677,28 +5954,72 @@
                 </div>
 
                 <!-- 同步音质选择设置 -->
-                <div class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                <div
+                    class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1.5">
                             <i class="fas fa-sliders-h text-emerald-500 text-xs"></i>
                             <span class="text-xs font-bold text-gray-800 dark:text-gray-100">同步目标音质</span>
                         </div>
-                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">若更改音质，下次同步会自动将已下载歌曲重新下载更新至该目标音质</p>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">若更改音质，下次同步会自动将已下载歌曲重新下载更新至该目标音质
+                        </p>
                     </div>
                     <div class="shrink-0">
-                        <select id="sd-quality-select"
-                            onchange="window.SyncDownloadPanel.onQualityChange(this.value)"
+                        <select id="sd-quality-select" onchange="window.SyncDownloadPanel.onQualityChange(this.value)"
                             class="px-3 py-1.5 text-xs font-semibold rounded-xl bg-white dark:bg-gray-700/80 text-gray-800 dark:text-gray-200 border border-gray-200 dark:border-gray-600 shadow-xs focus:outline-none focus:ring-2 focus:ring-emerald-500/40 cursor-pointer">
+                            <option value="master">母带音质</option>
+                            <option value="atmos_plus">增强空间音频</option>
+                            <option value="atmos">空间音频</option>
+                            <option value="hires">高解析度</option>
+                            <option value="flac24bit">24bit无损</option>
+                            <option value="flac">无损音质</option>
                             <option value="320k">高品质 (320k)</option>
                             <option value="128k">标准 (128k)</option>
-                            <option value="flac">无损 (FLAC)</option>
-                            <option value="flac24bit">Hi-Res (FLAC 24bit)</option>
                         </select>
                     </div>
                 </div>
 
+                <!-- 下载歌词文件开关 -->
+                <div
+                    class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <i class="fas fa-file-alt text-emerald-500 text-xs"></i>
+                            <span class="text-xs font-bold text-gray-800 dark:text-gray-100">下载歌词文件</span>
+                        </div>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">同步时自动下载 .lrc 歌词文件至歌曲同目录</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input type="checkbox" id="sd-download-lyric-switch" class="sr-only peer"
+                            onchange="window.SyncDownloadPanel.onDownloadLyricChange(this.checked)">
+                        <div
+                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500 shadow-inner">
+                        </div>
+                    </label>
+                </div>
+
+                <!-- 嵌入 USLT 标签开关 -->
+                <div
+                    class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1.5">
+                            <i class="fas fa-tag text-emerald-500 text-xs"></i>
+                            <span class="text-xs font-bold text-gray-800 dark:text-gray-100">嵌入 USLT 标签</span>
+                        </div>
+                        <p class="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5">将歌词写入音频文件元信息，方便播放器直接读取</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0">
+                        <input type="checkbox" id="sd-embed-lyric-switch" class="sr-only peer"
+                            onchange="window.SyncDownloadPanel.onEmbedLyricChange(this.checked)">
+                        <div
+                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-0.5 after:left-[3px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500 shadow-inner">
+                        </div>
+                    </label>
+                </div>
+
                 <!-- 存储位置设置 -->
-                <div id="sd-storage-row" class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                <div id="sd-storage-row"
+                    class="flex items-center justify-between gap-3 mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1.5">
                             <i class="fas fa-folder text-emerald-500 text-xs"></i>
@@ -5718,49 +6039,64 @@
                 </div>
 
 
-                <div class="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
-                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] bg-white dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/40 shadow-xs text-gray-600 dark:text-gray-300">
+                <div
+                    class="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-gray-200/50 dark:border-gray-700/40">
+                    <div
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] bg-white dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/40 shadow-xs text-gray-600 dark:text-gray-300">
                         <i class="far fa-clock text-emerald-500 text-[10px]"></i>
                         <span>上次同步:</span>
                         <b id="sd-last-sync-time" class="font-medium text-gray-800 dark:text-gray-200">—</b>
                     </div>
-                    <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] bg-white dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/40 shadow-xs text-gray-600 dark:text-gray-300">
+                    <div
+                        class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-[10px] bg-white dark:bg-gray-700/50 border border-gray-100 dark:border-gray-600/40 shadow-xs text-gray-600 dark:text-gray-300">
                         <i class="fas fa-satellite-dish text-teal-500 text-[10px]"></i>
                         <span>下次同步:</span>
                         <b id="sd-next-sync-time" class="font-medium text-gray-800 dark:text-gray-200">—</b>
                     </div>
                 </div>
-                <div id="sd-last-result" class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl inline-flex items-center gap-1.5 mt-2 hidden"></div>
+                <div id="sd-last-result"
+                    class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl inline-flex items-center gap-1.5 mt-2 hidden">
+                </div>
             </div>
 
             <!-- 顶部总进度看板（正在同步时展开）-->
             <div id="sd-progress-area" class="hidden">
-                <div class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-cyan-950/40 border border-emerald-500/25 dark:border-emerald-500/35 shadow-sm">
+                <div
+                    class="p-3.5 rounded-2xl bg-gradient-to-r from-emerald-500/10 via-teal-500/10 to-cyan-500/10 dark:from-emerald-950/40 dark:via-teal-950/30 dark:to-cyan-950/40 border border-emerald-500/25 dark:border-emerald-500/35 shadow-sm">
                     <div class="flex items-center justify-between gap-2 mb-2.5">
                         <div class="flex items-center gap-2 min-w-0">
-                            <span class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-white shadow-xs animate-pulse">
+                            <span
+                                class="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-white shadow-xs animate-pulse">
                                 <span class="w-1.5 h-1.5 rounded-full bg-white"></span>正在同步
                             </span>
-                            <span id="sd-progress-list" class="text-xs font-bold text-gray-800 dark:text-gray-100 truncate"></span>
+                            <span id="sd-progress-list"
+                                class="text-xs font-bold text-gray-800 dark:text-gray-100 truncate"></span>
                         </div>
-                        <span id="sd-progress-count" class="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono shrink-0">0/0</span>
+                        <span id="sd-progress-count"
+                            class="text-xs font-bold text-emerald-600 dark:text-emerald-400 font-mono shrink-0">0/0</span>
                     </div>
 
                     <!-- 进度条 -->
-                    <div class="w-full bg-gray-200/80 dark:bg-gray-700/80 rounded-full h-2 overflow-hidden shadow-inner">
+                    <div
+                        class="w-full bg-gray-200/80 dark:bg-gray-700/80 rounded-full h-2 overflow-hidden shadow-inner">
                         <div id="sd-progress-bar"
                             class="h-full bg-gradient-to-r from-emerald-500 via-teal-400 to-cyan-500 rounded-full transition-all duration-300 shadow-sm"
                             style="width: 0%"></div>
                     </div>
 
                     <!-- 正在处理的单曲与统计 -->
-                    <div class="flex items-center justify-between gap-2 mt-2.5 pt-2 border-t border-emerald-500/15 dark:border-emerald-500/20">
+                    <div
+                        class="flex items-center justify-between gap-2 mt-2.5 pt-2 border-t border-emerald-500/15 dark:border-emerald-500/20">
                         <div class="flex items-center gap-1.5 min-w-0 flex-1">
                             <i class="fas fa-compact-disc text-emerald-500 text-xs animate-spin shrink-0"></i>
-                            <span id="sd-progress-song" class="text-[11px] font-medium text-gray-700 dark:text-gray-300 truncate">准备中...</span>
+                            <span id="sd-progress-song"
+                                class="text-[11px] font-medium text-gray-700 dark:text-gray-300 truncate">准备中...</span>
                         </div>
                         <div class="text-[10px] text-gray-500 dark:text-gray-400 shrink-0 font-mono">
-                            增加: <b id="sd-progress-add-count" class="text-emerald-600 dark:text-emerald-400 font-bold">0</b> | 减少: <b id="sd-progress-del-count" class="text-amber-500 font-bold">0</b> | 失败: <b id="sd-progress-fail-count" class="text-red-500 font-bold">0</b>
+                            增加: <b id="sd-progress-add-count"
+                                class="text-emerald-600 dark:text-emerald-400 font-bold">0</b> | 减少: <b
+                                id="sd-progress-del-count" class="text-amber-500 font-bold">0</b> | 失败: <b
+                                id="sd-progress-fail-count" class="text-red-500 font-bold">0</b>
                         </div>
                     </div>
                 </div>
@@ -5769,7 +6105,8 @@
             <!-- 歌单列表 -->
             <div>
                 <div class="flex items-center justify-between mb-2 px-1">
-                    <p class="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">歌单同步配置</p>
+                    <p class="text-[11px] font-bold text-gray-500 dark:text-gray-400 uppercase tracking-wider">歌单同步配置
+                    </p>
                     <span id="sd-playlist-count-tag" class="text-[10px] text-gray-400 dark:text-gray-500"></span>
                 </div>
                 <div id="sd-playlist-list" class="space-y-2">
@@ -5786,8 +6123,17 @@
                         <i class="fas fa-exclamation-circle"></i>上次同步失败歌曲
                     </p>
                 </div>
+                <!-- 体积缩水保护说明 -->
+                <div
+                    class="mb-2 px-2.5 py-2 rounded-xl bg-amber-500/8 border border-amber-500/20 flex items-start gap-2">
+                    <i class="fas fa-shield-alt text-amber-500 text-[10px] mt-0.5 shrink-0"></i>
+                    <p class="text-[10px] text-amber-700 dark:text-amber-400 leading-relaxed">
+                        <span class="font-semibold">体积缩水保护</span> — 音质升级时若新文件比本地文件更小（疑似假高音质），将自动拒绝替换并在此列出，原文件保持不变。
+                    </p>
+                </div>
                 <div id="sd-failed-list" class="space-y-1.5 max-h-48 overflow-y-auto custom-scrollbar"></div>
             </div>
+
         </div>
 
         <!-- Footer 操作栏 -->
@@ -5796,7 +6142,8 @@
             <div class="text-[10px] text-gray-500 dark:text-gray-400 truncate flex items-center gap-1">
                 <i class="fas fa-folder-open text-gray-400"></i>
                 <span>目录:</span>
-                <code id="sd-footer-dir" class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">data/music/用户/歌单名/</code>
+                <code id="sd-footer-dir"
+                    class="bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded text-emerald-600 dark:text-emerald-400 font-mono text-[10px]">data/music/用户/歌单名/</code>
             </div>
             <div class="flex items-center gap-2 shrink-0">
                 <button id="sd-pause-btn" onclick="window.SyncDownloadPanel.cancelSync()"
@@ -5815,10 +6162,12 @@
 <!-- 同步存储迁移确认 Modal -->
 <div id="sd-migrate-modal"
     class="hidden fixed inset-0 z-[9500] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-    <div class="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden">
+    <div
+        class="w-full max-w-md bg-white dark:bg-gray-900 rounded-2xl shadow-2xl border border-gray-200/80 dark:border-gray-800 overflow-hidden">
         <!-- Header -->
         <div class="flex items-center gap-3 px-5 py-4 border-b border-gray-100 dark:border-gray-800/80">
-            <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center shadow-md shadow-amber-500/20 text-white shrink-0">
+            <div
+                class="w-9 h-9 rounded-xl bg-gradient-to-tr from-amber-500 to-orange-400 flex items-center justify-center shadow-md shadow-amber-500/20 text-white shrink-0">
                 <i class="fas fa-exchange-alt text-base"></i>
             </div>
             <div>
@@ -5828,14 +6177,19 @@
         </div>
         <!-- Body -->
         <div class="px-5 py-4 space-y-3">
-            <div class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 flex items-start gap-2.5">
+            <div
+                class="p-3 rounded-xl bg-amber-50 dark:bg-amber-950/30 border border-amber-200/60 dark:border-amber-800/40 flex items-start gap-2.5">
                 <i class="fas fa-exclamation-triangle text-amber-500 text-sm mt-0.5 shrink-0"></i>
-                <p class="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed" id="sd-migrate-desc">所有已同步的歌曲文件将被移动到新的存储目录，music_index.json 索引也会同步更新。迁移过程中请勿关闭页面。</p>
+                <p class="text-[11px] text-amber-700 dark:text-amber-300 leading-relaxed" id="sd-migrate-desc">
+                    所有已同步的歌曲文件将被移动到新的存储目录，music_index.json 索引也会同步更新。迁移过程中请勿关闭页面。</p>
             </div>
             <div class="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-400">
-                <span class="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 font-mono text-[11px]" id="sd-migrate-from">data/music/</span>
+                <span class="px-2 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 font-mono text-[11px]"
+                    id="sd-migrate-from">data/music/</span>
                 <i class="fas fa-long-arrow-alt-right text-gray-400"></i>
-                <span class="px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 font-mono text-[11px] text-emerald-700 dark:text-emerald-300" id="sd-migrate-to">music/</span>
+                <span
+                    class="px-2 py-1 rounded-lg bg-emerald-100 dark:bg-emerald-950/50 font-mono text-[11px] text-emerald-700 dark:text-emerald-300"
+                    id="sd-migrate-to">music/</span>
             </div>
         </div>
         <!-- Footer -->

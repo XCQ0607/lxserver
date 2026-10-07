@@ -710,6 +710,11 @@ class SubsonicHandler {
     // Subsonic 播放缓存后台任务跟踪：username -> { songKey, controller }，用于切歌时自动取消上一首未完成的下载
     private subsonicActiveTasks = new Map<string, { songKey: string, controller: AbortController }>()
 
+    // [修复] resolveStreamUrl In-flight 去重：同一歌曲并发 stream 请求（音流预加载多首）共享同一次解析 Promise，
+    // 避免短时间内重复调用自定义源接口（终端里大量重复 [自定义源] 日志的根因）。
+    // key = `${source}_${songmid}_${maxBitrate}_${username}`，值生命周期与解析 Promise 相同。
+    private resolveStreamInFlight = new Map<string, Promise<{ url: string, quality: string, selected?: string }>>()
+
     // 固定同一关键词的在线结果顺序，避免客户端翻页时出现重复或跳项。
     private onlineSearchCache = new Map<string, { expiresAt: number, results: { music: LX.Music.MusicInfo, listId: string }[] }>()
 
@@ -5224,7 +5229,27 @@ class SubsonicHandler {
         return inCap
     }
 
-    private async resolveStreamUrl(
+    private resolveStreamUrl(
+        source: string,
+        songmid: string,
+        id: string,
+        musicInfo: any,
+        requestedQuality: string,
+        maxBitrate: number,
+        username: string,
+    ): Promise<{ url: string, quality: string, selected?: string }> {
+        // [修复] In-flight 去重：同一首歌的并发解析请求共享同一个 Promise，
+        // 解决音流客户端预加载多首歌时日志里大量重复 [自定义源] 的问题。
+        const inflightKey = `${source}_${songmid}_${maxBitrate}_${username}`
+        const existing = this.resolveStreamInFlight.get(inflightKey)
+        if (existing) return existing
+        const promise = this._resolveStreamUrl(source, songmid, id, musicInfo, requestedQuality, maxBitrate, username)
+        this.resolveStreamInFlight.set(inflightKey, promise)
+        promise.finally(() => this.resolveStreamInFlight.delete(inflightKey))
+        return promise
+    }
+
+    private async _resolveStreamUrl(
         source: string,
         songmid: string,
         id: string,
@@ -5710,6 +5735,32 @@ class SubsonicHandler {
                 if (global.lx.config['subsonic.enableDebug']) {
                     subsonicLog.debug(`[Subsonic] stream cacheOnPlay: enabled=${global.lx.config['subsonic.cacheOnPlay']} user=${username} url=${String(result.url).slice(0, 90)}${result.selected ? ' selected=' + result.selected : ''}`)
                 }
+
+                // [修复] 00:00/00:00 时长回写：解析成功后若 musicInfo.interval 为空，
+                // 尝试从 CDN URL 的查询参数里提取时长（tx/wy 链接通常含 ?uin=...&ttime=秒数 或 ?total=毫秒），
+                // 回填到 onlineSongCache，让后续 getSong 能返回正确 duration。
+                if (!musicInfo.interval) {
+                    try {
+                        const urlObj = new URL(result.url)
+                        // 尝试各平台常见时长参数
+                        const rawSec = urlObj.searchParams.get('ttime')
+                            || urlObj.searchParams.get('total')
+                            || urlObj.searchParams.get('duration')
+                            || urlObj.searchParams.get('length')
+                        if (rawSec) {
+                            const sec = Number(rawSec)
+                            // ttime 是毫秒(>1000)，其余是秒
+                            const intervalSec = sec > 1000 ? Math.round(sec / 1000) : Math.round(sec)
+                            if (intervalSec > 0) {
+                                const updatedMusic = { ...musicInfo, interval: String(intervalSec) }
+                                this.cacheOnlineSong(updatedMusic)
+                                musicInfo = updatedMusic
+                                subsonicLog.debug(`[Subsonic] stream ${id}: 从 URL 参数回填时长 ${intervalSec}s`)
+                            }
+                        }
+                    } catch { /* URL 解析失败则跳过 */ }
+                }
+
                 // [新增] 播放时触发服务器缓存保存：受 subsonic.cacheOnPlay 开关控制
                 // 后台落盘到该用户缓存目录；已在播放的上一首若未下载完成，在切换新歌曲时自动 abort 中断，避免连切刷歌堆积带宽
                 if (global.lx.config['subsonic.cacheOnPlay'] && username) {

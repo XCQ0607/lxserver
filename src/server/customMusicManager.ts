@@ -875,6 +875,7 @@ export const replaceCustomMusicItem = async (
     if (!oldAudioPath || !fs.existsSync(oldAudioPath)) {
         throw new Error('原音频文件已不存在')
     }
+    const oldAudioSize = fs.statSync(oldAudioPath).size
 
     const stageId = crypto.randomBytes(12).toString('hex')
     const stageUsername = `.remaster-staging/${stageId}`
@@ -908,6 +909,9 @@ export const replaceCustomMusicItem = async (
         const sourceAudioPath = path.join(stageRoot, downloadedItem.filename)
         const sourceStats = fs.existsSync(sourceAudioPath) ? fs.statSync(sourceAudioPath) : null
         if (!sourceStats?.isFile() || sourceStats.size <= 0) throw new Error('新音质文件无效或为空')
+        if (sourceStats.size < oldAudioSize) {
+            throw new Error(`新文件（${sourceStats.size} 字节）小于原文件（${oldAudioSize} 字节），音源可能返回了低质量文件，已拒绝替换`)
+        }
 
         // 提取原音频封面作为备用
         const originalCover = await getCustomCover(currentItem.filename, username)

@@ -33,6 +33,8 @@ export interface SyncDownloadData {
   preferredQuality?: string // 歌单同步下载指定音质 ('128k' | '320k' | 'flac' | 'flac24bit' 等，默认 '320k')
   storageLocation?: 'root' | 'data' | 'custom' // 同步下载存储位置，默认 'data'
   lastCustomMusicDir?: string // 上次记录/生效的自定义音乐目录物理路径
+  downloadLyric?: boolean // 同步下载时是否下载 .lrc 歌词文件，默认 true
+  embedLyric?: boolean   // 同步下载时是否将歌词写入音频文件的 USLT 标签，默认 true
   playlists: Record<string, SyncDownloadPlaylistConfig>
   lastSyncTime: number | null
   lastSyncResult: string | null
@@ -77,6 +79,24 @@ type SongResolver = (
 let _resolver: SongResolver | null = null
 export const setSongResolver = (fn: SongResolver) => {
   _resolver = fn
+}
+
+const QUALITY_RANK: Record<string, number> = {
+  '128k': 1,
+  '192k': 2,
+  '320k': 3,
+  'flac': 4,
+  'flac24bit': 5,
+  'hires': 5,
+  'dolby': 6,
+  'sky': 6,
+  'atmos': 7,
+  'atmos_plus': 8,
+  'master': 9,
+}
+const getQualityRank = (quality?: string): number => {
+  if (!quality) return 0
+  return QUALITY_RANK[quality] ?? 3
 }
 
 // ─────────────────────────────────────────────
@@ -743,6 +763,9 @@ export const downloadSongToSubPath = async (
     touchGlobalLock()
 
     const songInfoWithSubPath = { ...finalSongInfo, __syncSubPath__: subPath }
+    const syncData = getSyncDownloadData(username)
+    const shouldCacheLyric = syncData.downloadLyric !== false // 默认 true
+    const shouldEmbedLyric = syncData.embedLyric !== false    // 默认 true
     await withTimeout(
       fileCache.downloadAndCache(
         songInfoWithSubPath,
@@ -750,9 +773,9 @@ export const downloadSongToSubPath = async (
         finalQuality,
         username,
         signal,
-        true,   // isOnlyDownload
-        true,   // cacheLyric
-        true,   // embedLyric
+        true,              // isOnlyDownload
+        shouldCacheLyric,  // cacheLyric (.lrc 文件)
+        shouldEmbedLyric,  // embedLyric (USLT 标签)
         {
           requestedSource: finalSongInfo.requestedSource || finalSongInfo.source,
           downloadSource: finalSongInfo.downloadSource,
@@ -1096,8 +1119,36 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
         const result = await downloadWithRetry(song, quality, username, subPath, 3, currentSignal)
 
         if (result.status === 'ok') {
-          // 如果是音质变更重新下载成功，清理旧音质文件
+          // 如果是音质变更重新下载成功，先做体积校验再清理旧文件
           if (isUpgrade && oldExisting && oldExisting.filename) {
+            // 体积缩水保护：获取新下载文件的大小，防止音源返回假高音质文件覆盖本地高质量文件
+            const songId = fileCache.normalizeSongId(song)
+            const effectiveLoc = getEffectiveCacheLocation(username)
+            const newItem = fileCache.indexManager.get(username, songId, 'music', quality, false, effectiveLoc)
+            const oldSize = oldExisting.size ?? 0
+            const newSize = newItem?.size ?? 0
+            const isTargetHigher = getQualityRank(quality) > getQualityRank(oldExisting.quality)
+            if (isTargetHigher && oldSize > 0 && newSize > 0 && newSize < oldSize) {
+              // 新文件体积小于旧文件，疑似假高音质，拒绝替换并清除刚下载的劣质文件
+              addLog(progress, `  ⚠ 体积缩水保护：${song.name} 新文件 (${newSize}B) < 旧文件 (${oldSize}B)，已拒绝替换`)
+              try { if (newItem?.filename) fileCache.removeCacheFile(newItem.filename, username, 'music') } catch { }
+              progress.failCount++
+              totalFailed++
+              const cover = song.img || song.pic || song.picUrl || song.meta?.picUrl || song.meta?.pic || song.meta?.albumPic || song.meta?.cover || song.album?.picUrl || song.album?.pic || song.album?.img || song.otherSource?.meta?.picUrl || ''
+              const interval = song.interval || song.meta?.interval || ''
+              const album = song.albumName || song.meta?.albumName || (typeof song.album === 'string' ? song.album : song.album?.name) || ''
+              listCfg.failedSongs.push({
+                id: songId,
+                name: song.name || '',
+                singer: song.singer || '',
+                reason: `新文件（${newSize} 字节）小于原文件（${oldSize} 字节），音源可能返回了低质量文件，已拒绝替换`,
+                source: song.source || '',
+                cover,
+                interval: typeof interval === 'number' ? `${Math.floor(interval / 60)}:${String(Math.floor(interval % 60)).padStart(2, '0')}` : String(interval || ''),
+                album,
+              })
+              continue
+            }
             try {
               fileCache.removeCacheFile(oldExisting.filename, username, 'music')
             } catch { }

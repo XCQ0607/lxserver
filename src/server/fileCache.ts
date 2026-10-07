@@ -662,6 +662,7 @@ const sanitize = (str: any) => String(str || '').replace(/[\\/:*?"<>|]/g, '_')
  */
 export const syncCacheIndex = async (username?: string, roots: Array<'cache' | 'music'> = ['cache', 'music']) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    void cleanupStaleTempFiles(normalizedUsername)
     const extensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav']
 
     for (const folder of roots) {
@@ -2043,9 +2044,26 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
     return new Promise<void>((resolve, reject) => {
         let req: http.ClientRequest
+        let fileStream: fs.WriteStream | undefined
         let settled = false
         let redirectCount = 0
         const MAX_REDIRECTS = 10
+
+        const safeUnlink = (stream?: fs.WriteStream, filePath?: string) => {
+            if (!filePath) return
+            try {
+                if (stream && !stream.destroyed) {
+                    stream.destroy()
+                }
+            } catch { }
+            setTimeout(() => {
+                try {
+                    if (fs.existsSync(filePath)) {
+                        fs.unlink(filePath, () => { })
+                    }
+                } catch { }
+            }, 50)
+        }
 
         const fail = (err: Error) => {
             if (settled) return
@@ -2063,7 +2081,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
 
         const abortHandler = () => {
             if (req) req.destroy()
-            if (fs.existsSync(tempPath)) fs.unlink(tempPath, () => { })
+            safeUnlink(fileStream, tempPath)
             cacheProgress.delete(songKey)
             settle(() => reject(new Error('Aborted')))
         }
@@ -2084,12 +2102,12 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                     const location = res.headers['location']
                     res.resume() // 消费响应体，避免连接挂起
                     if (!location) {
-                        fs.unlink(tempPath, () => { })
+                        safeUnlink(fileStream, tempPath)
                         fail(new Error(`Status: ${status} (missing Location header)`))
                         return
                     }
                     if (redirectCount >= MAX_REDIRECTS) {
-                        fs.unlink(tempPath, () => { })
+                        safeUnlink(fileStream, tempPath)
                         fail(new Error(`Too many redirects (${MAX_REDIRECTS})`))
                         return
                     }
@@ -2100,7 +2118,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                     return
                 }
                 if (status !== 200) {
-                    fs.unlink(tempPath, () => { })
+                    safeUnlink(fileStream, tempPath)
                     fail(new Error(`Status: ${status}`))
                     return
                 }
@@ -2119,7 +2137,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
             else if (contentType.includes('audio/x-m4a') || contentType.includes('audio/mp4')) headerExt = '.m4a'
             else if (contentType.includes('audio/wav')) headerExt = '.wav'
 
-            const fileStream = fs.createWriteStream(tempPath)
+            fileStream = fs.createWriteStream(tempPath)
             let writeFinished = false
             res.on('data', (chunk) => {
                 received += chunk.length
@@ -2138,12 +2156,12 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
             fileStream.on('close', async () => {
                 if (settled) return
                 if (!writeFinished) {
-                    fs.unlink(tempPath, () => { })
+                    safeUnlink(fileStream, tempPath)
                     fail(new Error('Download stream closed before write finished'))
                     return
                 }
                 if (total > 0 && received < total) {
-                    fs.unlink(tempPath, () => { })
+                    safeUnlink(fileStream, tempPath)
                     fail(new Error(`Download incomplete: ${received}/${total}`))
                     return
                 }
@@ -2165,7 +2183,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                 const finalPath = path.join(dir, finalBaseName + ext)
                 fs.rename(tempPath, finalPath, async (err) => {
                     if (err) {
-                        fs.unlink(tempPath, () => { })
+                        safeUnlink(fileStream, tempPath)
                         fail(err)
                         return
                     }
@@ -2265,10 +2283,11 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                     settle(() => { resolve(); void checkAndCleanupCache(username) })
                 })
             })
-            fileStream.on('error', (err) => { fs.unlink(tempPath, () => { }); fail(err) })
+            fileStream.on('error', (err) => { safeUnlink(fileStream, tempPath); fail(err) })
         })
-        req.on('error', (err) => { fs.unlink(tempPath, () => { }); fail(err) })
+        req.on('error', (err) => { safeUnlink(fileStream, tempPath); fail(err) })
         req.setTimeout(30000, () => {
+            safeUnlink(fileStream, tempPath)
             req.destroy(new Error('Download request timeout'))
         })
         }
@@ -2339,6 +2358,7 @@ export const replaceDownloadedMusicItem = async (
 
     const oldAudioPath = resolveMusicPath(root, currentItem.filename)
     if (!fs.existsSync(oldAudioPath)) throw new Error('原文件已不存在')
+    const oldAudioSize = fs.statSync(oldAudioPath).size
 
     const stageId = crypto.randomBytes(12).toString('hex')
     const stageUsername = `.remaster-staging/${stageId}`
@@ -2370,6 +2390,9 @@ export const replaceDownloadedMusicItem = async (
         const sourceAudioPath = resolveMusicPath(stageRoot, downloadedItem.filename)
         const sourceStats = fs.existsSync(sourceAudioPath) ? fs.statSync(sourceAudioPath) : null
         if (!sourceStats?.isFile() || sourceStats.size <= 0) throw new Error('新音质文件无效或为空')
+        if (sourceStats.size < oldAudioSize) {
+            throw new Error(`新文件（${sourceStats.size} 字节）小于原文件（${oldAudioSize} 字节），音源可能返回了低质量文件，已拒绝替换`)
+        }
         const stagedHasCover = readEmbeddedCoverState(sourceAudioPath)
         const originalCover = stagedHasCover
             ? null
@@ -2679,7 +2702,52 @@ export const clearLyricCache = (username?: string) => {
     return { deletedCount, freedSize }
 }
 
+/**
+ * 清理过期的 .tmp 临时下载文件
+ * @param username 用户名（可选）
+ * @param maxAgeMs 最大存活时间（默认 10 分钟）
+ */
+export const cleanupStaleTempFiles = async (username?: string, maxAgeMs: number = 10 * 60 * 1000) => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const roots: Array<'cache' | 'music'> = ['cache', 'music']
+    const now = Date.now()
+    let cleanedCount = 0
+
+    for (const folder of roots) {
+        const dir = getCacheDir(normalizedUsername, folder === 'music')
+        if (!fs.existsSync(dir)) continue
+        try {
+            const scanAndClean = (currentDir: string) => {
+                if (!fs.existsSync(currentDir)) return
+                const entries = fs.readdirSync(currentDir, { withFileTypes: true })
+                for (const entry of entries) {
+                    const fullPath = path.join(currentDir, entry.name)
+                    if (entry.isDirectory()) {
+                        scanAndClean(fullPath)
+                    } else if (entry.isFile() && entry.name.endsWith('.tmp')) {
+                        try {
+                            const stat = fs.statSync(fullPath)
+                            if (now - stat.mtimeMs > maxAgeMs) {
+                                fs.unlinkSync(fullPath)
+                                cleanedCount++
+                            }
+                        } catch { }
+                    }
+                }
+            }
+            scanAndClean(dir)
+        } catch (e) {
+            console.warn(`[文件缓存] 清理临时文件失败 (${dir}):`, e)
+        }
+    }
+    if (cleanedCount > 0) {
+        console.log(`[文件缓存] [${normalizedUsername}] 已清理 ${cleanedCount} 个遗留 .tmp 临时文件`)
+    }
+    return cleanedCount
+}
+
 export const checkAndCleanupCache = async (username?: string) => {
+    void cleanupStaleTempFiles(username)
     const config = (global as any).lx.config
     if (!config || !config['user.enableCacheSizeLimit']) return
     const { totalSize } = getCacheStats(username)
@@ -2710,6 +2778,13 @@ export const checkAndCleanupCache = async (username?: string) => {
     }
     console.log(`[文件缓存] 用户 ${normalizedUsername} 缓存空间清理完成，已删除 ${deletedCount} 个过期文件`)
 }
+
+// 启动 5 秒后自动扫描并清理系统遗留的过期 .tmp 文件
+setTimeout(() => {
+    try {
+        void cleanupStaleTempFiles()
+    } catch { }
+}, 5000)
 /**
  * Switch files between 'cache' and 'music' folders
  */

@@ -98,14 +98,21 @@ export default {
                 console.warn(`[WY SDK] Album ${id} returned no songs. Body code: ${body.code}`);
             }
 
+            const albumObj = body.album || {}
+            const artistObj = albumObj.artist || (albumObj.artists && albumObj.artists[0]) || {}
             return {
                 list: musicDetail.filterList({
                     songs,
                     privileges: songs.map(s => s.privilege || { id: s.id })
                 }),
                 total: songs.length,
-                name: body.album ? body.album.name : undefined,
-                publishTime: body.album ? new Date(body.album.publishTime).toISOString().split('T')[0] : undefined,
+                name: albumObj.name || undefined,
+                artistName: artistObj.name || formatSingerName(albumObj.artists) || (songs[0] && formatSingerName(songs[0].ar)) || undefined,
+                artistId: artistObj.id ? String(artistObj.id) : undefined,
+                desc: albumObj.description || albumObj.briefDesc || '',
+                img: albumObj.picUrl || undefined,
+                picUrl: albumObj.picUrl || undefined,
+                publishTime: albumObj.publishTime ? new Date(albumObj.publishTime).toISOString().split('T')[0] : undefined,
                 source: 'wy',
             }
         })

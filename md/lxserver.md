@@ -6,8 +6,8 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.1-blue?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/version-v2.1.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
     <br>
@@ -64,11 +64,14 @@
 
 ---
 
-## 📖 管理后台操作指南
+## 📖 管理后台与连接操作指南
 
-1. **登录管理后台**：访问 `http://your-ip:9527`。
-2. **初始化配置**：首次登录请立即进入“系统配置”修改默认密码。
-3. **添加用户**：在“用户管理”页面创建同步账号，生成的密码即为 LX Music 移动端/桌面端连接时使用的密钥。默认用户名admin，密码password。
-4. **备份策略**：建议在“WebDAV 同步”中配置云端备份，双重保障数据安全。
+1. **登录管理后台**：访问 `http://<服务器IP>:9527/admin`（默认后台路径为 `/admin`，默认管理员密码: `123456`）。
+2. **初始化配置**：首次登录请进入“系统配置”修改默认密码。
+3. **添加用户与客户端连接**：在“用户管理”页面创建同步账号与密码。
+   - **用户路径模式（默认推荐）**：客户端同步 URL 填写 `http://<服务器IP>:9527/<用户名>`，密码填写用户密码。此模式允许多用户密码相同。
+   - **根路径模式（需在系统配置中开启）**：客户端同步 URL 填写 `http://<服务器IP>:9527`，密码填写用户密码。此模式要求所有用户密码必须唯一。
+4. **Subsonic 客户端连接**：支持使用第三方 Subsonic 客户端（如音流、Feishin）连接 `http://<服务器IP>:9527/rest`，使用后台创建的用户名与密码登录即可。
+5. **备份策略**：建议在“WebDAV 同步”中配置云端备份，双重保障数据安全。
 
 > 💡 更多技术细节（如 Docker 部署、Nginx 配置、变量列表等）请返回 **[项目首页 (README.md)](../README.md)** 查看。

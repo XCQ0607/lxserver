@@ -8,7 +8,7 @@ Before starting this service project, please ensure that the host system (or vir
 
 **Running Directly from Source:**
 
-- **Node.js**: `v16.x` or higher (`v18.x` LTS version is recommended for production environments).
+- **Node.js**: `v20.x` or higher (`v20.x` / `v22.x` LTS version is recommended for production environments).
 - **Network Resources**: Ensure that the listening port required for the business (default configuration is `9527`) has been correctly allowed in the host firewall policy and the cloud provider's security group rules.
 
 **Running on Containerized Facilities (Preferred for Production):**
@@ -136,13 +136,23 @@ server {
 
 ---
 
-## Verify the Health of Delivered Components
+## Service Access & Client Connection Guide
 
-After the service instance registration and scheduling are completed, and the traffic tunnel is established, administrators can check the connectivity status of the two sub-service systems in the browser respectively:
+After the service starts, you can access the Web interfaces or connect clients via the following ways:
 
-| Module System Identifier                             | Deployment Application Node Level | Default Domain Check                                                                                                                                            | Core Application Capabilities and Infrastructure                                                                                                                     |
-| ---------------------------------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Basic Operation Monitoring and Sync Server** | `/admin`                        | Requires default key:`123456`                                                                                                                                 | Perform account role control authorization, review connection endpoint survival status, and perform global WebDAV off-site backup scheduling configuration reset.    |
-| **Rich Client Web Streaming Console**          | `/` (Root path)                 | Adjustable (depends on whether the administrator has configured the password environment variable) | Provides a multi-stack music information stream convergence point checking engine and completes the audio-visual business rendering logic of the end-user interface. |
+### 1. Web Interface Access
+| Module | Access URL | Auth Requirement | Description |
+| :--- | :--- | :--- | :--- |
+| **Web Player** | `http://<server-ip>:9527/` | Default free (can be enabled via `ENABLE_WEBPLAYER_AUTH`) | Modern online music web player supporting multi-source search and streaming. |
+| **Admin Console** | `http://<server-ip>:9527/admin` | Admin password (default `123456`) | User management, playlist and snapshot review, WebDAV backup and system settings. |
+
+### 2. LX Music Client Sync (Desktop / Mobile)
+Go to client "Settings → Sync Settings" and choose Custom Server:
+- **User Path Mode (Recommended, enabled by default)**: Connection URL `http://<server-ip>:9527/<username>` (e.g. `http://192.168.1.100:9527/user1`), password is the user's password. **Allows multiple users to use identical passwords**.
+- **Root Path Mode (Requires `USER_ENABLE_ROOT`)**: Connection URL `http://<server-ip>:9527`, password is the user's password. **Requires all user passwords to be strictly unique**.
+
+### 3. Subsonic Music Client Connection
+- **Server Address**: `http://<server-ip>:9527/rest` (or `http://<server-ip>:<port>/rest` if `SUBSONIC_PORT` is configured).
+- **Authentication**: Log in with user credentials created in the Admin Console.
 
 For more advance details on implementing silent import of underlying variables in the early lifecycle of instantiation, and configuration hierarchy rewriting, please move to read "[Configuration Engine and Environment Variable Injection Guide](./configuration.md)".

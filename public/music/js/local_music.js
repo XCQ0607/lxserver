@@ -346,9 +346,9 @@ window.LocalMusicManager = {
 
         // 当全选或选区从最开始节点延伸时，确保克隆包含首个标签在内的所有内容
         const isSelectAll = (selectedText.length >= fullText.length - 2) ||
-                            (range.startContainer === el && range.startOffset <= 1) ||
-                            (range.startContainer === el.firstChild) ||
-                            (el.firstChild && el.firstChild.contains(range.startContainer));
+            (range.startContainer === el && range.startOffset <= 1) ||
+            (range.startContainer === el.firstChild) ||
+            (el.firstChild && el.firstChild.contains(range.startContainer));
 
         const container = document.createElement('div');
         if (isSelectAll) {
@@ -638,7 +638,7 @@ window.LocalMusicManager = {
 
                 // Update UI elements
                 if (document.getElementById('lm-search-input')) this.setRichInputValue(document.getElementById('lm-search-input'), this.searchKeyword);
-                
+
                 ['lm-sort-by', 'lm-sort-order', 'lm-folder-select'].forEach(id => {
                     const el = document.getElementById(id);
                     if (!el) return;
@@ -2886,23 +2886,51 @@ window.LocalMusicManager = {
         this.openSubPathModal('categorize');
     },
 
-    // 同步洗版模态框副标题与底部提示（根据当前 remasterSource 更新文字）
+    // 同步洗版模态框副标题与底部提示（根据当前 remasterSource 更新文字与 Badge）
     syncRemasterSourceUI() {
         const isCustom = this.remasterSource === 'custom';
+
+        // 顶部 Badge
+        const sourceBadgeEl = document.getElementById('lm-remaster-source-badge');
+        if (sourceBadgeEl) {
+            sourceBadgeEl.textContent = isCustom ? '自定义目录' : '下载目录';
+            sourceBadgeEl.className = isCustom
+                ? 'px-2 py-0.5 text-[10px] font-semibold rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                : 'px-2 py-0.5 text-[10px] font-semibold rounded-full bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20';
+        }
 
         // 副标题
         const subtitleEl = document.getElementById('lm-remaster-modal-subtitle');
         if (subtitleEl) {
             subtitleEl.textContent = isCustom
-                ? '处理用户自定义音乐目录歌曲（替换同名音频及元数据）'
+                ? '处理用户自定义音乐目录歌曲（替换同名音频及元数据，已内置音质缩水保护）'
                 : '仅处理服务器下载目录，不处理缓存目录';
         }
 
         // 底部提示
         const hintEl = document.getElementById('lm-remaster-source-hint');
         if (hintEl) {
-            hintEl.textContent = isCustom ? '自定义目录中的歌曲' : '仅列出下载目录中的歌曲';
+            const spanEl = hintEl.querySelector('span') || hintEl;
+            spanEl.textContent = isCustom ? '仅列出自定义目录中的歌曲' : '仅列出下载目录中的歌曲';
         }
+    },
+
+    getModernQualityBadge(quality) {
+        const qualityName = window.QualityManager?.getQualityDisplayName(quality) || quality || '未知音质';
+        const q = String(quality || '').toLowerCase();
+        let badgeClass = 'bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400 border-gray-200 dark:border-gray-700';
+        if (q.includes('320')) {
+            badgeClass = 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400 border-blue-200 dark:border-blue-900/50';
+        } else if (q === 'flac') {
+            badgeClass = 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800/50 font-semibold';
+        } else if (q.includes('24bit') || q.includes('hires')) {
+            badgeClass = 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400 border-amber-300 dark:border-amber-700/50 font-bold';
+        } else if (q.includes('atmos')) {
+            badgeClass = 'bg-indigo-50 text-indigo-600 dark:bg-indigo-950/40 dark:text-indigo-400 border-indigo-200 dark:border-indigo-800/50 font-bold';
+        } else if (q.includes('master')) {
+            badgeClass = 'bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-purple-500/15 text-rose-600 dark:text-rose-400 border-rose-300 dark:border-rose-800/50 font-black';
+        }
+        return `<span class="px-2 py-0.5 rounded-full text-[10px] border tracking-tight ${badgeClass}">${this.escapeHtml(qualityName)}</span>`;
     },
 
     syncRemasterVisibility() {
@@ -3077,16 +3105,16 @@ window.LocalMusicManager = {
 
             container.innerHTML = pageItems.map(item => {
                 const selected = this.remasterSelectedItems.has(item.filename);
-                const qualityName = window.QualityManager?.getQualityDisplayName(item.quality) || item.quality || '未知音质';
-                const subPathBadge = item.subPath ? `<span class="text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 rounded px-1 mr-1 inline-block font-mono" title="${this.escapeAttr(item.subPath)}">${this.escapeHtml(item.subPath)}</span>` : '';
+                const qualityBadge = this.getModernQualityBadge(item.quality);
+                const subPathBadge = item.subPath ? `<span class="text-[9px] text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200/60 dark:border-emerald-800/40 rounded px-1.5 py-0.2 mr-1 inline-block font-mono" title="${this.escapeAttr(item.subPath)}">${this.escapeHtml(item.subPath)}</span>` : '';
 
                 const displayedSource = item.downloadSource || item.source;
                 const isCustomOrUnknown = !displayedSource || displayedSource === 'unknown' || displayedSource === 'local' || displayedSource === 'custom';
                 const safeSource = isCustomOrUnknown ? '' : this.escapeHtml(String(displayedSource).toUpperCase());
-                const sourceBadge = safeSource ? `<span class="px-1 py-0.2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded text-[9px] font-bold uppercase tracking-tight t-text-muted mr-1 inline-block shrink-0 leading-tight" title="平台：${this.escapeAttr(displayedSource)}">${safeSource}</span>` : '';
+                const sourceBadge = safeSource ? `<span class="px-1.5 py-0.2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded text-[9px] font-bold uppercase tracking-tight text-gray-500 dark:text-gray-400 mr-1 inline-block shrink-0 leading-tight" title="平台：${this.escapeAttr(displayedSource)}">${safeSource}</span>` : '';
 
-                let coverHtml = `<div class="w-8 h-8 rounded bg-gray-100 dark:bg-gray-800 flex-shrink-0 flex items-center justify-center border t-border-main">
-                                    <i class="fas fa-music t-text-muted text-[10px]"></i>
+                let coverHtml = `<div class="w-9 h-9 rounded-lg bg-gray-100 dark:bg-gray-800/80 flex-shrink-0 flex items-center justify-center border t-border-main shadow-xs">
+                                    <i class="fas fa-music text-gray-400 text-xs"></i>
                                  </div>`;
                 if (item.hasCover || (item.img && typeof item.img === 'string' && /^https?:\/\//i.test(item.img))) {
                     const coverUrl = item.hasCover
@@ -3095,19 +3123,19 @@ window.LocalMusicManager = {
                             : `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}&v=${encodeURIComponent([item.coverCheckedVersion || 0, Math.round(item.coverCheckedMtime || item.mtime || 0), item.coverCheckedSize || item.size || 0, 1].join('-'))}`)
                         : item.img;
                     const fallbackAttr = item.img && item.img !== coverUrl ? `data-fallback-src="${this.escapeAttr(item.img)}"` : '';
-                    coverHtml = `<img data-src="${this.escapeAttr(coverUrl)}" ${fallbackAttr} src="/music/assets/logo.svg" loading="lazy" fetchpriority="low" class="lazy-image lm-remaster-cover is-placeholder w-8 h-8 rounded object-cover shadow-sm flex-shrink-0 border t-border-main" onerror="if(this.dataset.fallbackSrc && !this.dataset.fallbackTried){this.dataset.fallbackTried='true';this.src=this.dataset.fallbackSrc;}else{this.src='/music/assets/logo.svg';}">`;
+                    coverHtml = `<img data-src="${this.escapeAttr(coverUrl)}" ${fallbackAttr} src="/music/assets/logo.svg" loading="lazy" fetchpriority="low" class="lazy-image lm-remaster-cover is-placeholder w-9 h-9 rounded-lg object-cover shadow-xs flex-shrink-0 border t-border-main" onerror="if(this.dataset.fallbackSrc && !this.dataset.fallbackTried){this.dataset.fallbackTried='true';this.src=this.dataset.fallbackSrc;}else{this.src='/music/assets/logo.svg';}">`;
                 }
 
                 return `
-                    <label class="min-h-12 px-3 py-2 flex items-center gap-3 border-b last:border-b-0 t-border-main ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:t-bg-track'}">
+                    <label class="min-h-13 px-3.5 py-2.5 flex items-center gap-3 transition-colors ${selected ? 'bg-red-500/[0.04] dark:bg-red-500/[0.06]' : ''} ${disabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer hover:t-bg-track'}">
                         <input type="checkbox" data-remaster-filename="${this.escapeAttr(item.filename)}" ${selected ? 'checked' : ''} ${disabled ? 'disabled' : ''}
-                            class="w-4 h-4 rounded border-gray-300 text-red-600 focus:ring-red-500 shrink-0">
+                            class="w-4 h-4 rounded-md border-gray-300 dark:border-gray-700 text-red-600 focus:ring-red-500 shrink-0 cursor-pointer accent-red-600">
                         ${coverHtml}
                         <span class="min-w-0 flex-1">
                             <span class="block text-xs font-bold t-text-main truncate">${this.escapeHtml(item.name || item.filename)}</span>
-                            <span class="block text-[10px] t-text-muted truncate mt-0.5 flex items-center flex-wrap">${subPathBadge}${sourceBadge}<span>${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span></span>
+                            <span class="block text-[11px] t-text-muted truncate mt-0.5 flex items-center flex-wrap gap-y-0.5">${subPathBadge}${sourceBadge}<span>${this.escapeHtml(item.singer || '未知歌手')} · ${this.escapeHtml(item.album || '未知专辑')}</span></span>
                         </span>
-                        <span class="shrink-0 text-[10px] t-text-muted">${this.escapeHtml(qualityName)}</span>
+                        <div class="shrink-0 flex items-center">${qualityBadge}</div>
                     </label>`;
             }).join('');
 
@@ -3293,6 +3321,7 @@ window.LocalMusicManager = {
         const total = Number(status.total || 0);
         const processed = Number(status.processed || 0);
         const percent = total > 0 ? Math.min(100, Math.round(processed / total * 100)) : 0;
+        const running = status.status === 'running';
         const statusNames = {
             idle: '尚未开始',
             running: '正在洗版',
@@ -3304,7 +3333,13 @@ window.LocalMusicManager = {
             const el = document.getElementById(id);
             if (el) el.textContent = String(value);
         };
-        setText('lm-remaster-status', statusNames[status.status] || status.status || '未知状态');
+        const statusDot = running
+            ? '<span class="relative flex h-2 w-2"><span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span></span>'
+            : '<span class="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-600"></span>';
+        const statusHtml = `<span class="flex items-center gap-1.5">${statusDot}<span>${statusNames[status.status] || status.status || '未知状态'}</span></span>`;
+        const statusEl = document.getElementById('lm-remaster-status');
+        if (statusEl) statusEl.innerHTML = statusHtml;
+
         setText('lm-remaster-progress-text', `${processed} / ${total}`);
         setText('lm-remaster-total', total);
         setText('lm-remaster-replaced', status.replaced || 0);
@@ -3314,7 +3349,6 @@ window.LocalMusicManager = {
         const progress = document.getElementById('lm-remaster-progress');
         if (progress) progress.style.width = `${percent}%`;
 
-        const running = status.status === 'running';
         const runningChanged = this.remasterTaskRunning !== running;
         this.remasterTaskRunning = running;
         const startButton = document.getElementById('lm-remaster-start');
@@ -3350,8 +3384,11 @@ window.LocalMusicManager = {
             const active = filter === this.remasterResultFilter;
             button.disabled = !counts[filter];
             button.setAttribute('aria-pressed', active ? 'true' : 'false');
-            button.style.borderColor = active ? 'rgb(239 68 68)' : '';
-            button.style.boxShadow = active ? 'inset 0 0 0 1px rgb(239 68 68)' : '';
+            if (active) {
+                button.classList.add('ring-2', 'ring-red-500/40', 'border-red-500/60', '!bg-red-500/[0.08]');
+            } else {
+                button.classList.remove('ring-2', 'ring-red-500/40', 'border-red-500/60', '!bg-red-500/[0.08]');
+            }
         });
         return counts;
     },
@@ -3370,30 +3407,45 @@ window.LocalMusicManager = {
         const activeFilter = filterConfig[this.remasterResultFilter] || filterConfig.all;
         const filteredResults = this.remasterResults.filter(activeFilter[1]);
         const title = document.getElementById('lm-remaster-results-title');
-        if (title) title.textContent = `处理结果 · ${activeFilter[0]} (${counts[this.remasterResultFilter] || 0})`;
+        if (title) {
+            title.innerHTML = `<i class="fas fa-square-poll-vertical text-red-500"></i><span>处理结果 · ${activeFilter[0]} (${counts[this.remasterResultFilter] || 0})</span>`;
+        }
         if (!filteredResults.length) {
-            container.innerHTML = '<div class="p-6 text-center text-xs t-text-muted">暂无结果</div>';
+            container.innerHTML = `
+                <div class="p-8 text-center text-xs t-text-muted flex flex-col items-center justify-center gap-2">
+                    <i class="fas fa-clipboard-list text-2xl opacity-20"></i>
+                    <span>暂无处理结果</span>
+                </div>`;
             return;
         }
         const statusConfig = {
-            replaced: ['已替换', 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/30'],
-            downgraded: ['已降级', 'text-amber-700 bg-amber-50 dark:bg-amber-950/30'],
-            skipped: ['已跳过', 'text-gray-600 bg-gray-100 dark:bg-gray-800'],
-            failed: ['失败', 'text-red-700 bg-red-50 dark:bg-red-950/30']
+            replaced: ['替换成功', 'text-emerald-700 dark:text-emerald-300 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/60', 'fa-circle-check'],
+            downgraded: ['音质降级', 'text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60', 'fa-arrow-trend-down'],
+            skipped: ['已跳过', 'text-gray-600 dark:text-gray-400 bg-gray-100 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700/60', 'fa-forward-step'],
+            failed: ['处理失败', 'text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60', 'fa-circle-xmark']
         };
         container.innerHTML = filteredResults.map(item => {
-            const config = statusConfig[item.status] || [item.status, 'text-gray-600 bg-gray-100'];
+            const config = statusConfig[item.status] || [item.status, 'text-gray-600 bg-gray-100 border border-gray-200', 'fa-info-circle'];
             const originalName = window.QualityManager?.getQualityDisplayName(item.originalQuality) || item.originalQuality;
             const actualName = item.actualQuality
                 ? (window.QualityManager?.getQualityDisplayName(item.actualQuality) || item.actualQuality)
                 : '-';
+            const isProtectedShrink = String(item.message || '').includes('小于原文件');
+
             return `
-                <div class="p-3 flex items-start gap-3">
-                    <span class="shrink-0 px-2 py-1 rounded text-[10px] font-bold ${config[1]}">${config[0]}</span>
+                <div class="p-3.5 flex items-start gap-3 hover:bg-gray-50/50 dark:hover:bg-white/[0.01] transition-colors">
+                    <span class="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-bold flex items-center gap-1 shadow-2xs ${config[1]}">
+                        <i class="fas ${config[2]} text-[9px]"></i>
+                        ${config[0]}
+                    </span>
                     <div class="min-w-0 flex-1">
-                        <div class="text-xs font-bold t-text-main truncate">${this.escapeHtml(item.name)} · ${this.escapeHtml(item.singer)}</div>
-                        <div class="text-[10px] t-text-muted mt-1">${this.escapeHtml(originalName)} → ${this.escapeHtml(actualName)}</div>
-                        <div class="text-[10px] t-text-muted mt-1 break-words">${this.escapeHtml(item.message || '')}</div>
+                        <div class="text-xs font-bold t-text-main truncate">${this.escapeHtml(item.name)} <span class="font-normal t-text-muted">· ${this.escapeHtml(item.singer)}</span></div>
+                        <div class="text-[11px] font-medium text-gray-500 dark:text-gray-400 mt-1 flex items-center gap-1.5 flex-wrap">
+                            <span class="px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-[10px] border t-border-main">${this.escapeHtml(originalName)}</span>
+                            <i class="fas fa-arrow-right text-[9px] text-gray-400"></i>
+                            <span class="px-1.5 py-0.2 rounded bg-gray-100 dark:bg-gray-800 text-[10px] border t-border-main font-semibold text-red-500">${this.escapeHtml(actualName)}</span>
+                        </div>
+                        ${item.message ? `<div class="text-[10px] mt-1.5 p-1.5 rounded-lg ${isProtectedShrink ? 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border border-amber-500/20 font-medium' : 'text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.02] border t-border-main'} break-words leading-relaxed">${this.escapeHtml(item.message)}</div>` : ''}
                     </div>
                 </div>`;
         }).join('');
@@ -3581,7 +3633,7 @@ window.toggleLmBatchMode = () => {
 ['toggleBatchMode', 'selectAll', 'deselectAll', 'batchDelete', 'batchDownloadToDevice', 'batchAddToPlaylist', 'batchFetchLyrics', 'batchEmbedLyric', 'batchUpdateMetadata', 'applyFilters', 'refresh', 'resetFilters', 'clearFilters', 'toggleFilterTag'].forEach(method => {
     if (window.LocalMusicManager && typeof window.LocalMusicManager[method] === 'function') {
         const orig = window.LocalMusicManager[method];
-        window.LocalMusicManager[method] = function(...args) {
+        window.LocalMusicManager[method] = function (...args) {
             if (window.CustomDirManager && window.CustomDirManager.isActive && typeof window.CustomDirManager[method] === 'function') {
                 return window.CustomDirManager[method].apply(window.CustomDirManager, args);
             }

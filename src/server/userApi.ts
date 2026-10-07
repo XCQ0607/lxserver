@@ -347,15 +347,43 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     }
 
     // 针对音源脚本沙箱的 console 代理：非 DEBUG 模式下静默普通的 log/info/debug 等输出
-    const sandboxConsole = {
+    const rawSandboxConsole: Record<string, any> = {
         log: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.log(...args) },
         info: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.info(...args) },
         debug: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.debug(...args) },
         warn: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.warn(...args) },
         time: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.time(...args) },
         timeEnd: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.timeEnd(...args) },
+        timeLog: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).timeLog?.(...args) },
+        group: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).group?.(...args) },
+        groupCollapsed: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).groupCollapsed?.(...args) },
+        groupEnd: () => { if (global.lx.config['debug.enabled']) (console as any).groupEnd?.() },
+        table: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).table?.(...args) },
+        trace: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.trace(...args) },
+        clear: () => {},
+        count: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).count?.(...args) },
+        countReset: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).countReset?.(...args) },
+        assert: (condition?: boolean, ...data: any[]) => { if (global.lx.config['debug.enabled']) console.assert(condition, ...data) },
+        dir: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.dir(...args) },
+        dirxml: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).dirxml?.(...args) },
         error: (...args: any[]) => { console.error(...args) }
     }
+
+    const sandboxConsole = new Proxy(rawSandboxConsole, {
+        get(target, prop: string) {
+            if (prop in target) {
+                return target[prop]
+            }
+            if (typeof (console as any)[prop] === 'function') {
+                return (...args: any[]) => {
+                    if (global.lx.config['debug.enabled']) {
+                        return (console as any)[prop](...args)
+                    }
+                }
+            }
+            return () => {}
+        }
+    })
 
     // 完整沙箱环境
     const sandbox: any = {

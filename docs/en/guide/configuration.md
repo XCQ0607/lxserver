@@ -28,9 +28,9 @@ This module manages the Node.js listening process and the basic settings of the 
 | :-------------------- | :------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT` | `9527` | Integer | **Service listening port**. It is recommended to avoid using other high-frequency ports in the host (such as 80, 443, 3306). |
 | `BIND_IP` | `0.0.0.0` | String | **Scope of service binding IP interfaces**. Set to `127.0.0.1` to accept only local Lookback calls; set to `0.0.0.0` means listening to all internal and external available network adapters of the host simultaneously. |
-| `ADMIN_PATH` | `'/music'` | String | **Backend management interface path**. Default is `/music`. |
+| `ADMIN_PATH` | `'/admin'` | String | **Backend management interface path**. Default is `/admin`. |
 | `PLAYER_PATH` | `'/'` | String | **Web player access path**. Default is the root path `/`. |
-| `SERVER_NAME` | `My Sync Server` | String | **Sync service name**. Showed in client connections. |
+| `SERVER_NAME` | `lxserver` | String | **Sync service name**. Showed in client connections. |
 | `PROXY_HEADER` | `x-real-ip` | String | **Reverse proxy remote IP penetration identifier**. When the system runs behind reverse proxies or load balancers such as Nginx, it is used to extract the true client source IP address to ensure accurate traceability of equipment audit logs. |
 | `PROXY_ALL_ENABLED` | `false` | Boolean | **Enable global outgoing request proxy**. If enabled, network requests from the server (e.g. search, resolving) will go through the proxy. |
 | `PROXY_ALL_ADDRESS` | `''` | String | **Proxy address**. Supports `http://` or `socks5://`, e.g. `socks5://127.0.0.1:10808`. |
@@ -47,13 +47,13 @@ This module involves monitoring the status of connected clients and isolation sp
 
 | Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
 | :-------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FRONTEND_PASSWORD` | `123456` | String | **Control Panel Root-level encrypted access credential**. Used to verify credentials entering `\` (the global scope of the control panel). To prevent unauthorized external network access, it is recommended to re-authorize and change it immediately upon the first setup. |
+| `FRONTEND_PASSWORD` | `123456` | String | **Control Panel Admin Password**. Used to log into the management console (default `/admin`). Recommended to modify immediately on setup. |
 | `MAX_SNAPSHOT_NUM` | `10` | Integer | **Time snapshot retention threshold setting**. The maximum allowed length of the historical archive snapshot queue retained by the system. Early histories exceeding this queue limit will be cyclically discarded by the underlying timed GC task. |
 | `DATA_PATH` | `./data` | String | **Data directory path**. Specifies where persistence data (users.json, snapshots) are stored. |
 | `LOG_PATH` | `./logs` | String | **Log directory path**. Specifies where system logs are stored. |
 | `CONFIG_PATH` | `''` | String | **External config path**. Manually specify an extra config.js file path. |
-| `USER_ENABLE_PATH` | `true` | Boolean | **Account-exclusive storage sandbox isolation system (Critical)**. After this state is started, the underlying data system will partition multiple discrete and parallel volumes according to active users in the `/data` directory. Ensure that preference files of different distribution devices and multi-users do not have data unauthorized access. |
-| `USER_ENABLE_ROOT` | `false` | Boolean | **Root directory flattening access override parameter**. When `true`, the above multi-user sandbox volume partitioning operation will become invalid, and data reading and writing will directly pierce and write into the system register in a reduced-dimension manner. |
+| `USER_ENABLE_PATH` | `true` | Boolean | **Enable User Path Mode (Recommended)**. When enabled, client sync URL is `http://ip:port/<username>`, and data is isolated per user. **Allows multiple users to use identical passwords**. |
+| `USER_ENABLE_ROOT` | `false` | Boolean | **Enable Root Path Mode**. When enabled, client sync URL is `http://ip:port` (without username), and server auto-matches user by password. **Requires all user passwords to be unique**. |
 | `ENABLE_PUBLIC_USER_RESTRICTION` | `true` | Boolean | **Restrict public user permissions**. If enabled, non-admin public users will be restricted from sensitive operations like uploading source, deleting public sources, caching to server, etc. |
 | `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `false` | Boolean | **Enable non-admin access to local music**. If enabled, allows non-admin public accounts to access local music. |
 | `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `true` | Boolean | **Enable non-admin browser download**. If enabled, allows non-admin/public accounts to download songs via browser. |

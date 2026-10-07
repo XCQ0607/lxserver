@@ -1652,9 +1652,12 @@ function switchTab(tabId) {
 }
 
 /**
- * 退出列表的二级模式（搜索框和批量模式）
+ * 退出列表的二级模式（搜索框和批量模式、排序模式）
  */
 function exitListSecondaryModes() {
+    if (window.glSortMode && typeof toggleGlobalSortMode === 'function') {
+        toggleGlobalSortMode(false);
+    }
     if (window.ListSearch && window.ListSearch.state.active) {
         window.ListSearch.resetState();
     }
@@ -2148,19 +2151,24 @@ async function doSearch(page = 1, append = false, prefetch = false) {
         if (source === 'all') {
             // Aggregate Search (Only supported for songs)
             const pageInfoEl = document.getElementById('page-info');
-            if (pageInfoEl) pageInfoEl.innerText = `聚合搜索 (前20条/源)`;
+            if (pageInfoEl) pageInfoEl.innerText = `聚合搜索 (各源并发)`;
 
             const promises = SOURCES.map(s =>
                 fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${s}&page=1&type=${type}`, { headers })
                     .then(res => res.json())
-                    .then(data => data.map(item => ({ ...item, source: s })))
+                    .then(data => (Array.isArray(data) ? data : []).map(item => ({ ...item, source: s })))
                     .catch(e => {
                         console.warn(`[聚合搜索] ${s} 源失败:`, e);
                         return [];
                     })
             );
             const results = await Promise.all(promises);
-            list = results.flat();
+            const flatList = results.flat();
+            if (typeof window.sortSearchResults === 'function') {
+                list = window.sortSearchResults(flatList, input, type === 'song');
+            } else {
+                list = flatList;
+            }
         } else {
             // Single Source Search — 支持前端决定拉取多少页
             const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}&pages=${FETCH_PAGES_STEP}`, { headers });
@@ -2233,34 +2241,53 @@ function changePage(delta) {
 }
 
 // ========== 热搜功能 ==========
-let hotSearchCache = null;
-let hotSearchCacheTime = 0;
+let hotSearchMultiCache = {};
+const HOT_SEARCH_SOURCES = ['wy', 'tx', 'kg', 'kw', 'mg'];
 const HOT_SEARCH_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
 
-async function fetchHotSearch(source = 'mg') {
-    // 检查缓存（必须匹配 source）
-    if (hotSearchCache &&
-        hotSearchCache.source === source && // Add checking source
-        Date.now() - hotSearchCacheTime < HOT_SEARCH_CACHE_DURATION) {
-        return hotSearchCache;
+async function fetchHotSearch(source = 'all', force = false) {
+    if (!force && hotSearchMultiCache[source] && (Date.now() - hotSearchMultiCache[source].time < HOT_SEARCH_CACHE_DURATION)) {
+        return hotSearchMultiCache[source].data;
     }
 
     try {
-        // [优化] 使用低优先级 fetch 获取热搜，避免阻塞主加载
-        const res = await fetch(`${API_BASE}/hotSearch?source=${source}`, { priority: 'low' });
-        if (!res.ok) {
-            throw new Error(`获取热搜失败: ${res.status}`);
+        if (source === 'all') {
+            const promises = HOT_SEARCH_SOURCES.map(s =>
+                fetch(`${API_BASE}/hotSearch?source=${s}`, { priority: 'low' })
+                    .then(res => res.ok ? res.json() : { list: [] })
+                    .then(d => ({ source: s, list: Array.isArray(d.list) ? d.list : [] }))
+                    .catch(() => ({ source: s, list: [] }))
+            );
+            const results = await Promise.all(promises);
+
+            // 交替合并多源热搜榜首（最热排在前面，去重）
+            const combinedList = [];
+            const seen = new Set();
+            const maxLen = Math.max(...results.map(r => r.list.length), 0);
+
+            for (let i = 0; i < maxLen; i++) {
+                for (const res of results) {
+                    const kw = res.list[i];
+                    if (kw && typeof kw === 'string' && !seen.has(kw.trim().toLowerCase())) {
+                        seen.add(kw.trim().toLowerCase());
+                        combinedList.push(kw.trim());
+                    }
+                }
+            }
+
+            const allData = { source: 'all', list: combinedList };
+            hotSearchMultiCache['all'] = { time: Date.now(), data: allData };
+            return allData;
+        } else {
+            const res = await fetch(`${API_BASE}/hotSearch?source=${source}`, { priority: 'low' });
+            if (!res.ok) {
+                throw new Error(`获取热搜失败: ${res.status}`);
+            }
+            const data = await res.json();
+            if (!data.source) data.source = source;
+            hotSearchMultiCache[source] = { time: Date.now(), data };
+            return data;
         }
-        const data = await res.json();
-
-        // 更新缓存
-        hotSearchCache = data;
-        // Ensure data also carries the source info if not present
-        if (!hotSearchCache.source) hotSearchCache.source = source;
-
-        hotSearchCacheTime = Date.now();
-
-        return data;
     } catch (e) {
         console.error('[HotSearch] 获取热搜失败:', e);
         return null;
@@ -2288,35 +2315,53 @@ function renderHotSearch(data) {
         return;
     }
 
-    const sourceTag = getSourceTag(data.source);
-    // [Fix] Correctly handle 0, do not fall back to 20 if 0 is set
+    const currentSource = data.source || 'all';
     const limit = (settings.hotSearchLimit !== undefined && settings.hotSearchLimit !== null) ? settings.hotSearchLimit : 20;
     const keywords = data.list.slice(0, limit); // 使用设置的数量
 
+    const tabs = [
+        { id: 'all', name: '全网聚合' },
+        { id: 'wy', name: '网易云' },
+        { id: 'tx', name: 'QQ' },
+        { id: 'kg', name: '酷狗' },
+        { id: 'kw', name: '酷我' },
+        { id: 'mg', name: '咪咕' }
+    ];
+
     container.innerHTML = `
         <div class="hot-search-container px-4 py-8 md:p-8">
-            <div class="flex items-center mb-6">
-                <i class="fas fa-fire text-orange-500 text-2xl mr-3"></i>
-                <h3 class="text-xl font-bold t-text-main">热门搜索</h3>
-                <span class="ml-3">${sourceTag}</span>
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-2 border-b t-border-main/50">
+                <div class="flex items-center">
+                    <i class="fas fa-fire text-orange-500 text-2xl mr-3"></i>
+                    <h3 class="text-xl font-bold t-text-main">热门搜索</h3>
+                </div>
+                <!-- Platform Tabs -->
+                <div class="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pb-1">
+                    ${tabs.map(tab => `
+                        <button onclick="switchHotSearchTab('${tab.id}')"
+                                class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${currentSource === tab.id ? 'bg-emerald-500 text-white shadow-sm' : 't-bg-panel hover:t-bg-main t-text-muted border t-border-main'}">
+                            ${tab.name}
+                        </button>
+                    `).join('')}
+                </div>
             </div>
-            <div class="hot-search-list grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 md:gap-3">
+            <div class="hot-search-list grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-3.5">
                 ${keywords.map((keyword, index) => `
                     <button onclick="handleHotSearchClick('${keyword.replace(/'/g, "\\'")}')" 
-                            class="hot-search-item group flex items-center px-2.5 py-3 md:p-3 t-bg-panel hover:bg-emerald-50 border t-border-main hover:border-emerald-400 rounded-lg transition-all shadow-sm hover:shadow-md overflow-hidden h-14">
-                        <span class="rank flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold mr-3 ${index < 3 ? 'bg-gradient-to-r from-orange-400 to-red-500 text-white' : 'bg-gray-100 text-gray-500'
+                            class="hot-search-item group flex items-center px-3 py-3 md:p-3.5 t-bg-panel hover:border-emerald-500/50 border t-border-main rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 overflow-hidden h-14">
+                        <span class="rank flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold mr-3 ${index < 3 ? 'bg-gradient-to-r from-orange-400 to-red-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
         }">
                             ${index + 1}
                         </span>
-                        <span class="keyword flex-1 text-left text-sm font-medium t-text-main group-hover:text-emerald-600 truncate">
+                        <span class="keyword flex-1 text-left text-sm font-medium t-text-main group-hover:text-emerald-500 truncate">
                             ${keyword}
                         </span>
-                        <i class="fas fa-search text-xs text-gray-300 group-hover:text-emerald-500 transition-colors ml-2"></i>
+                        <i class="fas fa-search text-xs text-gray-400 group-hover:text-emerald-500 transition-colors ml-2"></i>
                     </button>
                 `).join('')}
             </div>
             <div class="mt-6 text-center">
-                <button onclick="showInitialSearchState()" 
+                <button onclick="fetchHotSearch('${currentSource}', true).then(renderHotSearch)" 
                         class="text-sm t-text-muted hover:text-emerald-500 transition-colors">
                     <i class="fas fa-sync-alt mr-1"></i>
                     刷新热搜
@@ -2348,6 +2393,22 @@ function renderHotSearch(data) {
     }, 0);
 }
 
+function switchHotSearchTab(source) {
+    const container = document.getElementById('search-results');
+    if (container) {
+        container.innerHTML = `
+            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+                <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
+                <p>正在加载热门搜索...</p>
+            </div>
+        `;
+    }
+    fetchHotSearch(source).then(data => {
+        renderHotSearch(data);
+    });
+}
+window.switchHotSearchTab = switchHotSearchTab;
+
 function handleHotSearchClick(keyword) {
     const searchInput = document.getElementById('search-input');
     if (searchInput) {
@@ -2375,7 +2436,7 @@ function showInitialSearchState() {
 
     // 异步获取并显示热搜
     const sourceSelect = document.getElementById('search-source');
-    const source = sourceSelect ? sourceSelect.value : 'wy';
+    const source = sourceSelect ? sourceSelect.value : 'all';
 
     fetchHotSearch(source).then(data => {
         renderHotSearch(data);
@@ -2466,49 +2527,66 @@ function renderSingerResults(list) {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
     if (header) header.classList.add('hidden');
+    hideAlbumDetailHeader();
     // 搜索歌手时隐藏底部分页栏
     const paginationBar = document.getElementById('search-pagination-bar');
     if (paginationBar) paginationBar.classList.add('hidden');
 
     window.viewingPlaylist = list;
 
-    container.innerHTML = '<div class="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 md:gap-4 p-3 md:p-6"></div>';
+    if (!list || list.length === 0) {
+        container.innerHTML = '<div class="flex flex-col items-center justify-center py-24 text-center t-text-muted"><i class="fas fa-user-slash text-4xl mb-3 opacity-40"></i><p>未找到相关歌手</p></div>';
+        return;
+    }
+
+    container.innerHTML = '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 md:gap-5 p-3 md:p-6"></div>';
     const grid = container.querySelector('div');
-    list.forEach((singer, idx) => {
+    list.forEach((singer) => {
         const div = document.createElement('div');
-        div.className = 'group flex flex-col items-center p-2 md:p-4 rounded-2xl transition-all hover:t-bg-panel hover:shadow-md cursor-pointer border border-transparent hover:border-emerald-500/30';
+        div.className = 'group relative flex flex-col items-center p-4 md:p-5 rounded-3xl t-bg-panel border t-border-main hover:border-emerald-500/40 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 cursor-pointer overflow-hidden backdrop-blur-sm select-none';
         div.dataset.singerId = singer.id;
         div.dataset.singerSource = singer.source || 'wy';
         div.onclick = () => enterArtist(singer.id, singer.source || 'wy');
+
         const aliasHtml = singer.alias && singer.alias.length
-            ? `<span class="text-[9px] md:text-[10px] t-text-muted text-center truncate w-full mt-0.5 md:mt-1">${singer.alias[0]}</span>`
+            ? `<span class="text-[11px] t-text-muted text-center truncate w-full mt-0.5" title="${singer.alias[0]}">${singer.alias[0]}</span>`
             : '';
+
+        const sourceTagHtml = getSourceTag ? getSourceTag(singer.source || 'wy') : `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold border t-border-main t-bg-main t-text-muted">${(singer.source || 'wy').toUpperCase()}</span>`;
+
         div.innerHTML = `
-            <div class="relative mb-2 md:mb-3">
-                <div class="w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full overflow-hidden shadow-sm">
+            <!-- Top hover glow -->
+            <div class="absolute inset-0 bg-gradient-to-b from-emerald-500/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none"></div>
+
+            <!-- Avatar Container -->
+            <div class="relative mb-3 md:mb-4">
+                <div class="w-20 h-20 sm:w-24 sm:h-24 md:w-28 md:h-28 rounded-full overflow-hidden shadow-md ring-4 ring-black/5 dark:ring-white/5 group-hover:ring-emerald-500/40 group-hover:shadow-emerald-500/20 transition-all duration-500">
                     <img src="${singer.picUrl || '/music/assets/logo.svg'}"
                          onerror="this.src='/music/assets/logo.svg'"
                          class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
                 </div>
-                <button id="singer-fav-${singer.id}" class="absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isArtistFavorited(singer.id, singer.source || 'wy') ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
+                <button id="singer-fav-${singer.id}" class="absolute -top-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isArtistFavorited(singer.id, singer.source || 'wy') ? 'bg-rose-500 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-rose-500'}"
                         title="${isArtistFavorited(singer.id, singer.source || 'wy') ? '取消收藏' : '收藏歌手'}"
-                        onclick="event.stopPropagation(); (async () => { const favd = await toggleArtistFavorite('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-fav-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = favd ? '取消收藏' : '收藏歌手'; } const dBtn = document.getElementById('singer-dislike-${singer.id}'); if(dBtn && favd){ dBtn.className = 'absolute -top-1 -left-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/30 text-white opacity-0 group-hover:opacity-100'; dBtn.title = '不喜欢'; } })()">
-                    <i class="fas fa-heart text-[10px]"></i>
+                        onclick="event.stopPropagation(); (async () => { const favd = await toggleArtistFavorite('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-fav-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-rose-500'); btn.title = favd ? '取消收藏' : '收藏歌手'; } const dBtn = document.getElementById('singer-dislike-${singer.id}'); if(dBtn && favd){ dBtn.className = 'absolute -top-1 -left-1 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100'; dBtn.title = '不喜欢'; } })()">
+                    <i class="fas fa-heart text-[11px]"></i>
                 </button>
-                <button id="singer-dislike-${singer.id}" class="absolute -top-1 -left-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isArtistDisliked(singer.id, singer.source || 'wy') ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
+                <button id="singer-dislike-${singer.id}" class="absolute -top-1 -left-1 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isArtistDisliked(singer.id, singer.source || 'wy') ? 'bg-gray-800 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-gray-800'}"
                         title="${isArtistDisliked(singer.id, singer.source || 'wy') ? '取消不喜欢' : '不喜欢'}"
-                        onclick="event.stopPropagation(); (async () => { const disd = await toggleArtistDislike('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-dislike-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -left-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (disd ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = disd ? '取消不喜欢' : '不喜欢'; } const fBtn = document.getElementById('singer-fav-${singer.id}'); if(fBtn && disd){ fBtn.className = 'absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/30 text-white opacity-0 group-hover:opacity-100'; fBtn.title = '收藏歌手'; } })()">
-                    <i class="fas fa-ban text-[10px]"></i>
+                        onclick="event.stopPropagation(); (async () => { const disd = await toggleArtistDislike('${singer.id}', '${singer.source || 'wy'}', '${singer.name.replace(/'/g, "\\'")}', '${(singer.picUrl || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('singer-dislike-${singer.id}'); if(btn){ btn.className = 'absolute -top-1 -left-1 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (disd ? 'bg-gray-800 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-gray-800'); btn.title = disd ? '取消不喜欢' : '不喜欢'; } const fBtn = document.getElementById('singer-fav-${singer.id}'); if(fBtn && disd){ fBtn.className = 'absolute -top-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100'; fBtn.title = '收藏歌手'; } })()">
+                    <i class="fas fa-ban text-[11px]"></i>
                 </button>
             </div>
-            <span class="text-[11px] md:text-sm font-bold t-text-main text-center truncate w-full" title="${singer.name}">${singer.name}</span>
-            <div class="flex flex-col items-center mt-1">
-                ${aliasHtml}
-                <div class="mt-1">${getSourceTag ? getSourceTag(singer.source || 'wy') : (singer.source || 'wy').toUpperCase()}</div>
+
+            <!-- Singer Name & Info -->
+            <span class="text-sm md:text-base font-bold t-text-main text-center truncate w-full group-hover:text-emerald-500 transition-colors" title="${singer.name}">${singer.name}</span>
+            ${aliasHtml}
+
+            <!-- Badges -->
+            <div class="flex items-center gap-1.5 mt-2.5 flex-wrap justify-center">
+                ${sourceTagHtml}
+                ${singer.albumSize ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium t-bg-main t-text-muted border t-border-main">${singer.albumSize} 专辑</span>` : ''}
+                ${singer.musicSize ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-medium t-bg-main t-text-muted border t-border-main">${singer.musicSize} 单曲</span>` : ''}
             </div>
-            <span class="hidden md:inline-block text-[10px] px-2 py-0.5 mt-2 rounded bg-emerald-500 text-white opacity-0 group-hover:opacity-100 transition-opacity">
-                ${singer.albumSize || 0} 专辑
-            </span>
         `;
         grid.appendChild(div);
     });
@@ -2518,39 +2596,73 @@ function renderAlbumResults(list) {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
     if (header) header.classList.add('hidden');
+    hideAlbumDetailHeader();
     // 搜索专辑时隐藏底部分页栏
     const paginationBar = document.getElementById('search-pagination-bar');
     if (paginationBar) paginationBar.classList.add('hidden');
 
     window.viewingPlaylist = list;
 
-    container.innerHTML = '<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 p-6"></div>';
+    if (!list || list.length === 0) {
+        container.innerHTML = '<div class="flex flex-col items-center justify-center py-24 text-center t-text-muted"><i class="fas fa-compact-disc text-4xl mb-3 opacity-40"></i><p>未找到相关专辑</p></div>';
+        return;
+    }
+
+    container.innerHTML = '<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3.5 md:gap-5 p-3 md:p-6"></div>';
     const grid = container.querySelector('div');
+    const sourceNames = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
+
     list.forEach((item) => {
         const div = document.createElement('div');
-        div.className = 'group flex flex-col p-3 rounded-2xl transition-all hover:t-bg-panel hover:shadow-lg cursor-pointer border border-transparent hover:border-emerald-500/20';
-        div.onclick = () => enterAlbum(item.id, item.source || 'wy');
+        div.className = 'group relative flex flex-col p-3 md:p-3.5 rounded-2xl t-bg-panel border t-border-main hover:border-emerald-500/40 shadow-sm hover:shadow-xl hover:-translate-y-1.5 transition-all duration-300 cursor-pointer overflow-hidden select-none';
+        div.onclick = () => enterAlbum(item.id, item.source || 'wy', item);
         const publishDate = item.publishTime ? new Date(item.publishTime).toLocaleDateString() : '';
+        const itemSource = item.source || 'wy';
+        const sourceLabel = sourceNames[itemSource] || itemSource;
+
         div.innerHTML = `
-            <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-3 relative">
+            <!-- Album Cover with Overlay -->
+            <div class="relative aspect-square rounded-xl overflow-hidden shadow-md mb-3 group-hover:shadow-emerald-500/10 transition-all">
                 <img src="${item.picUrl || '/music/assets/logo.svg'}"
                      onerror="this.src='/music/assets/logo.svg'"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
-                <button id="album-fav-${item.id}" class="absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ${isAlbumFavorited(item.id, item.source || 'wy') ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
-                        title="${isAlbumFavorited(item.id, item.source || 'wy') ? '取消收藏' : '收藏专辑'}"
-                        onclick="event.stopPropagation(); (async () => { const favd = await toggleAlbumFavorite('${item.id}', '${item.source || 'wy'}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-fav-${item.id}'); if(btn){ btn.className = 'absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = favd ? '取消收藏' : '收藏专辑'; } const dBtn = document.getElementById('album-dislike-${item.id}'); if(dBtn && favd){ dBtn.className = 'absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm bg-black/30 text-white opacity-0 group-hover:opacity-100'; dBtn.title = '不喜欢'; } })()">
+                
+                <!-- Platform Badge -->
+                <span class="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-semibold bg-black/60 backdrop-blur-md text-white rounded-md shadow-sm z-10">${sourceLabel}</span>
+
+                <!-- Play Overlay Icon -->
+                <div class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <div class="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center text-white shadow-lg transform scale-75 group-hover:scale-100 transition-transform duration-300">
+                        <i class="fas fa-play text-sm ml-0.5"></i>
+                    </div>
+                </div>
+
+                <!-- Favorite Button -->
+                <button id="album-fav-${item.id}" class="absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isAlbumFavorited(item.id, itemSource) ? 'bg-rose-500 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-rose-500'}"
+                        title="${isAlbumFavorited(item.id, itemSource) ? '取消收藏' : '收藏专辑'}"
+                        onclick="event.stopPropagation(); (async () => { const favd = await toggleAlbumFavorite('${item.id}', '${itemSource}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-fav-${item.id}'); if(btn){ btn.className = 'absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (favd ? 'bg-rose-500 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-rose-500'); btn.title = favd ? '取消收藏' : '收藏专辑'; } const dBtn = document.getElementById('album-dislike-${item.id}'); if(dBtn && favd){ dBtn.className = 'absolute top-2 left-2 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100'; dBtn.title = '不喜欢'; } })()">
                     <i class="fas fa-heart text-xs"></i>
                 </button>
-                <button id="album-dislike-${item.id}" class="absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ${isAlbumDisliked(item.id, item.source || 'wy') ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'}"
-                        title="${isAlbumDisliked(item.id, item.source || 'wy') ? '取消不喜欢' : '不喜欢'}"
-                        onclick="event.stopPropagation(); (async () => { const disd = await toggleAlbumDislike('${item.id}', '${item.source || 'wy'}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-dislike-${item.id}'); if(btn){ btn.className = 'absolute top-1.5 left-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm ' + (disd ? 'bg-gray-800 text-white opacity-100' : 'bg-black/30 text-white opacity-0 group-hover:opacity-100'); btn.title = disd ? '取消不喜欢' : '不喜欢'; } const fBtn = document.getElementById('album-fav-${item.id}'); if(fBtn && disd){ fBtn.className = 'absolute top-1.5 right-1.5 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-sm bg-black/30 text-white opacity-0 group-hover:opacity-100'; fBtn.title = '收藏专辑'; } })()">
+                <!-- Dislike Button -->
+                <button id="album-dislike-${item.id}" class="absolute top-2 right-10 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ${isAlbumDisliked(item.id, itemSource) ? 'bg-gray-800 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-gray-800'}"
+                        title="${isAlbumDisliked(item.id, itemSource) ? '取消不喜欢' : '不喜欢'}"
+                        onclick="event.stopPropagation(); (async () => { const disd = await toggleAlbumDislike('${item.id}', '${itemSource}', '${item.name.replace(/'/g, "\\'")}', '${(item.picUrl || '').replace(/'/g, "\\'")}', '${(item.artistName || '').replace(/'/g, "\\'")}'); const btn = document.getElementById('album-dislike-${item.id}'); if(btn){ btn.className = 'absolute top-2 right-10 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 ' + (disd ? 'bg-gray-800 text-white opacity-100' : 'bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100 hover:bg-gray-800'); btn.title = disd ? '取消不喜欢' : '不喜欢'; } const fBtn = document.getElementById('album-fav-${item.id}'); if(fBtn && disd){ fBtn.className = 'absolute top-2 right-2 w-7 h-7 rounded-full flex items-center justify-center transition-all shadow-md z-10 bg-black/40 backdrop-blur-md text-white opacity-0 group-hover:opacity-100'; fBtn.title = '收藏专辑'; } })()">
                     <i class="fas fa-ban text-xs"></i>
                 </button>
             </div>
-            <span class="text-sm font-bold t-text-main line-clamp-2 h-10 leading-5 mb-1" title="${item.name}">${item.name}</span>
-            <div class="flex items-center justify-between mt-1">
-                <span class="text-[10px] t-text-muted truncate flex-1">${item.artistName || '未知歌手'}</span>
-                <span class="text-[10px] t-text-muted ml-2">${publishDate}</span>
+
+            <!-- Album Title -->
+            <h4 class="text-sm font-bold t-text-main line-clamp-1 group-hover:text-emerald-500 transition-colors leading-snug" title="${item.name}">
+                ${item.name}
+            </h4>
+
+            <!-- Meta info: Artist & Date -->
+            <div class="flex items-center justify-between mt-1.5 text-xs t-text-muted gap-2">
+                <span class="truncate flex items-center gap-1" title="${item.artistName || '未知歌手'}">
+                    <i class="far fa-user text-[10px] opacity-70"></i>
+                    ${item.artistName || '未知歌手'}
+                </span>
+                ${publishDate ? `<span class="text-[11px] text-gray-400 flex-shrink-0">${publishDate}</span>` : ''}
             </div>
         `;
         grid.appendChild(div);
@@ -2613,7 +2725,14 @@ async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBa
     window.currentArtistTab = tab;
     const resultsContainer = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
-    if (header) header.classList.add('hidden');
+    if (tab === 'songs') {
+        if (header) header.classList.remove('hidden');
+        const backBtn = document.getElementById('search-back-btn');
+        if (backBtn) backBtn.classList.add('hidden');
+    } else {
+        if (header) header.classList.add('hidden');
+    }
+    if (typeof hideAlbumDetailHeader === 'function') hideAlbumDetailHeader();
 
     // 只有在没有缓存或者 ID 变化时才获取详情
     if (!currentArtistInfo || String(currentArtistInfo.id) !== String(id) || currentArtistInfo.source !== source) {
@@ -2647,21 +2766,319 @@ async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBa
     if (backBtn) backBtn.classList.remove('hidden');
 }
 
-let isArtistFolded = false;
+let artistScrollRaf = null;
+let artistMiniBarHideTimeout = null;
+
+function updateArtistMiniExpandButton(st) {
+    const btn = document.getElementById('artist-mini-expand-btn');
+    if (!btn) return;
+    const atTop = st <= 20;
+    btn.title = atTop ? '展开歌手详情卡片' : '回到列表顶部';
+    const iconEl = btn.querySelector('i');
+    const textEl = btn.querySelector('span');
+    if (iconEl) iconEl.className = atTop ? 'fas fa-chevron-down text-[10px]' : 'fas fa-arrow-up text-[10px]';
+    if (textEl) textEl.textContent = atTop ? '展开' : '顶部';
+}
+
+function handleArtistMiniExpandClick() {
+    const searchResults = document.getElementById('search-results');
+    const st = searchResults ? searchResults.scrollTop : 0;
+    if (st > 20) {
+        searchResults.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+        expandArtistDetailHeader();
+    }
+}
+window.handleArtistMiniExpandClick = handleArtistMiniExpandClick;
+
+function handleArtistScrollEvent() {
+    if (artistScrollRaf) return;
+    artistScrollRaf = requestAnimationFrame(() => {
+        artistScrollRaf = null;
+        const searchResults = document.getElementById('search-results');
+        const artistContent = document.getElementById('artist-detail-content');
+        const header = document.getElementById('artist-detail-header');
+        const miniBar = document.getElementById('artist-mini-bar');
+        if (!header && !miniBar) return;
+
+        const st = Math.max(searchResults ? searchResults.scrollTop : 0, artistContent ? artistContent.scrollTop : 0);
+        const collapseThreshold = 35;
+
+        updateArtistMiniExpandButton(st);
+
+        if (st > collapseThreshold) {
+            if (artistMiniBarHideTimeout) {
+                clearTimeout(artistMiniBarHideTimeout);
+                artistMiniBarHideTimeout = null;
+            }
+            if (header && !header.classList.contains('artist-hero-collapsed')) {
+                header.classList.add('artist-hero-collapsed');
+                header.style.maxHeight = '0px';
+                header.style.opacity = '0';
+                header.style.paddingTop = '0px';
+                header.style.paddingBottom = '0px';
+                header.style.borderBottomWidth = '0px';
+                header.style.overflow = 'hidden';
+                header.style.transform = 'translateY(-10px)';
+                header.style.pointerEvents = 'none';
+            }
+            if (miniBar) {
+                miniBar.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    miniBar.classList.remove('opacity-0', '-translate-y-2', 'pointer-events-none');
+                    miniBar.classList.add('opacity-100', 'translate-y-0', 'pointer-events-auto');
+                });
+            }
+        }
+    });
+}
+
+function expandArtistDetailHeader() {
+    const header = document.getElementById('artist-detail-header');
+    const miniBar = document.getElementById('artist-mini-bar');
+    const searchResults = document.getElementById('search-results');
+
+    if (artistMiniBarHideTimeout) {
+        clearTimeout(artistMiniBarHideTimeout);
+        artistMiniBarHideTimeout = null;
+    }
+
+    if (header) {
+        header.classList.remove('artist-hero-collapsed');
+        header.style.maxHeight = '600px';
+        header.style.opacity = '1';
+        header.style.paddingTop = '';
+        header.style.paddingBottom = '';
+        header.style.borderBottomWidth = '';
+        header.style.transform = 'translateY(0)';
+        header.style.pointerEvents = 'auto';
+    }
+
+    if (miniBar && !miniBar.classList.contains('opacity-0')) {
+        miniBar.classList.add('opacity-0', '-translate-y-2', 'pointer-events-none');
+        miniBar.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+        artistMiniBarHideTimeout = setTimeout(() => {
+            if (miniBar.classList.contains('opacity-0')) {
+                miniBar.classList.add('hidden');
+            }
+        }, 300);
+    }
+
+    if (searchResults) {
+        searchResults.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+window.expandArtistDetailHeader = expandArtistDetailHeader;
+
+function initArtistScrollListener() {
+    const searchResults = document.getElementById('search-results');
+    const artistContent = document.getElementById('artist-detail-content');
+    if (searchResults) {
+        searchResults.removeEventListener('scroll', handleArtistScrollEvent);
+        searchResults.addEventListener('scroll', handleArtistScrollEvent, { passive: true });
+    }
+    if (artistContent) {
+        artistContent.removeEventListener('scroll', handleArtistScrollEvent);
+        artistContent.addEventListener('scroll', handleArtistScrollEvent, { passive: true });
+    }
+}
+
+function hideArtistDetailHeader() {
+    if (artistMiniBarHideTimeout) {
+        clearTimeout(artistMiniBarHideTimeout);
+        artistMiniBarHideTimeout = null;
+    }
+    const miniBar = document.getElementById('artist-mini-bar');
+    if (miniBar) {
+        miniBar.classList.add('hidden', 'opacity-0', '-translate-y-2', 'pointer-events-none');
+        miniBar.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+        miniBar.innerHTML = '';
+    }
+    const artistHeader = document.getElementById('artist-detail-header');
+    if (artistHeader) {
+        artistHeader.classList.add('hidden');
+        artistHeader.classList.remove('artist-hero-collapsed');
+        artistHeader.style.maxHeight = '';
+        artistHeader.style.opacity = '';
+        artistHeader.style.transform = '';
+        artistHeader.style.pointerEvents = '';
+        artistHeader.style.paddingTop = '';
+        artistHeader.style.paddingBottom = '';
+        artistHeader.style.borderBottomWidth = '';
+        artistHeader.innerHTML = '';
+    }
+    const searchResults = document.getElementById('search-results');
+    const artistContent = document.getElementById('artist-detail-content');
+    if (searchResults) searchResults.removeEventListener('scroll', handleArtistScrollEvent);
+    if (artistContent) artistContent.removeEventListener('scroll', handleArtistScrollEvent);
+}
+window.hideArtistDetailHeader = hideArtistDetailHeader;
+window.hideArtistMiniBar = hideArtistDetailHeader;
+
+function updateArtistFavButtons(favd) {
+    const mainBtn = document.getElementById('artist-header-fav-btn');
+    if (mainBtn) {
+        const base = 'absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
+        mainBtn.className = base + ' ' + (favd ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main');
+        mainBtn.title = favd ? '取消收藏' : '收藏歌手';
+    }
+    const miniBtn = document.getElementById('artist-mini-fav-btn');
+    const miniIcon = miniBtn?.querySelector('i');
+    if (miniBtn) {
+        miniBtn.className = 'w-7 h-7 md:w-8 md:h-8 rounded-lg border flex items-center justify-center transition-all shadow-sm active:scale-95 ' + (favd ? 'border-rose-500 bg-rose-500 text-white shadow-rose-500/20' : 't-border-main t-bg-main hover:t-bg-track text-rose-500');
+        if (miniIcon) miniIcon.className = 'fas fa-heart text-xs ' + (favd ? 'text-white' : 'text-rose-500');
+        miniBtn.title = favd ? '取消收藏' : '收藏歌手';
+    }
+}
+window.updateArtistFavButtons = updateArtistFavButtons;
+
+function updateArtistDislikeButtons(disd) {
+    const mainBtn = document.getElementById('artist-header-dislike-btn');
+    if (mainBtn) {
+        const base = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
+        mainBtn.className = base + ' ' + (disd ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main');
+        mainBtn.title = disd ? '取消不喜欢' : '不喜欢';
+    }
+    const miniBtn = document.getElementById('artist-mini-dislike-btn');
+    if (miniBtn) {
+        miniBtn.className = 'w-7 h-7 md:w-8 md:h-8 rounded-lg border t-border-main flex items-center justify-center transition-all shadow-sm active:scale-95 ' + (disd ? 'bg-gray-800 text-white' : 't-bg-main hover:t-bg-track t-text-muted hover:t-text-main');
+        miniBtn.title = disd ? '取消不喜欢' : '不喜欢';
+    }
+}
+window.updateArtistDislikeButtons = updateArtistDislikeButtons;
+
+function renderArtistMiniBar(info, activeTab, order) {
+    const miniBar = document.getElementById('artist-mini-bar');
+    if (!miniBar || !info) return;
+
+    const favd = isArtistFavorited(info.id, info.source);
+    const disd = isArtistDisliked(info.id, info.source);
+    const searchResults = document.getElementById('search-results');
+    const isAtTop = (searchResults ? searchResults.scrollTop : 0) <= 20;
+
+    miniBar.innerHTML = `
+        <div class="flex items-center justify-between gap-2.5 md:gap-4 w-full">
+            <!-- Left: Mini Avatar + Name + Stats -->
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <div class="relative w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-full overflow-hidden shadow-md flex-shrink-0 ring-2 ring-emerald-500/30">
+                    <img src="${info.avatar || '/music/assets/logo.svg'}" 
+                         onerror="this.src='/music/assets/logo.svg'"
+                         class="w-full h-full object-cover" 
+                         alt="${escapeHtmlText(info.name)}">
+                </div>
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-xs md:text-sm t-text-main truncate max-w-[120px] sm:max-w-xs md:max-w-md" title="${escapeHtmlText(info.name)}">
+                            ${escapeHtmlText(info.name)}
+                        </span>
+                        <span class="hidden sm:inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            歌手
+                        </span>
+                    </div>
+                    <div class="text-[10px] md:text-[11px] t-text-muted truncate flex items-center gap-2">
+                        <span><i class="fas fa-music text-emerald-500/80 mr-0.5"></i>${info.musicSize || 0} 歌曲</span>
+                        <span><i class="fas fa-compact-disc text-blue-500/80 mr-0.5"></i>${info.albumSize || 0} 专辑</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Middle: Quick Tabs (Songs / Albums) & Hot/New -->
+            <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
+                <div class="flex p-0.5 t-bg-main rounded-lg border t-border-main shadow-sm">
+                    <button onclick="enterArtist('${info.id}', '${info.source}', '${order}', 'songs')" 
+                            class="px-2.5 py-1 text-xs font-bold rounded-md transition-all ${activeTab === 'songs' ? 'bg-emerald-500 text-white shadow-sm' : 't-text-muted hover:t-bg-track'}">
+                        歌曲
+                    </button>
+                    <button onclick="enterArtist('${info.id}', '${info.source}', '${order}', 'albums')" 
+                            class="px-2.5 py-1 text-xs font-bold rounded-md transition-all ${activeTab === 'albums' ? 'bg-emerald-500 text-white shadow-sm' : 't-text-muted hover:t-bg-track'}">
+                        专辑
+                    </button>
+                </div>
+                ${activeTab === 'songs' ? `
+                <div class="hidden sm:flex p-0.5 t-bg-main rounded-lg border t-border-main shadow-sm">
+                    <button onclick="enterArtist('${info.id}', '${info.source}', 'hot', 'songs')" 
+                            class="px-2 py-1 text-[11px] font-bold rounded-md transition-all ${order === 'hot' ? 'bg-emerald-500 text-white shadow-sm' : 't-text-muted hover:t-bg-track'}">
+                        热门
+                    </button>
+                    <button onclick="enterArtist('${info.id}', '${info.source}', 'time', 'songs')" 
+                            class="px-2 py-1 text-[11px] font-bold rounded-md transition-all ${order === 'time' ? 'bg-emerald-500 text-white shadow-sm' : 't-text-muted hover:t-bg-track'}">
+                        最新
+                    </button>
+                </div>
+                ` : ''}
+            </div>
+
+            <!-- Right: Action Buttons -->
+            <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+                <!-- Mini Top / Expand Button -->
+                <button id="artist-mini-expand-btn"
+                        onclick="handleArtistMiniExpandClick()"
+                        class="px-2 md:px-2.5 py-1.5 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main text-xs flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        title="${isAtTop ? '展开歌手详情卡片' : '回到列表顶部'}">
+                    <i class="fas ${isAtTop ? 'fa-chevron-down' : 'fa-arrow-up'} text-[10px]"></i>
+                    <span class="hidden sm:inline">${isAtTop ? '展开' : '顶部'}</span>
+                </button>
+
+                <!-- Mini Favorite -->
+                <button id="artist-mini-fav-btn"
+                        onclick="(async () => {
+                            const f = await toggleArtistFavorite('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}');
+                            updateArtistFavButtons(f);
+                        })()"
+                        class="w-7 h-7 md:w-8 md:h-8 rounded-lg border flex items-center justify-center transition-all shadow-sm active:scale-95 ${favd ? 'border-rose-500 bg-rose-500 text-white shadow-rose-500/20' : 't-border-main t-bg-main hover:t-bg-track text-rose-500'}"
+                        title="${favd ? '取消收藏' : '收藏歌手'}">
+                    <i class="fas fa-heart text-xs ${favd ? 'text-white' : 'text-rose-500'}"></i>
+                </button>
+
+                <!-- Mini Dislike -->
+                <button id="artist-mini-dislike-btn"
+                        onclick="(async () => {
+                            const d = await toggleArtistDislike('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}');
+                            updateArtistDislikeButtons(d);
+                        })()"
+                        class="w-7 h-7 md:w-8 md:h-8 rounded-lg border t-border-main flex items-center justify-center transition-all shadow-sm active:scale-95 ${disd ? 'bg-gray-800 text-white' : 't-bg-main hover:t-bg-track t-text-muted hover:t-text-main'}"
+                        title="${disd ? '取消不喜欢' : '不喜欢'}">
+                    <i class="fas fa-ban text-xs"></i>
+                </button>
+
+                <!-- Mini Back -->
+                <button onclick="goBackToSearch()"
+                        class="px-2 md:px-2.5 py-1.5 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main text-xs flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        title="返回上一页">
+                    <i class="fas fa-arrow-left text-[10px]"></i>
+                    <span class="hidden md:inline">返回</span>
+                </button>
+            </div>
+        </div>
+    `;
+}
 
 function renderArtistHeader(info, activeTab, order) {
+    const artistHeader = document.getElementById('artist-detail-header');
     const container = document.getElementById('search-results');
-    const isMobile = window.innerWidth < 768;
+    const header = document.getElementById('search-results-header');
+    if (!artistHeader || !container || !info) return;
 
-    // 计算各状态下的样式类和内联样式，确保与 toggleArtistFold 完全一致
-    const headerPadding = isArtistFolded ? 'p-3 md:p-4' : 'p-6 md:p-8';
-    const nameTransform = isArtistFolded
-        ? (isMobile ? 'translate(40px, -30px) scale(0.65)' : 'translate(30px, 0px) scale(0.65)')
-        : 'translate(0, 0) scale(1)';
-    const tabsClass = isArtistFolded ? 'mt-1 pt-2' : 'mt-8 pt-6';
+    if (activeTab === 'songs') {
+        if (header) header.classList.remove('hidden');
+        const backBtn = document.getElementById('search-back-btn');
+        if (backBtn) backBtn.classList.add('hidden');
+    } else {
+        if (header) header.classList.add('hidden');
+    }
+
+    artistHeader.classList.remove('hidden');
+    artistHeader.classList.remove('artist-hero-collapsed');
+    artistHeader.style.maxHeight = '600px';
+    artistHeader.style.opacity = '1';
+    artistHeader.style.paddingTop = '';
+    artistHeader.style.paddingBottom = '';
+    artistHeader.style.borderBottomWidth = '';
+    artistHeader.style.transform = 'translateY(0)';
+    artistHeader.style.pointerEvents = 'auto';
 
     let headerHtml = `
-        <div id="artist-detail-header" class="relative ${headerPadding} is-folded t-bg-panel/50 border-b t-border-main transition-all duration-500 ease-in-out overflow-hidden group/header" style="${isArtistFolded ? 'min-height: ' + (isMobile ? '0px' : '90px') + ';' : ''}">
+        <div class="relative p-6 md:p-8 t-bg-panel/50 border-b t-border-main overflow-hidden group/header">
             <!-- Small Absolute Back Button -->
             <button onclick="goBackToSearch()" class="absolute top-2 left-2 md:top-4 md:left-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-emerald-500/80 hover:bg-emerald-500 text-white transition-all z-30 shadow-md active:scale-90" title="返回搜索">
                 <i class="fas fa-arrow-left"></i>
@@ -2670,21 +3087,9 @@ function renderArtistHeader(info, activeTab, order) {
             <button id="artist-header-fav-btn"
                 onclick="(async () => { 
                     const favd = await toggleArtistFavorite('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}'); 
-                    const btn = document.getElementById('artist-header-fav-btn'); 
-                    if(btn){ 
-                        const base = 'absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
-                        const favedCls = 'bg-rose-500 text-white';
-                        const normalCls = 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
-                        btn.className = base + ' ' + (favd ? favedCls : normalCls);
-                        btn.title = favd ? '取消收藏' : '收藏歌手';
-                    } 
-                    const dBtn = document.getElementById('artist-header-dislike-btn');
-                    if(dBtn && favd){
-                        dBtn.className = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90 bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
-                        dBtn.title = '不喜欢';
-                    }
+                    updateArtistFavButtons(favd);
                 })()"
-                class="absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistFavorited(info.id, info.source) ? 'bg-rose-500 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
+                class="absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistFavorited(info.id, info.source) ? 'bg-rose-500 text-white shadow-md shadow-rose-500/20' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
                 title="${isArtistFavorited(info.id, info.source) ? '取消收藏' : '收藏歌手'}">
                 <i class="fas fa-heart"></i>
             </button>
@@ -2693,39 +3098,22 @@ function renderArtistHeader(info, activeTab, order) {
             <button id="artist-header-dislike-btn"
                 onclick="(async () => { 
                     const disd = await toggleArtistDislike('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}'); 
-                    const btn = document.getElementById('artist-header-dislike-btn'); 
-                    if(btn){ 
-                        const base = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
-                        const disdCls = 'bg-gray-800 text-white';
-                        const normalCls = 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
-                        btn.className = base + ' ' + (disd ? disdCls : normalCls);
-                        btn.title = disd ? '取消不喜欢' : '不喜欢';
-                    } 
-                    const fBtn = document.getElementById('artist-header-fav-btn');
-                    if(fBtn && disd){
-                        fBtn.className = 'absolute top-2 right-12 md:top-4 md:right-16 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90 bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main';
-                        fBtn.title = '收藏歌手';
-                    }
+                    updateArtistDislikeButtons(disd);
                 })()"
                 class="absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistDisliked(info.id, info.source) ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
                 title="${isArtistDisliked(info.id, info.source) ? '取消不喜欢' : '不喜欢'}">
                 <i class="fas fa-ban"></i>
             </button>
 
-            <!-- Fold Toggle Button -->
-            <button id="artist-fold-btn" onclick="toggleArtistFold()" class="absolute top-2 right-2 md:top-4 md:right-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main transition-all z-30 shadow-sm active:scale-90" title="折叠/展开">
-                <i class="fas fa-chevron-up transition-transform duration-500 ${isArtistFolded ? 'rotate-180' : ''}" id="artist-fold-icon"></i>
-            </button>
-
-            <div id="artist-main-layout" class="flex flex-col md:flex-row gap-6 md:gap-8 ${isArtistFolded && isMobile ? 'items-start text-left' : 'items-center md:items-start text-center md:text-left'} transition-all duration-500">
-                <div id="artist-avatar-container" class="w-32 h-32 md:w-40 md:h-40 rounded-full overflow-hidden shadow-2xl ring-4 ring-emerald-500/20 flex-shrink-0 transition-all duration-500 origin-center" style="${isArtistFolded ? 'transform: scale(0); opacity: 0; width: 0; height: 0; margin: 0;' : ''}">
+            <div id="artist-main-layout" class="flex flex-col md:flex-row gap-6 md:gap-8 items-center md:items-start text-center md:text-left transition-all duration-500">
+                <div id="artist-avatar-container" class="w-32 h-32 md:w-40 md:h-40 rounded-full overflow-hidden shadow-2xl ring-4 ring-emerald-500/20 flex-shrink-0 transition-all duration-500 origin-center">
                     <img src="${info.avatar || '/music/assets/logo.svg'}" 
                          onerror="this.src='/music/assets/logo.svg'"
                          class="w-full h-full object-cover">
                 </div>
                 <div class="flex-1 min-w-0">
-                    <h2 id="artist-name-display" class="text-3xl md:text-4xl font-black t-text-main mb-2 transition-all duration-500 origin-left pointer-events-none" style="transform: ${nameTransform}; margin-bottom: ${isArtistFolded ? '0' : ''};">${info.name}</h2>
-                    <div id="artist-collapsible-section" class="transition-all duration-500 ${isArtistFolded ? 'opacity-0 max-h-0' : 'opacity-100 max-h-[500px]'}">
+                    <h2 id="artist-name-display" class="text-3xl md:text-4xl font-black t-text-main mb-2 transition-all duration-500 origin-left">${info.name}</h2>
+                    <div id="artist-collapsible-section" class="transition-all duration-500 opacity-100 max-h-[500px]">
                         <div id="artist-stats-bar" class="flex flex-wrap justify-center md:justify-start gap-3 mb-3 text-sm font-medium transition-all duration-500">
                             <span class="px-3 py-1 rounded-full t-bg-main t-text-muted border t-border-main">
                                 <i class="fas fa-music mr-1.5 text-emerald-500"></i>${info.musicSize} 歌曲
@@ -2736,7 +3124,7 @@ function renderArtistHeader(info, activeTab, order) {
                         </div>
                         <div class="relative group">
                             <p id="artist-bio-text" class="text-sm t-text-muted leading-relaxed line-clamp-3 overflow-y-auto max-h-32 transition-all cursor-pointer bg-black/5 dark:bg-white/5 p-3 rounded-lg custom-scrollbar" 
-                            onclick="this.classList.toggle('line-clamp-3')" title="点击展开/收回详情">
+                            onclick="this.classList.toggle('line-clamp-3')" title="点击展开/收起详情">
                                 ${info.desc || '暂无简介'}
                             </p>
                         </div>
@@ -2744,7 +3132,7 @@ function renderArtistHeader(info, activeTab, order) {
                 </div>
             </div>
             
-            <div id="artist-tabs-bar" class="flex items-end justify-between ${tabsClass} border-t t-border-main transition-all duration-500 relative z-40" style="min-height: 48px;">
+            <div id="artist-tabs-bar" class="flex items-end justify-between mt-8 pt-6 border-t t-border-main transition-all duration-500 relative z-40" style="min-height: 48px;">
                 <div class="flex gap-8">
                     <button onclick="enterArtist('${info.id}', '${info.source}', '${order}', 'songs')" 
                             class="pb-2 text-sm font-bold transition-all relative ${activeTab === 'songs' ? 't-text-main' : 't-text-muted hover:t-text-main'}">
@@ -2772,94 +3160,20 @@ function renderArtistHeader(info, activeTab, order) {
                 ` : ''}
             </div>
         </div>
-        <div id="artist-detail-content" class="flex-1 overflow-y-auto p-2 md:p-4">
+    `;
+    artistHeader.innerHTML = headerHtml;
+
+    container.innerHTML = `
+        <div id="artist-detail-content" class="min-h-[calc(100vh-160px)] pb-60">
             <div class="flex items-center justify-center py-10">
                 <i class="fas fa-spinner fa-spin text-2xl text-emerald-500"></i>
             </div>
         </div>
     `;
-    container.innerHTML = headerHtml;
+
+    renderArtistMiniBar(info, activeTab, order);
+    initArtistScrollListener();
 }
-
-function toggleArtistFold() {
-    const header = document.getElementById('artist-detail-header');
-    const avatar = document.getElementById('artist-avatar-container');
-    const collapsible = document.getElementById('artist-collapsible-section');
-    const name = document.getElementById('artist-name-display');
-    const tabsBar = document.getElementById('artist-tabs-bar');
-    const foldIcon = document.getElementById('artist-fold-icon');
-    const mainLayout = document.getElementById('artist-main-layout');
-
-    if (!header) return;
-
-    isArtistFolded = header.classList.toggle('is-folded');
-    const isMobile = window.innerWidth < 768;
-
-    if (isArtistFolded) {
-        // 折叠状态
-        header.classList.remove('p-6', 'md:p-8');
-        header.classList.add('p-3', 'md:p-4');
-        header.style.minHeight = isMobile ? '0px' : '90px';
-
-        // 手机版强制左对齐，方便定位到返回键右侧
-        if (isMobile) {
-            mainLayout.classList.remove('items-center', 'text-center');
-            mainLayout.classList.add('items-start', 'text-left');
-        }
-
-        avatar.style.transform = 'scale(0)';
-        avatar.style.opacity = '0';
-        avatar.style.width = '0';
-        avatar.style.height = '0';
-        avatar.style.margin = '0';
-
-        collapsible.style.maxHeight = '0';
-        collapsible.style.opacity = '0';
-        collapsible.style.marginTop = '0';
-
-        tabsBar.classList.remove('mt-8', 'pt-6');
-        tabsBar.classList.add('mt-1', 'pt-2');
-
-        // 响应式偏移
-        if (isMobile) {
-            name.style.transform = 'translate(40px, -30px) scale(0.65)';
-        } else {
-            name.style.transform = 'translate(30px, 0px) scale(0.65)';
-        }
-        name.style.marginBottom = '0';
-
-        foldIcon.style.transform = 'rotate(180deg)';
-    } else {
-        // 展开状态
-        header.classList.add('p-6', 'md:p-8');
-        header.classList.remove('p-3', 'md:p-4');
-        header.style.minHeight = '';
-
-        if (isMobile) {
-            mainLayout.classList.add('items-center', 'text-center');
-            mainLayout.classList.remove('items-start', 'text-left');
-        }
-
-        avatar.style.transform = 'scale(1)';
-        avatar.style.opacity = '1';
-        avatar.style.width = '';
-        avatar.style.height = '';
-        avatar.style.margin = '';
-
-        collapsible.style.maxHeight = '500px';
-        collapsible.style.opacity = '1';
-        collapsible.style.marginTop = '';
-
-        tabsBar.classList.add('mt-8', 'pt-6');
-        tabsBar.classList.remove('mt-1', 'pt-2');
-
-        name.style.transform = 'translate(0, 0) scale(1)';
-        name.style.marginBottom = '';
-
-        foldIcon.style.transform = 'rotate(0deg)';
-    }
-}
-window.toggleArtistFold = toggleArtistFold;
 
 async function loadArtistSongs(id, source, order, forceFetch = false) {
     // Check if we can use cache to speed up UI transitions (like batch mode toggle)
@@ -2945,29 +3259,7 @@ function renderArtistSongsUI(list, page) {
     const indexedDisplayList = fullIndexedList.slice(startIndex, endIndex);
 
     let html = `
-        <!-- 表头 -->
-        <div class="grid grid-cols-12 gap-2 md:gap-4 px-5 py-3 border-b t-border-main t-bg-main text-gray-500 text-xs md:text-sm font-medium sticky top-0 z-10 rounded-t-2xl overflow-hidden shadow-sm items-center pr-6 flex-shrink-0">
-            <div class="col-span-1 text-center flex items-center justify-center gap-1 sm:gap-2">
-                <span>#</span>
-                <div class="flex items-center gap-1">
-                    <button onclick="toggleBatchMode()"
-                        class="text-[10px] text-emerald-600 hover:text-emerald-700" title="批量操作">
-                        <i class="fas fa-tasks"></i>
-                    </button>
-                    <button onclick="window.ListSearch.toggleBar()"
-                        class="text-[10px] text-emerald-600 hover:text-emerald-700" title="内搜索 (/)">
-                        <i class="fas fa-search"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center min-w-0">歌曲标题</div>
-            <div class="hidden sm:flex sm:col-span-3 md:col-span-3 lg:col-span-2 items-center min-w-0">歌手</div>
-            <div class="hidden lg:flex lg:col-span-2 items-center min-w-0">专辑</div>
-            <div class="hidden md:flex md:col-span-2 lg:col-span-1 items-center justify-center text-center min-w-0">时长</div>
-            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 text-right flex items-center justify-end min-w-0">操作</div>
-        </div>
-        
-        <div class="space-y-1 mt-2">
+        <div class="space-y-1">
             ${indexedDisplayList.map((obj) => {
         const { item, originalIndex: index } = obj;
         const isSelected = window.selectedItems.has(String(item.id));
@@ -3076,6 +3368,7 @@ function renderArtistSongsUI(list, page) {
 
     // Init Marquee if needed (though we use truncate here)
     if (window.applyMarqueeChecks) applyMarqueeChecks();
+    if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
 }
 window.renderArtistSongsUI = renderArtistSongsUI;
 
@@ -3259,7 +3552,13 @@ function renderArtistAlbumsUI(list) {
     content.querySelectorAll('.artist-album-card').forEach(card => {
         card.addEventListener('click', () => {
             const album = list[Number(card.dataset.albumIndex)];
-            if (album) enterAlbum(album.id ?? album.mid, album.source || window.currentArtistSource || 'wy');
+            if (album) enterAlbum(album.id ?? album.mid, album.source || window.currentArtistSource || 'wy', {
+                name: album.name,
+                artistName: album.artistName || album.singer || artistName,
+                picUrl: getImgUrl(album),
+                publishTime: album.publishTime || '',
+                total: album.total ?? album.count ?? album.songCount ?? 0
+            });
         });
     });
     content.querySelectorAll('.artist-album-download-btn').forEach(button => {
@@ -3281,6 +3580,7 @@ function renderArtistAlbumsUI(list) {
             button.title = favorited ? '取消收藏' : '收藏专辑';
         });
     });
+    if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
 }
 window.renderArtistAlbumsUI = renderArtistAlbumsUI;
 
@@ -3336,7 +3636,488 @@ async function downloadArtistAlbumSongs(album, button) {
 }
 window.downloadArtistAlbumSongs = downloadArtistAlbumSongs;
 
-async function enterAlbum(id, source = 'wy') {
+let albumScrollHandlerBound = false;
+let albumScrollRaf = null;
+let miniBarHideTimeout = null;
+
+function updateAlbumMiniExpandButton(st) {
+    const btn = document.getElementById('album-mini-expand-btn');
+    if (!btn) return;
+    const atTop = st <= 20;
+    btn.title = atTop ? '展开专辑详情卡片' : '回到列表顶部';
+    const iconEl = btn.querySelector('i');
+    const textEl = btn.querySelector('span');
+    if (iconEl) iconEl.className = atTop ? 'fas fa-chevron-down text-[10px]' : 'fas fa-arrow-up text-[10px]';
+    if (textEl) textEl.textContent = atTop ? '展开' : '顶部';
+}
+
+function handleAlbumMiniExpandClick() {
+    const searchResults = document.getElementById('search-results');
+    const st = searchResults ? searchResults.scrollTop : 0;
+    if (st > 20) {
+        searchResults.scrollTo({ top: 0, behavior: 'smooth' });
+    } else {
+        expandAlbumDetailHeader();
+    }
+}
+window.handleAlbumMiniExpandClick = handleAlbumMiniExpandClick;
+
+function handleAlbumScrollEvent() {
+    if (albumScrollRaf) return;
+    albumScrollRaf = requestAnimationFrame(() => {
+        albumScrollRaf = null;
+        const container = document.getElementById('search-results');
+        const albumHeader = document.getElementById('album-detail-header');
+        const miniBar = document.getElementById('album-mini-bar');
+        if (!container || !window.currentAlbumInfo) return;
+
+        const st = container.scrollTop;
+        const collapseThreshold = 35;
+
+        updateAlbumMiniExpandButton(st);
+
+        if (st > collapseThreshold) {
+            if (miniBarHideTimeout) {
+                clearTimeout(miniBarHideTimeout);
+                miniBarHideTimeout = null;
+            }
+            // Smoothly collapse Big Hero Header
+            if (albumHeader && !albumHeader.classList.contains('album-hero-collapsed')) {
+                albumHeader.classList.add('album-hero-collapsed');
+                albumHeader.style.maxHeight = '0px';
+                albumHeader.style.opacity = '0';
+                albumHeader.style.transform = 'translateY(-10px)';
+                albumHeader.style.pointerEvents = 'none';
+            }
+            // Show Mini Bar
+            if (miniBar) {
+                miniBar.classList.remove('hidden');
+                requestAnimationFrame(() => {
+                    miniBar.classList.remove('opacity-0', '-translate-y-2', 'pointer-events-none');
+                    miniBar.classList.add('opacity-100', 'translate-y-0', 'pointer-events-auto');
+                });
+            }
+        }
+    });
+}
+
+function expandAlbumDetailHeader() {
+    const albumHeader = document.getElementById('album-detail-header');
+    const miniBar = document.getElementById('album-mini-bar');
+    const container = document.getElementById('search-results');
+
+    if (miniBarHideTimeout) {
+        clearTimeout(miniBarHideTimeout);
+        miniBarHideTimeout = null;
+    }
+
+    if (albumHeader) {
+        albumHeader.classList.remove('album-hero-collapsed');
+        albumHeader.style.maxHeight = '600px';
+        albumHeader.style.opacity = '1';
+        albumHeader.style.transform = 'translateY(0)';
+        albumHeader.style.pointerEvents = 'auto';
+    }
+
+    if (miniBar && !miniBar.classList.contains('opacity-0')) {
+        miniBar.classList.add('opacity-0', '-translate-y-2', 'pointer-events-none');
+        miniBar.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+        miniBarHideTimeout = setTimeout(() => {
+            if (miniBar.classList.contains('opacity-0')) {
+                miniBar.classList.add('hidden');
+            }
+        }, 300);
+    }
+
+    if (container) {
+        container.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+}
+window.expandAlbumDetailHeader = expandAlbumDetailHeader;
+
+function initAlbumScrollListener() {
+    const container = document.getElementById('search-results');
+    if (!container || albumScrollHandlerBound) return;
+    container.addEventListener('scroll', handleAlbumScrollEvent, { passive: true });
+    albumScrollHandlerBound = true;
+}
+
+function cleanupAlbumScrollListener() {
+    const container = document.getElementById('search-results');
+    if (container && albumScrollHandlerBound) {
+        container.removeEventListener('scroll', handleAlbumScrollEvent);
+        albumScrollHandlerBound = false;
+    }
+}
+
+function hideAlbumDetailHeader() {
+    if (typeof hideArtistMiniBar === 'function') {
+        hideArtistMiniBar();
+    }
+    if (miniBarHideTimeout) {
+        clearTimeout(miniBarHideTimeout);
+        miniBarHideTimeout = null;
+    }
+    const miniBar = document.getElementById('album-mini-bar');
+    if (miniBar) {
+        miniBar.classList.add('hidden', 'opacity-0', '-translate-y-2', 'pointer-events-none');
+        miniBar.classList.remove('opacity-100', 'translate-y-0', 'pointer-events-auto');
+        miniBar.innerHTML = '';
+    }
+
+    const albumHeader = document.getElementById('album-detail-header');
+    if (albumHeader) {
+        albumHeader.classList.add('hidden');
+        albumHeader.classList.remove('album-hero-collapsed');
+        albumHeader.style.maxHeight = '';
+        albumHeader.style.opacity = '';
+        albumHeader.style.transform = '';
+        albumHeader.style.pointerEvents = '';
+        albumHeader.style.transition = '';
+        albumHeader.innerHTML = '';
+    }
+
+    window.currentAlbumInfo = null;
+    window.currentAlbumSongs = null;
+    cleanupAlbumScrollListener();
+}
+window.hideAlbumDetailHeader = hideAlbumDetailHeader;
+
+function updateAlbumHeaderFavButton(favorited) {
+    // Hero Favorite Button
+    const btn = document.getElementById('album-header-fav-btn');
+    const textEl = document.getElementById('album-header-fav-text');
+    const icon = btn?.querySelector('i');
+    if (btn) {
+        if (favorited) {
+            btn.className = 'px-3.5 py-2 rounded-xl border border-rose-500 bg-rose-500 text-white font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-md shadow-rose-500/20 active:scale-95';
+            if (icon) icon.className = 'fas fa-heart text-white';
+            if (textEl) textEl.textContent = '已收藏';
+            btn.title = '取消收藏';
+        } else {
+            btn.className = 'px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-main font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-sm active:scale-95';
+            if (icon) icon.className = 'fas fa-heart text-rose-500';
+            if (textEl) textEl.textContent = '收藏专辑';
+            btn.title = '收藏专辑';
+        }
+    }
+
+    // Mini Favorite Button
+    const miniBtn = document.getElementById('album-mini-fav-btn');
+    const miniIcon = miniBtn?.querySelector('i');
+    if (miniBtn) {
+        if (favorited) {
+            miniBtn.className = 'w-7 h-7 md:w-8 md:h-8 rounded-lg border border-rose-500 bg-rose-500 text-white flex items-center justify-center transition-all shadow-sm shadow-rose-500/20 active:scale-95';
+            if (miniIcon) miniIcon.className = 'fas fa-heart text-xs text-white';
+            miniBtn.title = '取消收藏';
+        } else {
+            miniBtn.className = 'w-7 h-7 md:w-8 md:h-8 rounded-lg border t-border-main t-bg-main hover:t-bg-track text-rose-500 flex items-center justify-center transition-all shadow-sm active:scale-95';
+            if (miniIcon) miniIcon.className = 'fas fa-heart text-xs text-rose-500';
+            miniBtn.title = '收藏专辑';
+        }
+    }
+}
+window.updateAlbumHeaderFavButton = updateAlbumHeaderFavButton;
+
+function renderAlbumMiniBar(info) {
+    const miniBar = document.getElementById('album-mini-bar');
+    if (!miniBar || !info) return;
+
+    const sourceNames = { kw: '酷我音乐', kg: '酷狗音乐', tx: 'QQ音乐', wy: '网易云音乐', mg: '咪咕音乐' };
+    const sourceLabel = sourceNames[info.source] || (info.source ? info.source.toUpperCase() : '网易云');
+    const favorited = isAlbumFavorited(info.id, info.source);
+    const searchResults = document.getElementById('search-results');
+    const isAtTop = (searchResults ? searchResults.scrollTop : 0) <= 20;
+
+    miniBar.innerHTML = `
+        <div class="flex items-center justify-between gap-2.5 md:gap-4 w-full">
+            <!-- Left: Mini Cover + Title + Singer -->
+            <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                <div class="relative w-8 h-8 sm:w-9 sm:h-9 md:w-10 md:h-10 rounded-xl overflow-hidden shadow-md flex-shrink-0 ring-1 ring-black/10 dark:ring-white/10">
+                    <img src="${escapeHtmlText(info.picUrl || '/music/assets/logo.svg')}" 
+                         onerror="this.src='/music/assets/logo.svg'"
+                         class="w-full h-full object-cover" 
+                         alt="${escapeHtmlText(info.name)}">
+                </div>
+                <div class="min-w-0 flex-1">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-bold text-xs md:text-sm t-text-main truncate max-w-[120px] sm:max-w-xs md:max-w-md" title="${escapeHtmlText(info.name)}">
+                            ${escapeHtmlText(info.name)}
+                        </span>
+                        <span class="hidden sm:inline-block px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                            ${escapeHtmlText(sourceLabel)}
+                        </span>
+                    </div>
+                    <div class="text-[10px] md:text-[11px] t-text-muted truncate flex items-center gap-1">
+                        <span>歌手：</span>
+                        <span class="font-medium text-emerald-600 dark:text-emerald-400 hover:underline cursor-pointer"
+                              onclick="navigateToAlbumArtist('${escapeHtmlText(info.artistName)}', '${info.source}', '${info.artistId || ''}')"
+                              title="查看歌手「${escapeHtmlText(info.artistName)}」">
+                            ${escapeHtmlText(info.artistName || '未知歌手')}
+                        </span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Mini Action Buttons -->
+            <div class="flex items-center gap-1.5 md:gap-2 flex-shrink-0">
+                <!-- Mini Top / Expand Button -->
+                <button id="album-mini-expand-btn"
+                        onclick="handleAlbumMiniExpandClick()"
+                        class="px-2 md:px-2.5 py-1.5 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main text-xs flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        title="${isAtTop ? '展开专辑详情卡片' : '回到列表顶部'}">
+                    <i class="fas ${isAtTop ? 'fa-chevron-down' : 'fa-arrow-up'} text-[10px]"></i>
+                    <span class="hidden sm:inline">${isAtTop ? '展开' : '顶部'}</span>
+                </button>
+
+                <!-- Mini Play All -->
+                <button onclick="playAlbumAll()"
+                        class="px-2.5 md:px-3 py-1.5 rounded-lg bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs shadow-sm flex items-center gap-1.5 transition-all active:scale-95"
+                        title="播放全部">
+                    <i class="fas fa-play text-[10px]"></i>
+                    <span class="hidden sm:inline text-xs">播放全部</span>
+                </button>
+
+                <!-- Mini Favorite -->
+                <button id="album-mini-fav-btn"
+                        onclick="toggleAlbumHeaderFavorite()"
+                        class="w-7 h-7 md:w-8 md:h-8 rounded-lg border flex items-center justify-center transition-all shadow-sm active:scale-95 ${favorited ? 'border-rose-500 bg-rose-500 text-white shadow-rose-500/20' : 't-border-main t-bg-main hover:t-bg-track text-rose-500'}"
+                        title="${favorited ? '取消收藏' : '收藏专辑'}">
+                    <i class="fas fa-heart text-xs ${favorited ? 'text-white' : 'text-rose-500'}"></i>
+                </button>
+
+                <!-- Mini Download -->
+                <button onclick="downloadCurrentAlbumSongs()"
+                        class="w-7 h-7 md:w-8 md:h-8 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-main flex items-center justify-center transition-all shadow-sm active:scale-95"
+                        title="下载专辑全部歌曲">
+                    <i class="fas fa-download text-xs text-emerald-600"></i>
+                </button>
+
+                <!-- Mini Back -->
+                <button onclick="goBackToSearch()"
+                        class="px-2 md:px-2.5 py-1.5 rounded-lg border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main text-xs flex items-center gap-1 transition-all shadow-sm active:scale-95"
+                        title="返回上一页">
+                    <i class="fas fa-arrow-left text-[10px]"></i>
+                    <span class="hidden md:inline">返回</span>
+                </button>
+            </div>
+        </div>
+    `;
+}
+
+function renderAlbumDetailHeader(info) {
+    const albumHeader = document.getElementById('album-detail-header');
+    if (!albumHeader || !info) return;
+
+    window.currentAlbumInfo = info;
+
+    const sourceNames = { kw: '酷我音乐', kg: '酷狗音乐', tx: 'QQ音乐', wy: '网易云音乐', mg: '咪咕音乐' };
+    const sourceLabel = sourceNames[info.source] || (info.source ? info.source.toUpperCase() : '网易云');
+    const favorited = isAlbumFavorited(info.id, info.source);
+
+    const platformBadge = `<span class="absolute top-2 left-2 px-2 py-0.5 text-[10px] font-bold bg-black/60 backdrop-blur-md text-white rounded-lg shadow-sm z-10">${escapeHtmlText(sourceLabel)}</span>`;
+
+    albumHeader.innerHTML = `
+        <div class="relative p-4 md:p-6 border-b t-border-main t-bg-panel/60 backdrop-blur-md overflow-hidden group/album-header">
+            <!-- Ambient top-right glow -->
+            <div class="absolute -right-12 -top-12 w-52 h-52 bg-emerald-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+            <div class="flex flex-col md:flex-row gap-4 md:gap-6 items-center md:items-start text-center md:text-left relative z-10">
+                <!-- Album Cover -->
+                <div class="relative w-28 h-28 md:w-36 md:h-36 rounded-2xl overflow-hidden shadow-xl ring-2 ring-black/5 dark:ring-white/10 flex-shrink-0 group/cover">
+                    <img src="${escapeHtmlText(info.picUrl || '/music/assets/logo.svg')}" 
+                         onerror="this.src='/music/assets/logo.svg'"
+                         class="w-full h-full object-cover transition-transform duration-500 group-hover/cover:scale-105"
+                         alt="${escapeHtmlText(info.name)}">
+                    <div class="absolute inset-0 bg-black/30 opacity-0 group-hover/cover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer" onclick="playAlbumAll()">
+                        <div class="w-11 h-11 rounded-full bg-emerald-500 text-white flex items-center justify-center shadow-lg transform translate-y-2 group-hover/cover:translate-y-0 transition-transform duration-300">
+                            <i class="fas fa-play text-sm ml-0.5"></i>
+                        </div>
+                    </div>
+                    ${platformBadge}
+                </div>
+
+                <!-- Info & Actions -->
+                <div class="flex-1 min-w-0 flex flex-col justify-between self-stretch py-0.5">
+                    <div>
+                        <!-- Top Tags Row -->
+                        <div class="flex flex-wrap items-center justify-center md:justify-start gap-2 mb-2">
+                            <span class="px-2 py-0.5 rounded-md text-[10px] font-bold bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 tracking-wider">
+                                专辑
+                            </span>
+                            <span class="px-2 py-0.5 rounded-md text-[10px] font-medium bg-gray-500/10 t-text-muted border t-border-main">
+                                ${escapeHtmlText(sourceLabel)}
+                            </span>
+                            ${info.publishTime ? `
+                            <span class="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] t-text-muted bg-gray-500/10 border t-border-main">
+                                <i class="far fa-calendar-alt text-emerald-500/80"></i>
+                                <span>${escapeHtmlText(info.publishTime)}</span>
+                            </span>` : ''}
+                            <span class="flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] t-text-muted bg-gray-500/10 border t-border-main">
+                                <i class="fas fa-music text-emerald-500/80"></i>
+                                <span>共 ${info.total || 0} 首歌曲</span>
+                            </span>
+                        </div>
+
+                        <!-- Album Name -->
+                        <h1 class="text-xl md:text-2xl lg:text-3xl font-black t-text-main leading-snug tracking-tight mb-2 select-text" title="${escapeHtmlText(info.name)}">
+                            ${escapeHtmlText(info.name)}
+                        </h1>
+
+                        <!-- Singer Name -->
+                        <div class="flex items-center justify-center md:justify-start gap-1.5 text-xs md:text-sm mb-3">
+                            <span class="t-text-muted">歌手：</span>
+                            <span class="font-bold text-emerald-600 hover:text-emerald-500 hover:underline cursor-pointer transition-colors inline-flex items-center gap-1"
+                                  onclick="navigateToAlbumArtist('${escapeHtmlText(info.artistName)}', '${info.source}', '${info.artistId || ''}')"
+                                  title="查看歌手「${escapeHtmlText(info.artistName)}」">
+                                <i class="fas fa-user-circle"></i>
+                                <span>${escapeHtmlText(info.artistName || '未知歌手')}</span>
+                            </span>
+                        </div>
+
+                        <!-- Description (if any) -->
+                        ${info.desc ? `
+                        <div class="relative mb-3 max-w-3xl">
+                            <p class="text-xs t-text-muted leading-relaxed line-clamp-2 hover:line-clamp-none cursor-pointer bg-black/5 dark:bg-white/5 p-2.5 rounded-xl transition-all"
+                               onclick="this.classList.toggle('line-clamp-2')" title="点击展开/收起完整简介">
+                                ${escapeHtmlText(info.desc)}
+                            </p>
+                        </div>` : ''}
+                    </div>
+
+                    <!-- Action Toolbar -->
+                    <div class="flex flex-wrap items-center justify-center md:justify-start gap-2.5 pt-2">
+                        <!-- Play All -->
+                        <button onclick="playAlbumAll()"
+                                class="px-4 py-2 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs md:text-sm shadow-md shadow-emerald-500/20 flex items-center gap-2 transition-all active:scale-95"
+                                title="播放专辑内全部歌曲">
+                            <i class="fas fa-play text-xs"></i>
+                            <span>播放全部</span>
+                        </button>
+
+                        <!-- Favorite Album -->
+                        <button id="album-header-fav-btn"
+                                onclick="toggleAlbumHeaderFavorite()"
+                                class="px-3.5 py-2 rounded-xl border t-border-main font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-sm active:scale-95 ${favorited ? 'border-rose-500 bg-rose-500 text-white shadow-md shadow-rose-500/20' : 't-bg-main hover:t-bg-track t-text-main'}"
+                                title="${favorited ? '取消收藏' : '收藏专辑'}">
+                            <i class="fas fa-heart ${favorited ? 'text-white' : 'text-rose-500'}"></i>
+                            <span id="album-header-fav-text">${favorited ? '已收藏' : '收藏专辑'}</span>
+                        </button>
+
+                        <!-- Download All -->
+                        <button id="album-header-download-btn"
+                                onclick="downloadCurrentAlbumSongs()"
+                                class="px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-main font-medium text-xs md:text-sm flex items-center gap-2 transition-all shadow-sm active:scale-95"
+                                title="下载本专辑所有歌曲">
+                            <i class="fas fa-download text-emerald-600"></i>
+                            <span class="hidden sm:inline">下载专辑</span>
+                        </button>
+
+                        <!-- Back Button -->
+                        <button onclick="goBackToSearch()"
+                                class="px-3.5 py-2 rounded-xl border t-border-main t-bg-main hover:t-bg-track t-text-muted hover:t-text-main font-medium text-xs md:text-sm flex items-center gap-1.5 transition-all shadow-sm active:scale-95"
+                                title="返回上一页">
+                            <i class="fas fa-arrow-left text-xs"></i>
+                            <span>返回</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+
+    albumHeader.style.maxHeight = '600px';
+    albumHeader.style.opacity = '1';
+    albumHeader.style.transform = 'translateY(0)';
+    albumHeader.style.pointerEvents = 'auto';
+    albumHeader.style.transition = 'max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease, transform 0.3s ease';
+    albumHeader.classList.remove('hidden', 'album-hero-collapsed');
+
+    renderAlbumMiniBar(info);
+    initAlbumScrollListener();
+}
+window.renderAlbumDetailHeader = renderAlbumDetailHeader;
+
+function playAlbumAll() {
+    if (!window.currentAlbumSongs || window.currentAlbumSongs.length === 0) {
+        showInfo('当前专辑没有可播放的歌曲');
+        return;
+    }
+    updatePlaylist(window.currentAlbumSongs, 0, 'album', false);
+}
+window.playAlbumAll = playAlbumAll;
+
+async function toggleAlbumHeaderFavorite() {
+    if (!window.currentAlbumInfo) return;
+    const info = window.currentAlbumInfo;
+    const favorited = await toggleAlbumFavorite(info.id, info.source, info.name, info.picUrl, info.artistName);
+    updateAlbumHeaderFavButton(favorited);
+}
+window.toggleAlbumHeaderFavorite = toggleAlbumHeaderFavorite;
+
+async function downloadCurrentAlbumSongs() {
+    if (!window.currentAlbumSongs || window.currentAlbumSongs.length === 0) {
+        showError('当前专辑没有可下载的歌曲');
+        return;
+    }
+    const btn = document.getElementById('album-header-download-btn');
+    const icon = btn?.querySelector('i');
+    if (btn) btn.disabled = true;
+    if (icon) icon.className = 'fas fa-spinner fa-spin text-emerald-600';
+    try {
+        await window.batchDownloadSongs(window.currentAlbumSongs, {
+            clearSelection: false,
+            selectionLabel: `专辑「${window.currentAlbumInfo?.name || '未知专辑'}」共 ${window.currentAlbumSongs.length} 首歌曲`
+        });
+    } catch (e) {
+        showError(`下载专辑失败: ${e.message}`);
+    } finally {
+        if (btn) btn.disabled = false;
+        if (icon) icon.className = 'fas fa-download text-emerald-600';
+    }
+}
+window.downloadCurrentAlbumSongs = downloadCurrentAlbumSongs;
+
+async function navigateToAlbumArtist(singerName, source, artistId) {
+    if (!singerName || singerName === '未知歌手') return;
+    
+    let targetArtistId = artistId || window.currentAlbumInfo?.artistId;
+    let targetSource = source || window.currentAlbumInfo?.source || 'wy';
+
+    // 如果还没有 ID，尝试从歌曲列表中查找
+    if (!targetArtistId && window.currentAlbumSongs && window.currentAlbumSongs.length > 0) {
+        const songWithId = window.currentAlbumSongs.find(s => s.artistId || s.singerId || s.singermid);
+        if (songWithId) {
+            targetArtistId = songWithId.artistId || songWithId.singerId || songWithId.singermid;
+        }
+    }
+
+    if (targetArtistId && typeof enterArtist === 'function') {
+        // 暂存当前专辑上下文，以便从歌手页点击返回时能恢复专辑
+        window.tempAlbumContext = {
+            id: window.currentAlbumInfo?.id,
+            source: window.currentAlbumInfo?.source || targetSource,
+            initialInfo: window.currentAlbumInfo ? { ...window.currentAlbumInfo } : null
+        };
+        hideAlbumDetailHeader();
+        enterArtist(targetArtistId, targetSource);
+        return;
+    }
+
+    // 兜底：若确实无法获取歌手 ID，降级为搜索歌手
+    hideAlbumDetailHeader();
+    const searchInput = document.getElementById('search-input');
+    const searchType = document.getElementById('search-type');
+    const searchSource = document.getElementById('search-source');
+    if (searchInput) searchInput.value = singerName;
+    if (searchType) searchType.value = 'singer';
+    if (searchSource && targetSource && targetSource !== 'all') searchSource.value = targetSource;
+    doSearch();
+}
+window.navigateToAlbumArtist = navigateToAlbumArtist;
+window.searchSingerByName = navigateToAlbumArtist;
+
+async function enterAlbum(id, source = 'wy', initialInfo = null) {
     // 保存进入专辑前的上下文，如果是从歌手页进入，则记录歌手 ID
     const artistHeader = document.getElementById('artist-detail-header');
     if (artistHeader) {
@@ -3347,12 +4128,12 @@ async function enterAlbum(id, source = 'wy') {
             order: window.currentArtistOrder || 'hot'
         };
         artistHeader.remove(); // 进入专辑详情时移除歌手头部，保持界面整洁
-    } else {
+    } else if (!window.tempAlbumContext) {
         window.tempArtistContext = null;
     }
 
     const typeEl = document.getElementById('search-type');
-    if (!artistHeader) {
+    if (!artistHeader && !window.tempAlbumContext) {
         lastSearchType = typeEl ? typeEl.value : 'album';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
     }
@@ -3361,14 +4142,68 @@ async function enterAlbum(id, source = 'wy') {
     const resultsContainer = document.getElementById('search-results');
     resultsContainer.innerHTML = '<div class="flex items-center justify-center h-full"><i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i></div>';
 
+    // 如果传入了初始元数据，先预渲染头部
+    if (initialInfo) {
+        renderAlbumDetailHeader({
+            id,
+            source,
+            name: initialInfo.name || '正在加载专辑...',
+            artistName: initialInfo.artistName || initialInfo.singer || '',
+            artistId: initialInfo.artistId || initialInfo.singerId || '',
+            publishTime: initialInfo.publishTime || '',
+            picUrl: initialInfo.picUrl || initialInfo.img || getImgUrl(initialInfo),
+            desc: initialInfo.desc || '',
+            total: initialInfo.total || initialInfo.count || initialInfo.songCount || 0
+        });
+    }
+
     try {
         const res = await fetch(`${API_BASE}/albumSongs?id=${id}&source=${source}`);
         if (!res.ok) throw new Error('Failed to fetch album songs');
         const data = await res.json();
-        const songList = data.list || (Array.isArray(data) ? data : []);
+        const rawSongs = data.list || (Array.isArray(data) ? data : []);
+
+        const songList = rawSongs.map((song, idx) => {
+            if (!song.id || song.id === 'undefined') {
+                song.id = song.songmid || song.songId || song.hash || song.copyrightId || song.mid || song.mediaMid || `alb_${id}_${idx}`;
+            }
+            return {
+                ...song,
+                source: song.source || source,
+                albumName: song.albumName || data.name || (data.info && data.info.name) || (rawSongs[0] && (rawSongs[0].albumName || rawSongs[0].meta?.albumName)) || '未知专辑'
+            };
+        });
+
+        // 提取专辑完整信息
+        const firstSong = songList[0] || {};
+        const albumName = data.name || data.info?.name || data.info?.title || initialInfo?.name || firstSong.albumName || firstSong.meta?.albumName || '未知专辑';
+        const artistName = data.singer || data.artist || data.artistName || data.info?.singer || data.info?.artist || data.info?.artistName || initialInfo?.artistName || initialInfo?.singer || firstSong.singer || firstSong.meta?.singer || '未知歌手';
+        const artistId = data.artistId || data.singerId || data.singermid || data.info?.artistId || data.info?.singerId || initialInfo?.artistId || initialInfo?.singerId || firstSong.artistId || firstSong.singerId || firstSong.meta?.artistId;
+        const publishTime = data.publishTime || data.pubTime || data.aDate || data.info?.publishTime || data.info?.pubTime || initialInfo?.publishTime || firstSong.publishTime || firstSong.meta?.publishTime || '';
+        const picUrl = data.picUrl || data.img || data.cover || data.info?.picUrl || data.info?.img || initialInfo?.picUrl || initialInfo?.img || getImgUrl(firstSong) || '/music/assets/logo.svg';
+        const desc = data.desc || data.description || data.info?.desc || data.info?.description || initialInfo?.desc || '';
+        const songCount = data.total || data.count || songList.length;
+
+        window.currentAlbumInfo = {
+            id,
+            source,
+            name: albumName,
+            artistName,
+            artistId,
+            publishTime,
+            picUrl,
+            desc,
+            total: songCount
+        };
+        window.currentAlbumSongs = songList;
+
+        // 渲染完整专辑头部
+        renderAlbumDetailHeader(window.currentAlbumInfo);
+
+        // 渲染歌曲列表
         renderResults(songList);
         const pageInfoEl = document.getElementById('page-info');
-        if (pageInfoEl) pageInfoEl.innerText = `专辑歌曲列表`;
+        if (pageInfoEl) pageInfoEl.innerText = `专辑「${albumName}」共 ${songList.length} 首`;
 
         // [新增] 如果该专辑已收藏，则异步丰富其元数据
         if (isAlbumFavorited(id, source)) {
@@ -3376,61 +4211,78 @@ async function enterAlbum(id, source = 'wy') {
         }
 
         const backBtn = document.getElementById('search-back-btn');
-        if (backBtn) backBtn.classList.remove('hidden');
+        if (backBtn) backBtn.classList.add('hidden'); // 专辑详情有大卡片顶部的返回按钮，隐藏表头内多余的返回按键
     } catch (e) {
         showError(`获取专辑歌曲失败: ${e.message}`);
+        hideAlbumDetailHeader();
         goBackToSearch();
     }
 }
+window.enterAlbum = enterAlbum;
 
 function goBackToSearch(fromPopState = false) {
-    if (!fromPopState) {
-        if (window.history.state && window.history.state.page === 'search-detail') {
+    if (!fromPopState && window.history.state && window.history.state.page === 'search-detail') {
+        try {
             window.history.back();
+        } catch (e) {
+            console.warn('history.back error:', e);
+        }
+    }
+
+    // 隐藏专辑与歌手详情头部及浮动栏
+    hideAlbumDetailHeader();
+    hideArtistDetailHeader();
+
+    // 1. 如果有暂存的专辑上下文（从专辑点击歌手进入歌手页后返回），恢复专辑页
+    if (window.tempAlbumContext) {
+        const ctx = window.tempAlbumContext;
+        window.tempAlbumContext = null;
+        if (ctx.id) {
+            enterAlbum(ctx.id, ctx.source || 'wy', ctx.initialInfo);
             return;
         }
     }
 
-    // 如果有暂存的歌手上下文，优先返回歌手页
+    // 2. 如果有暂存的歌手上下文（从歌手页进入专辑后的返回），优先返回歌手页
     if (window.tempArtistContext) {
         const ctx = window.tempArtistContext;
-        window.tempArtistContext = null; // 用完即弃
+        window.tempArtistContext = null;
         enterArtist(ctx.id, ctx.source, ctx.order, ctx.tab, true);
         return;
-    }
-
-    if (!lastSearchResultList) return;
-
-    const container = document.getElementById('search-results');
-    const header = document.getElementById('search-results-header');
-
-    // 清除详情页专用头部
-    const detailHeader = document.getElementById('artist-detail-header');
-    if (detailHeader) detailHeader.remove();
-
-    // 恢复搜索结果列表头部
-    if (header) header.classList.remove('hidden');
-
-    if (currentSearchScope === 'lib_artists') {
-        renderLibraryArtists(lastSearchResultList);
-    } else if (currentSearchScope === 'lib_albums') {
-        renderLibraryAlbums(lastSearchResultList);
-    } else if (lastSearchType === 'singer') {
-        renderSingerResults(lastSearchResultList);
-    } else if (lastSearchType === 'album') {
-        renderAlbumResults(lastSearchResultList);
-    } else {
-        renderResults(lastSearchResultList);
     }
 
     const backBtn = document.getElementById('search-back-btn');
     if (backBtn) backBtn.classList.add('hidden');
 
-    const pageInfoEl = document.getElementById('page-info');
-    if (pageInfoEl) {
-        if (currentSearchScope === 'lib_artists') pageInfoEl.innerText = `收藏歌手`;
-        else if (currentSearchScope === 'lib_albums') pageInfoEl.innerText = `收藏专辑`;
-        else pageInfoEl.innerText = `搜索结果`;
+    // 恢复搜索/收藏结果列表
+    if (lastSearchResultList && lastSearchResultList.length > 0) {
+        const header = document.getElementById('search-results-header');
+        if (header) header.classList.remove('hidden');
+
+        if (currentSearchScope === 'lib_artists') {
+            renderLibraryArtists(lastSearchResultList);
+        } else if (currentSearchScope === 'lib_albums') {
+            renderLibraryAlbums(lastSearchResultList);
+        } else if (lastSearchType === 'singer') {
+            renderSingerResults(lastSearchResultList);
+        } else if (lastSearchType === 'album') {
+            renderAlbumResults(lastSearchResultList);
+        } else {
+            renderResults(lastSearchResultList);
+        }
+
+        const pageInfoEl = document.getElementById('page-info');
+        if (pageInfoEl) {
+            if (currentSearchScope === 'lib_artists') pageInfoEl.innerText = `收藏歌手`;
+            else if (currentSearchScope === 'lib_albums') pageInfoEl.innerText = `收藏专辑`;
+            else pageInfoEl.innerText = `搜索结果`;
+        }
+    } else {
+        // 兜底：若暂存列表丢失，根据搜索框内容重新搜索
+        const searchInput = document.getElementById('search-input');
+        if (searchInput && searchInput.value.trim()) {
+            doSearch();
+        }
     }
 
     lastSearchResultList = null;
@@ -3458,14 +4310,159 @@ window.getImgUrl = getImgUrl;
 
 // Removed duplicate toggleDislikeSong
 
+// Global Playlist Sort Mode State
+window.glSortMode = false;
+window.glSortWorkList = null;
+window.glSortableInstance = null;
+
+function toggleGlobalSortMode(force) {
+    const activeListId = window.currentViewingListId;
+    const isLocalList = currentSearchScope === 'local_list' && activeListId && (
+        activeListId === 'default' || activeListId === 'love' || (currentListData?.userList?.some(l => l.id === activeListId))
+    );
+
+    if (force !== undefined) {
+        window.glSortMode = Boolean(force);
+    } else {
+        window.glSortMode = !window.glSortMode;
+    }
+
+    if (window.glSortMode && !isLocalList) {
+        window.glSortMode = false;
+        showError('仅支持在我的收藏歌单（如我的喜爱、默认列表、自定义歌单）中调整顺序');
+        return;
+    }
+
+    const sortToolbar = document.getElementById('gl-sort-toolbar');
+    const hashBtn = document.getElementById('gl-sort-hash-btn');
+    const sortIconBtn = document.getElementById('gl-sort-icon-btn');
+    const paginationBar = document.getElementById('search-pagination-bar');
+
+    if (window.glSortMode) {
+        if (window.batchMode && typeof toggleBatchMode === 'function') toggleBatchMode();
+        if (window.ListSearch && window.ListSearch.isOpen) window.ListSearch.closeBar();
+
+        let currentSongs = [];
+        if (activeListId === 'default') currentSongs = currentListData?.defaultList || [];
+        else if (activeListId === 'love') currentSongs = currentListData?.loveList || [];
+        else {
+            const u = currentListData?.userList?.find(l => l.id === activeListId);
+            currentSongs = u ? (u.list || []) : [];
+        }
+
+        if (!currentSongs || currentSongs.length === 0) {
+            window.glSortMode = false;
+            showError('当前歌单为空，无法排序');
+            return;
+        }
+
+        window.glSortWorkList = JSON.parse(JSON.stringify(currentSongs));
+        if (sortToolbar) sortToolbar.classList.remove('hidden');
+        if (hashBtn) hashBtn.classList.add('text-emerald-500', 'bg-emerald-500/10', 'font-bold');
+        if (sortIconBtn) sortIconBtn.classList.add('text-emerald-500', 'font-bold');
+        if (paginationBar) paginationBar.classList.add('hidden');
+
+        renderResults(window.glSortWorkList);
+    } else {
+        if (window.glSortableInstance) {
+            try { window.glSortableInstance.destroy(); } catch (e) {}
+            window.glSortableInstance = null;
+        }
+        window.glSortWorkList = null;
+        if (sortToolbar) sortToolbar.classList.add('hidden');
+        if (hashBtn) hashBtn.classList.remove('text-emerald-500', 'bg-emerald-500/10', 'font-bold');
+        if (sortIconBtn) sortIconBtn.classList.remove('text-emerald-500', 'font-bold');
+        if (paginationBar) paginationBar.classList.remove('hidden');
+
+        let currentSongs = [];
+        if (activeListId === 'default') currentSongs = currentListData?.defaultList || [];
+        else if (activeListId === 'love') currentSongs = currentListData?.loveList || [];
+        else {
+            const u = currentListData?.userList?.find(l => l.id === activeListId);
+            currentSongs = u ? (u.list || []) : [];
+        }
+        renderResults(currentSongs);
+    }
+}
+window.toggleGlobalSortMode = toggleGlobalSortMode;
+
+function moveGlobalSongToPosition(oldIndex, targetPos) {
+    if (!window.glSortWorkList || window.glSortWorkList.length === 0) return;
+    if (isNaN(targetPos) || targetPos < 1) targetPos = 1;
+    if (targetPos > window.glSortWorkList.length) targetPos = window.glSortWorkList.length;
+    const newIndex = targetPos - 1;
+    if (oldIndex === newIndex) return;
+
+    const [item] = window.glSortWorkList.splice(oldIndex, 1);
+    window.glSortWorkList.splice(newIndex, 0, item);
+    renderResults(window.glSortWorkList);
+}
+window.moveGlobalSongToPosition = moveGlobalSongToPosition;
+
+async function saveGlobalSortOrder() {
+    const listId = window.currentViewingListId;
+    if (!listId || !window.glSortWorkList) return;
+
+    const btn = document.getElementById('gl-sort-save-btn');
+    const originalHtml = btn ? btn.innerHTML : '';
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>保存中...</span>';
+    }
+
+    try {
+        const orderedSongIds = window.glSortWorkList.map(s => String(s.id || s.songmid || s.songId || s.hash));
+        const res = await fetch('/api/music/user/list/reorder', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...getUserAuthHeaders()
+            },
+            body: JSON.stringify({
+                listId: listId,
+                orderedSongIds: orderedSongIds
+            })
+        });
+
+        if (!res.ok) {
+            const errText = await res.text();
+            throw new Error(errText || '保存失败');
+        }
+
+        if (currentListData) {
+            if (listId === 'default') {
+                currentListData.defaultList = window.glSortWorkList;
+            } else if (listId === 'love') {
+                currentListData.loveList = window.glSortWorkList;
+            } else {
+                const target = currentListData.userList?.find(l => l.id === listId);
+                if (target) target.list = window.glSortWorkList;
+            }
+        }
+
+        showSuccess('歌单排序已成功保存');
+        toggleGlobalSortMode(false);
+    } catch (err) {
+        console.error('[Sort] 保存歌单排序失败:', err);
+        showError('保存排序失败: ' + (err.message || '网络错误'));
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    }
+}
+window.saveGlobalSortOrder = saveGlobalSortOrder;
+
 // List search logic is now handled by ListSearch service in list_search.js
 function renderResults(list) {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
     if (header) header.classList.remove('hidden');
-    // 搜索歌曲时恢复底部分页栏显示
+    // 专辑歌曲列表渲染时也需要隐藏 album-detail-header（由 enterAlbum 单独管理显示）
+    // 搜索歌曲时恢复底部分页栏显示（非排序模式下）
     const paginationBar = document.getElementById('search-pagination-bar');
-    if (paginationBar) paginationBar.classList.remove('hidden');
+    if (paginationBar && !window.glSortMode) paginationBar.classList.remove('hidden');
     // 重置歌手详情分页（进入歌曲搜索视图时清空）
     window.artistSongsPage = 1;
     // Update Header
@@ -3475,8 +4472,6 @@ function renderResults(list) {
 
     container.innerHTML = '';
 
-    // [Fix] 确保每个歌曲都有唯一的 ID，防止批量操作时因为 ID 缺失(undefined)导致只能选中一个
-    // 很多源(如酷狗、咪咕)返回的原始数据可能只有 hash 或 copyrightsId 而没有 id 字段
     if (list && list.length > 0) {
         list.forEach((item, idx) => {
             if (!item.id || item.id === 'undefined') {
@@ -3494,22 +4489,27 @@ function renderResults(list) {
     }
 
     // Applying Unified Filter with original index preservation BEFORE pagination
-    const indexedDisplayList = window.ListSearch.getDisplayList(list);
+    const indexedDisplayList = (window.glSortMode || !window.ListSearch) ? list.map((item, index) => ({ item, originalIndex: index })) : window.ListSearch.getDisplayList(list);
 
-    // Pagination
+    // Pagination (Sort Mode displays all items to enable dragging & reordering)
     const totalItems = indexedDisplayList.length;
-    let itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
-    if (itemsPerPage <= 0) itemsPerPage = 20;
-    const totalPages = Math.ceil(totalItems / (itemsPerPage || 1));
+    let pageList = indexedDisplayList;
+    let totalPages = 1;
+    let startIndex = 0;
+    let endIndex = totalItems;
 
-    // Bounds check
-    if (currentPage > totalPages) currentPage = totalPages || 1;
-    if (currentPage < 1) currentPage = 1;
+    if (!window.glSortMode) {
+        let itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
+        if (itemsPerPage <= 0) itemsPerPage = 20;
+        totalPages = Math.ceil(totalItems / (itemsPerPage || 1));
 
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+        if (currentPage > totalPages) currentPage = totalPages || 1;
+        if (currentPage < 1) currentPage = 1;
 
-    const pageList = indexedDisplayList.slice(startIndex, endIndex);
+        startIndex = (currentPage - 1) * itemsPerPage;
+        endIndex = Math.min(startIndex + itemsPerPage, totalItems);
+        pageList = indexedDisplayList.slice(startIndex, endIndex);
+    }
 
     pageList.forEach((obj, pageIndex) => {
         const { item, originalIndex: actualIndexInOriginal } = obj;
@@ -3517,13 +4517,14 @@ function renderResults(list) {
         row.id = `gl-row-${actualIndexInOriginal}`;
         row.dataset.songId = String(item.id);
 
-        const isMatched = window.ListSearch.isMatched(actualIndexInOriginal);
-        const isCurrentMatch = window.ListSearch.isCurrentMatch(actualIndexInOriginal);
-        const isSelected = window.selectedItems.has(String(item.id));
+        const isMatched = !window.glSortMode && window.ListSearch && window.ListSearch.isMatched(actualIndexInOriginal);
+        const isCurrentMatch = !window.glSortMode && window.ListSearch && window.ListSearch.isCurrentMatch(actualIndexInOriginal);
+        const isSelected = !window.glSortMode && window.selectedItems && window.selectedItems.has(String(item.id));
 
         const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
 
         let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
+        if (window.glSortMode) rowClass += 'sort-row select-none ';
         if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
         else if (isMatched) rowClass += 'search-match ';
@@ -3533,12 +4534,12 @@ function renderResults(list) {
 
         // Add click listener for the row
         row.onclick = (e) => {
+            if (window.glSortMode) return;
             if (window.batchMode) {
                 const id = String(item.id);
                 const isChecked = !window.selectedItems.has(id);
                 window.handleBatchSelect(id, isChecked);
             } else {
-                // If not in batch mode, clicking row plays the song
                 playFromView(actualIndexInOriginal);
             }
         };
@@ -3547,15 +4548,27 @@ function renderResults(list) {
         const imgUrl = getImgUrl(item);
 
         row.innerHTML = `
-            <!-- Index -->
+            <!-- Index / Drag Handle -->
             <div class="col-span-1 sm:col-span-1 text-center font-mono t-text-muted text-xs md:text-sm flex items-center justify-center">
-                ${window.batchMode ? `
+                ${window.glSortMode ? `
+                    <div class="flex items-center justify-center gap-1 w-full">
+                        <span class="sort-handle cursor-grab active:cursor-grabbing text-emerald-500 hover:text-emerald-400 p-1 flex items-center justify-center touch-none" title="按住拖拽排序">
+                            <i class="fas fa-grip-vertical text-sm"></i>
+                        </span>
+                        <input type="number" min="1" max="${totalItems}" value="${actualIndexInOriginal + 1}"
+                               class="gl-sort-pos-input w-9 text-center bg-gray-100 dark:bg-gray-800 border border-emerald-500/50 rounded text-xs py-0.5 px-0.5 t-text-main font-bold focus:outline-none focus:ring-1 focus:ring-emerald-500 select-all"
+                               title="输入目标序号后按回车跳转"
+                               onclick="event.stopPropagation(); this.select();"
+                               onchange="window.moveGlobalSongToPosition(${actualIndexInOriginal}, parseInt(this.value))"
+                               onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+                    </div>
+                ` : (window.batchMode ? `
                     <input type="checkbox" 
                            class="batch-checkbox w-4 h-4 text-emerald-600 rounded" 
                            data-song-id="${item.id}"
                            ${isSelected ? 'checked' : ''}
                     onclick="event.stopPropagation(); handleBatchSelect('${String(item.id)}', this.checked);">
-                ` : `<span class="index-num">${actualIndexInOriginal + 1}</span>`}
+                ` : `<span class="index-num">${actualIndexInOriginal + 1}</span>`)}
             </div>
 
             <!-- Title (Image + Text) -->
@@ -3649,8 +4662,29 @@ function renderResults(list) {
         container.appendChild(row);
     });
 
+    if (window.glSortMode && typeof Sortable !== 'undefined') {
+        if (window.glSortableInstance) {
+            try { window.glSortableInstance.destroy(); } catch (e) {}
+        }
+        window.glSortableInstance = new Sortable(container, {
+            handle: '.sort-handle',
+            animation: 150,
+            ghostClass: 'sort-ghost',
+            dragClass: 'sort-drag',
+            onEnd: function (evt) {
+                const { oldIndex, newIndex } = evt;
+                if (oldIndex === newIndex || oldIndex == null || newIndex == null) return;
+                const moved = window.glSortWorkList.splice(oldIndex, 1)[0];
+                window.glSortWorkList.splice(newIndex, 0, moved);
+                renderResults(window.glSortWorkList);
+            }
+        });
+    }
+
     // Update pagination info
-    updatePaginationInfo(startIndex + 1, endIndex, totalItems, currentPage, totalPages);
+    if (!window.glSortMode) {
+        updatePaginationInfo(startIndex + 1, endIndex, totalItems, currentPage, totalPages);
+    }
 
     // Init Lazy Loader
     lazyLoadImages(container);
@@ -4862,6 +5896,7 @@ async function triggerServerCache(song, url, quality) {
 }
 
 let lastNamingPattern = window.settings?.serverCacheNamingPattern || 'simple';
+let serverCacheConfigInitialized = false; // 首次初始化同步完成前不弹命名格式变更弹窗
 
 async function updateServerCacheConfig(location, pattern) {
     const loc = location || window.settings?.serverCacheLocation || 'root';
@@ -4894,7 +5929,8 @@ async function updateServerCacheConfig(location, pattern) {
             console.log('[Cache] 服务器配置已同步:', loc, pat);
 
             // 如果命名模式真的发生了变化（且不是初始化同步）
-            if (pattern && oldPattern && pattern !== oldPattern) {
+            // serverCacheConfigInitialized 为 false 时说明是页面首次加载/登录后初始化同步，不应弹窗
+            if (pattern && oldPattern && pattern !== oldPattern && serverCacheConfigInitialized) {
                 const confirmed = await showSelect('歌曲命名格式变更', `检测到命名方式已更改为 "${pat}"。是否将服务器上已下载的本地歌曲重新命名为新的格式？<br><br><span class="text-xs opacity-70">注：这会同时移动对应的歌词文件，确保播放器能正常识别。</span>`, {
                     confirmText: '现在重命名',
                     cancelText: '保持现状',
@@ -4925,6 +5961,7 @@ async function updateServerCacheConfig(location, pattern) {
                 }
             }
             lastNamingPattern = pat; // 更新最后同步的模式
+            serverCacheConfigInitialized = true; // 首次同步完成，后续变更才允许弹窗
         }
     } catch (e) {
         console.error('[ServerCache] Config update failed:', e);
@@ -8065,7 +9102,7 @@ function toggleLyrics(fromPopState = false) {
     }
 }
 
-// 监听浏览器返回，用于在移动端通过物理返回键/手势关闭歌词详情页
+// 监听浏览器返回，用于在移动端通过物理返回键/手势关闭歌词详情页及搜索详情页
 window.addEventListener('popstate', (e) => {
     // 1. 优先处理歌词页
     if (isLyricViewOpen) {
@@ -8074,8 +9111,13 @@ window.addEventListener('popstate', (e) => {
     }
 
     // 2. 处理搜索详情 (歌手/专辑)
+    const albumHeader = document.getElementById('album-detail-header');
+    const isAlbumOpen = Boolean(window.currentAlbumInfo || (albumHeader && !albumHeader.classList.contains('hidden')));
+    const artistHeader = document.getElementById('artist-detail-header');
     const backBtn = document.getElementById('search-back-btn');
-    if (backBtn && !backBtn.classList.contains('hidden')) {
+    const isBackBtnVisible = backBtn && !backBtn.classList.contains('hidden');
+
+    if (isAlbumOpen || artistHeader || isBackBtnVisible) {
         goBackToSearch(true);
     }
 });
@@ -9624,7 +10666,7 @@ function renderLibraryAlbums(list, isDislike = false) {
                 toggleLibAlbumBatchSelect(item.id);
                 return;
             }
-            enterAlbum(item.id, item.source || 'wy');
+            enterAlbum(item.id, item.source || 'wy', item);
         };
         div.innerHTML = `
             <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-3 relative">
@@ -12459,10 +13501,21 @@ async function renderCustomSources() {
             const isPublic = source.owner === 'open';
             const canManageSource = isAdmin || (!isPublic && isUser);
 
+            const isBatchContainer = window._sourceBatchMode === containerId;
             div.innerHTML = `
+            ${isBatchContainer ? `
+            <div class="flex items-center self-stretch pr-2 md:pr-4 -ml-1 md:-ml-2 touch-none" onclick="toggleSourceBatchSelect('${source.id}', '${containerId}')">
+                <div class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer
+                    ${window._sourceBatchSelected?.has(source.id)
+                        ? 'bg-blue-500 border-blue-500 text-white'
+                        : 'border-gray-300 dark:border-neutral-600 t-bg-panel hover:border-blue-400'}"
+                    id="source-batch-check-${containerId}-${source.id}">
+                    ${window._sourceBatchSelected?.has(source.id) ? '<i class="fas fa-check text-[10px]"></i>' : ''}
+                </div>
+            </div>` : `
             <div class="flex items-center self-stretch cursor-grab custom-source-handle t-text-muted hover:text-emerald-500 pr-2 md:pr-4 -ml-1 md:-ml-2 transition-all active:scale-110 touch-none" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-base md:text-lg"></i>
-            </div>
+            </div>`}
             <div class="flex justify-between items-start flex-1 min-w-0">
                 <div class="flex-1 pr-2 md:pr-4 min-w-0">
                     <div class="flex flex-wrap items-center gap-1.5 md:gap-2 mb-1">
@@ -12483,31 +13536,33 @@ async function renderCustomSources() {
                 </div>
                 
                 <div class="flex flex-col items-end gap-1.5 md:gap-2 shrink-0">
-                    <button onclick="toggleSource('${source.id}', ${source.enabled})" 
+                    <button onclick="${isBatchContainer ? '' : `toggleSource('${source.id}', ${source.enabled})`}" 
                             class="px-2 md:px-3 py-1 rounded-lg text-[11px] md:text-xs font-medium transition-colors whitespace-nowrap w-16 md:w-20 flex justify-center items-center ${source.enabled
-                    ? (source.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/30')
-                    : 't-bg-track t-text-muted hover:t-bg-item-hover'}">
+                    ? (source.status === 'failed'
+                        ? (isBatchContainer ? 'bg-red-100/50 text-red-400 dark:bg-red-500/10 dark:text-red-600 opacity-50 cursor-not-allowed' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30')
+                        : (isBatchContainer ? 'bg-emerald-100/50 text-emerald-500/60 dark:bg-emerald-500/10 dark:text-emerald-600/60 opacity-60 cursor-not-allowed' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/30'))
+                    : (isBatchContainer ? 't-bg-track/50 t-text-muted opacity-40 cursor-not-allowed' : 't-bg-track t-text-muted hover:t-bg-item-hover')} ${isBatchContainer ? 'pointer-events-none select-none' : ''}">
                         ${source.enabled ? '已启用' : '已禁用'}
                     </button>
                     
                     <div class="flex items-center gap-1">
                         ${source.enabled && source.status === 'failed' && canManageSource ? `
-                        <button onclick="reloadSource('${source.id}')" 
-                                class="p-1 md:p-1.5 text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40 rounded-lg transition-colors"
-                                title="尝试重新加载">
+                        <button ${isBatchContainer ? 'disabled' : `onclick="reloadSource('${source.id}')"`}
+                                class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 'text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40'} rounded-lg transition-colors"
+                                title="${isBatchContainer ? '' : '尝试重新加载'}">
                             <i class="fas fa-sync-alt text-xs md:text-sm"></i>
                         </button>` : ''}
 
-                        <button data-id="${encodeURIComponent(source.id)}" onclick="openEditSourceModal(decodeURIComponent(this.dataset.id))"
-                                class="p-1 md:p-1.5 t-text-muted hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/40 rounded-lg transition-colors"
-                                title="编辑音源平台">
+                        <button ${isBatchContainer ? 'disabled' : `data-id="${encodeURIComponent(source.id)}" onclick="openEditSourceModal(decodeURIComponent(this.dataset.id))"`}
+                                class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 't-text-muted hover:text-emerald-600 dark:hover:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-900/40'} rounded-lg transition-colors"
+                                title="${isBatchContainer ? '' : '编辑音源平台'}">
                             <i class="fas fa-edit text-xs md:text-sm"></i>
                         </button>
                         
                         ${canManageSource ? `
-                        <button onclick="deleteSource('${source.id}')" 
-                                class="p-1 md:p-1.5 t-text-muted hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40 rounded-lg transition-colors"
-                                title="删除">
+                        <button ${isBatchContainer ? 'disabled' : `onclick="deleteSource('${source.id}')"`}
+                                class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 't-text-muted hover:text-red-500 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/40'} rounded-lg transition-colors"
+                                title="${isBatchContainer ? '' : '删除'}">
                             <i class="fas fa-trash-alt text-xs md:text-sm"></i>
                         </button>` : ''}
                     </div>
@@ -12519,7 +13574,7 @@ async function renderCustomSources() {
 
         // Add Sortable for both the modal list and the settings panel list
         const isSortableContainer = (containerId === 'custom-sources-list' || containerId === 'settings-custom-sources-list') && typeof Sortable !== 'undefined';
-        if (isSortableContainer) {
+        if (isSortableContainer && window._sourceBatchMode !== containerId) {
             try {
                 const oldSortable = Sortable.get(container);
                 if (oldSortable) oldSortable.destroy();
@@ -12701,6 +13756,186 @@ async function deleteSource(sourceId) {
         console.error('[CustomSource] 删除失败:', error);
         showError(`删除失败: ${error.message}`);
     }
+}
+
+// ========================================
+// Source Batch Mode
+// ========================================
+
+// containerId: 'modal' | 'settings'
+// maps to actual DOM list IDs
+const SOURCE_BATCH_CONTAINER_MAP = {
+    modal: 'custom-sources-list',
+    settings: 'settings-custom-sources-list'
+};
+
+window._sourceBatchMode = null;   // which containerId is in batch mode
+window._sourceBatchSelected = new Set();
+
+function enterSourceBatchMode(scope) {
+    window._sourceBatchMode = SOURCE_BATCH_CONTAINER_MAP[scope];
+    window._sourceBatchSelected = new Set();
+    // Show the batch bar and hide entry button
+    const bar = document.getElementById(scope === 'modal' ? 'modal-source-batch-bar' : 'settings-source-batch-bar');
+    if (bar) bar.classList.remove('hidden');
+    const entryBtn = document.getElementById(scope === 'modal' ? 'btn-modal-source-batch' : 'btn-settings-source-batch');
+    if (entryBtn) entryBtn.classList.add('hidden');
+    // Disable sortable and re-render to show checkboxes
+    const container = document.getElementById(window._sourceBatchMode);
+    if (container && typeof Sortable !== 'undefined') {
+        try { const s = Sortable.get(container); if (s) s.option('disabled', true); } catch(e){}
+    }
+    renderCustomSources();
+    updateSourceBatchCount(scope);
+}
+
+function exitSourceBatchMode(scope) {
+    window._sourceBatchMode = null;
+    window._sourceBatchSelected = new Set();
+    const bar = document.getElementById(scope === 'modal' ? 'modal-source-batch-bar' : 'settings-source-batch-bar');
+    if (bar) bar.classList.add('hidden');
+    const entryBtn = document.getElementById(scope === 'modal' ? 'btn-modal-source-batch' : 'btn-settings-source-batch');
+    if (entryBtn) entryBtn.classList.remove('hidden');
+    // Re-enable sortable
+    const containerId = SOURCE_BATCH_CONTAINER_MAP[scope];
+    const container = document.getElementById(containerId);
+    if (container && typeof Sortable !== 'undefined') {
+        try { const s = Sortable.get(container); if (s) s.option('disabled', false); } catch(e){}
+    }
+    renderCustomSources();
+}
+
+function toggleSourceBatchSelect(sourceId, containerId) {
+    if (!window._sourceBatchSelected) window._sourceBatchSelected = new Set();
+    if (window._sourceBatchSelected.has(sourceId)) {
+        window._sourceBatchSelected.delete(sourceId);
+    } else {
+        window._sourceBatchSelected.add(sourceId);
+    }
+    // Update checkbox UI in both containers (they share same selected set)
+    ['modal', 'settings'].forEach(scope => {
+        const cid = SOURCE_BATCH_CONTAINER_MAP[scope];
+        const checkEl = document.getElementById(`source-batch-check-${cid}-${sourceId}`);
+        if (checkEl) {
+            const isChecked = window._sourceBatchSelected.has(sourceId);
+            checkEl.className = `w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer ${
+                isChecked ? 'bg-blue-500 border-blue-500 text-white' : 'border-gray-300 dark:border-neutral-600 t-bg-panel hover:border-blue-400'
+            }`;
+            checkEl.innerHTML = isChecked ? '<i class="fas fa-check text-[10px]"></i>' : '';
+        }
+        updateSourceBatchCount(scope);
+    });
+}
+
+function selectAllSourceBatch(scope) {
+    const list = window._currentCustomSourcesList || [];
+    const allSelected = list.every(s => window._sourceBatchSelected.has(s.id));
+    if (allSelected) {
+        window._sourceBatchSelected.clear();
+    } else {
+        list.forEach(s => window._sourceBatchSelected.add(s.id));
+    }
+    renderCustomSources();
+    updateSourceBatchCount(scope);
+}
+
+function updateSourceBatchCount(scope) {
+    const countEl = document.getElementById(scope === 'modal' ? 'modal-source-batch-count' : 'settings-source-batch-count');
+    if (countEl) countEl.textContent = window._sourceBatchSelected?.size || 0;
+}
+
+async function batchSourceEnable(scope, enable) {
+    const selected = [...(window._sourceBatchSelected || [])];
+    if (!selected.length) { showInfo('请先选择要操作的源'); return; }
+    const label = enable ? '启用' : '禁用';
+    if (!(await showSelect(`批量${label}`, `确定要${label} ${selected.length} 个源吗？`, {}))) return;
+
+    const username = currentListData?.username || 'default';
+    const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+    const adminPass = localStorage.getItem('lx_admin_password');
+    if (adminPass) headers['x-frontend-auth'] = adminPass;
+
+    let successCount = 0;
+    for (const sourceId of selected) {
+        try {
+            const response = await fetch('/api/custom-source/toggle', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ username, sourceId, enabled: enable })
+            });
+            if (response.ok) successCount++;
+        } catch(e) { console.error('[BatchSource] toggle error', sourceId, e); }
+    }
+    showSuccess(`已${label} ${successCount} 个源`);
+    exitSourceBatchMode(scope);
+}
+
+async function batchSourceDelete(scope) {
+    const selected = [...(window._sourceBatchSelected || [])];
+    if (!selected.length) { showInfo('请先选择要删除的源'); return; }
+    if (!(await showSelect('批量删除', `确定要删除 ${selected.length} 个源吗？此操作不可撤销。`, { danger: true }))) return;
+
+    const username = currentListData?.username || 'default';
+    const headers = { 'Content-Type': 'application/json', ...getUserAuthHeaders() };
+    const adminPass = localStorage.getItem('lx_admin_password');
+    if (adminPass) headers['x-frontend-auth'] = adminPass;
+
+    // 从缓存列表找到源名称（用于错误提示）
+    const sourceList = window._currentCustomSourcesList || [];
+    const sourceNameMap = {};
+    sourceList.forEach(s => { sourceNameMap[s.id] = s.name || s.id; });
+
+    let successCount = 0;
+    const failedNoPermission = []; // 403 权限不足的源名称
+    const failedOther = [];        // 其他错误
+
+    for (const sourceId of selected) {
+        try {
+            const response = await fetch('/api/custom-source/delete', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ username, sourceId })
+            });
+            if (response.ok) {
+                successCount++;
+            } else if (response.status === 403) {
+                failedNoPermission.push(sourceNameMap[sourceId] || sourceId);
+            } else {
+                failedOther.push(sourceNameMap[sourceId] || sourceId);
+            }
+        } catch(e) {
+            console.error('[BatchSource] delete error', sourceId, e);
+            failedOther.push(sourceNameMap[sourceId] || sourceId);
+        }
+    }
+
+    // 组合提示
+    const allFailed = successCount === 0;
+    const hasPermFail = failedNoPermission.length > 0;
+    const hasOtherFail = failedOther.length > 0;
+
+    if (allFailed && hasPermFail && !hasOtherFail) {
+        // 全部是权限问题
+        showError(`无权限删除：${failedNoPermission.join('、')}（公开源需要管理员权限）`);
+    } else if (allFailed && !hasPermFail && hasOtherFail) {
+        showError(`删除失败：${failedOther.join('、')}`);
+    } else if (allFailed) {
+        // 混合失败
+        let msg = '全部删除失败。';
+        if (hasPermFail) msg += ` 无权限：${failedNoPermission.join('、')}。`;
+        if (hasOtherFail) msg += ` 其他错误：${failedOther.join('、')}。`;
+        showError(msg);
+    } else if (hasPermFail || hasOtherFail) {
+        // 部分成功
+        let msg = `已删除 ${successCount} 个源。`;
+        if (hasPermFail) msg += ` 无对应权限：${failedNoPermission.join('、')}。`;
+        if (hasOtherFail) msg += ` 删除失败：${failedOther.join('、')}。`;
+        showError(msg);
+    } else {
+        showSuccess(`已删除 ${successCount} 个源`);
+    }
+
+    exitSourceBatchMode(scope);
 }
 
 // 模态框控制
@@ -13721,6 +14956,14 @@ window.toggleSource = toggleSource;
 window.deleteSource = deleteSource;
 window.reloadSource = reloadSource;
 
+// Source Batch Mode
+window.enterSourceBatchMode = enterSourceBatchMode;
+window.exitSourceBatchMode = exitSourceBatchMode;
+window.toggleSourceBatchSelect = toggleSourceBatchSelect;
+window.selectAllSourceBatch = selectAllSourceBatch;
+window.batchSourceEnable = batchSourceEnable;
+window.batchSourceDelete = batchSourceDelete;
+
 // 兼容旧版函数名 (Alias)
 window.toggleCustomSource = toggleSource;
 window.deleteCustomSource = deleteSource;
@@ -13814,7 +15057,7 @@ function showInput(title, message, options = {}) {
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
-        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">

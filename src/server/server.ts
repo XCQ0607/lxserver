@@ -1927,6 +1927,63 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      // [新增] Reorder Songs in List (User Auth)
+      if (pathname === '/api/music/user/list/reorder' && req.method === 'POST') {
+        const username = verifyUserAuth(req)
+        if (!username) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: '需要用户认证' }))
+          return
+        }
+
+        void readBody(req).then(async body => {
+          try {
+            const { listId, orderedSongIds } = JSON.parse(body)
+
+            if (!listId || !Array.isArray(orderedSongIds)) {
+              res.writeHead(400)
+              res.end('参数错误:需要listId和orderedSongIds数组')
+              return
+            }
+
+            console.log(`[用户接口] 歌单重排请求: 用户=${username}, 列表=${listId}, 歌曲数=${orderedSongIds.length}`)
+
+            const userSpace = getUserSpace(username)
+
+            // Get current full song objects
+            const currentList = await userSpace.listManage.listDataManage.getListMusics(listId)
+
+            // Build ordered list from IDs, preserving song objects
+            const songMap = new Map<string, LX.Music.MusicInfo>()
+            for (const song of currentList) songMap.set(song.id, song)
+
+            const reorderedList = orderedSongIds
+              .map((id: string) => songMap.get(id))
+              .filter(Boolean) as LX.Music.MusicInfo[]
+
+            // Append any songs not in orderedSongIds (safety net)
+            const orderedSet = new Set<string>(orderedSongIds)
+            for (const song of currentList) {
+              if (!orderedSet.has(song.id)) reorderedList.push(song)
+            }
+
+            await userSpace.listManage.listDataManage.listMusicOverwrite(listId, reorderedList)
+
+            // Create new snapshot to persist changes
+            const newSnapshotKey = await userSpace.listManage.createSnapshot()
+            console.log(`[用户接口] 歌单重排成功,已创建新快照: ${newSnapshotKey}`)
+
+            res.writeHead(200)
+            res.end('重排成功')
+          } catch (err: any) {
+            console.error('[用户接口] 歌单重排失败:', err)
+            res.writeHead(500)
+            res.end(err.message || '重排失败')
+          }
+        })
+        return
+      }
+
       // [新增] Batch Add Songs to List (User Auth)
       if (pathname === '/api/music/user/list/add' && req.method === 'POST') {
         const username = verifyUserAuth(req)
@@ -2725,6 +2782,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               syncDownload: {
                 enabled: syncData.enabled,
                 preferredQuality: syncData.preferredQuality || '320k',
+                downloadLyric: syncData.downloadLyric !== false, // 默认 true
+                embedLyric: syncData.embedLyric !== false,       // 默认 true
                 lastSyncTime: syncData.lastSyncTime,
                 lastSyncResult: syncData.lastSyncResult,
               },
@@ -2767,6 +2826,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (typeof payload.preferredQuality === 'string' && ['128k', '320k', 'flac', 'flac24bit'].includes(payload.preferredQuality)) {
               syncData.preferredQuality = payload.preferredQuality
             }
+            if (typeof payload.downloadLyric === 'boolean') syncData.downloadLyric = payload.downloadLyric
+            if (typeof payload.embedLyric === 'boolean') syncData.embedLyric = payload.embedLyric
             if (payload.playlists && typeof payload.playlists === 'object') {
               for (const [id, cfg] of Object.entries(payload.playlists) as any) {
                 if (!syncData.playlists[id]) {

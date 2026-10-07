@@ -5,8 +5,8 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.1-blue?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/version-v2.1.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
     <br>
@@ -223,10 +223,31 @@ npm start
 2. Extract and run `npm install --production`.
 3. Execute `npm start`.
 
-### 3. Access Info
+### 3. Service Connection & Client Setup Guide
 
-- **Web Player**: `http://your-ip:9527` (Default root path, configurable via `PLAYER_PATH`)
-- **Sync Dashboard**: `http://your-ip:9527/admin` (Default path `/admin`, configurable via `ADMIN_PATH`, default password: `123456`)
+#### ① Web Interface Access
+- **Web Player**: `http://<server-ip>:9527` (Default root path `/`, customizable via `PLAYER_PATH` env or backend settings, e.g., `/music`).
+  - If password authentication is enabled (`ENABLE_WEBPLAYER_AUTH`), enter your player password (default: `123456`).
+- **Sync Dashboard**: `http://<server-ip>:9527/admin` (Default path `/admin`, customizable via `ADMIN_PATH`, default admin password: `123456`).
+
+#### ② LX Music Client Sync Setup (Desktop / Mobile)
+Go to LX Music client "Settings → Sync Settings" and choose Custom Server:
+- **Mode 1: User Path Mode (Recommended, enabled by default `USER_ENABLE_PATH=true`)**
+  - **Connection URL**: `http://<server-ip>:9527/<username>` (e.g., `http://192.168.1.100:9527/user1`)
+  - **Connection Password**: Password of the corresponding user.
+  - **Feature**: Routes directly to isolated user storage via username in the URL. **Allows different users to use identical passwords**.
+- **Mode 2: Root Path Mode (Requires `USER_ENABLE_ROOT=true`)**
+  - **Connection URL**: `http://<server-ip>:9527` (e.g., `http://192.168.1.100:9527`)
+  - **Connection Password**: Password of the corresponding user.
+  - **Feature**: Connect without username in the URL; server auto-matches user by password. **Note: In this mode, all user passwords must be strictly unique**.
+
+#### ③ Subsonic Music Client Setup (Yinliu / Feishin / Symfonium, etc.)
+Fully compatible with Subsonic API protocol:
+- **Server Address (Server URL)**:
+  - **Default Shared Port**: `http://<server-ip>:9527/rest` (Subpath configured via `SUBSONIC_PATH`, default `/rest`).
+  - **Standalone Port Mode** (if `SUBSONIC_PORT` > 0, e.g., `4533`): `http://<server-ip>:4533/rest`.
+- **Username & Password**: Sync username and password configured in the "User Management" dashboard.
+- **Global Online Search**: Search and stream tracks across music platforms directly within Subsonic clients. Prefix keywords with `wy:`, `tx:`, `kw:`, `kg:`, `mg:` to specify sources, or `online:` / `local:` to toggle online/local search.
 
 ---
 

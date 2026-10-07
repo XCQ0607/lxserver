@@ -5,8 +5,8 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.1-blue?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/version-v2.1.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
     <br>
@@ -57,11 +57,14 @@ Built-in lightweight file management system for viewing, downloading, and search
 
 ---
 
-## 📖 Dashboard Guide
+## 📖 Dashboard & Connection Guide
 
-1. **Access Dashboard**: Visit `http://your-ip:9527`.
+1. **Access Dashboard**: Visit `http://<server-ip>:9527/admin` (Default dashboard path is `/admin`, default admin password: `123456`).
 2. **Initial Setup**: Change your default password in "System Config" immediately after first login.
-3. **Add User**: Create sync accounts in the "User Management" page. The generated password is the key for LX Music client connection. (Default: username `admin`, password `password`).
-4. **Backup Strategy**: It's highly recommended to configure cloud backup in "WebDAV Sync" for data safety.
+3. **Add User & Client Connection**: Create sync accounts in the "User Management" page.
+   - **User Path Mode (Default & Recommended)**: Client sync URL is `http://<server-ip>:9527/<username>`, password is the user's password. Multiple users can share identical passwords.
+   - **Root Path Mode (Requires enabling in System Config)**: Client sync URL is `http://<server-ip>:9527`, password is the user's password. All user passwords must be strictly unique.
+4. **Subsonic Client Connection**: Use third-party Subsonic clients (e.g. Yinliu, Feishin) to connect to `http://<server-ip>:9527/rest` with user credentials created in the dashboard.
+5. **Backup Strategy**: It's highly recommended to configure cloud backup in "WebDAV Sync" for data safety.
 
 > 💡 For more technical details (Docker deployment, Nginx config, variables, etc.), please return to the **[Project Homepage (README_EN.md)](../README_EN.md)**.

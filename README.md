@@ -8,8 +8,8 @@
   <h1>LX Sync Server</h1> -->
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.1-blue?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D16-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/version-v2.1.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
     <br>
@@ -233,10 +233,31 @@ npm start
 2. 解压后运行 `npm install --production`。
 3. 执行 `npm start` 启动。
 
-### 3. 访问说明
+### 3. 服务连接与客户端配置指南
 
-- **Web 播放器**: `http://your-ip:9527` (默认路径，可通过 `PLAYER_PATH` 修改)
-- **同步管理后台**: `http://your-ip:9527/admin` (默认路径，可通过 `ADMIN_PATH` 修改，默认密码: `123456`)
+#### ① Web 界面访问
+- **Web 播放器**: `http://<服务器IP>:9527`（默认根路径，可通过 `PLAYER_PATH` 环境变量或后台配置自定义路径，如 `/music`）
+  - 若启用了播放器访问密码认证（`ENABLE_WEBPLAYER_AUTH`），首次访问需输入播放器密码（默认 `123456`）。
+- **管理后台**: `http://<服务器IP>:9527/admin`（默认路径为 `/admin`，可通过 `ADMIN_PATH` 自定义，默认管理员密码: `123456`）。
+
+#### ② LX Music 客户端同步配置（桌面端 / 移动端）
+进入客户端「设置 → 同步设置」，选择自定义连接：
+- **模式一：用户路径模式（推荐，默认开启 `USER_ENABLE_PATH=true`）**
+  - **连接 URL**: `http://<服务器IP>:9527/<用户名>`（例如：`http://192.168.1.100:9527/user1`）
+  - **连接密码**: 对应用户的独立密码
+  - **特点**: 通过 URL 中的用户名精确路由到各用户独立存储空间，**允许多个不同用户使用相同密码**。
+- **模式二：根路径模式（需配置 `USER_ENABLE_ROOT=true`）**
+  - **连接 URL**: `http://<服务器IP>:9527`（例如：`http://192.168.1.100:9527`）
+  - **连接密码**: 对应用户的密码
+  - **特点**: URL 无需携带用户名，服务端通过鉴权密码自动匹配用户。**注意：此模式下所有用户的密码必须唯一，不允许不同用户使用相同密码**。
+
+#### ③ Subsonic 音乐客户端配置（音流 / Feishin / Symfonium 等）
+全面兼容 Subsonic API 协议，客户端中填写：
+- **服务器地址 (Server URL)**:
+  - **默认共享主端口**: `http://<服务器IP>:9527/rest`（子路径由 `SUBSONIC_PATH` 决定，默认 `/rest`）
+  - **独立监听端口模式**（若配置了 `SUBSONIC_PORT` > 0，例如 `4533`）: `http://<服务器IP>:4533/rest`
+- **用户名 & 密码**: 在后台“用户管理”中配置的用户名及其同步密码。
+- **在线搜索**: 支持在 Subsonic 客户端中直接全网搜索与播放，可使用 `wy:`、`tx:`、`kw:`、`kg:`、`mg:` 指定平台，或使用 `online:` / `local:` 强制在线/本地搜索。
 
 ---
 
