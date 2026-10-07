@@ -4276,7 +4276,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
             username = verified
           }
-          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username)
+          const folderParam = urlObj.searchParams.get('folder')
+          const requestedFolder = folderParam === 'cache' || folderParam === 'music' ? folderParam as fileCache.CacheFolder : undefined
+          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username, requestedFolder)
           return
         }
       }

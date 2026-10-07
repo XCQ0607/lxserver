@@ -1638,9 +1638,15 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
         // 1. Search by exact ID and Quality (Primary Check)
         // exactQuality=true 时：精确匹配，不允许 fallback 到不同音质
         const useExact = !!songInfo.exactQuality
-        const folderTypes: Array<'cache' | 'music'> = ['cache', 'music']
-        for (const folder of folderTypes) {
-            const cached = indexManager.get(normalizedUsername, id, folder, quality, useExact)
+        // 同一音质的下载文件优先于缓存副本；任意音质的兜底仍保持缓存目录优先，避免高音质被降级
+        const lookupOrder: Array<{ folder: 'cache' | 'music'; anyQuality: boolean }> = [
+            { folder: 'music', anyQuality: false },
+            { folder: 'cache', anyQuality: false },
+            { folder: 'cache', anyQuality: true },
+            { folder: 'music', anyQuality: true }
+        ]
+        for (const { folder, anyQuality } of lookupOrder) {
+            const cached = indexManager.get(normalizedUsername, id, folder, quality, !anyQuality || useExact)
             if (cached) {
                 // 二次校验：exactQuality 模式下确保音质匹配
                 if (useExact && quality && cached.quality !== quality) continue
@@ -2102,6 +2108,14 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
             }, 'music')
 
             await ensureCachedLyrics(songInfo, actualQuality, username, true, finalPath, 'music', shouldCacheLyric, shouldEmbedLyric)
+
+            // 音频/歌词/封面都已迁到下载目录，删除缓存副本，避免双份占盘且播放继续命中缓存
+            try {
+                removeCacheFile(result.filename, normalizedUsername, 'cache')
+                console.log(`[文件缓存] 已删除缓存副本: ${result.filename}`)
+            } catch (e) {
+                console.warn(`[文件缓存] 删除缓存副本失败: ${result.filename}`, e)
+            }
 
             console.log(`[文件缓存] 已复制缓存歌曲至下载目录: ${path.basename(finalPath)}`)
             cacheProgress.set(songKey, { progress: 100, status: 'finished', total: stat.size, received: stat.size })
@@ -2693,14 +2707,14 @@ export const setIndexEmbedLyric = (
     return false
 }
 
-export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerResponse, filename: string, username?: string) => {
+export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerResponse, filename: string, username?: string, folder?: CacheFolder) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
     const userLoc = getUserCacheLocation(normalizedUsername)
     const locations = [
         userLoc,
         userLoc === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
     ]
-    const roots = ['cache', 'music']
+    const roots: CacheFolder[] = folder ? [folder] : ['cache', 'music']
     let filePath = ''
     for (const loc of locations) {
         for (const folder of roots) {
