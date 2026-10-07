@@ -59,7 +59,7 @@
     "utf-8-validate": "^6.0.6",
     "vm2": "^3.12.2",
     "webdav": "^5.11.0",
-    "ws": "8.21.3"
+    "ws": "8.22.0"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
@@ -71,7 +71,7 @@
     "@types/needle": "^3.3.0",
     "@types/tunnel": "^0.0.7",
     "@types/unzipper": "^0.10.11",
-    "@types/ws": "8.18.1",
+    "@types/ws": "8.18.2",
     "changelog-parser": "^4.1.0",
     "electron": "^43.7.5",
     "electron-builder": "^26.15.3",
