@@ -139,6 +139,10 @@ declare namespace LX {
      * 缓存空间限制大小 (MB)
      */
     'user.cacheSizeLimit'?: number
+    /**
+     * 缓存文件自动保留天数 (0 为永久保留)
+     */
+    'cache.maxAgeDays'?: number
 
     /**
      * 公共最大备份快照数

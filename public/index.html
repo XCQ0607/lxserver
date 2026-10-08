@@ -1288,6 +1288,14 @@
                                     <input type="number" name="user.cacheSizeLimit" class="form-input config-input"
                                         placeholder="默认 2000" min="10" />
                                 </div>
+                                <div class="config-field">
+                                    <label class="config-label">缓存文件自动保留时间 (天)</label>
+                                    <input type="number" name="cache.maxAgeDays" class="form-input config-input"
+                                        placeholder="默认 14" min="0" />
+                                    <span class="config-field-desc" style="display:block; margin-top:4px; font-size:12px; color:rgba(255,255,255,0.6);">
+                                        后台每12小时自动扫描并清理超出保留天数的未访问音频与歌词缓存文件。<strong>设为 0 表示永久保留，永不自动删除。</strong>
+                                    </span>
+                                </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
