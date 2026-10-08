@@ -3587,7 +3587,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         void readBody(req).then(async body => {
           try {
-            const { location, namingPattern } = JSON.parse(body)
+            const { location, namingPattern, maxAgeDays } = JSON.parse(body)
             let updated = false
 
             if (location) {
@@ -3609,6 +3609,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (namingPattern) {
               const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
               if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              updated = true
+            }
+
+            if (typeof maxAgeDays !== 'undefined') {
+              const days = Math.max(0, parseInt(maxAgeDays, 10) || 0)
+              if (global.lx.config) {
+                global.lx.config['cache.maxAgeDays'] = days
+                if (typeof global.lx.saveConfig === 'function') global.lx.saveConfig()
+              }
               updated = true
             }
 
@@ -8857,11 +8866,23 @@ export const removeDevice = async (userName: string, clientId: string) => {
   await userSpace.removeDevice(clientId)
 }
 
-// ===== 缓存自动过期清理任务 =====
-const CACHE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000 // 14 天
+// ===== 缓存生命周期自动过期清理任务 (支持 0 永久保留) =====
+const getCacheRetentionMs = () => {
+  const daysConfig = global.lx.config && typeof global.lx.config['cache.maxAgeDays'] !== 'undefined'
+    ? Number(global.lx.config['cache.maxAgeDays'])
+    : 14
+  if (isNaN(daysConfig) || daysConfig <= 0) return 0 // 0 表示永久保留，不清理
+  return daysConfig * 24 * 60 * 60 * 1000
+}
 
 const cleanExpiredCacheFiles = () => {
   try {
+    const retentionMs = getCacheRetentionMs()
+    if (retentionMs === 0) {
+      // 设置为 0，永久保留缓存
+      return
+    }
+
     const cacheBase = global.lx.cachePath || '/server/cache'
     if (!fs.existsSync(cacheBase)) return
     const now = Date.now()
@@ -8880,7 +8901,7 @@ const cleanExpiredCacheFiles = () => {
           try {
             const stats = fs.statSync(fullPath)
             const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
-            if (now - fileTime > CACHE_MAX_AGE_MS) {
+            if (now - fileTime > retentionMs) {
               fs.unlinkSync(fullPath)
               totalCleaned++
               totalBytesFreed += stats.size
@@ -8892,10 +8913,11 @@ const cleanExpiredCacheFiles = () => {
 
     scanAndClean(cacheBase)
     if (totalCleaned > 0) {
-      console.log(`[文件缓存] [14天过期清理] 成功清理 ${totalCleaned} 个超过14天的缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
+      const retentionDays = Math.round(retentionMs / (24 * 60 * 60 * 1000))
+      console.log(`[文件缓存] [${retentionDays}天过期清理] 成功清理 ${totalCleaned} 个过期缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
     }
   } catch (err) {
-    console.error('[文件缓存] 14天自动清理异常:', err)
+    console.error('[文件缓存] 自动清理异常:', err)
   }
 }
 

@@ -126,6 +126,7 @@ const DEFAULT_SETTINGS = {
     embedLyricToFile: true, // 下载时将歌词嵌入文件（标签+.lrc）
     serverCacheLocation: 'root', // 缓存位置: 'data' (synced) or 'root' (local)
     serverCacheNamingPattern: 'simple', // 缓存命名规则: standard | simple
+    serverCacheRetentionDays: '14', // 缓存自动保留天数: 7 | 14 | 30 | 60 | 0 (0为永久)
     enableRemaster: false, // 启用下载目录歌曲洗版
     enableLyricCache: true,
     enableSongUrlCache: true,
@@ -789,9 +790,9 @@ window.syncServerNetworkListUpdates = syncServerNetworkListUpdates;
 
 // Initial Sync for Server Cache Config
 setTimeout(() => {
-    if (settings.serverCacheLocation && window.updateServerCacheConfig) {
-        console.log('[ServerCache] Syncing config:', settings.serverCacheLocation, settings.serverCacheNamingPattern);
-        window.updateServerCacheConfig(settings.serverCacheLocation, settings.serverCacheNamingPattern);
+    if (window.updateServerCacheConfig) {
+        console.log('[ServerCache] Syncing config:', settings.serverCacheLocation, settings.serverCacheNamingPattern, settings.serverCacheRetentionDays);
+        window.updateServerCacheConfig(settings.serverCacheLocation, settings.serverCacheNamingPattern, settings.serverCacheRetentionDays);
     }
 }, 2000);
 
@@ -6005,9 +6006,12 @@ async function triggerServerCache(song, url, quality) {
 let lastNamingPattern = window.settings?.serverCacheNamingPattern || 'simple';
 let serverCacheConfigInitialized = false; // 首次初始化同步完成前不弹命名格式变更弹窗
 
-async function updateServerCacheConfig(location, pattern) {
+async function updateServerCacheConfig(location, pattern, retentionDays) {
     const loc = location || window.settings?.serverCacheLocation || 'root';
     const pat = pattern || window.settings?.serverCacheNamingPattern || 'simple';
+    const retDays = retentionDays !== undefined && retentionDays !== null
+        ? String(retentionDays)
+        : (window.settings?.serverCacheRetentionDays || '14');
     const oldPattern = lastNamingPattern;
 
     const headers = { 'Content-Type': 'application/json' };
@@ -6022,7 +6026,8 @@ async function updateServerCacheConfig(location, pattern) {
             headers: headers,
             body: JSON.stringify({
                 location: loc,
-                namingPattern: pat
+                namingPattern: pat,
+                maxAgeDays: parseInt(retDays, 10)
             })
         });
         if (!response.ok) {
@@ -8403,6 +8408,11 @@ const SETTINGS_UI_MAP = {
         id: 'setting-server-cache-naming',
         type: 'value',
         normalize: value => ['standard', 'simple', 'singer_name_quality_album', 'singer_name', 'name_singer'].includes(value) ? value : 'simple'
+    },
+    serverCacheRetentionDays: {
+        id: 'setting-server-cache-retention',
+        type: 'value',
+        normalize: value => ['0', '7', '14', '30', '60'].includes(String(value)) ? String(value) : '14'
     },
     enableProxyPlayback: { id: 'toggle-proxy-playback', type: 'checkbox' },
     enableProxyDownload: { id: 'toggle-proxy-download', type: 'checkbox' },
