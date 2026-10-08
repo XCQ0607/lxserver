@@ -177,10 +177,107 @@ let currentPlaybackErrorHandler = null; // 当前音频地址的错误恢复监�
 let shouldAutoRecoverPlayback = false;
 let playbackRecoveryTriggeredForRequestId = 0;
 
+let isServerReconnecting = false;
+let serverReconnectTimer = null;
+let serverReconnectAbortCtrl = null;
+let playbackStallDetectionTimer = null;
+let lastKnownPlaybackTime = 0;
+
+async function checkServerOnline() {
+    try {
+        const controller = new AbortController();
+        const tid = setTimeout(() => controller.abort(), 2500);
+        const res = await fetch('/api/music/auth/verify?t=' + Date.now(), {
+            method: 'GET',
+            cache: 'no-store',
+            signal: controller.signal
+        });
+        clearTimeout(tid);
+        return res.ok || res.status === 401 || res.status === 403;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, targetIndex) {
+    if (isServerReconnecting) return;
+    isServerReconnecting = true;
+    console.log('[ServerReconnect] 启动服务端断线重连守护:', targetSong?.name, '断点位置:', resumeTime);
+
+    setPlayerStatus('服务端连接中断，正在等待重连...', null, true);
+    if (window.showToast) {
+        window.showToast('info', '与服务器连接断开，正在尝试自动重连并恢复播放...', 4000);
+    }
+
+    if (serverReconnectTimer) {
+        clearTimeout(serverReconnectTimer);
+        serverReconnectTimer = null;
+    }
+
+    let retryCount = 0;
+    const maxRetries = 150; // 最多尝试约 5-6 分钟
+
+    const poll = async () => {
+        if (!isServerReconnecting) return;
+        retryCount++;
+
+        const isOnline = await checkServerOnline();
+        if (isOnline) {
+            console.log('[ServerReconnect] 服务端已恢复在线！耗费尝试次数:', retryCount);
+            isServerReconnecting = false;
+            if (serverReconnectTimer) {
+                clearTimeout(serverReconnectTimer);
+                serverReconnectTimer = null;
+            }
+
+            setPlayerStatus('服务器已连接，正在恢复播放...', null, true);
+            if (window.showToast) {
+                window.showToast('success', '服务器已重新上线，正在无缝恢复播放...', 3000);
+            }
+
+            // 保存恢复位置
+            if (resumeTime > 0) {
+                window._resumeInfo = {
+                    time: resumeTime,
+                    song: targetSong
+                };
+            }
+
+            // 重新解析该歌曲并自动继续播放
+            try {
+                if (targetSong) {
+                    await playSong(targetSong, targetIndex >= 0 ? targetIndex : currentIndex, targetQuality || currentQuality, false, true);
+                }
+            } catch (err) {
+                console.error('[ServerReconnect] 恢复播放异常:', err);
+            }
+            return;
+        }
+
+        if (retryCount >= maxRetries) {
+            isServerReconnecting = false;
+            setPlayerStatus('重连超时');
+            if (window.showToast) {
+                window.showToast('error', '服务器重连超时，请检查服务状态', 4000);
+            }
+            return;
+        }
+
+        // 指数/平滑退避间隔: 前 5 次每 1.5 秒，之后每 2.5 秒
+        const delay = retryCount < 5 ? 1500 : 2500;
+        serverReconnectTimer = setTimeout(poll, delay);
+    };
+
+    poll();
+}
+
 function handleUnexpectedPlaybackPause() {
     const requestId = currentRecoveryState?.thisRequestId;
     if (!shouldAutoRecoverPlayback || !requestId || audio.ended || !audio.src) return false;
     if (playbackRecoveryTriggeredForRequestId === requestId) return false;
+
+    // 记录暂停瞬间的断点位置
+    const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
 
     shouldAutoRecoverPlayback = false;
     playbackRecoveryTriggeredForRequestId = requestId;
@@ -188,7 +285,17 @@ function handleUnexpectedPlaybackPause() {
         audio.removeEventListener('error', currentPlaybackErrorHandler);
         currentPlaybackErrorHandler = null;
     }
-    void runRecoveryFlow(new Error('播放链接意外暂停'));
+
+    // 探测服务器是否掉线
+    void (async () => {
+        const isOnline = await checkServerOnline();
+        if (!isOnline && currentPlayingSong) {
+            reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
+            return;
+        }
+        void runRecoveryFlow(new Error('播放链接意外暂停'));
+    })();
+
     return true;
 }
 
@@ -6542,9 +6649,20 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
         // Media errors happen asynchronously after play() resolves, so every source
         // needs an explicit recovery entry point.
-        currentPlaybackErrorHandler = () => {
+        currentPlaybackErrorHandler = async () => {
             if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
             currentPlaybackErrorHandler = null;
+
+            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
+
+            // 首先探测是否因后端服务重启/网络断开导致音频流中断
+            const isOnline = await checkServerOnline();
+            if (!isOnline) {
+                playbackRecoveryTriggeredForRequestId = thisRequestId;
+                shouldAutoRecoverPlayback = false;
+                reconnectServerAndResume(playbackSong, savedTime, currentQuality || targetQuality, index);
+                return;
+            }
 
             if (currentSourceType !== 'normal') {
                 shouldAutoRecoverPlayback = false;
@@ -6566,15 +6684,25 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
         audio.src = finalUrl;
 
+        if (window._resumeInfo && window._resumeInfo.time > 0) {
+            const targetResumeTime = window._resumeInfo.time;
+            delete window._resumeInfo;
+            const onMeta = () => {
+                if (targetResumeTime > 0 && targetResumeTime < (audio.duration || Infinity)) {
+                    audio.currentTime = targetResumeTime;
+                    console.log('[Resume] 已定位恢复至断点时间:', targetResumeTime);
+                }
+            };
+            if (audio.readyState >= 1) {
+                onMeta();
+            } else {
+                audio.addEventListener('loadedmetadata', onMeta, { once: true });
+            }
+        }
+
         if (noPlay) {
             setPlayerStatus('', false);
             updatePlayButton(false);
-            if (window._resumeInfo && window._resumeInfo.time > 0) {
-                audio.addEventListener('loadedmetadata', () => {
-                    audio.currentTime = window._resumeInfo.time;
-                    delete window._resumeInfo;
-                }, { once: true });
-            }
             return;
         }
 
@@ -7229,6 +7357,11 @@ function fadeVolume(targetVolume, duration = 800) {
 
 // Audio Events
 audio.addEventListener('timeupdate', () => {
+    if (audio.currentTime > 0) lastKnownPlaybackTime = audio.currentTime;
+    if (playbackStallDetectionTimer) {
+        clearTimeout(playbackStallDetectionTimer);
+        playbackStallDetectionTimer = null;
+    }
     if (isDragging === 'progress') return; // Skip updating UI while user is dragging
 
     const current = audio.currentTime;
@@ -7529,15 +7662,37 @@ audio.addEventListener('seeked', () => {
         }
     }
 });
-audio.addEventListener('waiting', () => {
+function handlePlaybackStallOrWait() {
     setPlayerStatus('缓冲歌曲中', null, true);
     if (lyricPlayer) {
         lyricPlayer.pause();
     }
-});
+    if (audio.paused || audio.ended || isServerReconnecting) return;
 
-audio.addEventListener('stalled', () => {
-    setPlayerStatus('缓冲歌曲中', null, true);
+    if (!playbackStallDetectionTimer) {
+        playbackStallDetectionTimer = setTimeout(async () => {
+            playbackStallDetectionTimer = null;
+            if (audio.paused || audio.ended || isServerReconnecting) return;
+            // 超过 4 秒一直处于卡顿状态，探测服务端连通性
+            const isOnline = await checkServerOnline();
+            if (!isOnline && currentPlayingSong) {
+                console.warn('[Player] 缓冲超时且服务端失联，触发自动重连恢复');
+                const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
+                shouldAutoRecoverPlayback = false;
+                reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
+            }
+        }, 4000);
+    }
+}
+
+audio.addEventListener('waiting', handlePlaybackStallOrWait);
+audio.addEventListener('stalled', handlePlaybackStallOrWait);
+
+audio.addEventListener('playing', () => {
+    if (playbackStallDetectionTimer) {
+        clearTimeout(playbackStallDetectionTimer);
+        playbackStallDetectionTimer = null;
+    }
 });
 
 // Initialize Media Session Actions
@@ -11160,7 +11315,10 @@ async function handleSyncLogout(skipConfirm = false) {
     }
 
     try {
-        // 1. 服务端注销 Token
+        // 1. 服务端注销 Token 及 Web 会话
+        try {
+            await fetch('/api/music/auth/logout', { method: 'POST' });
+        } catch (e) { }
         if (userToken) {
             try {
                 await fetch('/api/user/logout', {

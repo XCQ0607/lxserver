@@ -99,7 +99,7 @@ const serializeDislikeRules = (rules: string, username?: string) => {
 }
 
 // ===== Player Session Store =====
-const playerSessions = new Map<string, { createdAt: number }>()
+const playerSessions = new Map<string, { createdAt: number, user?: string | null }>()
 const SESSION_TTL = 24 * 60 * 60 * 1000 // 24小时
 const SESSION_COOKIE_NAME = 'lx_player_session'
 
@@ -220,19 +220,22 @@ const parseCookies = (cookieHeader: string | undefined): Record<string, string> 
   )
 }
 
-/** 检查请求是否携带有效的 Player Session Cookie */
+/** 检查请求是否携带有效的 Player Session Cookie 或有效的用户凭证 */
 const checkPlayerAuth = (req: IncomingMessage): boolean => {
   if (!global.lx.config['player.enableAuth']) return true // 未开启认证，直接放行
   const cookies = parseCookies(req.headers['cookie'])
   const sessionId = cookies[SESSION_COOKIE_NAME]
-  if (!sessionId) return false
-  const session = playerSessions.get(sessionId)
-  if (!session) return false
-  if (Date.now() - session.createdAt > SESSION_TTL) {
-    playerSessions.delete(sessionId)
-    return false
+  if (sessionId) {
+    const session = playerSessions.get(sessionId)
+    if (session && Date.now() - session.createdAt <= SESSION_TTL) {
+      return true
+    }
+    if (session) playerSessions.delete(sessionId)
   }
-  return true
+  // Safari / Token 备选鉴权: 若 Cookie 丢失但请求中携带了有效的用户 Token
+  const user = verifyUserAuth(req)
+  if (user) return true
+  return false
 }
 
 /** 定期清理过期 Session（每小时） */
@@ -5838,26 +5841,41 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
-      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session）
+      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session，支持账号密码登录）
       if (pathname === '/api/music/auth' && req.method === 'POST') {
         void readBody(req).then(body => {
           try {
-            const { password } = JSON.parse(body)
+            const { password, username } = JSON.parse(body)
             const correctPassword = global.lx.config['player.password'] || ''
+            let matchedUser: any = null
+            if (username) {
+              matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
+            } else {
+              matchedUser = (global.lx.config.users || []).find((u: any) => u.password === password)
+            }
 
-            if (password === correctPassword) {
+            if (matchedUser || (correctPassword && password === correctPassword)) {
               const sessionId = generateSessionId()
-              playerSessions.set(sessionId, { createdAt: Date.now() })
-              loginLog.info(`Player login success from ${ip}`)
+              playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser ? matchedUser.name : null })
+              loginLog.info(`Player login success (${matchedUser ? matchedUser.name : 'guest'}) from ${ip}`)
+              let userToken: string | null = null
+              if (matchedUser) {
+                userToken = generateSessionId()
+                userSessions.set(userToken, { username: matchedUser.name, createdAt: Date.now() })
+              }
               res.writeHead(200, {
                 'Content-Type': 'application/json',
-                'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${SESSION_TTL / 1000}`
+                'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
               })
-              res.end(JSON.stringify({ success: true }))
+              res.end(JSON.stringify({
+                success: true,
+                username: matchedUser ? matchedUser.name : null,
+                token: userToken
+              }))
             } else {
-              loginLog.warn(`Player login failed from ${ip}`)
+              loginLog.warn(`Player login failed (${username || 'guest'}) from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ success: false }))
+              res.end(JSON.stringify({ success: false, message: '账号或密码错误' }))
             }
           } catch (err: any) {
             res.writeHead(500)
@@ -5874,7 +5892,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (sessionId) playerSessions.delete(sessionId)
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Set-Cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0`
+          'Set-Cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=0`
         })
         res.end(JSON.stringify({ success: true }))
         return
@@ -8838,3 +8856,48 @@ export const removeDevice = async (userName: string, clientId: string) => {
   const userSpace = getUserSpace(userName)
   await userSpace.removeDevice(clientId)
 }
+
+// ===== 缓存自动过期清理任务 =====
+const CACHE_MAX_AGE_MS = 14 * 24 * 60 * 60 * 1000 // 14 天
+
+const cleanExpiredCacheFiles = () => {
+  try {
+    const cacheBase = global.lx.cachePath || '/server/cache'
+    if (!fs.existsSync(cacheBase)) return
+    const now = Date.now()
+    let totalCleaned = 0
+    let totalBytesFreed = 0
+
+    const scanAndClean = (dir: string) => {
+      if (!fs.existsSync(dir)) return
+      const entries = fs.readdirSync(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name)
+        if (entry.isDirectory()) {
+          scanAndClean(fullPath)
+        } else if (entry.isFile()) {
+          if (entry.name === 'cache_index.json' || entry.name.endsWith('.json')) continue
+          try {
+            const stats = fs.statSync(fullPath)
+            const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
+            if (now - fileTime > CACHE_MAX_AGE_MS) {
+              fs.unlinkSync(fullPath)
+              totalCleaned++
+              totalBytesFreed += stats.size
+            }
+          } catch (e) {}
+        }
+      }
+    }
+
+    scanAndClean(cacheBase)
+    if (totalCleaned > 0) {
+      console.log(`[文件缓存] [14天过期清理] 成功清理 ${totalCleaned} 个超过14天的缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
+    }
+  } catch (err) {
+    console.error('[文件缓存] 14天自动清理异常:', err)
+  }
+}
+
+setTimeout(() => cleanExpiredCacheFiles(), 10000)
+setInterval(() => cleanExpiredCacheFiles(), 12 * 60 * 60 * 1000)
