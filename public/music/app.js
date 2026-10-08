@@ -8920,7 +8920,8 @@ async function refreshCacheList() {
         const data = await res.json();
 
         if (data.success) {
-            currentCacheList = data.data;
+            // 这个抽屉只管缓存目录；已下载的文件在「本地音乐」页管理，避免在这里被误删
+            currentCacheList = (data.data || []).filter(item => item.folder !== 'music');
             renderCacheList();
             updateCacheHeaderStats();
         } else {
