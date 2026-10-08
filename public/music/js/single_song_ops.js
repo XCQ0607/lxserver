@@ -149,6 +149,58 @@ function getQualityOptionLabel(song, quality) {
     return `${name} [${size}${sourceLabel ? ` · ${sourceLabel}` : ''}]`;
 }
 
+// 该歌在服务器上已存在的音质 -> 目录（弹窗场景强制取最新，不吃 60s 缓存）
+async function getServerFolders(song, qualities) {
+    if (!window.ServerFileState) return {};
+    await window.ServerFileState.ensure(true);
+    let folders = window.ServerFileState.foldersFor(song);
+    if (!folders) folders = await window.ServerFileState.foldersByCheck(song, qualities || []);
+    return folders || {};
+}
+
+// 给音质选项加上"服务器已缓存/已下载"标注；forServer 时已下载的音质置灰不可选
+async function buildQualityOptions(song, qualities, forServer) {
+    const labels = await buildQualityOptionLabels(song, qualities);
+    const folders = await getServerFolders(song, qualities);
+
+    return labels.map((label, idx) => {
+        const folder = (folders || {})[qualities[idx]];
+        if (!folder) return { label, disabled: false };
+        const stateText = window.ServerFileState.stateText(folder);
+        const blocked = forServer && folder === 'music';
+        return {
+            label: `${label} · ${stateText}`,
+            disabled: blocked,
+            hint: blocked ? '该音质已在服务器下载目录，无需重复下载' : stateText
+        };
+    });
+}
+
+function qualityIndexOfLabel(options, label) {
+    return options.findIndex(o => (typeof o === 'string' ? o : o.label) === label);
+}
+
+// 该音质在服务器上的落点：本地列表那一行自带文件名，其余入口按 歌曲ID + 音质 查映射
+async function resolveCachedFile(song, quality) {
+    if (song._serverFile) return { folder: song._serverFile.folder, filename: song._serverFile.filename };
+    if (!window.ServerFileState) return null;
+    await window.ServerFileState.ensure(true);
+    if (window.ServerFileState.unavailable) return null;
+    return window.ServerFileState.locate(window.ServerFileState.songKey(song), quality);
+}
+
+// 模式选择层的标注：统计这首歌在服务器上已有的音质，不再只看偏好音质
+async function describeServerStateSuffix(song) {
+    if (!window.ServerFileState) return '';
+    await window.ServerFileState.ensure(true);
+    let folders = window.ServerFileState.foldersFor(song);
+    if (!folders) folders = await window.ServerFileState.foldersByCheck(song, getSelectableQualityOrder(song));
+    const entries = Object.entries(folders || {});
+    if (entries.length === 0) return '';
+    const downloaded = entries.filter(e => e[1] === 'music').length;
+    return downloaded > 0 ? ` (已下载 ${downloaded} 个音质)` : ` (已缓存 ${entries.length} 个音质)`;
+}
+
 function getSelectableQualityOrder(song = null) {
     if (song && window.QualityManager?.getSelectableQualities) {
         return window.QualityManager.getSelectableQualities(song);
@@ -369,12 +421,7 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
 
     let selected = skipPromptTarget;
     if (!selected) {
-        // [优化] 检测是否已缓存
-        const prefQuality = window.settings?.preferredQuality || 'flac';
-        const checkResult = await window.checkServerCache?.(song, prefQuality);
-        const cacheSuffix = (checkResult?.exists && !checkResult?.isCollision) ? ' (已缓存)' : '';
-
-        const options = ['浏览器下载', `${actionLabel}${cacheSuffix}`];
+        const options = ['浏览器下载', `${actionLabel}${await describeServerStateSuffix(song)}`];
         const modeText = isOnlyDownload ? '仅下载模式' : '缓存模式';
         selected = await showOptions('下载与缓存', `[${modeText}] 选择对 [${song.name}] 的操作：`, options);
     }
@@ -399,12 +446,12 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
 
         if (window.SystemDownloadManager) {
             const availableQualities = getSelectableQualityOrder(song);
-            const qualityDisplayNames = await buildQualityOptionLabels(song, availableQualities);
-            const selectedQualityDisplay = await showOptions('选择下载音质', `请选择对 [${song.name}] 的下载音质：`, qualityDisplayNames);
+            const qualityOptions = await buildQualityOptions(song, availableQualities, false);
+            const selectedQualityDisplay = await showOptions('选择下载音质', `请选择对 [${song.name}] 的下载音质：`, qualityOptions);
             if (!selectedQualityDisplay) return false;
 
-            const selectedQualityIndex = qualityDisplayNames.indexOf(selectedQualityDisplay);
-            const targetQuality = availableQualities[selectedQualityIndex];
+            const targetQuality = availableQualities[qualityIndexOfLabel(qualityOptions, selectedQualityDisplay)];
+            if (!targetQuality) return false;
 
             window.SystemDownloadManager.addTasks([{
                 ...song,
@@ -429,24 +476,44 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
             }
         }
 
-        // [优化] 检测是否已缓存
-        const prefQuality = window.settings?.preferredQuality || 'flac';
-        const checkResult = await window.checkServerCache?.(song, prefQuality);
-        const isCached = checkResult?.exists && !checkResult?.isCollision;
-
-        if (!isOnlyDownload && isCached) {
-            showInfo('该歌曲已在服务器缓存');
-            return false;
-        }
         let targetQuality = forceQuality;
         if (!targetQuality) {
             const availableQualities = getSelectableQualityOrder(song);
-            const qualityDisplayNames = await buildQualityOptionLabels(song, availableQualities);
-            const selectedQualityDisplay = await showOptions('选择缓存音质', `请选择对 [${song.name}] 的缓存音质：`, qualityDisplayNames);
+            const qualityOptions = await buildQualityOptions(song, availableQualities, true);
+            if (qualityOptions.every(o => o.disabled)) {
+                showInfo(`[${song.name}] 可选音质都已在服务器下载目录`);
+                return false;
+            }
+            const selectedQualityDisplay = await showOptions('选择缓存音质', `请选择对 [${song.name}] 的缓存音质：`, qualityOptions);
             if (!selectedQualityDisplay) return false;
 
-            const selectedQualityIndex = qualityDisplayNames.indexOf(selectedQualityDisplay);
-            targetQuality = availableQualities[selectedQualityIndex];
+            const picked = qualityIndexOfLabel(qualityOptions, selectedQualityDisplay);
+            if (picked === -1) return false;
+            targetQuality = availableQualities[picked];
+        }
+
+        // 该音质已在服务器缓存目录：直接移动过去，不联网解析音源
+        // （解析可能落到同名的另一平台版本，且对已缓存的内容来说这次解析是白跑的）
+        const cachedFile = await resolveCachedFile(song, targetQuality);
+        if (cachedFile && cachedFile.folder === 'cache') {
+            try {
+                const res = await fetch('/api/music/cache/move', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+                    body: JSON.stringify({ filenames: [cachedFile.filename] })
+                });
+                const r = await res.json().catch(() => ({}));
+                if (r.success && (r.successCount || 0) > 0) {
+                    if (!suppressAlerts) showInfo(`[${song.name}] 已从缓存目录移入下载目录`);
+                    window.SystemDownloadManager?.notifyServerFilesChanged?.();
+                    return true;
+                }
+                if (!suppressAlerts) showError(r.message || `[${song.name}] 移动失败：目标目录可能已有同名文件`);
+                return false;
+            } catch (e) {
+                if (!suppressAlerts) showError('移动失败: ' + e.message);
+                return false;
+            }
         }
 
         try {

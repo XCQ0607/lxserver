@@ -4723,6 +4723,7 @@ function renderResults(list) {
                     <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden">
                          ${getSourceTag(item.source)}
                          ${getQualityTags(item)}
+                         <span data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
                             ${createMarqueeHtml(item.singer, 'text-[10px] t-text-muted')}
                          </div>
@@ -4822,6 +4823,7 @@ function renderResults(list) {
     // Init Lazy Loader
     lazyLoadImages(container);
     applyMarqueeChecks(container);
+    window.ServerFileState?.paintBadges(container);
 
     // [Prefetch] 自动后台预加载逻辑
     if (currentSearchScope === 'network' && currentPage === totalPages) {
@@ -5994,6 +5996,35 @@ function updateAdminUI() {
     });
 }
 
+const watchedCacheSongKeys = new Set();
+
+/**
+ * 播放时触发的后台缓存不经过下载管理器，轮询它的进度直到结束，
+ * 结束后重拉服务器文件状态并刷新页面上已有的缓存/下载徽标。
+ */
+async function watchServerCacheTask(songKey) {
+    if (!songKey || watchedCacheSongKeys.has(songKey)) return;
+    watchedCacheSongKeys.add(songKey);
+    const headers = getUserAuthHeaders();
+    const deadline = Date.now() + 10 * 60 * 1000;
+    try {
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 3000));
+            let status = null;
+            try {
+                const res = await fetch(`/api/music/cache/progress?ids=${encodeURIComponent(songKey)}`, { headers });
+                const data = await res.json();
+                status = data?.data?.[songKey]?.status || null;
+            } catch (e) { break; }
+            // 进度条目被服务端移除即代表已结束（完成或失败）
+            if (!status || status === 'finished' || status === 'exists' || status === 'error') break;
+        }
+    } finally {
+        watchedCacheSongKeys.delete(songKey);
+    }
+    window.ServerFileState?.repaintAll();
+}
+
 async function triggerServerCache(song, url, quality) {
     try {
         console.log('[ServerCache] Triggering background download for:', song.name);
@@ -6026,6 +6057,9 @@ async function triggerServerCache(song, url, quality) {
                 embedLyric: !!(window.settings?.embedLyricToFile ?? true)
             })
         });
+        if (window.ServerFileState) {
+            void watchServerCacheTask(`${window.ServerFileState.songKey(songInfoForCache)}_${quality || 'unknown'}`);
+        }
         // 移除 403 自动重试逻辑，API 不再报 403
     } catch (e) { console.error('[ServerCache] Trigger failed:', e); }
 }
@@ -15530,12 +15564,18 @@ function showOptions(title, message, options = []) {
         const modal = document.createElement('div');
         modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
 
-        const optionsHtml = options.map(opt => `
-            <button class="w-full text-left px-4 py-3.5 t-text-main hover:bg-emerald-500 hover:text-white transition-all rounded-xl font-bold text-sm flex items-center justify-between group" data-value="${opt}">
-                <span>${opt}</span>
+        const optionsHtml = options.map((opt, idx) => {
+            const entry = typeof opt === 'string' ? { label: opt } : (opt || { label: '' });
+            const label = String(entry.label ?? '');
+            const disabled = !!entry.disabled;
+            const safeLabel = label.replace(/"/g, '&quot;');
+            const hint = entry.hint ? ` title="${String(entry.hint).replace(/"/g, '&quot;')}"` : '';
+            return `
+            <button${hint} data-value="${safeLabel}" data-index="${idx}"${disabled ? ' disabled aria-disabled="true"' : ''} class="w-full text-left px-4 py-3.5 t-text-main ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-emerald-500 hover:text-white transition-all'} rounded-xl font-bold text-sm flex items-center justify-between group">
+                <span>${label}</span>
                 <i class="fas fa-chevron-right text-[10px] opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all"></i>
-            </button>
-        `).join('');
+            </button>`;
+        }).join('');
 
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
@@ -15568,6 +15608,7 @@ function showOptions(title, message, options = []) {
         };
 
         modal.querySelectorAll('button[data-value]').forEach(btn => {
+            if (btn.disabled) return;
             btn.onclick = () => close(btn.getAttribute('data-value'));
         });
 
@@ -15592,14 +15633,9 @@ async function handleDownloadClick(event) {
 
     const song = currentPlayingSong;
 
-    // [优化] 检测是否已缓存
-    const prefQuality = window.settings?.preferredQuality || 'flac';
-    const checkResult = await window.checkServerCache?.(song, prefQuality);
-    const cacheSuffix = (checkResult?.exists && !checkResult?.isCollision) ? ' (已缓存)' : '';
-
     const isOnlyDownload = window.settings?.enableOnlyDownloadMode === true;
     const actionLabel = isOnlyDownload ? '下载到服务器' : '缓存到服务器';
-    const options = ['浏览器下载', `${actionLabel}${cacheSuffix}`];
+    const options = ['浏览器下载', `${actionLabel}${await (window.describeServerStateSuffix?.(song) || '')}`];
     const modeText = isOnlyDownload ? '仅下载模式' : '缓存模式';
     const selected = await showOptions('下载与缓存', `[${modeText}] 选择对 [${song.name}] 的操作：`, options);
     if (!selected) return;
@@ -15636,12 +15672,6 @@ async function handleDownloadClick(event) {
             } else {
                 return;
             }
-        }
-
-        const isCached = checkResult?.exists && !checkResult?.isCollision;
-        if (!isOnlyDownload && isCached) {
-            showInfo('该歌曲已在服务器缓存');
-            return;
         }
 
         if (typeof downloadSong === 'function') {

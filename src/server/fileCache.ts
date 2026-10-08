@@ -203,6 +203,9 @@ export interface CacheItem {
     bitrate?: number
     sampleRate?: number
     bitDepth?: number
+    // 各平台原生标识（tx 的 mid/strMediaMid、kg 的 hash、wy 的 songId 等），
+    // 规范化 ID 无法反推它们，缺了就没法从缓存条目还原出可解析的歌曲对象
+    nativeIds?: Record<string, string>
 }
 
 export type CacheFolder = 'cache' | 'music'
@@ -555,6 +558,24 @@ export const normalizeSongId = (songInfo: any): string => {
 /**
  * Extract rich metadata from Lx songInfo object
  */
+// 各平台解析音源时要用的原生标识字段；normalizeSongId 会把它们统一成 "source_原生ID"，
+// 反向拆不出来，所以缓存/下载条目落索引时必须原样留一份
+const NATIVE_ID_KEYS = ['hash', 'hashMid', 'mid', 'strMediaMid', 'songId', 'songmid', 'sid',
+    'copyrightId', 'mediaMid', 'albumMid', 'albumId', 'singerId', 'otherSource']
+
+export const extractNativeIds = (songInfo: any): Record<string, string> | undefined => {
+    if (!songInfo) return undefined
+    const meta = songInfo.meta || {}
+    const out: Record<string, string> = {}
+    for (const key of NATIVE_ID_KEYS) {
+        const value = songInfo[key] !== undefined && songInfo[key] !== null && songInfo[key] !== ''
+            ? songInfo[key]
+            : (meta[key] !== undefined && meta[key] !== null && meta[key] !== '' ? meta[key] : null)
+        if (value !== null) out[key] = String(value)
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+}
+
 export const extractSongMetadata = (songInfo: any) => {
     const meta = songInfo.meta || {}
     const id = normalizeSongId(songInfo)
@@ -2188,7 +2209,8 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                 sampleRate: inspection.sampleRate,
                 bitDepth: inspection.bitDepth,
                 metadataWritable,
-                metadataError: metadataWritable ? undefined : getMetadataUnsupportedMessage(audioContainer)
+                metadataError: metadataWritable ? undefined : getMetadataUnsupportedMessage(audioContainer),
+                nativeIds: cachedItem?.nativeIds || extractNativeIds(songInfo)
             }, 'music')
 
             await ensureCachedLyrics(songInfo, actualQuality, username, true, finalPath, 'music', shouldCacheLyric, shouldEmbedLyric)
@@ -2433,6 +2455,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         bitrate: inspection.bitrate,
                         sampleRate: inspection.sampleRate,
                         bitDepth: inspection.bitDepth,
+                        nativeIds: extractNativeIds(songInfo)
                     }, folderType)
 
                     let tagger: any
