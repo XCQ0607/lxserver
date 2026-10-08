@@ -5032,12 +5032,13 @@ let currentLoadingRequestId = 0; // Track latest request ID
 
 let currentQuality = null; // 当前播放音质 (从 settings.preferredQuality 动态获取)
 let currentSourceType = 'normal'; // 当前链接来源类型: 'normal' | 'cache' | 'server_cache'
+let currentCacheFolder = 'cache'; // server_cache 时区分目录: 'cache' 缓存副本 | 'music' 已下载文件
 let hintTimeout = null;
 
 // 获取来源类型的中文描述
-function getSourceTypeText(sourceType) {
+function getSourceTypeText(sourceType, folder) {
     const map = {
-        'server_cache': '服务器本地缓存',
+        'server_cache': folder === 'music' ? '已下载文件' : '服务器缓存',
         'cache': '浏览器链接缓存',
         'normal': '在线解析'
     };
@@ -5489,7 +5490,8 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url && !isRetry) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
-        return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
+        const localFolder = /folder=music/.test(song.url) ? 'music' : 'cache';
+        return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality, folder: localFolder };
     }
 
     const shouldBypassServerCache = isRetry === 'local_retry' || isRetry === 'download';
@@ -5503,7 +5505,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             let serverCacheUrl = cacheResult.url;
             // 应用代理逻辑 (以防服务器缓存返回的是原始 HTTP 链接)
             serverCacheUrl = await applyAutoProxy(serverCacheUrl, song);
-            return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality };
+            return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality, folder: cacheResult.folder };
         }
     }
 
@@ -5705,7 +5707,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
         }
 
         prefetchManager.set(nextSong.id, result);
-        const sourceDesc = getSourceTypeText(result.sourceType);
+        const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
         console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
 
     } catch (e) {
@@ -6652,13 +6654,13 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         // [Fix] 移除 dismissAllToasts()，允许成功/失败/尝试信息的 Toast 共存堆叠
 
         // Display attempts / success message
-        const sourceText = getSourceTypeText(urlResult.sourceType);
+        const sourceText = getSourceTypeText(urlResult.sourceType, urlResult.folder);
         const sourceName = urlResult.sourceName || '';
 
         if (urlResult.isPrefetch) {
             let detail = '解析成功';
             if (urlResult.sourceType === 'cache') detail = '命中缓存链接';
-            else if (urlResult.sourceType === 'server_cache') detail = '命中本地文件';
+            else if (urlResult.sourceType === 'server_cache') detail = urlResult.folder === 'music' ? '命中已下载文件' : '命中服务器缓存';
             else if (sourceName) detail = `${sourceName} 解析成功`;
             showSuccess(`[预读] ${song.name} ${detail}`);
         } else if (urlResult.sourceType !== 'normal') {
@@ -6678,6 +6680,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         let finalUrl = urlResult.url;
         currentQuality = urlResult.quality;
         currentSourceType = urlResult.sourceType;
+        currentCacheFolder = urlResult.folder || 'cache';
         const playbackSong = (urlResult.switchedSource && urlResult.songInfo) ? urlResult.songInfo : song;
         if (playbackSong !== song) {
             currentPlayingSong = playbackSong;
@@ -6946,7 +6949,7 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
     if (currentSourceType === 'cache') {
         statusText += ' 【缓存链接】';
     } else if (currentSourceType === 'server_cache') {
-        statusText += ' 【服务器缓存】';
+        statusText += currentCacheFolder === 'music' ? ' 【已下载】' : ' 【缓存】';
     }
 
     statusEl.innerText = statusText;
