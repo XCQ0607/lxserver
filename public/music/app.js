@@ -8685,6 +8685,43 @@ async function resetAllSettings() {
     }
 }
 
+// 清理"未引用歌词"：磁盘上存在但没有被缓存索引登记的 .lrc（历史上音质未定时写出的兜底文件名等）
+async function cleanOrphanLyrics() {
+    const headers = {};
+    Object.assign(headers, getUserAuthHeaders());
+    try {
+        const res = await fetch('/api/music/cache/lyric/orphans', { headers });
+        const scan = await res.json();
+        if (!scan.success) throw new Error(scan.message || '扫描失败');
+        const orphans = scan.data || [];
+        if (orphans.length === 0) {
+            showSuccess('没有未引用的歌词文件');
+            return;
+        }
+        const sizeMb = (orphans.reduce((sum, o) => sum + (o.size || 0), 0) / 1024 / 1024).toFixed(2);
+        const confirmed = await showSelect('清理未引用歌词',
+            `发现 ${orphans.length} 个没有对应音频或未在索引中登记的歌词文件，共 ${sizeMb} MB。删除后相关歌曲下次播放会重新在线获取歌词，确认删除？`,
+            { danger: true, confirmText: '删除' });
+        if (!confirmed) return;
+
+        const delRes = await fetch('/api/music/cache/lyric/orphans/delete', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: orphans.map(o => ({ filename: o.filename, folder: o.folder })) })
+        });
+        const del = await delRes.json();
+        const result = del.data || {};
+        const deleted = result.deletedCount || 0;
+        const failures = result.failures || [];
+        if (deleted > 0) showSuccess(`已清理 ${deleted} 个未引用歌词`);
+        if (failures.length > 0) showError(`${failures.length} 个未能删除`);
+        if (deleted === 0 && failures.length === 0) showError(del.message || '清理失败');
+        refreshCacheList();
+    } catch (e) {
+        showError('清理未引用歌词失败: ' + e.message);
+    }
+}
+
 async function clearCache(type) {
     if (!(await showSelect('清除缓存', '确定要清除本地缓存吗？', { danger: true }))) return;
 

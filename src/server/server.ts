@@ -4359,6 +4359,69 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      // 6.5 未引用歌词（孤儿 .lrc）扫描与删除
+      if (pathname === '/api/music/cache/lyric/orphans' && req.method === 'GET') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        try {
+          const data = fileCache.listOrphanLyrics(username)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, data }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || 'Failed to list orphan lyrics' }))
+        }
+        return
+      }
+
+      if (pathname === '/api/music/cache/lyric/orphans/delete' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        void readBody(req).then(body => {
+          try {
+            const payload = JSON.parse(body)
+            const rawItems = Array.isArray(payload.items) ? payload.items : []
+            if (rawItems.length === 0) throw new Error('Missing items')
+            const items = rawItems.map((item: any) => {
+              if (typeof item === 'string') return { filename: item }
+              if (!item || typeof item.filename !== 'string') throw new Error('Invalid item')
+              if (item.folder !== undefined && item.folder !== 'cache' && item.folder !== 'music') throw new Error('Invalid folder')
+              return { filename: item.filename, folder: item.folder }
+            })
+            const result = fileCache.deleteOrphanLyrics(items, username)
+            accessLog.info(`orphan lyrics deleted user=${username} count=${result.deletedCount} failures=${result.failures.length}`)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: result.failures.length === 0, data: result }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
       // 7. Get Cache Progress
       if (pathname === '/api/music/cache/progress' && req.method === 'GET') {
         const ids = urlObj.searchParams.get('ids')?.split(',') || []
