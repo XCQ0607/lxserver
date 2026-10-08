@@ -49,12 +49,12 @@
     <div class="relative z-10 t-bg-panel/95 backdrop-blur-xl rounded-3xl shadow-2xl p-10 w-full max-w-md mx-4 transform transition-all duration-500"
         id="auth-card">
         <!-- Logo & Title -->
-        <div class="text-center mb-8">
+        <div class="text-center mb-6">
             <div
                 class="w-20 h-20 theme-gradient-bg rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg transform hover:scale-105 transition-transform">
                 <i class="fas fa-music text-white text-3xl"></i>
             </div>
-            <h1 class="text-3xl font-black t-text-main mb-2">LX Music Web</h1>
+            <h1 class="text-3xl font-black t-text-main mb-1">LX Music Web</h1>
             <p class="text-gray-500 text-sm">请登录您的账号以使用播放器</p>
         </div>
 
@@ -111,6 +111,22 @@
                 const verifyData = await verifyRes.json()
                 if (verifyData.valid) {
                     window.location.replace('./')
+                    return
+                }
+                // Safari Fallback: 如果 Cookie 被清除但本地已存凭证，尝试自动恢复登录
+                const savedUser = localStorage.getItem('lx_sync_user')
+                const savedPass = localStorage.getItem('lx_sync_pass')
+                if (savedUser && savedPass) {
+                    console.log('[Login] 检测到已保存凭据，正在为 Safari 恢复 Session...')
+                    const autoRes = await fetch('/api/music/auth', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ username: savedUser, password: savedPass })
+                    })
+                    const autoData = await autoRes.json()
+                    if (autoData.success) {
+                        window.location.replace('./')
+                    }
                 }
             } catch (e) {
                 console.error('[Login] 初始化检查失败:', e)
@@ -119,31 +135,41 @@
 
         async function handleLogin(event) {
             event.preventDefault()
+            const username = document.getElementById('auth-username-input').value.trim()
             const password = document.getElementById('auth-password-input').value
             const errorDiv = document.getElementById('auth-error')
+            const errorMsg = document.getElementById('auth-error-msg')
             const submitBtn = document.getElementById('submit-btn')
             const card = document.getElementById('auth-card')
 
             if (!password) return
 
             submitBtn.disabled = true
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>验证中...'
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>登录中...'
             errorDiv.classList.add('hidden')
 
             try {
                 const res = await fetch('/api/music/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
+                    body: JSON.stringify({ username, password })
                 })
                 const data = await res.json()
 
                 if (data.success) {
-                    submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>验证成功，跳转中...'
+                    submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>登录成功，跳转中...'
+                    if (data.username) {
+                        localStorage.setItem('lx_sync_user', data.username);
+                        localStorage.setItem('lx_sync_pass', password);
+                        localStorage.setItem('lx_sync_mode', 'local');
+                        if (data.token) {
+                            localStorage.setItem('lx_user_token', data.token);
+                        }
+                    }
                     setTimeout(() => window.location.replace('./'), 300)
                 } else {
                     errorDiv.classList.remove('hidden')
-                    // 抖动效果
+                    if (errorMsg) errorMsg.textContent = data.message || '账号或密码错误';
                     card.style.transform = 'translateX(-8px)'
                     setTimeout(() => card.style.transform = 'translateX(8px)', 80)
                     setTimeout(() => card.style.transform = 'translateX(-5px)', 160)
@@ -156,14 +182,14 @@
                     input.focus()
 
                     submitBtn.disabled = false
-                    submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>进入播放器'
+                    submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>登录播放器'
                 }
             } catch (e) {
                 console.error('[Login] 请求失败:', e)
-                errorDiv.querySelector('span').textContent = '网络错误，请稍后重试'
                 errorDiv.classList.remove('hidden')
+                if (errorMsg) errorMsg.textContent = '网络错误，请稍后重试';
                 submitBtn.disabled = false
-                submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>进入播放器'
+                submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>登录播放器'
             }
         }
 

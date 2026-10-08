@@ -12993,16 +12993,26 @@ document.addEventListener('DOMContentLoaded', async () => {
     switchTab(defaultTab);
 
     // 2. Auto-reconnect or auto-login
-    const syncMode = localStorage.getItem('lx_sync_mode');
+    let syncMode = localStorage.getItem('lx_sync_mode');
+    const savedUser = localStorage.getItem('lx_sync_user');
+    const savedPass = localStorage.getItem('lx_sync_pass');
+
+    // 如果通过 Web 登录页已记录账号密码但尚未显式保存 lx_sync_mode，则默认启用 local 模式并自动建连
+    if (!syncMode && savedUser && savedPass) {
+        syncMode = 'local';
+        localStorage.setItem('lx_sync_mode', 'local');
+    }
 
     if (syncMode === 'local') {
         // Local mode: auto-login
-        const user = localStorage.getItem('lx_sync_user');
-        const pass = localStorage.getItem('lx_sync_pass');
+        const user = savedUser;
+        const pass = savedPass;
         if (user && pass) {
-            document.getElementById('sync-local-user').value = user;
-            document.getElementById('sync-local-pass').value = pass;
-            console.log('[Cache] 自动登录本地账号:', user);
+            const userInput = document.getElementById('sync-local-user');
+            const passInput = document.getElementById('sync-local-pass');
+            if (userInput) userInput.value = user;
+            if (passInput) passInput.value = pass;
+            console.log('[Cache] 自动登录本地账号与同步服务:', user);
             handleLocalLogin();
         }
     } else if (syncMode === 'remote') {
