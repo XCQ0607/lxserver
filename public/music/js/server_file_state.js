@@ -144,7 +144,7 @@ window.ServerFileState = {
         const cls = info.folder === 'music'
             ? 't-badge-blue border-blue-200 dark:border-blue-500/30'
             : 't-badge-green border-emerald-200 dark:border-emerald-500/30';
-        return `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] font-bold ${cls} transition-colors" title="${info.title}">${info.text}</span>`;
+        return `<span class="song-tag ${cls} transition-colors cursor-help" title="${info.title}">${info.text}</span>`;
     },
 
     badgeHtml(song) {

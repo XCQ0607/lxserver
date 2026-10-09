@@ -655,9 +655,10 @@ window.SongListManager = (function () {
                         <div class="font-bold text-sm t-text-main group-hover:text-emerald-500 transition-colors">
                             ${window.createMarqueeHtml ? window.createMarqueeHtml(song.name) : `<span class="truncate">${song.name}</span>`}
                         </div>
-                        <div class="flex items-center gap-1 mt-0.5 overflow-hidden">
+                        <div class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
                              ${window.getSourceTag ? window.getSourceTag(song.source || detailState.source) : ''}
                              ${window.getQualityTags ? window.getQualityTags(song) : ''}
+                             <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(song) : ''}"></span>
                              <div class="md:hidden flex-1 min-w-0">
                                 ${window.createMarqueeHtml ? window.createMarqueeHtml(song.singer, 'text-[10px] t-text-muted') : `<span class="text-[10px] t-text-muted truncate">${song.singer}</span>`}
                              </div>
@@ -717,6 +718,7 @@ window.SongListManager = (function () {
         if (typeof window.applyMarqueeChecks === 'function') {
             window.applyMarqueeChecks();
         }
+        window.ServerFileState?.paintBadges(listContainer);
     }
 
     // --- Sortable binding (private helper) ---

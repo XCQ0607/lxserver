@@ -2643,11 +2643,11 @@ function getQualityTags(item) {
         else if (q === '320k') has320 = true;
     }
 
-    if (hasMaster) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-purple border border-purple-200 dark:border-purple-500/30 transition-colors">Master</span>');
-    else if (hasAtmos) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-cyan-200 dark:border-cyan-500/30 transition-colors">Atmos</span>');
-    else if (hasHiRes) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-yellow border border-yellow-200 dark:border-yellow-500/30 transition-colors">Hi-Res</span>');
-    else if (hasFlac) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-green border border-emerald-200 dark:border-emerald-500/30 transition-colors">无损</span>');
-    else if (has320) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-blue-200 dark:border-blue-500/30 transition-colors">高品质</span>');
+    if (hasMaster) tags.push('<span class="song-tag t-badge-purple border-purple-200 dark:border-purple-500/30 transition-colors">Master</span>');
+    else if (hasAtmos) tags.push('<span class="song-tag t-badge-cyan border-cyan-200 dark:border-cyan-500/30 transition-colors">Atmos</span>');
+    else if (hasHiRes) tags.push('<span class="song-tag t-badge-yellow border-yellow-200 dark:border-yellow-500/30 transition-colors">Hi-Res</span>');
+    else if (hasFlac) tags.push('<span class="song-tag t-badge-green border-emerald-200 dark:border-emerald-500/30 transition-colors">无损</span>');
+    else if (has320) tags.push('<span class="song-tag t-badge-blue border-blue-200 dark:border-blue-500/30 transition-colors">高品质</span>');
 
     return tags.join('');
 }
@@ -2663,8 +2663,8 @@ function getSourceTag(source) {
     };
     const names = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
     const color = colors[source] || 't-bg-main t-text-muted t-border-main';
-    const name = names[source] || source.toUpperCase();
-    return `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] font-bold border ${color} mr-1">${name}</span>`;
+    const name = names[source] || (source ? source.toUpperCase() : '未知');
+    return `<span class="song-tag ${color}">${name}</span>`;
 }
 window.getSourceTag = getSourceTag;
 
@@ -3446,9 +3446,10 @@ function renderArtistSongsUI(list, page) {
                         </div>
                         <div class="min-w-0 flex-1">
                             <div class="font-bold t-text-main text-sm md:text-base leading-tight truncate group-hover:text-emerald-600 transition-colors">${item.name}</div>
-                            <div class="flex items-center gap-1 mt-1">
+                            <div class="flex items-center gap-1 mt-1 overflow-hidden whitespace-nowrap">
                                 ${getSourceTag ? getSourceTag(item.source) : ''}
                                 ${getQualityTags ? getQualityTags(item) : ''}
+                                <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                             </div>
                         </div>
                     </div>
@@ -3516,6 +3517,7 @@ function renderArtistSongsUI(list, page) {
     // Init Marquee if needed (though we use truncate here)
     if (window.applyMarqueeChecks) applyMarqueeChecks();
     if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
+    window.ServerFileState?.paintBadges(content);
 }
 window.renderArtistSongsUI = renderArtistSongsUI;
 
@@ -4734,10 +4736,10 @@ function renderResults(list) {
                     <div class="font-bold t-text-main text-sm md:text-base leading-tight hover:text-emerald-600 transition-colors">
                          ${createMarqueeHtml(item.name)}
                     </div>
-                    <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden">
+                    <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
                          ${getSourceTag(item.source)}
                          ${getQualityTags(item)}
-                         <span data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
+                         <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
                             ${createMarqueeHtml(item.singer, 'text-[10px] t-text-muted')}
                          </div>
@@ -8950,7 +8952,7 @@ function renderCacheList() {
         const isSelected = selectedCacheFiles.has(getCacheItemKey(item));
 
         // 样式同步：使用主列表的来源标签生成函数
-        const sourceTagHtml = window.getSourceTag ? window.getSourceTag(item.source) : `<span class="px-1 py-0 rounded text-[10px] font-bold border t-badge-red mr-1">${item.source.toUpperCase()}</span>`;
+        const sourceTagHtml = window.getSourceTag ? window.getSourceTag(item.source) : `<span class="song-tag t-badge-red">${item.source.toUpperCase()}</span>`;
 
         // 样式同步：匹配 getQualityTags 的逻辑
         let qTagHtml = '';
@@ -8958,19 +8960,19 @@ function renderCacheList() {
         const qName = window.QualityManager?.getQualityDisplayName(q) || q.toUpperCase();
 
         if (q === 'master') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-purple border border-purple-200 dark:border-purple-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-purple border-purple-200 dark:border-purple-500/30 transition-colors">${qName}</span>`;
         } else if (q === 'atmos' || q === 'atmos_plus') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-cyan-200 dark:border-cyan-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-cyan border-cyan-200 dark:border-cyan-500/30 transition-colors">${qName}</span>`;
         } else if (q === 'flac24bit' || q === 'hires' || q === 'hr') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-yellow border border-yellow-200 dark:border-yellow-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-yellow border-yellow-200 dark:border-yellow-500/30 transition-colors">${qName}</span>`;
         } else if (q === 'flac' || q === 'sq' || q === 'ape') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-green border border-emerald-200 dark:border-emerald-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-green border-emerald-200 dark:border-emerald-500/30 transition-colors">${qName}</span>`;
         } else if (q === '320k' || q === 'hq') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-blue-200 dark:border-blue-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-blue border-blue-200 dark:border-blue-500/30 transition-colors">${qName}</span>`;
         } else if (q === '128k' || q === 'mq' || q === 'standard') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-gray border t-border-main transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-gray border t-border-main transition-colors">${qName}</span>`;
         } else {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-red border border-red-200 dark:border-red-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-red border border-red-200 dark:border-red-500/30 transition-colors">${qName}</span>`;
         }
 
         const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';

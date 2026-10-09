@@ -286,6 +286,16 @@ i {
     color: #be185d;
 }
 
+.t-badge-purple {
+    background-color: #ede9fe;
+    color: #6d28d9;
+}
+
+.t-badge-cyan {
+    background-color: #cffafe;
+    color: #0e7490;
+}
+
 .t-badge-gray {
     background-color: #f3f4f6;
     color: #4b5563;
@@ -295,6 +305,18 @@ i {
     background-color: rgba(59, 130, 246, 0.2);
     color: #60a5fa;
     border: 1px solid rgba(59, 130, 246, 0.3);
+}
+
+[data-appearance="dark"] .t-badge-purple {
+    background-color: rgba(139, 92, 246, 0.2);
+    color: #a78bfa;
+    border: 1px solid rgba(139, 92, 246, 0.3);
+}
+
+[data-appearance="dark"] .t-badge-cyan {
+    background-color: rgba(6, 182, 212, 0.2);
+    color: #22d3ee;
+    border: 1px solid rgba(6, 182, 212, 0.3);
 }
 
 [data-appearance="dark"] .t-badge-yellow {
@@ -325,4 +347,25 @@ i {
     background-color: rgba(156, 163, 175, 0.2);
     color: #9ca3af;
     border: 1px solid rgba(156, 163, 175, 0.3);
+}
+
+/* 统一歌曲列表中各徽标（音乐源/音质/服务器状态）的标准尺寸与排版 */
+.song-tag {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 17px;
+    padding: 0 4.5px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    white-space: nowrap;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    border-width: 1px;
+    border-style: solid;
+    user-select: none;
+    letter-spacing: 0.01em;
+    vertical-align: middle;
 }
