@@ -5850,39 +5850,59 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
-      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session，支持账号密码登录）
+      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session，支持用户账号登录 / 播放器访问密码双模式）
       if (pathname === '/api/music/auth' && req.method === 'POST') {
         void readBody(req).then(body => {
           try {
-            const { password, username } = JSON.parse(body)
-            const correctPassword = global.lx.config['player.password'] || ''
-            let matchedUser: any = null
-            if (username) {
-              matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
-            } else {
-              matchedUser = (global.lx.config.users || []).find((u: any) => u.password === password)
+            const { password, username, mode } = JSON.parse(body)
+            const correctPlayerPassword = global.lx.config['player.password'] || ''
+            const isPlayerMode = mode === 'player' || (!username && mode !== 'user')
+
+            // 1. 播放器访问密码模式（无账号访客进入）
+            if (isPlayerMode) {
+              if (correctPlayerPassword && password === correctPlayerPassword) {
+                const sessionId = generateSessionId()
+                playerSessions.set(sessionId, { createdAt: Date.now(), user: null })
+                loginLog.info(`Player guest login success from ${ip}`)
+                res.writeHead(200, {
+                  'Content-Type': 'application/json',
+                  'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
+                })
+                res.end(JSON.stringify({
+                  success: true,
+                  mode: 'player',
+                  username: null,
+                  token: null
+                }))
+                return
+              } else {
+                loginLog.warn(`Player guest login failed from ${ip}`)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: '播放器访问密码错误' }))
+                return
+              }
             }
 
-            if (matchedUser || (correctPassword && password === correctPassword)) {
+            // 2. 用户账号登录模式
+            const matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
+            if (matchedUser) {
               const sessionId = generateSessionId()
-              playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser ? matchedUser.name : null })
-              loginLog.info(`Player login success (${matchedUser ? matchedUser.name : 'guest'}) from ${ip}`)
-              let userToken: string | null = null
-              if (matchedUser) {
-                userToken = generateSessionId()
-                userSessions.set(userToken, { username: matchedUser.name, createdAt: Date.now() })
-              }
+              playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser.name })
+              loginLog.info(`Player login success (${matchedUser.name}) from ${ip}`)
+              const userToken = generateSessionId()
+              userSessions.set(userToken, { username: matchedUser.name, createdAt: Date.now() })
               res.writeHead(200, {
                 'Content-Type': 'application/json',
                 'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
               })
               res.end(JSON.stringify({
                 success: true,
-                username: matchedUser ? matchedUser.name : null,
+                mode: 'user',
+                username: matchedUser.name,
                 token: userToken
               }))
             } else {
-              loginLog.warn(`Player login failed (${username || 'guest'}) from ${ip}`)
+              loginLog.warn(`Player user login failed (${username || 'unknown'}) from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '账号或密码错误' }))
             }
@@ -8886,8 +8906,10 @@ const cleanExpiredCacheFiles = () => {
       return
     }
 
-    const cacheBase = global.lx.cachePath || '/server/cache'
-    if (!fs.existsSync(cacheBase)) return
+    const cacheDirs = [
+      path.join(process.cwd(), 'cache'),
+      path.join(global.lx.dataPath, 'cache'),
+    ]
     const now = Date.now()
     let totalCleaned = 0
     let totalBytesFreed = 0
@@ -8914,7 +8936,10 @@ const cleanExpiredCacheFiles = () => {
       }
     }
 
-    scanAndClean(cacheBase)
+    const uniqueDirs = Array.from(new Set(cacheDirs))
+    for (const d of uniqueDirs) {
+      scanAndClean(d)
+    }
     if (totalCleaned > 0) {
       const retentionDays = Math.round(retentionMs / (24 * 60 * 60 * 1000))
       console.log(`[文件缓存] [${retentionDays}天过期清理] 成功清理 ${totalCleaned} 个过期缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
