@@ -10,7 +10,7 @@ To ensure security, server endpoints enforce different authentication mechanisms
 
 1. **Administrator Authentication (`x-frontend-auth`)**:
    - Header: `x-frontend-auth: <Admin Password>`
-   - Uses the master administrator password (`frontend.password`). Required for global configurations, user administration, file manager, WebDAV backup/restore, and server process restarts.
+   - Uses the master administrator password (`admin.password`). Required for global configurations, user administration, file manager, WebDAV backup/restore, and server process restarts.
 2. **User Token Authentication (`x-user-token`)**:
    - Header: `x-user-token: <Token>` or Query string: `?token=<Token>` for stream endpoints.
    - Uses a session token issued upon login or a persistent API token. Used for operating user-specific playlists, favorite libraries, dislike rules, cache management, and sound effects.

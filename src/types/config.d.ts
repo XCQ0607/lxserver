@@ -160,9 +160,9 @@ declare namespace LX {
     users: UserConfig[]
 
     /**
-     * 前端访问密码
+     * 管理员密码（用于登录管理控制台和在音乐播放器界面登录管理员）
      */
-    'frontend.password'?: string
+    'admin.password'?: string
 
     /**
      * 是否启用 WebDAV 同步服务

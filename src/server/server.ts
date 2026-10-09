@@ -1325,7 +1325,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         void readBody(req).then(body => {
           try {
             const { password } = JSON.parse(body)
-            if (password === global.lx.config['frontend.password']) {
+            if (password === global.lx.config['admin.password']) {
               loginLog.info(`Admin login success from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
@@ -1347,7 +1347,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 获取服务器状态
       if (pathname === '/api/status' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -1419,7 +1419,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/users') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -1685,7 +1685,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/data' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -1747,7 +1747,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 获取快照列表
       if (pathname === '/api/data/snapshots' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -1789,7 +1789,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 下载快照数据
       if (pathname === '/api/data/snapshot' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -1841,7 +1841,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 恢复快照
       if (pathname === '/api/data/restore-snapshot' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -2038,7 +2038,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 删除快照 API
       if (pathname === '/api/data/delete-snapshot' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -2081,7 +2081,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 上传快照 API
       if (pathname === '/api/data/upload-snapshot' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
         const time = parseInt(urlObj.searchParams.get('time') || '0')
         const filename = urlObj.searchParams.get('filename')
@@ -2262,7 +2262,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const targetUserParam = urlObj.searchParams.get('user')
         const reqUsername = (req.headers['x-user-name'] as string) || targetUserParam || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         let username: string | null = null
 
         const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
@@ -2306,7 +2306,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const targetUserParam = urlObj.searchParams.get('user')
         const reqUsername = (req.headers['x-user-name'] as string) || targetUserParam || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         let username: string | null = null
 
         const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
@@ -2318,7 +2318,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, error: '权限不足：未开启公开访问。' }))
             return
           }
-          if (auth !== global.lx.config['frontend.password']) {
+          if (auth !== global.lx.config['admin.password']) {
             res.writeHead(403, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, error: '权限不足：公共歌单修改受限，请先验证管理员身份。' }))
             return
@@ -2364,7 +2364,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userParam = url.searchParams.get('user') || ''
         const reqUsername = (req.headers['x-user-name'] as string) || userParam
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
 
         const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
           global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verifyUserAuth(req)
@@ -2808,7 +2808,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (isPublic) {
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
               return
@@ -2857,7 +2857,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (isPublic) {
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
               return
@@ -3027,7 +3027,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           // 公开用户：若开启了限制，需要管理员密码
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, error: '权限不足：公共用户保存设置受限，请先验证管理员身份。' }))
               return
@@ -3364,7 +3364,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if ((pathname === '/api/tasks/status' || pathname === '/api/music/tasks/status') && req.method === 'GET') {
         const reqUsername = req.headers['x-user-name'] as string
         const isPublic = !reqUsername || reqUsername === 'default'
-        
+
         if (!isPublic && !verifyUserAuth(req)) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
@@ -3381,11 +3381,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if ((pathname === '/api/tasks/trigger' || pathname === '/api/music/tasks/trigger') && req.method === 'POST') {
         const reqUsername = req.headers['x-user-name'] as string
         const isPublic = !reqUsername || reqUsername === 'default'
-        
+
         if (isPublic) {
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限不足：受限模式下需要管理员权限' }))
               return
@@ -3415,7 +3415,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // GET  /api/tasks/user-data?task=<taskId>  → 返回当前用户该任务的状态数据
       // POST /api/tasks/user-data?task=<taskId>  → 更新（如清除红点）
       if ((pathname === '/api/tasks/user-data' || pathname === '/api/music/tasks/user-data') &&
-          (req.method === 'GET' || req.method === 'POST')) {
+        (req.method === 'GET' || req.method === 'POST')) {
         const reqUsername = req.headers['x-user-name'] as string
         const isPublic = !reqUsername || reqUsername === 'default'
         let targetUser = '_open'
@@ -3615,7 +3615,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 // 公开用户：需要管理员密码才能修改
                 if (isPublic && global.lx.config['user.enablePublicRestriction']) {
                   const auth = req.headers['x-frontend-auth']
-                  if (auth !== global.lx.config['frontend.password']) {
+                  if (auth !== global.lx.config['admin.password']) {
                     res.writeHead(403, { 'Content-Type': 'application/json' })
                     res.end(JSON.stringify({ success: false, error: '权限不足：公共用户修改缓存位置受限，请输入管理员密码。' }))
                     return
@@ -3812,7 +3812,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/subdirs/rename' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
         let username = '_open'
 
@@ -3854,7 +3854,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 检查文件夹是否有效
       if (pathname === '/api/utils/check-dir' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
           return
@@ -3893,7 +3893,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/subdirs/delete' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
         let username = '_open'
 
@@ -4023,7 +4023,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
         const auth = req.headers['x-frontend-auth']
         const isPublic = username === '_open'
-        const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
+        const isAdmin = auth === global.lx.config['admin.password'] || username === 'admin'
         const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
         const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
 
@@ -4040,7 +4040,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (concurrency !== undefined) serverDownloadQueue.setConcurrency(username, concurrency)
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth === global.lx.config['frontend.password']) {
+              if (auth === global.lx.config['admin.password']) {
                 const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
                 if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
               }
@@ -4148,7 +4148,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             const auth = req.headers['x-frontend-auth']
-            const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
+            const isAdmin = auth === global.lx.config['admin.password'] || username === 'admin'
             const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
             const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
 
@@ -4159,7 +4159,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth === global.lx.config['frontend.password']) {
+              if (auth === global.lx.config['admin.password']) {
                 const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
                 if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
               }
@@ -4441,7 +4441,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const targetUserParam = urlObj.searchParams.get('user')
         const reqUsername = targetUserParam || (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open' || targetUserParam === '_open'
         let username = '_open'
 
@@ -4527,7 +4527,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/remove' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
         let username = '_open'
 
@@ -5703,7 +5703,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/data/delete-playlist' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5742,7 +5742,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 删除歌曲
       if (pathname === '/api/data/delete-song' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5796,7 +5796,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 重命名歌单
       if (pathname === '/api/data/rename-playlist' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5850,7 +5850,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 批量删除歌曲
       if (pathname === '/api/data/batch-delete-songs' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -6877,7 +6877,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 管理员身份验证接口
       if (pathname === '/api/admin/verify' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth === global.lx.config['frontend.password']) {
+        if (auth === global.lx.config['admin.password']) {
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
         } else {
@@ -6895,7 +6895,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname.startsWith('/api/custom-source/') && req.method === 'POST' && pathname !== '/api/custom-source/validate') {
         if (global.lx.config['user.enablePublicRestriction']) {
           const auth = req.headers['x-frontend-auth']
-          const isAdmin = auth === global.lx.config['frontend.password']
+          const isAdmin = auth === global.lx.config['admin.password']
           const user = verifyUserAuth(req)
           if (!isAdmin && !user) {
             res.writeHead(403, { 'Content-Type': 'application/json' })
@@ -6917,7 +6917,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         // 鉴权逻辑：如果开启了页面公开访问限制
         if (global.lx.config['user.enablePublicRestriction']) {
           const auth = req.headers['x-frontend-auth']
-          const isAdmin = auth === global.lx.config['frontend.password']
+          const isAdmin = auth === global.lx.config['admin.password']
           const user = verifyUserAuth(req)
           if (!isAdmin && !user) {
             res.writeHead(403, { 'Content-Type': 'application/json' })
@@ -6947,7 +6947,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         // [修改] 优先从 Header 获取，如果没有则尝试从 URL 参数获取 (用于支持下载和预览)
         const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
 
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7105,7 +7105,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Configuration API
       if (pathname === '/api/config') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7131,8 +7131,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
             'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
-                'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
-            'frontend.password': global.lx.config['frontend.password'],
+            'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
+            'admin.password': global.lx.config['admin.password'],
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
             'player.password': global.lx.config['player.password'] || '',
             'webdav.enable': global.lx.config['webdav.enable'] ?? false,
@@ -7246,7 +7246,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   warning += '检测到重复密码！开启“根路径”模式要求所有用户密码唯一，否则可能导致连接错误。'
                 }
               }
-              if (newConfig['frontend.password'] !== undefined) global.lx.config['frontend.password'] = newConfig['frontend.password']
+              if (newConfig['admin.password'] !== undefined) global.lx.config['admin.password'] = newConfig['admin.password']
 
               // Web播放器配置
               if (newConfig['player.enableAuth'] !== undefined) global.lx.config['player.enableAuth'] = newConfig['player.enableAuth']
@@ -7278,18 +7278,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = validateAndCleanProxy(newConfig['proxy.all.address'])
-              // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
-              ;(['music', 'customSource', 'app'] as const).forEach(cat => {
-                const cfg: any = global.lx.config
-                const kEnabled = `proxy.${cat}.enabled`
-                const kAddress = `proxy.${cat}.address`
-                if (newConfig[kEnabled] !== undefined) {
-                  cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
-                }
-                if (newConfig[kAddress] !== undefined) {
-                  cfg[kAddress] = newConfig[kAddress] === null ? '' : validateAndCleanProxy(newConfig[kAddress])
-                }
-              })
+                // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
+                ; (['music', 'customSource', 'app'] as const).forEach(cat => {
+                  const cfg: any = global.lx.config
+                  const kEnabled = `proxy.${cat}.enabled`
+                  const kAddress = `proxy.${cat}.address`
+                  if (newConfig[kEnabled] !== undefined) {
+                    cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
+                  }
+                  if (newConfig[kAddress] !== undefined) {
+                    cfg[kAddress] = newConfig[kAddress] === null ? '' : validateAndCleanProxy(newConfig[kAddress])
+                  }
+                })
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
                 const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
@@ -7465,7 +7465,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
                 'debug.enabled': global.lx.config['debug.enabled'] || false,
                 disableTelemetry: global.lx.config.disableTelemetry,
-                'frontend.password': global.lx.config['frontend.password'],
+                'admin.password': global.lx.config['admin.password'],
                 'player.enableAuth': global.lx.config['player.enableAuth'],
                 'player.password': global.lx.config['player.password'],
                 'webdav.enable': global.lx.config['webdav.enable'],
@@ -7565,7 +7565,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 获取备份列表及状态
       if (pathname === '/api/config/backups' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7635,7 +7635,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 手动立即备份
       if (pathname === '/api/config/backup-now' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7665,7 +7665,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 下载指定备份文件
       if (pathname === '/api/config/backups/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7705,7 +7705,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 删除指定备份文件
       if (pathname.startsWith('/api/config/backups/') && req.method === 'DELETE') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7741,7 +7741,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 从备份文件还原配置
       if (pathname === '/api/config/backups/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7795,7 +7795,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Test Proxy API
       if (pathname === '/api/config/test-proxy' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7848,7 +7848,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Logs API
       if (pathname === '/api/logs' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7877,7 +7877,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Stats API
       if (pathname === '/api/stats' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7901,7 +7901,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Test Connection API
       if (pathname === '/api/webdav/test' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7924,7 +7924,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Sync File API
       if (pathname === '/api/webdav/sync-file' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7961,7 +7961,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Backup API
       if (pathname === '/api/webdav/backup' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7986,7 +7986,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Sync All Files API
       if (pathname === '/api/webdav/sync' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8009,7 +8009,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Backups List API
       if (pathname === '/api/webdav/backups' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8038,7 +8038,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Delete Backup API
       if (pathname === '/api/webdav/backup' && req.method === 'DELETE') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8083,7 +8083,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Restore API
       if (pathname === '/api/webdav/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8122,7 +8122,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Logs API
       if (pathname === '/api/webdav/logs' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8146,7 +8146,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Progress SSE API
       if (pathname === '/api/webdav/progress' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8180,7 +8180,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 本地备份下载 API
       if (pathname === '/api/backup/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401); res.end('Unauthorized'); return
         }
 
@@ -8215,7 +8215,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 本地备份还原 API
       if (pathname === '/api/backup/upload' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401); res.end('Unauthorized'); return
         }
 
@@ -8257,7 +8257,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 管理重载 API
       if (pathname === '/api/admin/reload' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401); res.end('Unauthorized'); return
         }
 
@@ -8274,7 +8274,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Restart Server API
       if (pathname === '/api/restart' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8306,7 +8306,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - List Files
       if (pathname === '/api/files' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8349,7 +8349,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - Download File
       if (pathname === '/api/files/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8381,7 +8381,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - Create/Update File
       if (pathname === '/api/files' && (req.method === 'POST' || req.method === 'PUT')) {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8421,7 +8421,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - Delete File
       if (pathname === '/api/files' && req.method === 'DELETE') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return

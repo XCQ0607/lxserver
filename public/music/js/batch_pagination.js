@@ -375,6 +375,9 @@ function updatePaginationInfo(start, end, total, current, totalPages) {
 function goToResultPage(page) {
     currentPage = page;
     window.currentPage = page;
+    if (window.savedNetworkSearchState && window.currentSearchScope === 'network') {
+        window.savedNetworkSearchState.page = page;
+    }
     renderResults(window.viewingPlaylist);
     scrollToSearchResultsTop();
 }

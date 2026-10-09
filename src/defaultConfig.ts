@@ -39,7 +39,7 @@ const config: LX.Config = {
     // },
   ],
 
-  'frontend.password': '123456',
+  'admin.password': '123456',
 
   // WebDAV 配置
   'webdav.enable': false,

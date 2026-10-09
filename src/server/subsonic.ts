@@ -45,15 +45,15 @@ const musicSdk = musicSdkRaw as any
 
 // 服务端签名票据密钥
 // ─────────────────────────────────────────────
-// 进程级随机密钥备选（当未设置 frontend.password 时使用，避免硬编码常数字符串）
+// 进程级随机密钥备选（当未设置 admin.password 时使用，避免硬编码常数字符串）
 const processRandomSecret = crypto.randomBytes(32).toString('hex')
 
 function serverTicketSecret(): string {
-    return String((global.lx.config as any)?.['frontend.password'] || processRandomSecret)
+    return String((global.lx.config as any)?.['admin.password'] || processRandomSecret)
 }
 
 function radioTicketSecret(): string {
-    return String((global.lx.config as any)?.['frontend.password'] || processRandomSecret)
+    return String((global.lx.config as any)?.['admin.password'] || processRandomSecret)
 }
 
 /** 把错误原因压成可安全回传给客户端的一小段文本（截断 + 打码常见密钥参数） */
@@ -152,7 +152,7 @@ async function probeFfmpeg(): Promise<boolean> {
 class TranscodeSemaphore {
     private active = 0
     private queue: Array<() => void> = []
-    constructor(private max: number) {}
+    constructor(private max: number) { }
     async acquire(): Promise<void> {
         if (this.active < this.max) { this.active++; return }
         await new Promise<void>((resolve) => this.queue.push(resolve))
@@ -1311,8 +1311,8 @@ class SubsonicHandler {
                     return this.handleGetIndexes(res, username, format)
 
                 case 'startScan':
-                    // [新增] 本服曲库是在线聚合、无常驻扫描任务，返回 ok 只是为了不让客户端
-                    // 因 "Method not found" 报错；真实状态由 getScanStatus 统一返回（恒为未扫描）。
+                // [新增] 本服曲库是在线聚合、无常驻扫描任务，返回 ok 只是为了不让客户端
+                // 因 "Method not found" 报错；真实状态由 getScanStatus 统一返回（恒为未扫描）。
                 case 'getScanStatus':
                     return this.sendResponse(res, format === 'json'
                         ? { scanStatus: { scanning: false, count: 0 } }
@@ -2868,7 +2868,7 @@ class SubsonicHandler {
             if (type === 'random') {
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1))
-                    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+                        ;[pool[i], pool[j]] = [pool[j], pool[i]]
                 }
             }
 
@@ -5043,7 +5043,7 @@ class SubsonicHandler {
                     const shuffled = cloudSongs.slice()
                     for (let i = shuffled.length - 1; i > 0; i--) {
                         const j = Math.floor(Math.random() * (i + 1))
-                        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+                            ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
                     }
                     const picked = shuffled.slice(0, size).map((s: any) => ({ music: s, listId: parentId }))
                     return this.renderRandomSongs(res, picked, format, rootKey, username)
@@ -5156,7 +5156,7 @@ class SubsonicHandler {
             const a = arr.slice()
             for (let i = a.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1))
-                ;[a[i], a[j]] = [a[j], a[i]]
+                    ;[a[i], a[j]] = [a[j], a[i]]
             }
             return a
         }
@@ -5983,8 +5983,8 @@ class SubsonicHandler {
         const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] })
         const contentType = targetFormat === 'mp3' ? 'audio/mpeg'
             : targetFormat === 'opus' ? 'audio/ogg'
-            : targetFormat === 'aac' ? 'audio/aac'
-            : 'application/octet-stream'
+                : targetFormat === 'aac' ? 'audio/aac'
+                    : 'application/octet-stream'
 
         res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' })
 
@@ -6028,7 +6028,7 @@ class SubsonicHandler {
     ) {
         // [coverArtScaling] 客户端实际会带 size（实测 92/120 次请求带），此前被完全忽略
         const coverSize = Math.max(0, Math.min(parseInt(params.get('size') || '0') || 0, 1500))
-        ;(res as any).__coverSize = coverSize
+            ; (res as any).__coverSize = coverSize
 
         let id = params.get('id')
         if (!id) {

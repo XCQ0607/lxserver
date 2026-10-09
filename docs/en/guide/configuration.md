@@ -47,7 +47,7 @@ This module involves monitoring the status of connected clients and isolation sp
 
 | Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
 | :-------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FRONTEND_PASSWORD` | `123456` | String | **Control Panel Admin Password**. Used to log into the management console (default `/admin`). Recommended to modify immediately on setup. |
+| `ADMIN_PASSWORD` | `123456` | String | **Admin Password**. Used to log into the management console (default `/admin`) and the music player admin login. Recommended to modify immediately on setup. |
 | `MAX_SNAPSHOT_NUM` | `10` | Integer | **Time snapshot retention threshold setting**. The maximum allowed length of the historical archive snapshot queue retained by the system. Early histories exceeding this queue limit will be cyclically discarded by the underlying timed GC task. |
 | `DATA_PATH` | `./data` | String | **Data directory path**. Specifies where persistence data (users.json, snapshots) are stored. |
 | `LOG_PATH` | `./logs` | String | **Log directory path**. Specifies where system logs are stored. |

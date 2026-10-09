@@ -841,12 +841,12 @@ class App {
             </div>
             <div class="user-selection-grid fade-in">
                 ${this.allUsers.map(user => {
-                    const isPublic = user.name === '_open';
-                    const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
-                    const roleText = isPublic ? '公共数据与歌单' : '用户数据';
-                    const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size: 1.5rem;' : '';
-                    const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
-                    return `
+            const isPublic = user.name === '_open';
+            const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
+            const roleText = isPublic ? '公共数据与歌单' : '用户数据';
+            const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size: 1.5rem;' : '';
+            const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
+            return `
                     <div class="user-select-card" onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
                         <div class="avatar" style="${avatarStyle}">${avatarHtml}</div>
                         <div class="name">${displayName}</div>
@@ -2425,7 +2425,7 @@ class App {
             if (form.elements['singer.sourcePriority']) {
                 form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
             }
-            form.elements['frontend.password'].value = config['frontend.password'] || '';
+            form.elements['admin.password'].value = config['admin.password'] || '';
 
             // Web播放器配置
             if (form.elements['player.enableAuth']) {
@@ -3053,7 +3053,7 @@ class App {
             'user.enableLoginCacheRestriction': formData.get('user.enableLoginCacheRestriction') === 'on',
             'user.enableCacheSizeLimit': formData.get('user.enableCacheSizeLimit') === 'on',
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,
-            'frontend.password': formData.get('frontend.password'),
+            'admin.password': formData.get('admin.password'),
             'player.enableAuth': formData.get('player.enableAuth') === 'on',
             'player.password': formData.get('player.password'),
             'webdav.enable': formData.get('webdav.enable') === 'on',
@@ -3123,9 +3123,9 @@ class App {
             });
 
             // 如果密码改了，更新本地存储
-            if (config['frontend.password'] && config['frontend.password'] !== this.password) {
-                this.password = config['frontend.password'];
-                localStorage.setItem('lx_auth', config['frontend.password']);
+            if (config['admin.password'] && config['admin.password'] !== this.password) {
+                this.password = config['admin.password'];
+                localStorage.setItem('lx_auth', config['admin.password']);
             }
 
             // 更新侧边栏播放器链接

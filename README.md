@@ -207,7 +207,7 @@ services:
       - ./music:/server/music
     environment:
       - NODE_ENV=production
-      # - FRONTEND_PASSWORD=123456
+      # - ADMIN_PASSWORD=123456
       # - ENABLE_WEBPLAYER_AUTH=true
       # - WEBPLAYER_PASSWORD=yourpassword
       # - ADMIN_PATH=/music
@@ -280,7 +280,7 @@ npm start
 | `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
 | `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
 | `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
-| `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
+| `ADMIN_PASSWORD`                      | `admin.password`                   | 管理员密码（用于登录控制台和音乐播放器管理员登录）                  | `123456`         |
 | `SERVER_NAME`                         | `serverName`                       | 同步服务名称                                                       | `lxserver`       |
 | `ENABLE_DEBUG`                        | `debug.enabled`                    | 是否启用 DEBUG 模式 (开启后输出详细调试日志与音源内部日志，默认关闭) | `false`          |
 | `MAX_SNAPSHOT_NUM`                    | `maxSnapshotNum`                   | 保留的最大快照数量                                                 | `10`             |

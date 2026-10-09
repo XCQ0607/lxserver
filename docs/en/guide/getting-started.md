@@ -78,7 +78,7 @@ services:
       - ./music:/server/music
     environment:
       - NODE_ENV=production
-      # - FRONTEND_PASSWORD=123456
+      # - ADMIN_PASSWORD=123456
       # - ENABLE_WEBPLAYER_AUTH=true
       # - WEBPLAYER_PASSWORD=yourpassword
 ```

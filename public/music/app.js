@@ -1733,15 +1733,42 @@ function switchTab(tabId) {
         currentSearchScope = 'network';
         document.getElementById('search-source').classList.remove('hidden');
         document.getElementById('search-type').classList.remove('hidden');
+        document.getElementById('page-title').innerText = "搜索音乐";
+        if (typeof hideAlbumDetailHeader === 'function') hideAlbumDetailHeader();
+        if (typeof hideArtistDetailHeader === 'function') hideArtistDetailHeader();
+
         const searchInput = document.getElementById('search-input');
-        if (searchInput) {
-            searchInput.placeholder = "搜索歌曲、歌手...";
-            // 如果搜索框内容为空，则展示初始热搜状态，避免由于重用搜索界面展示本地列表导致的残留
-            if (!searchInput.value.trim()) {
-                showInitialSearchState();
+        const searchTypeEl = document.getElementById('search-type');
+        const searchSourceEl = document.getElementById('search-source');
+
+        // 如果存在已保存的网络搜索结果且有效，直接无缝恢复，不发网络请求
+        if (window.savedNetworkSearchState && window.savedNetworkSearchState.list && window.savedNetworkSearchState.list.length > 0) {
+            const state = window.savedNetworkSearchState;
+            if (searchInput) searchInput.value = state.keyword || '';
+            if (searchTypeEl && state.type) searchTypeEl.value = state.type;
+            if (searchSourceEl && state.source) searchSourceEl.value = state.source;
+            window.lastSearchMeta = state.meta;
+            window.serverPagedSearch = state.serverPagedSearch;
+            window.viewingPlaylist = state.list;
+            currentPage = state.page || 1;
+            window.currentPage = currentPage;
+
+            if (state.type === 'singer') {
+                renderSingerResults(state.list);
+            } else if (state.type === 'album') {
+                renderAlbumResults(state.list);
+            } else {
+                renderResults(state.list);
+            }
+        } else {
+            if (searchInput) {
+                searchInput.placeholder = "搜索歌曲、歌手...";
+                // 如果搜索框内容为空，则展示初始热搜状态，避免由于重用搜索界面展示本地列表导致的残留
+                if (!searchInput.value.trim()) {
+                    showInitialSearchState();
+                }
             }
         }
-        document.getElementById('page-title').innerText = "搜索音乐";
     }
 
     if (tabId === 'songlist') {
@@ -2267,6 +2294,7 @@ async function doSearch(page = 1, append = false) {
     window.serverPagedSearch = appendableServerSearch;
 
     if (!input) {
+        window.savedNetworkSearchState = null;
         showInitialSearchState();
         return;
     }
@@ -2351,6 +2379,15 @@ async function doSearch(page = 1, append = false) {
                 if (type === 'singer') renderSingerResults(combinedList);
                 else if (type === 'album') renderAlbumResults(combinedList);
                 else renderResults(combinedList);
+                window.savedNetworkSearchState = {
+                    keyword: input,
+                    source: source,
+                    type: type,
+                    list: combinedList,
+                    page: currentPage,
+                    meta: window.lastSearchMeta || null,
+                    serverPagedSearch: window.serverPagedSearch
+                };
             } else {
                 showInfo('没有更多搜索结果了');
             }
@@ -2361,6 +2398,15 @@ async function doSearch(page = 1, append = false) {
             if (type === 'song' && window.lastSearchMeta && window.lastSearchMeta.hasMore) {
                 showInfo(`该平台报 ${window.lastSearchMeta.total} 条，本次取到 ${list.length} 条（受平台页数墙与取数预算限制，未全部取回）`);
             }
+            window.savedNetworkSearchState = {
+                keyword: input,
+                source: source,
+                type: type,
+                list: list,
+                page: currentPage,
+                meta: window.lastSearchMeta || null,
+                serverPagedSearch: window.serverPagedSearch
+            };
         }
     } catch (e) {
         console.error('[Search] 搜索失败:', e);
@@ -4425,6 +4471,27 @@ function goBackToSearch(fromPopState = false) {
             if (currentSearchScope === 'lib_artists') pageInfoEl.innerText = `收藏歌手`;
             else if (currentSearchScope === 'lib_albums') pageInfoEl.innerText = `收藏专辑`;
             else pageInfoEl.innerText = `搜索结果`;
+        }
+    } else if (window.savedNetworkSearchState && window.savedNetworkSearchState.list && window.savedNetworkSearchState.list.length > 0) {
+        const state = window.savedNetworkSearchState;
+        const searchInput = document.getElementById('search-input');
+        const searchTypeEl = document.getElementById('search-type');
+        const searchSourceEl = document.getElementById('search-source');
+        if (searchInput) searchInput.value = state.keyword || '';
+        if (searchTypeEl && state.type) searchTypeEl.value = state.type;
+        if (searchSourceEl && state.source) searchSourceEl.value = state.source;
+        window.lastSearchMeta = state.meta;
+        window.serverPagedSearch = state.serverPagedSearch;
+        window.viewingPlaylist = state.list;
+        currentPage = state.page || 1;
+        window.currentPage = currentPage;
+
+        if (state.type === 'singer') {
+            renderSingerResults(state.list);
+        } else if (state.type === 'album') {
+            renderAlbumResults(state.list);
+        } else {
+            renderResults(state.list);
         }
     } else {
         // 兜底：若暂存列表丢失，根据搜索框内容重新搜索

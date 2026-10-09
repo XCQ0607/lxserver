@@ -94,9 +94,9 @@ module.exports = {
   // 说明：仅收集版本号、运行环境（Docker/Node）、OS类型等非敏感信息用于项目改进。绝对匿名，不收集IP。
   "disableTelemetry": false,
 
-  // 前端管理控制台访问密码
-  // 环境变量: FRONTEND_PASSWORD
-  "frontend.password": "123456",
+  // 管理员密码（用于登录管理控制台和在音乐播放器界面登录管理员）
+  // 环境变量: ADMIN_PASSWORD
+  "admin.password": "123456",
 
   // 用户列表
   // 环境变量: LX_USER_<用户名>=<密码> (例如: LX_USER_user1=123456)

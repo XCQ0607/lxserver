@@ -6,7 +6,7 @@ LX Sync Server 提供了多种 RESTful 风格的 API 接口，用于自动化获
 
 为了确保安全性，API 要求进行鉴权。目前主要支持以下两种鉴权方式：
 
-1. **管理员鉴权 (`x-frontend-auth`)**: 使用管理终端的全局口令（`frontend.password`）。用于敏感的服务控制、用户管理及全局数据提取。
+1. **管理员鉴权 (`x-admin-auth`)**: 使用管理终端的全局口令（`admin.password`）。用于敏感的服务控制、用户管理及全局数据提取。
 2. **用户 Token 鉴权 (`x-user-token`)**: 使用通过登录接口获取的动态 Session Token 或管理面板生成的持久化 API Token。用于操作特定用户的数据（如歌单、设置、缓存等）。
 
 所有接口如无特殊说明均**使用 JSON 作为请求体及响应体**类型 (`Content-Type: application/json`)。
