@@ -99,7 +99,7 @@ const serializeDislikeRules = (rules: string, username?: string) => {
 }
 
 // ===== Player Session Store =====
-const playerSessions = new Map<string, { createdAt: number }>()
+const playerSessions = new Map<string, { createdAt: number, user?: string | null }>()
 const SESSION_TTL = 24 * 60 * 60 * 1000 // 24小时
 const SESSION_COOKIE_NAME = 'lx_player_session'
 
@@ -220,19 +220,22 @@ const parseCookies = (cookieHeader: string | undefined): Record<string, string> 
   )
 }
 
-/** 检查请求是否携带有效的 Player Session Cookie */
+/** 检查请求是否携带有效的 Player Session Cookie 或有效的用户凭证 */
 const checkPlayerAuth = (req: IncomingMessage): boolean => {
   if (!global.lx.config['player.enableAuth']) return true // 未开启认证，直接放行
   const cookies = parseCookies(req.headers['cookie'])
   const sessionId = cookies[SESSION_COOKIE_NAME]
-  if (!sessionId) return false
-  const session = playerSessions.get(sessionId)
-  if (!session) return false
-  if (Date.now() - session.createdAt > SESSION_TTL) {
-    playerSessions.delete(sessionId)
-    return false
+  if (sessionId) {
+    const session = playerSessions.get(sessionId)
+    if (session && Date.now() - session.createdAt <= SESSION_TTL) {
+      return true
+    }
+    if (session) playerSessions.delete(sessionId)
   }
-  return true
+  // Safari / Token 备选鉴权: 若 Cookie 丢失但请求中携带了有效的用户 Token
+  const user = verifyUserAuth(req)
+  if (user) return true
+  return false
 }
 
 /** 定期清理过期 Session（每小时） */
@@ -708,6 +711,8 @@ const reloadServerData = async () => {
           backupInterval: global.lx.config['sync.backupInterval'],
         })
       }
+      // 刷新缓存位置映射，使 _open 等未自定义位置的用户回退到最新的全局 serverCacheLocation
+      fileCache.invalidateUserCacheLocations()
       startupLog.info(`Config re-loaded and merged from ${configPath}.`)
     } catch (err: any) {
       startupLog.error('Failed to reload config file:', err.message)
@@ -3057,6 +3062,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
 
+            if (settings.serverCacheLocation !== undefined) {
+              fileCache.setUserCacheLocation(resolvedUsername!, settings.serverCacheLocation)
+            }
+            if (settings.serverCacheNamingPattern !== undefined) {
+              fileCache.setUserNamingPattern(resolvedUsername!, settings.serverCacheNamingPattern)
+            }
+
             // 如果更新了网络歌单自动检测设置，同步更新后台任务调度器
             if (settings.networkListAutoCheckInterval !== undefined || settings.autoUpdateNetworkList !== undefined) {
               const taskConfig: { intervalMs?: number; enabled?: boolean } = {}
@@ -3569,8 +3581,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] File Cache APIs
       // 1. Config Cache Location
       if (pathname === '/api/music/cache/config' && req.method === 'POST') {
-        const reqUsername = req.headers['x-user-name'] as string
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
 
         // 具名用户必须通过 Token（或兼容密码）验证身份
         if (!isPublic) {
@@ -3580,6 +3593,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
           }
+          username = verified
         }
 
         void readBody(req).then(async body => {
@@ -3587,8 +3601,17 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const { location, namingPattern } = JSON.parse(body)
             let updated = false
 
+            const userSpace = getUserSpace(username)
+            const settingsPath = path.join(userSpace.dataManage.userDir, File.userSettingsJSON)
+            let userSettings: any = {}
+            if (fs.existsSync(settingsPath)) {
+              try {
+                userSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+              } catch (e) { }
+            }
+
             if (location) {
-              if (location !== fileCache.getCacheLocation()) {
+              if (location !== fileCache.getUserCacheLocation(username)) {
                 // 公开用户：需要管理员密码才能修改
                 if (isPublic && global.lx.config['user.enablePublicRestriction']) {
                   const auth = req.headers['x-frontend-auth']
@@ -3598,18 +3621,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                     return
                   }
                 }
-                fileCache.setCacheLocation(location)
+                fileCache.setUserCacheLocation(username, location)
+                userSettings.serverCacheLocation = location
                 updated = true
               }
             }
 
             if (namingPattern) {
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              const normalizedNamingPattern = fileCache.setUserNamingPattern(username, namingPattern)
+              userSettings.serverCacheNamingPattern = normalizedNamingPattern
               updated = true
             }
 
             if (updated) {
+              fs.writeFileSync(settingsPath, JSON.stringify(userSettings, null, 2), 'utf8')
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
             } else {
@@ -3644,7 +3669,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        const effectiveLocation = locationQuery || fileCache.getCacheLocation()
+        const effectiveLocation = locationQuery || fileCache.getUserCacheLocation(username)
         const cacheDir = fileCache.getCacheDir(username, false, effectiveLocation)
         const downloadDir = fileCache.getCacheDir(username, true, effectiveLocation)
 
@@ -5838,26 +5863,61 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
-      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session）
+      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session，支持用户账号登录 / 播放器访问密码双模式）
       if (pathname === '/api/music/auth' && req.method === 'POST') {
         void readBody(req).then(body => {
           try {
-            const { password } = JSON.parse(body)
-            const correctPassword = global.lx.config['player.password'] || ''
+            const { password, username, mode } = JSON.parse(body)
+            const correctPlayerPassword = global.lx.config['player.password'] || ''
+            const isPlayerMode = mode === 'player' || (!username && mode !== 'user')
 
-            if (password === correctPassword) {
+            // 1. 播放器访问密码模式（无账号访客进入）
+            if (isPlayerMode) {
+              if (correctPlayerPassword && password === correctPlayerPassword) {
+                const sessionId = generateSessionId()
+                playerSessions.set(sessionId, { createdAt: Date.now(), user: null })
+                loginLog.info(`Player guest login success from ${ip}`)
+                res.writeHead(200, {
+                  'Content-Type': 'application/json',
+                  'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
+                })
+                res.end(JSON.stringify({
+                  success: true,
+                  mode: 'player',
+                  username: null,
+                  token: null
+                }))
+                return
+              } else {
+                loginLog.warn(`Player guest login failed from ${ip}`)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: '播放器访问密码错误' }))
+                return
+              }
+            }
+
+            // 2. 用户账号登录模式
+            const matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
+            if (matchedUser) {
               const sessionId = generateSessionId()
-              playerSessions.set(sessionId, { createdAt: Date.now() })
-              loginLog.info(`Player login success from ${ip}`)
+              playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser.name })
+              loginLog.info(`Player login success (${matchedUser.name}) from ${ip}`)
+              const userToken = generateSessionId()
+              userSessions.set(userToken, { username: matchedUser.name, createdAt: Date.now() })
               res.writeHead(200, {
                 'Content-Type': 'application/json',
-                'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${SESSION_TTL / 1000}`
+                'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
               })
-              res.end(JSON.stringify({ success: true }))
+              res.end(JSON.stringify({
+                success: true,
+                mode: 'user',
+                username: matchedUser.name,
+                token: userToken
+              }))
             } else {
-              loginLog.warn(`Player login failed from ${ip}`)
+              loginLog.warn(`Player user login failed (${username || 'unknown'}) from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ success: false }))
+              res.end(JSON.stringify({ success: false, message: '账号或密码错误' }))
             }
           } catch (err: any) {
             res.writeHead(500)
@@ -5874,7 +5934,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (sessionId) playerSessions.delete(sessionId)
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Set-Cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0`
+          'Set-Cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=0`
         })
         res.end(JSON.stringify({ success: true }))
         return
@@ -6936,6 +6996,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
             'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
+                'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
             'frontend.password': global.lx.config['frontend.password'],
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
             'player.password': global.lx.config['player.password'] || '',
@@ -7030,6 +7091,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['user.enableLoginCacheRestriction'] !== undefined) global.lx.config['user.enableLoginCacheRestriction'] = newConfig['user.enableLoginCacheRestriction']
               if (newConfig['user.enableCacheSizeLimit'] !== undefined) global.lx.config['user.enableCacheSizeLimit'] = newConfig['user.enableCacheSizeLimit']
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
+              if (newConfig['cache.maxAgeDays'] !== undefined) global.lx.config['cache.maxAgeDays'] = Math.max(0, parseInt(newConfig['cache.maxAgeDays']) || 0)
               if (newConfig['system.allowUnsafeVM'] !== undefined) global.lx.config['system.allowUnsafeVM'] = newConfig['system.allowUnsafeVM']
 
               let warning = ''
@@ -7263,6 +7325,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
                 'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
                 'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
+                'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
                 maxSnapshotNum: global.lx.config.maxSnapshotNum,
                 'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
                 'debug.enabled': global.lx.config['debug.enabled'] || false,
@@ -8744,11 +8807,11 @@ export const startServer = async (port: number, ip: string) => {
     if (fs.existsSync(settingsPath)) {
       const savedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
       if (savedSettings.serverCacheLocation) {
-        fileCache.setCacheLocation(savedSettings.serverCacheLocation)
+        fileCache.setUserCacheLocation('_open', savedSettings.serverCacheLocation)
         console.log(`[缓存] 从配置恢复服务器缓存路径: ${savedSettings.serverCacheLocation}`)
       }
       if (savedSettings.serverCacheNamingPattern) {
-        const normalizedNamingPattern = fileCache.setNamingPattern(savedSettings.serverCacheNamingPattern)
+        const normalizedNamingPattern = fileCache.setUserNamingPattern('_open', savedSettings.serverCacheNamingPattern)
         console.log(`[缓存] 从配置恢复缓存文件命名模式: ${normalizedNamingPattern}`)
       }
     }
@@ -8838,3 +8901,70 @@ export const removeDevice = async (userName: string, clientId: string) => {
   const userSpace = getUserSpace(userName)
   await userSpace.removeDevice(clientId)
 }
+
+// ===== 缓存生命周期自动过期清理任务 (支持 0 永久保留) =====
+const getCacheRetentionMs = () => {
+  const daysConfig = global.lx.config && typeof global.lx.config['cache.maxAgeDays'] !== 'undefined'
+    ? Number(global.lx.config['cache.maxAgeDays'])
+    : 14
+  if (isNaN(daysConfig) || daysConfig <= 0) return 0 // 0 表示永久保留，不清理
+  return daysConfig * 24 * 60 * 60 * 1000
+}
+
+const cleanExpiredCacheFiles = async () => {
+  try {
+    const retentionMs = getCacheRetentionMs()
+    if (retentionMs === 0) {
+      // 设置为 0，永久保留缓存
+      return
+    }
+
+    const cacheDirs = [
+      path.join(process.cwd(), 'cache'),
+      path.join(global.lx.dataPath, 'cache'),
+    ]
+    const now = Date.now()
+    let totalCleaned = 0
+    let totalBytesFreed = 0
+
+    const scanAndCleanAsync = async (dir: string) => {
+      try {
+        const exists = await fs.promises.access(dir).then(() => true).catch(() => false)
+        if (!exists) return
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name)
+          if (entry.isDirectory()) {
+            await scanAndCleanAsync(fullPath)
+            await new Promise(resolve => setImmediate(resolve))
+          } else if (entry.isFile()) {
+            if (entry.name === 'cache_index.json' || entry.name.endsWith('.json')) continue
+            try {
+              const stats = await fs.promises.stat(fullPath)
+              const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
+              if (now - fileTime > retentionMs) {
+                await fs.promises.unlink(fullPath)
+                totalCleaned++
+                totalBytesFreed += stats.size
+              }
+            } catch (e) { }
+          }
+        }
+      } catch (e) { }
+    }
+
+    const uniqueDirs = Array.from(new Set(cacheDirs))
+    for (const d of uniqueDirs) {
+      await scanAndCleanAsync(d)
+    }
+    if (totalCleaned > 0) {
+      const retentionDays = Math.round(retentionMs / (24 * 60 * 60 * 1000))
+      console.log(`[文件缓存] [${retentionDays}天过期清理] 成功清理 ${totalCleaned} 个过期缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
+    }
+  } catch (err) {
+    console.error('[文件缓存] 自动清理异常:', err)
+  }
+}
+
+setTimeout(() => void cleanExpiredCacheFiles(), 10000)
+setInterval(() => void cleanExpiredCacheFiles(), 12 * 60 * 60 * 1000)

@@ -77,6 +77,10 @@ module.exports = {
   // 环境变量: CACHE_SIZE_LIMIT
   "user.cacheSizeLimit": 2000,
 
+  // 缓存文件自动保留天数 (单位: 天，0 为永久保留)
+  // 环境变量: CACHE_MAX_AGE_DAYS
+  "cache.maxAgeDays": 14,
+
   // 最大快照数 (用于数据回滚)
   // 环境变量: MAX_SNAPSHOT_NUM
   "maxSnapshotNum": 10,
