@@ -3060,6 +3060,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
 
+            if (settings.serverCacheLocation !== undefined) {
+              fileCache.setUserCacheLocation(resolvedUsername!, settings.serverCacheLocation)
+            }
+            if (settings.serverCacheNamingPattern !== undefined) {
+              fileCache.setUserNamingPattern(resolvedUsername!, settings.serverCacheNamingPattern)
+            }
+
             // 如果更新了网络歌单自动检测设置，同步更新后台任务调度器
             if (settings.networkListAutoCheckInterval !== undefined || settings.autoUpdateNetworkList !== undefined) {
               const taskConfig: { intervalMs?: number; enabled?: boolean } = {}
@@ -3572,8 +3579,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] File Cache APIs
       // 1. Config Cache Location
       if (pathname === '/api/music/cache/config' && req.method === 'POST') {
-        const reqUsername = req.headers['x-user-name'] as string
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
 
         // 具名用户必须通过 Token（或兼容密码）验证身份
         if (!isPublic) {
@@ -3583,15 +3591,25 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
           }
+          username = verified
         }
 
         void readBody(req).then(async body => {
           try {
-            const { location, namingPattern, maxAgeDays } = JSON.parse(body)
+            const { location, namingPattern } = JSON.parse(body)
             let updated = false
 
+            const userSpace = getUserSpace(username)
+            const settingsPath = path.join(userSpace.dataManage.userDir, File.userSettingsJSON)
+            let userSettings: any = {}
+            if (fs.existsSync(settingsPath)) {
+              try {
+                userSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+              } catch (e) { }
+            }
+
             if (location) {
-              if (location !== fileCache.getCacheLocation()) {
+              if (location !== fileCache.getUserCacheLocation(username)) {
                 // 公开用户：需要管理员密码才能修改
                 if (isPublic && global.lx.config['user.enablePublicRestriction']) {
                   const auth = req.headers['x-frontend-auth']
@@ -3601,18 +3619,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                     return
                   }
                 }
-                fileCache.setCacheLocation(location)
+                fileCache.setUserCacheLocation(username, location)
+                userSettings.serverCacheLocation = location
                 updated = true
               }
             }
 
             if (namingPattern) {
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              const normalizedNamingPattern = fileCache.setUserNamingPattern(username, namingPattern)
+              userSettings.serverCacheNamingPattern = normalizedNamingPattern
               updated = true
             }
 
             if (updated) {
+              fs.writeFileSync(settingsPath, JSON.stringify(userSettings, null, 2), 'utf8')
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
             } else {
@@ -3647,7 +3667,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        const effectiveLocation = locationQuery || fileCache.getCacheLocation()
+        const effectiveLocation = locationQuery || fileCache.getUserCacheLocation(username)
         const cacheDir = fileCache.getCacheDir(username, false, effectiveLocation)
         const downloadDir = fileCache.getCacheDir(username, true, effectiveLocation)
 
@@ -8785,11 +8805,11 @@ export const startServer = async (port: number, ip: string) => {
     if (fs.existsSync(settingsPath)) {
       const savedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
       if (savedSettings.serverCacheLocation) {
-        fileCache.setCacheLocation(savedSettings.serverCacheLocation)
+        fileCache.setUserCacheLocation('_open', savedSettings.serverCacheLocation)
         console.log(`[缓存] 从配置恢复服务器缓存路径: ${savedSettings.serverCacheLocation}`)
       }
       if (savedSettings.serverCacheNamingPattern) {
-        const normalizedNamingPattern = fileCache.setNamingPattern(savedSettings.serverCacheNamingPattern)
+        const normalizedNamingPattern = fileCache.setUserNamingPattern('_open', savedSettings.serverCacheNamingPattern)
         console.log(`[缓存] 从配置恢复缓存文件命名模式: ${normalizedNamingPattern}`)
       }
     }
