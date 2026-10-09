@@ -61,11 +61,20 @@ window.soundEffects = (function () {
         return isEqActive || isPitchActive || isReverbActive || isPannerActive;
     }
 
+    function isIOSDevice() {
+        if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
+            return window.iOSBackgroundAudio.isIOS();
+        }
+        const ua = navigator.userAgent;
+        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return /iPhone|iPod/.test(ua) || isIPad;
+    }
+
     function init(force = false) {
         if (audioContext && isGraphBuilt) return;
         loadSettings();
-        if (!force && !hasActiveEffects()) {
-            console.log('[SoundEffects] No custom sound effects enabled. Keeping direct native audio output (zero throttling).');
+        if (!force && (isIOSDevice() || !hasActiveEffects())) {
+            console.log('[SoundEffects] No custom sound effects enabled or iOS device detected. Keeping direct native audio output (zero throttling).');
             return;
         }
         const audio = document.getElementById('audio-player');
@@ -545,6 +554,9 @@ window.soundEffects = (function () {
         open: function () {
             // 打开面板时只加载并显示设置，不在此强制初始化 Web Audio 图
             loadSettings();
+            if (isIOSDevice() && window.showInfo) {
+                window.showInfo('提示：iOS 系统限制，开启自定义音效将导致退至后台或锁屏时暂停播放。如需后台播放请保持音效关闭。', 5000);
+            }
             const modal = document.getElementById('sound-effects-modal');
             if (!modal) return;
             modal.classList.remove('hidden');

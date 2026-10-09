@@ -13,6 +13,15 @@ const musicVisualizer = (function () {
     const detailCanvas = document.getElementById('detail-visualizer');
     const playerFooter = document.getElementById('player-footer');
 
+    function isIOSDevice() {
+        if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
+            return window.iOSBackgroundAudio.isIOS();
+        }
+        const ua = navigator.userAgent;
+        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return /iPhone|iPod/.test(ua) || isIPad;
+    }
+
     /**
      * Initialize AudioContext and AnalyserNode.
      */
@@ -28,6 +37,14 @@ const musicVisualizer = (function () {
 
         if (!isAnyVisualizerWanted && !hasEffectsAnalyser) {
             console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation to preserve native playback.');
+            return;
+        }
+
+        // [iOS Fix] On iOS (Safari/WebKit), creating Web Audio createMediaElementSource silences native audio output.
+        // WebKit automatically suspends all AudioContexts when Safari is minimized or locked, killing background playback.
+        // To preserve native background and lock-screen playback on iOS, skip Web Audio hijacking when no external DSP is active.
+        if (isIOSDevice() && !hasEffectsAnalyser) {
+            console.log('[Visualizer] iOS device detected. Skipping AudioContext capture to preserve native background playback.');
             return;
         }
 

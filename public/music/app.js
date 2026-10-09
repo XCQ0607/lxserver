@@ -36,6 +36,10 @@ let currentPlayingSong = null; // Track currently playing song independently of 
 window.batchCollectSongs = null; // Store songs for batch collection modal
 window.playlistAddTargetSong = null; // Explicit single-song target from any song list
 const audio = document.getElementById('audio-player');
+if (audio) {
+    audio.setAttribute('playsinline', '');
+    audio.setAttribute('webkit-playsinline', '');
+}
 let currentPlaybackRate = 1.0;
 
 // Initialize Unified Search for Global (Favorites/Search)
@@ -7430,6 +7434,10 @@ function fadeVolume(targetVolume, duration = 800) {
 // Audio Events
 audio.addEventListener('timeupdate', () => {
     if (audio.currentTime > 0) lastKnownPlaybackTime = audio.currentTime;
+    if (playbackStallDetectionTimer && audio.currentTime > 0) {
+        clearTimeout(playbackStallDetectionTimer);
+        playbackStallDetectionTimer = null;
+    }
     if (isDragging === 'progress') return; // Skip updating UI while user is dragging
 
     const current = audio.currentTime;
@@ -16620,8 +16628,8 @@ function initAudioEngine() {
             window.musicVisualizer.init();
         }
 
-        // iOS: 在用户手势上下文中立即启动 anchor audio，建立后台音频会话
-        if (window.iOSBackgroundAudio) {
+        // iOS: 在用户手势上下文中若开启了后台桥接则同步 anchor audio
+        if (window.iOSBackgroundAudio && window.iOSBackgroundAudio.isActive && window.iOSBackgroundAudio.isActive()) {
             window.iOSBackgroundAudio.ensureAnchorPlaying();
         }
     }
