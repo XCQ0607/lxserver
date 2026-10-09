@@ -52,8 +52,21 @@ window.soundEffects = (function () {
 
     let dryGainNode, wetGainNode, mixerNode;
 
-    function init() {
+    function hasActiveEffects() {
+        const isEqActive = settings.eq && settings.eq.some(val => val !== 0);
+        const isPitchActive = settings.pitch !== 1.0;
+        const isReverbActive = settings.reverb && settings.reverb.id && settings.reverb.id !== 'none';
+        const isPannerActive = settings.panner && settings.panner.enable;
+        return isEqActive || isPitchActive || isReverbActive || isPannerActive;
+    }
+
+    function init(force = false) {
         if (audioContext) return;
+        loadSettings();
+        if (!force && !hasActiveEffects()) {
+            console.log('[SoundEffects] No custom sound effects enabled. Keeping direct native audio output (zero throttling).');
+            return;
+        }
         const audio = document.getElementById('audio-player');
         if (!audio) return;
 
@@ -494,7 +507,7 @@ window.soundEffects = (function () {
             }
         },
         open: function () {
-            if (!audioContext) init(); // Ensure init is called if not already
+            if (!audioContext) init(true); // User explicitly opened EQ panel, activate engine
             const modal = document.getElementById('sound-effects-modal');
             modal.classList.remove('hidden');
             modal.classList.add('flex');
@@ -525,6 +538,7 @@ window.soundEffects = (function () {
             }, 300);
         },
         setEQ: function (index, val) {
+            if (!audioContext) init(true);
             val = parseInt(val);
             settings.eq[index] = val;
             if (eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
@@ -533,6 +547,7 @@ window.soundEffects = (function () {
             renderUI();
         },
         applyPreset: function (name) {
+            if (!audioContext) init(true);
             const allPresets = [...defaultPresets, ...customPresets];
             const p = allPresets.find(p => p.name === name);
             if (p) {
@@ -555,6 +570,7 @@ window.soundEffects = (function () {
             renderUI();
         },
         setReverb: function (id) {
+            if (!audioContext) init(true);
             settings.reverb.id = id;
             const rev = reverbOptions.find(r => r.id === id);
             if (rev) {
@@ -570,6 +586,7 @@ window.soundEffects = (function () {
             renderUI(); // Update radio selection state
         },
         setPitch: function (val) {
+            if (!audioContext) init(true);
             const oldPitch = settings.pitch;
             settings.pitch = parseFloat(val);
 
@@ -592,6 +609,7 @@ window.soundEffects = (function () {
             this.setPitch(1.0);
         },
         setPanner: function (key, val) {
+            if (!audioContext) init(true);
             if (key === 'enable') settings.panner.enable = val;
             else settings.panner[key] = parseInt(val);
             updatePanner();

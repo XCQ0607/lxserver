@@ -19,6 +19,16 @@ const musicVisualizer = (function () {
     function init() {
         if (isInitialized || !window.Wave || !audio) return;
 
+        // If visualizer is disabled in settings, do NOT hijack the native audio output!
+        const isFooterOn = window.settings ? window.settings.showFooterVisualizer !== false : true;
+        const isDetailOn = window.settings ? window.settings.showDetailVisualizer : false;
+        const isAnyVisualizerWanted = isFooterOn || isDetailOn;
+
+        if (!isAnyVisualizerWanted && (!window.soundEffects || !window.soundEffects.getAnalyser())) {
+            console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation to preserve native playback.');
+            return;
+        }
+
         try {
             console.log('[Visualizer] Initializing AudioContext...');
             audioContext = new (window.AudioContext || window.webkitAudioContext)();
