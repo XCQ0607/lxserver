@@ -6535,6 +6535,14 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     // Clear the previous song's quality until URL resolution confirms the actual one.
     updatePlayerInfo(song, null);
     updateMediaSessionMetadata(song);
+
+    // [Lyric State Reset] 清空旧歌曲的歌词文本与归属，防止异步竞争将旧歌词写入新歌缓存
+    currentRawLrc = '';
+    currentRawTlrc = '';
+    currentRawRlrc = '';
+    currentRawKlrc = '';
+    lastLyricSongId = null;
+
     // 异步触发歌词抓取，初步尝试（此时音质可能尚未最终确定，但在 playSong 后续逻辑中会再次同步）
     fetchLyric(song);
 
@@ -6677,10 +6685,10 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         // Always refresh the bottom-player badge, including cache hits that keep the same song object.
         updatePlayerInfo(playbackSong, currentQuality);
 
-        // [Sync] 确定了最终播放音质后，直接以正确音质重写服务器端歌词缓存文件名
-        // 注意：不能再调用 fetchLyric(song)，因为歌词已就绪时 fetchLyric 会提前返回，
-        // 永远不会走到写入服务器缓存的逻辑，导致文件名停留在音质未确定时的错误值。
-        if (settings.enableServerLyricCache !== false && currentRawLrc) {
+        // [Sync] 确定了最终播放音质后，若当前已就绪的歌词确实属于本歌曲，才以正确音质重写服务器端歌词缓存文件名
+        // 关键防护：必须校验 lastLyricSongId 匹配当前歌曲，防止切歌时旧歌词异步残留写入新歌缓存文件
+        const playbackSongKey = `${playbackSong.source || playbackSong.meta?.source || ''}_${playbackSong.songmid || playbackSong.songId || playbackSong.id || playbackSong.meta?.songmid || playbackSong.meta?.songId || ''}`;
+        if (settings.enableServerLyricCache !== false && currentRawLrc && lastLyricSongId === playbackSongKey) {
             try {
                 const _lyricHeaders = { 'Content-Type': 'application/json' };
                 Object.assign(_lyricHeaders, getUserAuthHeaders());
@@ -9456,7 +9464,7 @@ async function fetchLyric(song, quality = null) {
     }
 
     // [Optimize] 如果歌曲未变化且已有歌词，跳过完整加载流程逻辑
-    const currentLyricKey = `${source}_${songmid} `;
+    const currentLyricKey = `${source}_${songmid}`;
     if (lastLyricSongId === currentLyricKey && currentLyricLines.length > 0) {
         console.log(`[Lyric] 歌词已就绪(${currentLyricKey})，同步播放状态`);
         if (lyricPlayer) {
@@ -9464,13 +9472,17 @@ async function fetchLyric(song, quality = null) {
         }
         return;
     }
-    lastLyricSongId = currentLyricKey;
 
     document.getElementById('lyric-content').innerHTML = '<p class="t-text-muted text-lg animate-pulse">正在加载歌词...</p>';
     currentLyricLines = [];
+    currentRawLrc = '';
+    currentRawTlrc = '';
+    currentRawRlrc = '';
+    currentRawKlrc = '';
+    lastLyricSongId = null;
 
     // ===== 1. 尝试读取浏览器本地缓存 (最高优先级) =====
-    const cacheKey = `lx_lyric_${source}_${songmid} `;
+    const cacheKey = `lx_lyric_${source}_${songmid}`;
     if (settings.enableLyricCache !== false) {
         try {
             const cached = localStorage.getItem(cacheKey);
@@ -9480,8 +9492,9 @@ async function fetchLyric(song, quality = null) {
                 currentRawTlrc = data.tlyric || '';
                 currentRawRlrc = data.rlyric || '';
                 currentRawKlrc = data.klyric || data.lxlyric || '';
+                lastLyricSongId = currentLyricKey;
 
-                console.log(`[Lyric] 使用浏览器本地缓存歌词: ${songmid} `);
+                console.log(`[Lyric] 使用浏览器本地缓存歌词: ${songmid}`);
                 initLyricPlayer();
                 applyLyricUpdate();
                 return; // 命中缓存，直接返回
@@ -9508,8 +9521,9 @@ async function fetchLyric(song, quality = null) {
                     currentRawTlrc = scData.data.tlyric || '';
                     currentRawRlrc = scData.data.rlyric || '';
                     currentRawKlrc = scData.data.klyric || scData.data.lxlyric || '';
+                    lastLyricSongId = currentLyricKey;
 
-                    console.log(`[Lyric] 使用服务器端缓存歌词: ${source}_${songmid} `);
+                    console.log(`[Lyric] 使用服务器端缓存歌词: ${source}_${songmid}`);
 
                     // 同步到浏览器本地缓存
                     if (settings.enableLyricCache !== false && currentRawLrc) {
@@ -9553,21 +9567,21 @@ async function fetchLyric(song, quality = null) {
         }
 
         const data = await res.json();
-        currentRawLrc = data.lyric || data.lrc || '';
-        currentRawTlrc = data.tlyric || '';
-        currentRawRlrc = data.rlyric || '';
-        currentRawKlrc = data.klyric || data.lxlyric || '';
+        const fetchedLrc = data.lyric || data.lrc || '';
+        const fetchedTlrc = data.tlyric || '';
+        const fetchedRlrc = data.rlyric || '';
+        const fetchedKlrc = data.klyric || data.lxlyric || '';
 
         const isFromLocal = !!data._fromLocalCache;
         console.log(`[Lyric] ${isFromLocal ? '使用服务器本地缓存歌词' : '获取到网络歌词'}:`, { source, songmid });
 
         // ===== 4. 写入缓存 (浏览器本地 + 服务器端) =====
-        if (currentRawLrc) {
+        if (fetchedLrc) {
             const cacheData = {
-                lrc: currentRawLrc,
-                tlyric: currentRawTlrc,
-                rlyric: currentRawRlrc,
-                klyric: currentRawKlrc
+                lrc: fetchedLrc,
+                tlyric: fetchedTlrc,
+                rlyric: fetchedRlrc,
+                klyric: fetchedKlrc
             };
 
             // 写入浏览器本地
@@ -9590,18 +9604,32 @@ async function fetchLyric(song, quality = null) {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            songInfo: { ...song, quality: (typeof quality !== 'undefined' ? quality : (typeof currentQuality !== 'undefined' ? currentQuality : null)) },
+                            songInfo: { ...song, quality: (typeof quality !== 'undefined' && quality !== null ? quality : (typeof currentQuality !== 'undefined' ? currentQuality : null)) },
                             lyricsObj: {
-                                lyric: currentRawLrc,
-                                tlyric: currentRawTlrc,
-                                rlyric: currentRawRlrc,
-                                lxlyric: currentRawKlrc
+                                lyric: fetchedLrc,
+                                tlyric: fetchedTlrc,
+                                rlyric: fetchedRlrc,
+                                lxlyric: fetchedKlrc
                             }
                         })
                     }).catch(e => console.warn('[Lyric] 上传服务端缓存失败:', e));
                 } catch (e) { }
             }
         }
+
+        // 校验当前活跃歌曲是否仍匹配，避免切歌过快导致前一首的异步返回污染当前歌曲播放器
+        const currentActiveSongmid = currentPlayingSong?.songmid || currentPlayingSong?.songId || currentPlayingSong?.id || currentPlayingSong?.meta?.songmid || currentPlayingSong?.meta?.songId;
+        const currentActiveSource = currentPlayingSong?.source || currentPlayingSong?.meta?.source;
+        if (currentActiveSongmid && currentActiveSource && (String(currentActiveSongmid) !== String(songmid) || String(currentActiveSource) !== String(source))) {
+            console.log(`[Lyric] 忽略过期的网络歌词渲染: ${source}_${songmid}`);
+            return;
+        }
+
+        currentRawLrc = fetchedLrc;
+        currentRawTlrc = fetchedTlrc;
+        currentRawRlrc = fetchedRlrc;
+        currentRawKlrc = fetchedKlrc;
+        lastLyricSongId = currentLyricKey;
 
         if (!currentRawLrc) {
             // [兜底] 若获取到的歌词为空，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
