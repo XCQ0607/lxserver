@@ -46,6 +46,11 @@ let currentPlaybackRate = 1.0;
 window.goToPage = function (page) {
     currentPage = page;
     window.currentPage = page;
+    // 歌曲搜索的结果已一次性取回，跳页只需本地重渲染；歌手/专辑仍要向后端追加
+    if (window.serverPagedSearch === false && typeof goToResultPage === 'function') {
+        goToResultPage(page);
+        return;
+    }
     if (typeof doSearch === 'function') doSearch(page);
 };
 
@@ -2182,7 +2187,7 @@ const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 
 //搜索歌曲
-async function doSearch(page = 1, append = false, prefetch = false) {
+async function doSearch(page = 1, append = false) {
     const typeEl = document.getElementById('search-type');
     const type = typeEl ? typeEl.value : 'song';
 
@@ -2255,11 +2260,11 @@ async function doSearch(page = 1, append = false, prefetch = false) {
 
     // Network Search Logic
     const source = document.getElementById('search-source').value;
-    //翻页步长
-    const FETCH_PAGES_STEP = 1;
-
-    // 保存到缓存
     localStorage.setItem('search-source', source);
+
+    // 只有歌手/专辑/歌单搜索还是「一次一页」，需要靠下一页追加；歌曲搜索一次取回全量后纯本地分页
+    const appendableServerSearch = type !== 'song';
+    window.serverPagedSearch = appendableServerSearch;
 
     if (!input) {
         showInitialSearchState();
@@ -2280,16 +2285,16 @@ async function doSearch(page = 1, append = false, prefetch = false) {
         if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
         Object.assign(headers, getUserAuthHeaders());
 
+        const pageInfoEl = document.getElementById('page-info');
         let list = [];
         if (source === 'all') {
             // Aggregate Search (Only supported for songs)
-            const pageInfoEl = document.getElementById('page-info');
-            if (pageInfoEl) pageInfoEl.innerText = `聚合搜索 (各源并发)`;
+            if (pageInfoEl) pageInfoEl.innerText = '聚合搜索 (各源并发取全量)...';
 
             const promises = SOURCES.map(s =>
                 fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${s}&page=1&type=${type}`, { headers })
                     .then(res => res.json())
-                    .then(data => (Array.isArray(data) ? data : []).map(item => ({ ...item, source: s })))
+                    .then(data => (data.list || []).map(item => ({ ...item, source: s })))
                     .catch(e => {
                         console.warn(`[聚合搜索] ${s} 源失败:`, e);
                         return [];
@@ -2303,8 +2308,8 @@ async function doSearch(page = 1, append = false, prefetch = false) {
                 list = flatList;
             }
         } else {
-            // Single Source Search — 支持前端决定拉取多少页
-            const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}&pages=${FETCH_PAGES_STEP}`, { headers });
+            if (pageInfoEl && type === 'song') pageInfoEl.innerText = '正在取该平台全部结果...';
+            const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, { headers });
 
             if (!res.ok) {
                 throw new Error(`搜索请求失败: ${res.status} ${res.statusText}`);
@@ -2312,18 +2317,24 @@ async function doSearch(page = 1, append = false, prefetch = false) {
 
             const data = await res.json();
 
-            // 检查返回的数据是否为数组
-            if (!Array.isArray(data)) {
-                console.error('[Search] 后端返回非数组数据:', data);
-                throw new Error(data.error || data.message || '搜索返回的数据格式错误');
+            if (!data || !Array.isArray(data.list)) {
+                console.error('[Search] 后端返回数据格式错误:', data);
+                throw new Error((data && (data.error || data.message)) || '搜索返回的数据格式错误');
             }
 
-            list = data.map(item => ({ ...item, source }));
+            list = data.list.map(item => ({ ...item, source }));
+            if (type === 'song') {
+                window.lastSearchMeta = {
+                    total: data.total,
+                    fetchedPages: data.fetchedPages,
+                    pageSize: data.pageSize,
+                    hasMore: data.hasMore,
+                };
+            }
         }
 
-        // song/singer/album 统一支持 append 追加翻页
-        if (append && (type === 'song' || type === 'singer' || type === 'album')) {
-            // [Fix] Ensure each new song has unique ID
+        // 歌手/专辑/歌单仍支持 append 追加翻页
+        if (append && appendableServerSearch && (type === 'singer' || type === 'album')) {
             if (list && list.length > 0) {
                 list.forEach((item, idx) => {
                     if (!item.id || item.id === 'undefined') {
@@ -2336,7 +2347,7 @@ async function doSearch(page = 1, append = false, prefetch = false) {
 
             if (newItems.length > 0) {
                 const combinedList = [...(window.viewingPlaylist || []), ...newItems];
-                if (!prefetch) currentPage++;
+                currentPage++;
                 if (type === 'singer') renderSingerResults(combinedList);
                 else if (type === 'album') renderAlbumResults(combinedList);
                 else renderResults(combinedList);
@@ -2347,6 +2358,9 @@ async function doSearch(page = 1, append = false, prefetch = false) {
             if (type === 'singer') renderSingerResults(list);
             else if (type === 'album') renderAlbumResults(list);
             else renderResults(list);
+            if (type === 'song' && window.lastSearchMeta && window.lastSearchMeta.hasMore) {
+                showInfo(`该平台报 ${window.lastSearchMeta.total} 条，本次取到 ${list.length} 条（受平台页数墙与取数预算限制，未全部取回）`);
+            }
         }
     } catch (e) {
         console.error('[Search] 搜索失败:', e);
@@ -4824,25 +4838,6 @@ function renderResults(list) {
     lazyLoadImages(container);
     applyMarqueeChecks(container);
     window.ServerFileState?.paintBadges(container);
-
-    // [Prefetch] 自动后台预加载逻辑
-    if (currentSearchScope === 'network' && currentPage === totalPages) {
-        const FETCH_PAGES_STEP = 3;
-        const nextNetPage = (window.currentNetworkPage || 1) + FETCH_PAGES_STEP;
-
-        // 避免重复触发
-        if (!window._prefetchingPending || window._prefetchingPending !== nextNetPage) {
-            window._prefetchingPending = nextNetPage;
-            console.log(`[Prefetch] 触及本地末页 (${totalPages})，自动拉取后续 ${FETCH_PAGES_STEP} 页... (Next URL Page: ${nextNetPage})`);
-
-            // 延迟一点触发，确保 UI 先更新
-            setTimeout(() => {
-                doSearch(nextNetPage, true, true).finally(() => {
-                    // 完成后清除标志，但不再主动重置，防止同一页重复触发
-                });
-            }, 500);
-        }
-    }
 }
 
 /**
@@ -5359,9 +5354,9 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
         if (!isSilent) showInfo('正在自动尝试换源匹配...');
 
         const searchPromises = searchSources.map(s =>
-            fetch(`${API_BASE}/search?name=${encodeURIComponent(query)}&source=${s}&page=1`, { headers })
+            fetch(`${API_BASE}/search?name=${encodeURIComponent(query)}&source=${s}&page=1&limit=20`, { headers })
                 .then(res => res.json())
-                .then(data => Array.isArray(data) ? data.map(item => ({ ...item, source: s })) : [])
+                .then(data => (data.list || []).map(item => ({ ...item, source: s })))
                 .catch(() => [])
         );
 
