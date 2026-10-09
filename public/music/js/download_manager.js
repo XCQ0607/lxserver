@@ -190,6 +190,8 @@ class DownloadManager {
             if (!Array.isArray(items)) return;
             const remoteIds = new Set();
             const updatedTasks = [];
+            // [Fix] 收集因服务端状态推进而刚完成的任务，最后统一调用 completeServerTask
+            const justCompletedTasks = [];
             let serverFileChanged = false;
             items.forEach(item => {
                 remoteIds.add(item.id);
@@ -205,10 +207,11 @@ class DownloadManager {
                         serverSongKey: item.songKey || '',
                         quality: item.quality || item.requestedQuality || '',
                         status: item.status || 'waiting',
-                        progress: item.progress || 0,
-                        downloadedBytes: item.received || 0,
-                        totalBytes: item.total || 0,
-                        speed: item.speed || 0,
+                        // [Fix] 使用 ?? 避免服务端返回 0 时覆盖本地真实进度
+                        progress: item.progress ?? 0,
+                        downloadedBytes: item.received ?? 0,
+                        totalBytes: item.total ?? 0,
+                        speed: item.speed ?? 0,
                         errorMsg: item.errorMsg || '',
                         retryCount: 0,
                         maxRetries: 2,
@@ -225,12 +228,17 @@ class DownloadManager {
                     task.serverSongKey = item.songKey || task.serverSongKey;
                     task.quality = item.quality || task.quality;
                     task.status = item.status || task.status;
-                    task.progress = item.progress || 0;
-                    task.downloadedBytes = item.received || 0;
-                    task.totalBytes = item.total || 0;
-                    task.speed = item.speed || 0;
+                    // [Fix] 使用 ?? 避免服务端返回 0 时覆盖本地真实进度
+                    task.progress = item.progress ?? 0;
+                    task.downloadedBytes = item.received ?? 0;
+                    task.totalBytes = item.total ?? 0;
+                    task.speed = item.speed ?? 0;
                     task.errorMsg = item.errorMsg || '';
-                    if (wasActive && (task.status === 'finished' || task.status === 'exists')) serverFileChanged = true;
+                    if (wasActive && (task.status === 'finished' || task.status === 'exists')) {
+                        serverFileChanged = true;
+                        // [Fix] 收集刚完成的任务，稍后调用 completeServerTask 以触发 processQueue
+                        justCompletedTasks.push({ task, status: task.status });
+                    }
                 }
                 updatedTasks.push(task);
             });
@@ -246,6 +254,8 @@ class DownloadManager {
             this.saveTasks();
             // 队列里的任务落盘完成 = 服务器文件变了，重拉状态并刷新列表徽标与音质标注
             if (serverFileChanged) this.notifyServerFilesChanged();
+            // [Fix] 对刚完成的任务调用 completeServerTask，从而触发 processQueue 推进队列
+            justCompletedTasks.forEach(({ task, status }) => this.completeServerTask(task, status));
         } catch (error) {
             console.warn('[DownloadManager] Failed to sync server queue:', error);
         } finally {
