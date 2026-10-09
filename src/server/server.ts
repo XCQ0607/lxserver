@@ -3612,15 +3612,6 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               updated = true
             }
 
-            if (typeof maxAgeDays !== 'undefined') {
-              const days = Math.max(0, parseInt(maxAgeDays, 10) || 0)
-              if (global.lx.config) {
-                global.lx.config['cache.maxAgeDays'] = days
-                if (typeof global.lx.saveConfig === 'function') global.lx.saveConfig()
-              }
-              updated = true
-            }
-
             if (updated) {
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))

@@ -2472,24 +2472,6 @@
                                             <option value="root">运行目录 (仅本地)</option>
                                         </select>
 
-                                        <div class="mt-4 mb-2 flex items-center justify-between">
-                                            <div class="text-sm font-bold t-text-main flex items-center">
-                                                缓存保留时间 (天)
-                                                <span class="setting-tooltip-trigger ml-1">
-                                                    <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">服务端自动扫描并清理超过该天数未被访问的音频与歌词缓存文件。设为 0 表示永久保留，永不自动删除。</span>
-                                                </span>
-                                            </div>
-                                        </div>
-                                        <select id="setting-server-cache-retention"
-                                            onchange="updateSetting('serverCacheRetentionDays', this.value); updateServerCacheConfig(null, null, this.value)"
-                                            class="lm-select !w-full !py-2.5">
-                                            <option value="7">7 天 (适度清理)</option>
-                                            <option value="14">14 天 (推荐默认)</option>
-                                            <option value="30">30 天 (较长保留)</option>
-                                            <option value="60">60 天 (长时间保留)</option>
-                                            <option value="0">0 天 (永久保留，不清理)</option>
-                                        </select>
 
                                         <div class="mt-4 mb-2 flex items-center justify-between">
                                             <div class="text-sm font-bold t-text-main flex items-center">
