@@ -1033,6 +1033,12 @@ async function ensureUserAuthToken(options = {}) {
     const force = options.force === true;
     const username = localStorage.getItem('lx_sync_user') || '';
     const password = localStorage.getItem('lx_sync_pass') || '';
+    const token = typeof userToken !== 'undefined' ? userToken : localStorage.getItem('lx_user_token');
+
+    if (token && !force) {
+        userToken = token;
+        return true;
+    }
 
     if (!username || !password) {
         if (force) {
@@ -1042,7 +1048,6 @@ async function ensureUserAuthToken(options = {}) {
         }
         return false;
     }
-    if (userToken && !force) return true;
     if (userTokenRefreshPromise) return userTokenRefreshPromise;
 
     userTokenRefreshPromise = (async () => {
@@ -11517,28 +11522,33 @@ async function handleSyncLogout(skipConfirm = false) {
 }
 
 async function handleLocalLogin() {
-    const user = document.getElementById('sync-local-user').value;
-    const pass = document.getElementById('sync-local-pass').value;
+    const userInput = document.getElementById('sync-local-user');
+    const passInput = document.getElementById('sync-local-pass');
+    const user = (userInput && userInput.value.trim()) || localStorage.getItem('lx_sync_user') || '';
+    const pass = (passInput && passInput.value) || localStorage.getItem('lx_sync_pass') || '';
     const statusEl = document.getElementById('sync-status');
+    const currentToken = (typeof userToken !== 'undefined' && userToken) || localStorage.getItem('lx_user_token');
 
-    if (!user || !pass) {
+    if (!user || (!pass && !currentToken)) {
         showError('请输入用户名和密码');
         return;
     }
 
-    statusEl.innerHTML = '<i class="fas fa-spinner fa-spin text-emerald-500"></i> 正在登录...';
+    if (userInput && !userInput.value) userInput.value = user;
+    if (statusEl) statusEl.innerHTML = '<i class="fas fa-spinner fa-spin text-emerald-500"></i> 正在登录...';
 
     try {
         syncManager.initLocal(user, pass);
         const success = await syncManager.client.login();
 
         if (success) {
-            statusEl.innerHTML = '<i class="fas fa-check-circle text-emerald-500"></i> 登录成功，正在同步...';
+            if (statusEl) statusEl.innerHTML = '<i class="fas fa-check-circle text-emerald-500"></i> 登录成功，正在同步...';
 
             // [核心优化] 如果已有有效 Token，则不用再请求 /api/user/login 获取新 Token
-            if (userToken) {
+            if (currentToken) {
+                userToken = currentToken;
                 console.log('[Auth] 检测到现有的 User Token，跳过登录接口直接尝试数据同步。');
-            } else {
+            } else if (pass) {
                 try {
                     const tokenRes = await fetch('/api/user/login', {
                         method: 'POST',
@@ -11582,7 +11592,9 @@ async function handleLocalLogin() {
             // Save credentials to localStorage (Simple version)
             localStorage.setItem('lx_sync_mode', 'local'); // [Fix] Save mode
             localStorage.setItem('lx_sync_user', user);
-            localStorage.setItem('lx_sync_pass', pass);
+            if (pass) {
+                localStorage.setItem('lx_sync_pass', pass);
+            }
 
             // [新增] 成功登录后立即更新顶部栏 UI
             if (typeof updateUserUI === 'function') updateUserUI();
@@ -11600,10 +11612,10 @@ async function handleLocalLogin() {
                 }, 1000);
             }
         } else {
-            statusEl.innerHTML = '<i class="fas fa-times-circle text-red-500"></i> 登录失败: 用户名或密码错误';
+            if (statusEl) statusEl.innerHTML = '<i class="fas fa-times-circle text-red-500"></i> 登录失败: 用户名或密码错误/凭证已失效';
         }
     } catch (e) {
-        statusEl.innerHTML = `<i class="fas fa-exclamation-circle text-red-500"></i> 错误: ${e.message}`;
+        if (statusEl) statusEl.innerHTML = `<i class="fas fa-exclamation-circle text-red-500"></i> 错误: ${e.message}`;
     }
 }
 
@@ -13104,9 +13116,10 @@ document.addEventListener('DOMContentLoaded', async () => {
     let syncMode = localStorage.getItem('lx_sync_mode');
     const savedUser = localStorage.getItem('lx_sync_user');
     const savedPass = localStorage.getItem('lx_sync_pass');
+    const savedToken = localStorage.getItem('lx_user_token');
 
-    // 如果通过 Web 登录页已记录账号密码但尚未显式保存 lx_sync_mode，则默认启用 local 模式并自动建连
-    if (!syncMode && savedUser && savedPass) {
+    // 如果通过 Web 登录页已记录账号/Token 但尚未显式保存 lx_sync_mode，则默认启用 local 模式并自动建连
+    if (!syncMode && savedUser && (savedPass || savedToken)) {
         syncMode = 'local';
         localStorage.setItem('lx_sync_mode', 'local');
     }
@@ -13115,11 +13128,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Local mode: auto-login
         const user = savedUser;
         const pass = savedPass;
-        if (user && pass) {
+        if (user && (pass || savedToken)) {
             const userInput = document.getElementById('sync-local-user');
             const passInput = document.getElementById('sync-local-pass');
             if (userInput) userInput.value = user;
-            if (passInput) passInput.value = pass;
+            if (passInput && pass) passInput.value = pass;
             console.log('[Cache] 自动登录本地账号与同步服务:', user);
             handleLocalLogin();
         }
@@ -16239,21 +16252,18 @@ document.addEventListener('DOMContentLoaded', () => {
         if (savedMode === 'local') {
             const u = localStorage.getItem('lx_sync_user');
             const p = localStorage.getItem('lx_sync_pass');
-            if (u && p) {
-                // [优化] 如果已经有有效的 Token，不再重复登录
-                if (userToken) {
-                    console.log('[AutoLogin] 检测到有效 Token，跳过自动登录流程并直接恢复会话。');
-                    return;
-                }
-
-                console.log('[AutoLogin] 检测到本地账户且无有效 Token，正在自动登录...');
+            const t = localStorage.getItem('lx_user_token');
+            if (u && (p || t)) {
                 // Fill UI
                 const uInput = document.getElementById('sync-local-user');
                 const pInput = document.getElementById('sync-local-pass');
-                if (uInput) uInput.value = u;
-                if (pInput) pInput.value = p;
-                // Trigger login
-                handleLocalLogin();
+                if (uInput && !uInput.value) uInput.value = u;
+                if (pInput && p && !pInput.value) pInput.value = p;
+                // If not yet synced, trigger login
+                if (!currentListData) {
+                    console.log('[AutoLogin] 检测到本地账户或有效 Token，正在确保同步连接...');
+                    handleLocalLogin();
+                }
             }
         } else if (savedMode === 'remote') {
             const url = localStorage.getItem('lx_sync_url');
