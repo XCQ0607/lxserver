@@ -46,6 +46,11 @@ let currentPlaybackRate = 1.0;
 window.goToPage = function (page) {
     currentPage = page;
     window.currentPage = page;
+    // 歌曲搜索的结果已一次性取回，跳页只需本地重渲染；歌手/专辑仍要向后端追加
+    if (window.serverPagedSearch === false && typeof goToResultPage === 'function') {
+        goToResultPage(page);
+        return;
+    }
     if (typeof doSearch === 'function') doSearch(page);
 };
 
@@ -2182,7 +2187,7 @@ const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 
 //搜索歌曲
-async function doSearch(page = 1, append = false, prefetch = false) {
+async function doSearch(page = 1, append = false) {
     const typeEl = document.getElementById('search-type');
     const type = typeEl ? typeEl.value : 'song';
 
@@ -2255,11 +2260,11 @@ async function doSearch(page = 1, append = false, prefetch = false) {
 
     // Network Search Logic
     const source = document.getElementById('search-source').value;
-    //翻页步长
-    const FETCH_PAGES_STEP = 1;
-
-    // 保存到缓存
     localStorage.setItem('search-source', source);
+
+    // 只有歌手/专辑/歌单搜索还是「一次一页」，需要靠下一页追加；歌曲搜索一次取回全量后纯本地分页
+    const appendableServerSearch = type !== 'song';
+    window.serverPagedSearch = appendableServerSearch;
 
     if (!input) {
         showInitialSearchState();
@@ -2280,16 +2285,16 @@ async function doSearch(page = 1, append = false, prefetch = false) {
         if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
         Object.assign(headers, getUserAuthHeaders());
 
+        const pageInfoEl = document.getElementById('page-info');
         let list = [];
         if (source === 'all') {
             // Aggregate Search (Only supported for songs)
-            const pageInfoEl = document.getElementById('page-info');
-            if (pageInfoEl) pageInfoEl.innerText = `聚合搜索 (各源并发)`;
+            if (pageInfoEl) pageInfoEl.innerText = '聚合搜索 (各源并发取全量)...';
 
             const promises = SOURCES.map(s =>
                 fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${s}&page=1&type=${type}`, { headers })
                     .then(res => res.json())
-                    .then(data => (Array.isArray(data) ? data : []).map(item => ({ ...item, source: s })))
+                    .then(data => (data.list || []).map(item => ({ ...item, source: s })))
                     .catch(e => {
                         console.warn(`[聚合搜索] ${s} 源失败:`, e);
                         return [];
@@ -2303,8 +2308,8 @@ async function doSearch(page = 1, append = false, prefetch = false) {
                 list = flatList;
             }
         } else {
-            // Single Source Search — 支持前端决定拉取多少页
-            const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}&pages=${FETCH_PAGES_STEP}`, { headers });
+            if (pageInfoEl && type === 'song') pageInfoEl.innerText = '正在取该平台全部结果...';
+            const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, { headers });
 
             if (!res.ok) {
                 throw new Error(`搜索请求失败: ${res.status} ${res.statusText}`);
@@ -2312,18 +2317,24 @@ async function doSearch(page = 1, append = false, prefetch = false) {
 
             const data = await res.json();
 
-            // 检查返回的数据是否为数组
-            if (!Array.isArray(data)) {
-                console.error('[Search] 后端返回非数组数据:', data);
-                throw new Error(data.error || data.message || '搜索返回的数据格式错误');
+            if (!data || !Array.isArray(data.list)) {
+                console.error('[Search] 后端返回数据格式错误:', data);
+                throw new Error((data && (data.error || data.message)) || '搜索返回的数据格式错误');
             }
 
-            list = data.map(item => ({ ...item, source }));
+            list = data.list.map(item => ({ ...item, source }));
+            if (type === 'song') {
+                window.lastSearchMeta = {
+                    total: data.total,
+                    fetchedPages: data.fetchedPages,
+                    pageSize: data.pageSize,
+                    hasMore: data.hasMore,
+                };
+            }
         }
 
-        // song/singer/album 统一支持 append 追加翻页
-        if (append && (type === 'song' || type === 'singer' || type === 'album')) {
-            // [Fix] Ensure each new song has unique ID
+        // 歌手/专辑/歌单仍支持 append 追加翻页
+        if (append && appendableServerSearch && (type === 'singer' || type === 'album')) {
             if (list && list.length > 0) {
                 list.forEach((item, idx) => {
                     if (!item.id || item.id === 'undefined') {
@@ -2336,7 +2347,7 @@ async function doSearch(page = 1, append = false, prefetch = false) {
 
             if (newItems.length > 0) {
                 const combinedList = [...(window.viewingPlaylist || []), ...newItems];
-                if (!prefetch) currentPage++;
+                currentPage++;
                 if (type === 'singer') renderSingerResults(combinedList);
                 else if (type === 'album') renderAlbumResults(combinedList);
                 else renderResults(combinedList);
@@ -2347,6 +2358,9 @@ async function doSearch(page = 1, append = false, prefetch = false) {
             if (type === 'singer') renderSingerResults(list);
             else if (type === 'album') renderAlbumResults(list);
             else renderResults(list);
+            if (type === 'song' && window.lastSearchMeta && window.lastSearchMeta.hasMore) {
+                showInfo(`该平台报 ${window.lastSearchMeta.total} 条，本次取到 ${list.length} 条（受平台页数墙与取数预算限制，未全部取回）`);
+            }
         }
     } catch (e) {
         console.error('[Search] 搜索失败:', e);
@@ -2629,11 +2643,11 @@ function getQualityTags(item) {
         else if (q === '320k') has320 = true;
     }
 
-    if (hasMaster) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-purple border border-purple-200 dark:border-purple-500/30 transition-colors">Master</span>');
-    else if (hasAtmos) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-cyan-200 dark:border-cyan-500/30 transition-colors">Atmos</span>');
-    else if (hasHiRes) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-yellow border border-yellow-200 dark:border-yellow-500/30 transition-colors">Hi-Res</span>');
-    else if (hasFlac) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-green border border-emerald-200 dark:border-emerald-500/30 transition-colors">无损</span>');
-    else if (has320) tags.push('<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-blue-200 dark:border-blue-500/30 transition-colors">高品质</span>');
+    if (hasMaster) tags.push('<span class="song-tag t-badge-purple border-purple-200 dark:border-purple-500/30 transition-colors">Master</span>');
+    else if (hasAtmos) tags.push('<span class="song-tag t-badge-cyan border-cyan-200 dark:border-cyan-500/30 transition-colors">Atmos</span>');
+    else if (hasHiRes) tags.push('<span class="song-tag t-badge-yellow border-yellow-200 dark:border-yellow-500/30 transition-colors">Hi-Res</span>');
+    else if (hasFlac) tags.push('<span class="song-tag t-badge-green border-emerald-200 dark:border-emerald-500/30 transition-colors">无损</span>');
+    else if (has320) tags.push('<span class="song-tag t-badge-blue border-blue-200 dark:border-blue-500/30 transition-colors">高品质</span>');
 
     return tags.join('');
 }
@@ -2649,8 +2663,8 @@ function getSourceTag(source) {
     };
     const names = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
     const color = colors[source] || 't-bg-main t-text-muted t-border-main';
-    const name = names[source] || source.toUpperCase();
-    return `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] font-bold border ${color} mr-1">${name}</span>`;
+    const name = names[source] || (source ? source.toUpperCase() : '未知');
+    return `<span class="song-tag ${color}">${name}</span>`;
 }
 window.getSourceTag = getSourceTag;
 
@@ -3432,9 +3446,10 @@ function renderArtistSongsUI(list, page) {
                         </div>
                         <div class="min-w-0 flex-1">
                             <div class="font-bold t-text-main text-sm md:text-base leading-tight truncate group-hover:text-emerald-600 transition-colors">${item.name}</div>
-                            <div class="flex items-center gap-1 mt-1">
+                            <div class="flex items-center gap-1 mt-1 overflow-hidden whitespace-nowrap">
                                 ${getSourceTag ? getSourceTag(item.source) : ''}
                                 ${getQualityTags ? getQualityTags(item) : ''}
+                                <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                             </div>
                         </div>
                     </div>
@@ -3502,6 +3517,7 @@ function renderArtistSongsUI(list, page) {
     // Init Marquee if needed (though we use truncate here)
     if (window.applyMarqueeChecks) applyMarqueeChecks();
     if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
+    window.ServerFileState?.paintBadges(content);
 }
 window.renderArtistSongsUI = renderArtistSongsUI;
 
@@ -4720,9 +4736,10 @@ function renderResults(list) {
                     <div class="font-bold t-text-main text-sm md:text-base leading-tight hover:text-emerald-600 transition-colors">
                          ${createMarqueeHtml(item.name)}
                     </div>
-                    <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden">
+                    <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
                          ${getSourceTag(item.source)}
                          ${getQualityTags(item)}
+                         <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
                             ${createMarqueeHtml(item.singer, 'text-[10px] t-text-muted')}
                          </div>
@@ -4822,25 +4839,7 @@ function renderResults(list) {
     // Init Lazy Loader
     lazyLoadImages(container);
     applyMarqueeChecks(container);
-
-    // [Prefetch] 自动后台预加载逻辑
-    if (currentSearchScope === 'network' && currentPage === totalPages) {
-        const FETCH_PAGES_STEP = 3;
-        const nextNetPage = (window.currentNetworkPage || 1) + FETCH_PAGES_STEP;
-
-        // 避免重复触发
-        if (!window._prefetchingPending || window._prefetchingPending !== nextNetPage) {
-            window._prefetchingPending = nextNetPage;
-            console.log(`[Prefetch] 触及本地末页 (${totalPages})，自动拉取后续 ${FETCH_PAGES_STEP} 页... (Next URL Page: ${nextNetPage})`);
-
-            // 延迟一点触发，确保 UI 先更新
-            setTimeout(() => {
-                doSearch(nextNetPage, true, true).finally(() => {
-                    // 完成后清除标志，但不再主动重置，防止同一页重复触发
-                });
-            }, 500);
-        }
-    }
+    window.ServerFileState?.paintBadges(container);
 }
 
 /**
@@ -5032,12 +5031,13 @@ let currentLoadingRequestId = 0; // Track latest request ID
 
 let currentQuality = null; // 当前播放音质 (从 settings.preferredQuality 动态获取)
 let currentSourceType = 'normal'; // 当前链接来源类型: 'normal' | 'cache' | 'server_cache'
+let currentCacheFolder = 'cache'; // server_cache 时区分目录: 'cache' 缓存副本 | 'music' 已下载文件
 let hintTimeout = null;
 
 // 获取来源类型的中文描述
-function getSourceTypeText(sourceType) {
+function getSourceTypeText(sourceType, folder) {
     const map = {
-        'server_cache': '服务器本地缓存',
+        'server_cache': folder === 'music' ? '已下载文件' : '服务器缓存',
         'cache': '浏览器链接缓存',
         'normal': '在线解析'
     };
@@ -5356,9 +5356,9 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
         if (!isSilent) showInfo('正在自动尝试换源匹配...');
 
         const searchPromises = searchSources.map(s =>
-            fetch(`${API_BASE}/search?name=${encodeURIComponent(query)}&source=${s}&page=1`, { headers })
+            fetch(`${API_BASE}/search?name=${encodeURIComponent(query)}&source=${s}&page=1&limit=20`, { headers })
                 .then(res => res.json())
-                .then(data => Array.isArray(data) ? data.map(item => ({ ...item, source: s })) : [])
+                .then(data => (data.list || []).map(item => ({ ...item, source: s })))
                 .catch(() => [])
         );
 
@@ -5489,7 +5489,8 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url && !isRetry) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
-        return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality };
+        const localFolder = /folder=music/.test(song.url) ? 'music' : 'cache';
+        return { url: localUrl, sourceType: 'server_cache', quality: song.quality || quality, folder: localFolder };
     }
 
     const shouldBypassServerCache = isRetry === 'local_retry' || isRetry === 'download';
@@ -5503,7 +5504,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             let serverCacheUrl = cacheResult.url;
             // 应用代理逻辑 (以防服务器缓存返回的是原始 HTTP 链接)
             serverCacheUrl = await applyAutoProxy(serverCacheUrl, song);
-            return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality };
+            return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality, folder: cacheResult.folder };
         }
     }
 
@@ -5705,7 +5706,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
         }
 
         prefetchManager.set(nextSong.id, result);
-        const sourceDesc = getSourceTypeText(result.sourceType);
+        const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
         console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
 
     } catch (e) {
@@ -5992,6 +5993,35 @@ function updateAdminUI() {
     });
 }
 
+const watchedCacheSongKeys = new Set();
+
+/**
+ * 播放时触发的后台缓存不经过下载管理器，轮询它的进度直到结束，
+ * 结束后重拉服务器文件状态并刷新页面上已有的缓存/下载徽标。
+ */
+async function watchServerCacheTask(songKey) {
+    if (!songKey || watchedCacheSongKeys.has(songKey)) return;
+    watchedCacheSongKeys.add(songKey);
+    const headers = getUserAuthHeaders();
+    const deadline = Date.now() + 10 * 60 * 1000;
+    try {
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 3000));
+            let status = null;
+            try {
+                const res = await fetch(`/api/music/cache/progress?ids=${encodeURIComponent(songKey)}`, { headers });
+                const data = await res.json();
+                status = data?.data?.[songKey]?.status || null;
+            } catch (e) { break; }
+            // 进度条目被服务端移除即代表已结束（完成或失败）
+            if (!status || status === 'finished' || status === 'exists' || status === 'error') break;
+        }
+    } finally {
+        watchedCacheSongKeys.delete(songKey);
+    }
+    window.ServerFileState?.repaintAll();
+}
+
 async function triggerServerCache(song, url, quality) {
     try {
         console.log('[ServerCache] Triggering background download for:', song.name);
@@ -6024,6 +6054,9 @@ async function triggerServerCache(song, url, quality) {
                 embedLyric: !!(window.settings?.embedLyricToFile ?? true)
             })
         });
+        if (window.ServerFileState) {
+            void watchServerCacheTask(`${window.ServerFileState.songKey(songInfoForCache)}_${quality || 'unknown'}`);
+        }
         // 移除 403 自动重试逻辑，API 不再报 403
     } catch (e) { console.error('[ServerCache] Trigger failed:', e); }
 }
@@ -6652,13 +6685,13 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         // [Fix] 移除 dismissAllToasts()，允许成功/失败/尝试信息的 Toast 共存堆叠
 
         // Display attempts / success message
-        const sourceText = getSourceTypeText(urlResult.sourceType);
+        const sourceText = getSourceTypeText(urlResult.sourceType, urlResult.folder);
         const sourceName = urlResult.sourceName || '';
 
         if (urlResult.isPrefetch) {
             let detail = '解析成功';
             if (urlResult.sourceType === 'cache') detail = '命中缓存链接';
-            else if (urlResult.sourceType === 'server_cache') detail = '命中本地文件';
+            else if (urlResult.sourceType === 'server_cache') detail = urlResult.folder === 'music' ? '命中已下载文件' : '命中服务器缓存';
             else if (sourceName) detail = `${sourceName} 解析成功`;
             showSuccess(`[预读] ${song.name} ${detail}`);
         } else if (urlResult.sourceType !== 'normal') {
@@ -6678,6 +6711,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         let finalUrl = urlResult.url;
         currentQuality = urlResult.quality;
         currentSourceType = urlResult.sourceType;
+        currentCacheFolder = urlResult.folder || 'cache';
         const playbackSong = (urlResult.switchedSource && urlResult.songInfo) ? urlResult.songInfo : song;
         if (playbackSong !== song) {
             currentPlayingSong = playbackSong;
@@ -6946,7 +6980,7 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
     if (currentSourceType === 'cache') {
         statusText += ' 【缓存链接】';
     } else if (currentSourceType === 'server_cache') {
-        statusText += ' 【服务器缓存】';
+        statusText += currentCacheFolder === 'music' ? ' 【已下载】' : ' 【缓存】';
     }
 
     statusEl.innerText = statusText;
@@ -8685,6 +8719,43 @@ async function resetAllSettings() {
     }
 }
 
+// 清理"未引用歌词"：磁盘上存在但没有被缓存索引登记的 .lrc（历史上音质未定时写出的兜底文件名等）
+async function cleanOrphanLyrics() {
+    const headers = {};
+    Object.assign(headers, getUserAuthHeaders());
+    try {
+        const res = await fetch('/api/music/cache/lyric/orphans', { headers });
+        const scan = await res.json();
+        if (!scan.success) throw new Error(scan.message || '扫描失败');
+        const orphans = scan.data || [];
+        if (orphans.length === 0) {
+            showSuccess('没有未引用的歌词文件');
+            return;
+        }
+        const sizeMb = (orphans.reduce((sum, o) => sum + (o.size || 0), 0) / 1024 / 1024).toFixed(2);
+        const confirmed = await showSelect('清理未引用歌词',
+            `发现 ${orphans.length} 个没有对应音频或未在索引中登记的歌词文件，共 ${sizeMb} MB。删除后相关歌曲下次播放会重新在线获取歌词，确认删除？`,
+            { danger: true, confirmText: '删除' });
+        if (!confirmed) return;
+
+        const delRes = await fetch('/api/music/cache/lyric/orphans/delete', {
+            method: 'POST',
+            headers: { ...headers, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items: orphans.map(o => ({ filename: o.filename, folder: o.folder })) })
+        });
+        const del = await delRes.json();
+        const result = del.data || {};
+        const deleted = result.deletedCount || 0;
+        const failures = result.failures || [];
+        if (deleted > 0) showSuccess(`已清理 ${deleted} 个未引用歌词`);
+        if (failures.length > 0) showError(`${failures.length} 个未能删除`);
+        if (deleted === 0 && failures.length === 0) showError(del.message || '清理失败');
+        refreshCacheList();
+    } catch (e) {
+        showError('清理未引用歌词失败: ' + e.message);
+    }
+}
+
 async function clearCache(type) {
     if (!(await showSelect('清除缓存', '确定要清除本地缓存吗？', { danger: true }))) return;
 
@@ -8846,7 +8917,8 @@ async function refreshCacheList() {
         const data = await res.json();
 
         if (data.success) {
-            currentCacheList = data.data;
+            // 这个抽屉只管缓存目录；已下载的文件在「本地音乐」页管理，避免在这里被误删
+            currentCacheList = (data.data || []).filter(item => item.folder !== 'music');
             renderCacheList();
             updateCacheHeaderStats();
         } else {
@@ -8880,7 +8952,7 @@ function renderCacheList() {
         const isSelected = selectedCacheFiles.has(getCacheItemKey(item));
 
         // 样式同步：使用主列表的来源标签生成函数
-        const sourceTagHtml = window.getSourceTag ? window.getSourceTag(item.source) : `<span class="px-1 py-0 rounded text-[10px] font-bold border t-badge-red mr-1">${item.source.toUpperCase()}</span>`;
+        const sourceTagHtml = window.getSourceTag ? window.getSourceTag(item.source) : `<span class="song-tag t-badge-red">${item.source.toUpperCase()}</span>`;
 
         // 样式同步：匹配 getQualityTags 的逻辑
         let qTagHtml = '';
@@ -8888,19 +8960,19 @@ function renderCacheList() {
         const qName = window.QualityManager?.getQualityDisplayName(q) || q.toUpperCase();
 
         if (q === 'master') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-purple border border-purple-200 dark:border-purple-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-purple border-purple-200 dark:border-purple-500/30 transition-colors">${qName}</span>`;
         } else if (q === 'atmos' || q === 'atmos_plus') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-cyan-200 dark:border-cyan-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-cyan border-cyan-200 dark:border-cyan-500/30 transition-colors">${qName}</span>`;
         } else if (q === 'flac24bit' || q === 'hires' || q === 'hr') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-yellow border border-yellow-200 dark:border-yellow-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-yellow border-yellow-200 dark:border-yellow-500/30 transition-colors">${qName}</span>`;
         } else if (q === 'flac' || q === 'sq' || q === 'ape') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-green border border-emerald-200 dark:border-emerald-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-green border-emerald-200 dark:border-emerald-500/30 transition-colors">${qName}</span>`;
         } else if (q === '320k' || q === 'hq') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-blue border border-blue-200 dark:border-blue-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-blue border-blue-200 dark:border-blue-500/30 transition-colors">${qName}</span>`;
         } else if (q === '128k' || q === 'mq' || q === 'standard') {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-gray border t-border-main transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-gray border t-border-main transition-colors">${qName}</span>`;
         } else {
-            qTagHtml = `<span class="flex-shrink-0 px-1 py-0 rounded text-[10px] t-badge-red border border-red-200 dark:border-red-500/30 transition-colors">${qName}</span>`;
+            qTagHtml = `<span class="song-tag t-badge-red border border-red-200 dark:border-red-500/30 transition-colors">${qName}</span>`;
         }
 
         const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
@@ -15490,12 +15562,18 @@ function showOptions(title, message, options = []) {
         const modal = document.createElement('div');
         modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
 
-        const optionsHtml = options.map(opt => `
-            <button class="w-full text-left px-4 py-3.5 t-text-main hover:bg-emerald-500 hover:text-white transition-all rounded-xl font-bold text-sm flex items-center justify-between group" data-value="${opt}">
-                <span>${opt}</span>
+        const optionsHtml = options.map((opt, idx) => {
+            const entry = typeof opt === 'string' ? { label: opt } : (opt || { label: '' });
+            const label = String(entry.label ?? '');
+            const disabled = !!entry.disabled;
+            const safeLabel = label.replace(/"/g, '&quot;');
+            const hint = entry.hint ? ` title="${String(entry.hint).replace(/"/g, '&quot;')}"` : '';
+            return `
+            <button${hint} data-value="${safeLabel}" data-index="${idx}"${disabled ? ' disabled aria-disabled="true"' : ''} class="w-full text-left px-4 py-3.5 t-text-main ${disabled ? 'opacity-40 cursor-not-allowed' : 'hover:bg-emerald-500 hover:text-white transition-all'} rounded-xl font-bold text-sm flex items-center justify-between group">
+                <span>${label}</span>
                 <i class="fas fa-chevron-right text-[10px] opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all"></i>
-            </button>
-        `).join('');
+            </button>`;
+        }).join('');
 
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
@@ -15528,6 +15606,7 @@ function showOptions(title, message, options = []) {
         };
 
         modal.querySelectorAll('button[data-value]').forEach(btn => {
+            if (btn.disabled) return;
             btn.onclick = () => close(btn.getAttribute('data-value'));
         });
 
@@ -15552,14 +15631,9 @@ async function handleDownloadClick(event) {
 
     const song = currentPlayingSong;
 
-    // [优化] 检测是否已缓存
-    const prefQuality = window.settings?.preferredQuality || 'flac';
-    const checkResult = await window.checkServerCache?.(song, prefQuality);
-    const cacheSuffix = (checkResult?.exists && !checkResult?.isCollision) ? ' (已缓存)' : '';
-
     const isOnlyDownload = window.settings?.enableOnlyDownloadMode === true;
     const actionLabel = isOnlyDownload ? '下载到服务器' : '缓存到服务器';
-    const options = ['浏览器下载', `${actionLabel}${cacheSuffix}`];
+    const options = ['浏览器下载', `${actionLabel}${await (window.describeServerStateSuffix?.(song) || '')}`];
     const modeText = isOnlyDownload ? '仅下载模式' : '缓存模式';
     const selected = await showOptions('下载与缓存', `[${modeText}] 选择对 [${song.name}] 的操作：`, options);
     if (!selected) return;
@@ -15596,12 +15670,6 @@ async function handleDownloadClick(event) {
             } else {
                 return;
             }
-        }
-
-        const isCached = checkResult?.exists && !checkResult?.isCollision;
-        if (!isOnlyDownload && isCached) {
-            showInfo('该歌曲已在服务器缓存');
-            return;
         }
 
         if (typeof downloadSong === 'function') {

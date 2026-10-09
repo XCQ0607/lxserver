@@ -6,7 +6,10 @@ import { eapiRequest } from './utils/index'
 import { buildQualitys } from './quality'
 
 export default {
-  limit: 30,
+  // 每页条数：2026-10-09 实测（关键词「周杰伦」第 1 页）。请求 20/25/30/50 都只返回 20 条，
+  // 网易这个接口按 20 固定分页，请求更大的值不会多给。深页 20/页 时第 13 页起整页与已见重复，
+  // 14 页共 260 条原始结果里只有约 156 条是新条目，所以取回后要按 id 去重。
+  limit: 20,
   total: 0,
   page: 0,
   allPage: 1,
@@ -72,12 +75,13 @@ export default {
 
       this.total = result.data.totalCount || 0
       this.page = page
-      this.allPage = Math.ceil(this.total / this.limit)
+      // allPage/limit 按本次请求真正用的每页条数算，不能用 this.limit（默认值 30 会把页数少算约 1/3）
+      this.allPage = Math.ceil(this.total / limit)
 
       return {
         list,
         allPage: this.allPage,
-        limit: this.limit,
+        limit,
         total: this.total,
         source: 'wy',
       }

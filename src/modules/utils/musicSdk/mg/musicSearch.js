@@ -10,6 +10,9 @@ export const createSignature = (time, str) => {
 }
 
 export default {
+  // 每页条数：2026-10-09 实测（关键词「周杰伦」）。咪咕不按请求给数：请求 20 返回 37 条，
+  // 请求 50/100/200/300 都返回 174 条左右，所以这里保持 20 只是请求占位，
+  // 判断是否到底不能用「返回数 < 请求数」，只能按 allPage 翻页再按 id 去重。
   limit: 20,
   total: 0,
   page: 0,

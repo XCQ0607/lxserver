@@ -4276,7 +4276,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
             username = verified
           }
-          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username)
+          const folderParam = urlObj.searchParams.get('folder')
+          const requestedFolder = folderParam === 'cache' || folderParam === 'music' ? folderParam as fileCache.CacheFolder : undefined
+          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username, requestedFolder)
           return
         }
       }
@@ -4354,6 +4356,69 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: e.message || 'Failed to clear lyric cache' }))
         }
+        return
+      }
+
+      // 6.5 未引用歌词（孤儿 .lrc）扫描与删除
+      if (pathname === '/api/music/cache/lyric/orphans' && req.method === 'GET') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        try {
+          const data = fileCache.listOrphanLyrics(username)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, data }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || 'Failed to list orphan lyrics' }))
+        }
+        return
+      }
+
+      if (pathname === '/api/music/cache/lyric/orphans/delete' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        void readBody(req).then(body => {
+          try {
+            const payload = JSON.parse(body)
+            const rawItems = Array.isArray(payload.items) ? payload.items : []
+            if (rawItems.length === 0) throw new Error('Missing items')
+            const items = rawItems.map((item: any) => {
+              if (typeof item === 'string') return { filename: item }
+              if (!item || typeof item.filename !== 'string') throw new Error('Invalid item')
+              if (item.folder !== undefined && item.folder !== 'cache' && item.folder !== 'music') throw new Error('Invalid folder')
+              return { filename: item.filename, folder: item.folder }
+            })
+            const result = fileCache.deleteOrphanLyrics(items, username)
+            accessLog.info(`orphan lyrics deleted user=${username} count=${result.deletedCount} failures=${result.failures.length}`)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: result.failures.length === 0, data: result }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
         return
       }
 
@@ -5955,7 +6020,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const type = urlObj.searchParams.get('type') || 'song' // 新增 type 参数: song, singer, album, playlist
         const limit = parseInt(urlObj.searchParams.get('limit') || '20')
         const page = parseInt(urlObj.searchParams.get('page') || '1')
-        const fetchPages = parseInt(urlObj.searchParams.get('pages') || '1') // 新增：一次请求多少页
+        // 调用方显式要了 N 条时只取够 N 条（如本地音乐匹配一首歌），不传就是取该平台全量
+        const requestedLimit = urlObj.searchParams.get('limit') ? parseInt(urlObj.searchParams.get('limit') || '0') : 0
 
         if (!name) {
           res.writeHead(400); res.end('Missing name'); return
@@ -5966,45 +6032,114 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             throw new Error(`Source ${source} is not supported`)
           }
 
-          let result
+          // 搜索结果统一成对象返回：list 是去重后的条目，total/allPage 是平台自报值（可能不可信），
+          // fetchedPages 是本次实际取到的页数，hasMore 表示被页数墙或预算截断、还有数据没取到。
+          let result: any
           if (type === 'song') {
-            const PAGE_SIZE = 20
-            let allSongs: any[] = []
-            // 根据前端给定的起始页 (page) 和 请求量 (pages) 进行拉取
-            const startPage = page
-            const endPage = page + fetchPages - 1
+            const api = musicSdk[source].musicSearch
+            // 调用方显式带了 limit 时，走「第 page 页、每页 limit 条」的传统分页（本地音乐的在线匹配靠它翻页）；
+            // 不带 limit 才是搜索界面的用法：按各源 musicSearch.js 里实测出的 limit 取全量。
+            const singlePage = requestedLimit > 0
+            const startPage = singlePage ? page : 1
+            const pageSize: number = singlePage
+              ? Math.min(requestedLimit, api.limit || 20)
+              : (api.limit || 20)
+            const startedAt = Date.now()
+            const first: any = await api.search(name, startPage, pageSize)
+            const firstList: any[] = (first && first.list) || []
+            const rawTotal = first && typeof first.total === 'number' && first.total > 0 ? first.total : firstList.length
+            const rawAllPage = first && typeof first.allPage === 'number' && first.allPage > 0
+              ? first.allPage
+              : Math.ceil(rawTotal / pageSize)
+            // 平台自报的 total/allPage 不可全信（tx 报 45206 条 = 754 页，实测取不到那么多），
+            // 所以取数上限是「allPage 推算 + 页数墙 + 条数预算 + 时间预算」四重收紧，而不是照 total 硬翻页。
+            const SEARCH_PAGE_CAP = 60
+            const SEARCH_MAX_ITEMS = 4000
+            const SEARCH_MAX_MS = 15000
+            const capPages = singlePage ? startPage : Math.max(1, Math.min(
+              Number.isFinite(rawAllPage) ? rawAllPage : 1,
+              SEARCH_PAGE_CAP
+            ))
 
-            for (let p = startPage; p <= endPage; p++) {
-              const searchData = await musicSdk[source].musicSearch.search(name, p, PAGE_SIZE)
-              const pageList: any[] = searchData.list || []
-              allSongs = allSongs.concat(pageList)
-              // 如果本页返回数量小于 PAGE_SIZE，说明已经是最后页
-              if (pageList.length < PAGE_SIZE) break
+            const seen = new Set<string>()
+            const allSongs: any[] = []
+            const pushItems = (pageList: any[]): number => {
+              // 返回本页贡献的新条目数（0 表示整页都是已见过的 → 平台已开始回绕）
+              let fresh = 0
+              for (const item of pageList) {
+                const key = `${source}_${item.id ?? item.songmid ?? item.mid ?? item.hash ?? item.copyrightId ?? item.strMediaMid ?? `${item.name || ''}-${item.singer || ''}`}`
+                if (seen.has(key)) continue
+                seen.add(key)
+                allSongs.push(item)
+                fresh++
+              }
+              return fresh
             }
-            result = allSongs
+            pushItems(firstList)
+
+            // 必须串行翻页：2026-10-09 实测并发（3 路）取 kw 同一关键词三次只拿回 3000/2000/2000 条
+            // （串行是 3045 条），tx 并发 60 页只回 240 条 —— 平台在快速连发时会返回重复或漂移的页。
+            let fetchedPages = startPage
+            let stopReason = 'all-pages'
+            for (let p = startPage + 1; p <= capPages; p++) {
+              if (Date.now() - startedAt > SEARCH_MAX_MS) { stopReason = 'time-budget'; break }
+              if (allSongs.length >= SEARCH_MAX_ITEMS) { stopReason = 'item-budget'; break }
+              let pageData: any
+              try {
+                pageData = await api.search(name, p, pageSize)
+              } catch (e) {
+                // 平台自己的页数墙（kg 的 try max num 等）：撞到就到此为止
+                stopReason = 'page-wall'
+                break
+              }
+              const pageList: any[] = (pageData && pageData.list) || []
+              fetchedPages = p
+              if (pageList.length === 0) { stopReason = 'empty-page'; break }
+              if (pushItems(pageList) === 0) { stopReason = 'repeat-page'; break }
+            }
+            if (singlePage) {
+              stopReason = 'single-page'
+            } else if (fetchedPages < capPages && stopReason === 'all-pages') {
+              stopReason = 'page-cap'
+            }
+
+            const list = requestedLimit > 0 ? allSongs.slice(0, requestedLimit) : allSongs
+            // 取完一整轮（empty-page/repeat-page/all-pages）就不算还有剩，别用「条数 < 平台报的 total」误判：
+            // kw 报 3600 条里本身就含跨页重复，串行取到第 18 页也只有 3045 条新内容。
+            const finished = stopReason === 'empty-page' || stopReason === 'repeat-page' || stopReason === 'all-pages'
+            result = {
+              list,
+              total: rawTotal,
+              allPage: rawAllPage,
+              pageSize,
+              fetchedPages,
+              stopReason,
+              hasMore: singlePage ? firstList.length >= pageSize : !finished,
+              source,
+            }
           } else if (type === 'singer') {
             if (!musicSdk[source].extendSearch || !musicSdk[source].extendSearch.searchSinger) {
               throw new Error(`Source ${source} does not support singer search`)
             }
             const searchData = await musicSdk[source].extendSearch.searchSinger(name, page, limit)
-            result = searchData.list || []
+            result = { list: searchData.list || [], total: searchData.total || 0, allPage: searchData.allPage || 1, pageSize: limit, fetchedPages: page, source }
           } else if (type === 'album') {
             if (!musicSdk[source].extendSearch || !musicSdk[source].extendSearch.searchAlbum) {
               throw new Error(`Source ${source} does not support album search`)
             }
             const searchData = await musicSdk[source].extendSearch.searchAlbum(name, page, limit)
-            result = searchData.list || []
+            result = { list: searchData.list || [], total: searchData.total || 0, allPage: searchData.allPage || 1, pageSize: limit, fetchedPages: page, source }
           } else if (type === 'playlist') {
             if (!musicSdk[source].extendSearch || !musicSdk[source].extendSearch.searchPlaylist) {
               throw new Error(`Source ${source} does not support playlist search`)
             }
             const searchData = await musicSdk[source].extendSearch.searchPlaylist(name, page, limit)
-            result = searchData.list || []
+            result = { list: searchData.list || [], total: searchData.total || 0, allPage: searchData.allPage || 1, pageSize: limit, fetchedPages: page, source }
           } else {
             throw new Error(`Invalid search type: ${type}`)
           }
 
-          fs.appendFileSync(path.join(process.cwd(), 'debug.txt'), `[Search] Source: ${source}, Type: ${type}, Query: ${name}, StartPage: ${page}, Pages: ${fetchPages}, Result Count: ${result.length}\n`)
+          fs.appendFileSync(path.join(process.cwd(), 'debug.txt'), `[Search] Source: ${source}, Type: ${type}, Query: ${name}, FetchedPages: ${result.fetchedPages}, Returned: ${result.list.length}, PlatformTotal: ${result.total}\n`)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
