@@ -24,28 +24,37 @@ const musicVisualizer = (function () {
         const isDetailOn = window.settings ? window.settings.showDetailVisualizer : false;
         const isAnyVisualizerWanted = isFooterOn || isDetailOn;
 
-        if (!isAnyVisualizerWanted && (!window.soundEffects || !window.soundEffects.getAnalyser())) {
+        const hasEffectsAnalyser = window.soundEffects && window.soundEffects.getAnalyser && window.soundEffects.getAnalyser();
+
+        if (!isAnyVisualizerWanted && !hasEffectsAnalyser) {
             console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation to preserve native playback.');
             return;
         }
 
         try {
-            console.log('[Visualizer] Initializing AudioContext...');
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+            console.log('[Visualizer] Initializing AudioContext & Visualizer graph...');
+            audioContext = window._sharedAudioContext || (window.soundEffects && window.soundEffects.getContext && window.soundEffects.getContext()) || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());
 
-            // 如果音效管理器已存在，使用它的分析器
-            if (window.soundEffects && window.soundEffects.getAnalyser()) {
+            if (hasEffectsAnalyser) {
                 audioAnalyser = window.soundEffects.getAnalyser();
+                audioSource = window.soundEffects.getSourceNode ? window.soundEffects.getSourceNode() : window._sharedAudioSourceNode;
                 console.log('[Visualizer] Using analyser from SoundEffectsManager');
             } else {
-                audioSource = audioContext.createMediaElementSource(audio);
-                audioAnalyser = audioContext.createAnalyser();
+                audioSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(audio));
+                audioAnalyser = window._sharedAudioAnalyser || (window._sharedAudioAnalyser = audioContext.createAnalyser());
+                
+                try { audioSource.disconnect(); } catch (_) { }
+                try { audioAnalyser.disconnect(); } catch (_) { }
                 audioSource.connect(audioAnalyser);
                 audioAnalyser.connect(audioContext.destination);
             }
 
             audioAnalyser.smoothingTimeConstant = 0.8;
             audioAnalyser.fftSize = 512;
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().catch(() => {});
+            }
 
             waveFooter = new Wave(audioAnalyser, footerCanvas);
             waveDetail = new Wave(audioAnalyser, detailCanvas);

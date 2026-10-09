@@ -207,13 +207,18 @@ function safeRedirect(res: http.ServerResponse, targetUrl: string, extraHeaders?
 
 /**
  * 快速探测上游返回的音频直链是否真实可读（发送 Range: bytes=0-0 GET 请求）。
- * 防止部分自定义源对某些歌曲返回 401 签名错误或 404 文件不存在的虚假链接，
- * 探测失败时可自动让 resolveStreamUrl 降级尝试次选音质或备用音源。
+ * 区分明确的 401/404/403 错误状态与网络探测超时，防止上游响应缓慢时直接误杀有效直链。
  */
-async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<boolean> {
-    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
+export type ProbeAudioResult = 'ok' | 'invalid' | 'timeout'
+
+async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<ProbeAudioResult> {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return 'invalid'
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), timeoutMs)
+    let timedOut = false
+    const timer = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+    }, timeoutMs)
     try {
         const resp = await fetch(url, {
             method: 'GET',
@@ -227,18 +232,29 @@ async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<boo
         // 及时中止未读取的响应流以释放连接和上游带宽
         try { controller.abort() } catch { }
 
-        // 200 OK 或 206 Partial Content 说明资源可正常读取
-        if (resp.status !== 200 && resp.status !== 206) return false
+        // 明确的错误状态码（如 401 签名失效、403 权限拒绝、404 文件不存在、410 资源下架或 5xx 故障）
+        if (resp.status === 401 || resp.status === 403 || resp.status === 404 || resp.status === 410 || resp.status >= 500) {
+            return 'invalid'
+        }
 
         // 检查 Content-Type：防止上游将失效链接重定向至 HTML 登录页或 JSON 错误提示
         const contentType = (resp.headers.get('content-type') || '').toLowerCase()
         if (contentType.includes('text/html') || contentType.includes('application/json')) {
-            return false
+            return 'invalid'
         }
-        return true
-    } catch {
+
+        // 200 OK 或 206 Partial Content 说明资源可正常读取
+        if (resp.status === 200 || resp.status === 206) {
+            return 'ok'
+        }
+
+        return 'invalid'
+    } catch (err: any) {
         clearTimeout(timer)
-        return false
+        if (timedOut || err?.name === 'AbortError') {
+            return 'timeout'
+        }
+        return 'invalid'
     }
 }
 
@@ -5330,6 +5346,8 @@ class SubsonicHandler {
             for (const s of srcPriority) if (s !== source && !sourcesToTry.includes(s)) sourcesToTry.push(s)
         }
 
+        let fallbackResult: { url: string; quality: string; selected?: string } | null = null
+
         for (const trySource of sourcesToTry) {
             const excludeApiSources: string[] = []
 
@@ -5380,15 +5398,24 @@ class SubsonicHandler {
                         )
                         if (r?.url) {
                             // 探测音频 URL 是否真实可读，避免返回 401 签名错误或 404 文件不存在的虚假链接
-                            const isReachable = await probeAudioUrl(r.url)
-                            if (isReachable) {
-                                const selected = trySource === source
-                                    ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
-                                    : `source:${source}->${trySource}/${q}`
+                            const probeResult = await probeAudioUrl(r.url)
+                            const selected = trySource === source
+                                ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
+                                : `source:${source}->${trySource}/${q}`
+
+                            if (probeResult === 'ok') {
                                 return { url: r.url, quality: r.type || q, selected }
+                            } else if (probeResult === 'timeout') {
+                                // 区分探测超时与明确失效（401/404）：超时保留为候选回退，避免上游延迟导致整首歌误报错误
+                                if (!fallbackResult) {
+                                    fallbackResult = { url: r.url, quality: r.type || q, selected }
+                                }
+                                if (cfg['subsonic.enableDebug']) {
+                                    subsonicLog.debug(`[Subsonic] candidate URL probe timeout (saved as fallback): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                }
                             } else {
                                 if (cfg['subsonic.enableDebug']) {
-                                    subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe failed): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                    subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe invalid): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
                                 }
                             }
                         }
@@ -5404,6 +5431,14 @@ class SubsonicHandler {
                     }
                 }
             }
+        }
+
+        // 所有候选均未能通过即时 probe 探测，但存在超时的备选直链时，回退使用该直链供客户端尝试播放
+        if (fallbackResult) {
+            if (cfg['subsonic.enableDebug']) {
+                subsonicLog.debug(`[Subsonic] all candidates finished; returning timeout fallback URL: ${fallbackResult.quality} -> ${String(fallbackResult.url).slice(0, 80)}`)
+            }
+            return fallbackResult
         }
 
         throw new Error('Could not resolve music URL (all quality/source candidates failed)')

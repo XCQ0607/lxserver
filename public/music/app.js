@@ -7420,10 +7420,6 @@ function fadeVolume(targetVolume, duration = 800) {
 // Audio Events
 audio.addEventListener('timeupdate', () => {
     if (audio.currentTime > 0) lastKnownPlaybackTime = audio.currentTime;
-    if (playbackStallDetectionTimer) {
-        clearTimeout(playbackStallDetectionTimer);
-        playbackStallDetectionTimer = null;
-    }
     if (isDragging === 'progress') return; // Skip updating UI while user is dragging
 
     const current = audio.currentTime;

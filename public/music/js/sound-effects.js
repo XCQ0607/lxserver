@@ -51,6 +51,7 @@ window.soundEffects = (function () {
     };
 
     let dryGainNode, wetGainNode, mixerNode;
+    let isGraphBuilt = false;
 
     function hasActiveEffects() {
         const isEqActive = settings.eq && settings.eq.some(val => val !== 0);
@@ -61,7 +62,7 @@ window.soundEffects = (function () {
     }
 
     function init(force = false) {
-        if (audioContext) return;
+        if (audioContext && isGraphBuilt) return;
         loadSettings();
         if (!force && !hasActiveEffects()) {
             console.log('[SoundEffects] No custom sound effects enabled. Keeping direct native audio output (zero throttling).');
@@ -70,13 +71,22 @@ window.soundEffects = (function () {
         const audio = document.getElementById('audio-player');
         if (!audio) return;
 
-        console.log('[SoundEffects] Initializing AudioContext...');
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('[SoundEffects] Initializing AudioContext and DSP graph...');
+        audioContext = window._sharedAudioContext || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());
 
-        // 1. Create Nodes
-        mediaSource = audioContext.createMediaElementSource(audio);
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 512;
+        // 1. Create or Reuse Nodes
+        if (!mediaSource) {
+            mediaSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(audio));
+        }
+        if (!analyser) {
+            analyser = window._sharedAudioAnalyser || (window._sharedAudioAnalyser = audioContext.createAnalyser());
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.8;
+        }
+
+        // Disconnect any bypass link (e.g. created previously by visualizer)
+        try { mediaSource.disconnect(); } catch (_) { }
+        try { analyser.disconnect(); } catch (_) { }
 
         // EQ Filters
         eqFilters = freqs.map(freq => {
@@ -127,6 +137,12 @@ window.soundEffects = (function () {
         // iOS: 在 analyser 之后接入后台保活流桥（仅 iOS 设备生效）
         if (window.iOSBackgroundAudio) {
             window.iOSBackgroundAudio.init(audioContext, analyser);
+        }
+
+        isGraphBuilt = true;
+
+        if (audioContext.state === 'suspended') {
+            audioContext.resume().catch(() => {});
         }
 
         // 3. Load Settings
@@ -507,22 +523,18 @@ window.soundEffects = (function () {
             }
         },
         open: function () {
-            if (!audioContext) init(true); // User explicitly opened EQ panel, activate engine
+            // 打开面板时只加载并显示设置，不在此强制初始化 Web Audio 图
+            loadSettings();
             const modal = document.getElementById('sound-effects-modal');
+            if (!modal) return;
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             // Background animation
             setTimeout(() => {
                 const content = document.getElementById('sound-effects-content');
-                if (content) { // Check if content exists before trying to access its classList
+                if (content) {
                     content.classList.remove('translate-y-10', 'opacity-0');
                 }
-                // The provided code edit had modal.querySelector('.bg-t-bg-panel') but the original open()
-                // targets 'sound-effects-content' for animation. I'll stick to the original's target
-                // but use the new animation classes if they were intended.
-                // For now, I'll keep the original animation logic for 'content' as it's more consistent
-                // with the original structure, unless the user explicitly wants to change the animated element.
-                // Given the instruction is about refactoring the return and listeners, I'll keep the animation target.
             }, 10);
             renderUI();
         },
@@ -538,7 +550,7 @@ window.soundEffects = (function () {
             }, 300);
         },
         setEQ: function (index, val) {
-            if (!audioContext) init(true);
+            if (!audioContext || !isGraphBuilt) init(true);
             val = parseInt(val);
             settings.eq[index] = val;
             if (eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
@@ -547,7 +559,7 @@ window.soundEffects = (function () {
             renderUI();
         },
         applyPreset: function (name) {
-            if (!audioContext) init(true);
+            if (!audioContext || !isGraphBuilt) init(true);
             const allPresets = [...defaultPresets, ...customPresets];
             const p = allPresets.find(p => p.name === name);
             if (p) {
@@ -565,12 +577,14 @@ window.soundEffects = (function () {
         resetEQ: function () {
             settings.eq = Array(10).fill(0);
             activePresetName = '';
-            eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
+            if (eqFilters.length && audioContext) {
+                eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
+            }
             saveSettings();
             renderUI();
         },
         setReverb: function (id) {
-            if (!audioContext) init(true);
+            if (!audioContext || !isGraphBuilt) init(true);
             settings.reverb.id = id;
             const rev = reverbOptions.find(r => r.id === id);
             if (rev) {
@@ -586,7 +600,7 @@ window.soundEffects = (function () {
             renderUI(); // Update radio selection state
         },
         setPitch: function (val) {
-            if (!audioContext) init(true);
+            if (!audioContext || !isGraphBuilt) init(true);
             const oldPitch = settings.pitch;
             settings.pitch = parseFloat(val);
 
@@ -609,20 +623,23 @@ window.soundEffects = (function () {
             this.setPitch(1.0);
         },
         setPanner: function (key, val) {
-            if (!audioContext) init(true);
+            if (!audioContext || !isGraphBuilt) init(true);
             if (key === 'enable') settings.panner.enable = val;
             else settings.panner[key] = parseInt(val);
             updatePanner();
             saveSettings();
             renderUI();
         },
-        getAnalyser: () => analyser,
+        getContext: () => audioContext || window._sharedAudioContext || null,
+        getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
+        getAnalyser: () => analyser || window._sharedAudioAnalyser || null,
         setReverbGain: function (type, val) {
+            if (!audioContext || !isGraphBuilt) init(true);
             if (type === 'main') settings.reverb.mainGain = val;
             else settings.reverb.sendGain = val;
             saveSettings();
 
-            if (window._soundEffectsGains) {
+            if (window._soundEffectsGains && audioContext) {
                 if (type === 'main') window._soundEffectsGains.dry.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
                 else window._soundEffectsGains.wet.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
             }
