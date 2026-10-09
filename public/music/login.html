@@ -793,22 +793,25 @@
                     return;
                 }
 
-                // Safari 凭据自动静默恢复
+                // Safari / 浏览器凭据自动静默恢复 (通过 Token 校验)
                 const savedUser = localStorage.getItem('lx_sync_user');
-                const savedPass = localStorage.getItem('lx_sync_pass');
-                if (savedUser && savedPass) {
-                    console.log('[Login] 检测到已保存的用户凭据，正在尝试自动恢复 Session...');
-                    const autoRes = await fetch('/api/music/auth', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ mode: 'user', username: savedUser, password: savedPass })
+                const savedToken = localStorage.getItem('lx_user_token');
+                if (savedUser && savedToken) {
+                    console.log('[Login] 检测到已保存的用户 Token，正在尝试自动恢复 Session...');
+                    const tokenVerifyRes = await fetch('/api/music/auth/verify', {
+                        headers: {
+                            'x-user-name': savedUser,
+                            'x-user-token': savedToken
+                        }
                     });
-                    const autoData = await autoRes.json();
-                    if (autoData.success) {
+                    const tokenVerifyData = await tokenVerifyRes.json();
+                    if (tokenVerifyData.valid) {
                         window.location.replace('./');
+                        return;
                     } else {
-                        // 凭据已失效，清除本地失效凭据
+                        // Token 已失效，清除本地失效凭据
                         localStorage.removeItem('lx_sync_user');
+                        localStorage.removeItem('lx_user_token');
                         localStorage.removeItem('lx_sync_pass');
                     }
                 }
@@ -873,11 +876,12 @@
 
                     if (data.mode === 'user' && data.username) {
                         localStorage.setItem('lx_sync_user', data.username);
-                        localStorage.setItem('lx_sync_pass', payload.password);
                         localStorage.setItem('lx_sync_mode', 'local');
                         if (data.token) {
                             localStorage.setItem('lx_user_token', data.token);
                         }
+                        // 移除本地明文密码存储
+                        localStorage.removeItem('lx_sync_pass');
                     }
 
                     // 优雅缩放淡出跳转

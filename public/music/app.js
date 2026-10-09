@@ -6847,7 +6847,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 shouldAutoRecoverPlayback = false;
                 playbackRecoveryTriggeredForRequestId = thisRequestId;
                 console.error('[Player] Playback failed:', playError);
-                await runRecoveryFlow(playError);
+                const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
+                await runRecoveryFlow(playError, savedTime);
             }
         }
 
@@ -6859,7 +6860,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
-            await runRecoveryFlow(error);
+            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
+            await runRecoveryFlow(error, savedTime);
         } else {
             setPlayerStatus('播放失败');
             showError(`播放失败: ${error.message || '未知错误'}`);

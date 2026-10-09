@@ -33,7 +33,8 @@ export const normalizeNamingPattern = (pattern: unknown) => {
 
 export const setNamingPattern = (pattern: unknown) => {
     currentNamingPattern = normalizeNamingPattern(pattern)
-    userNamingPatternMap.set('_open', currentNamingPattern)
+    // 仅更新全局回退值，清空缓存映射以使未自定义用户继承新全局值，绝不覆盖用户已保存的个性化设置
+    userNamingPatternMap.clear()
     return currentNamingPattern
 }
 
@@ -103,6 +104,13 @@ export const getUserCacheLocation = (username?: string): string => {
     const fallback = global.lx?.config?.serverCacheLocation || currentCacheLocation
     userCacheLocationMap.set(normalizedUsername, fallback)
     return fallback
+}
+
+export const invalidateUserCacheLocations = (): void => {
+    userCacheLocationMap.clear()
+    userNamingPatternMap.clear()
+    currentCacheLocation = global.lx?.config?.serverCacheLocation || CACHE_ROOTS.ROOT
+    currentNamingPattern = normalizeNamingPattern(global.lx?.config?.['cache.namingPattern'] || CACHE_NAMING_PATTERNS.SIMPLE)
 }
 
 export const setUserCacheLocation = (username: string | undefined, location: unknown): string => {

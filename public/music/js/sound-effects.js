@@ -152,34 +152,46 @@ window.soundEffects = (function () {
         initPitchShifter();
     }
 
+    let pitchShifterInitPromise = null;
+
     async function initPitchShifter() {
-        if (!audioContext) return;
-        if (pitchShifterNode) return;
+        if (!audioContext) return null;
+        if (pitchShifterNode) return pitchShifterNode;
+        if (pitchShifterInitPromise) return pitchShifterInitPromise;
 
-        try {
-            console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
-            await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
+        pitchShifterInitPromise = (async () => {
+            try {
+                console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
+                await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
 
-            pitchShifterNode = new AudioWorkletNode(audioContext, 'phase-vocoder-processor', {
-                numberOfInputs: 1,
-                numberOfOutputs: 1,
-                outputChannelCount: [2],
-                processorOptions: { blockSize: 2048 }
-            });
-            pitchFactorParam = pitchShifterNode.parameters.get('pitchFactor');
+                if (!pitchShifterNode) {
+                    pitchShifterNode = new AudioWorkletNode(audioContext, 'phase-vocoder-processor', {
+                        numberOfInputs: 1,
+                        numberOfOutputs: 1,
+                        outputChannelCount: [2],
+                        processorOptions: { blockSize: 2048 }
+                    });
+                    pitchFactorParam = pitchShifterNode.parameters.get('pitchFactor');
 
-            console.log('[SoundEffects] Pitch Shifter Node created successfully');
+                    console.log('[SoundEffects] Pitch Shifter Node created successfully');
 
-            // Apply the pitch param since node was just created
-            applyPitch();
+                    // Apply the pitch param since node was just created
+                    applyPitch();
 
-            // If settings already have a pitch, apply it and connect if needed
-            if (settings.pitch !== 1.0) {
-                connectPitchShifter();
+                    // If settings already have a pitch, apply it and connect if needed
+                    if (settings.pitch !== 1.0) {
+                        connectPitchShifter();
+                    }
+                }
+                return pitchShifterNode;
+            } catch (e) {
+                console.error('[SoundEffects] Failed to initialize pitch shifter:', e);
+                pitchShifterInitPromise = null;
+                return null;
             }
-        } catch (e) {
-            console.error('[SoundEffects] Failed to initialize pitch shifter:', e);
-        }
+        })();
+
+        return pitchShifterInitPromise;
     }
 
     function connectPitchShifter() {
@@ -187,19 +199,27 @@ window.soundEffects = (function () {
             // Already loaded, just connect
             try { mixerNode.disconnect(pannerNode); } catch (e) { }
             try { mixerNode.disconnect(pitchShifterNode); } catch (e) { }
+            try { pitchShifterNode.disconnect(pannerNode); } catch (e) { }
             mixerNode.connect(pitchShifterNode);
             pitchShifterNode.connect(pannerNode);
         } else {
-            initPitchShifter();
+            initPitchShifter().then(node => {
+                if (node && settings.pitch !== 1.0) {
+                    try { mixerNode.disconnect(pannerNode); } catch (e) { }
+                    try { mixerNode.disconnect(node); } catch (e) { }
+                    try { node.disconnect(pannerNode); } catch (e) { }
+                    mixerNode.connect(node);
+                    node.connect(pannerNode);
+                }
+            });
         }
     }
 
     function disconnectPitchShifter() {
         if (pitchShifterNode) {
-            try {
-                mixerNode.disconnect(pitchShifterNode);
-                pitchShifterNode.disconnect(pannerNode);
-            } catch (e) { }
+            try { mixerNode.disconnect(pitchShifterNode); } catch (e) { }
+            try { pitchShifterNode.disconnect(pannerNode); } catch (e) { }
+            try { mixerNode.disconnect(pannerNode); } catch (e) { }
             mixerNode.connect(pannerNode);
         }
     }

@@ -711,6 +711,8 @@ const reloadServerData = async () => {
           backupInterval: global.lx.config['sync.backupInterval'],
         })
       }
+      // 刷新缓存位置映射，使 _open 等未自定义位置的用户回退到最新的全局 serverCacheLocation
+      fileCache.invalidateUserCacheLocations()
       startupLog.info(`Config re-loaded and merged from ${configPath}.`)
     } catch (err: any) {
       startupLog.error('Failed to reload config file:', err.message)

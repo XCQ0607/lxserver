@@ -251,10 +251,10 @@ async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<Pro
         return 'invalid'
     } catch (err: any) {
         clearTimeout(timer)
-        if (timedOut || err?.name === 'AbortError') {
-            return 'timeout'
-        }
-        return 'invalid'
+        // 区分明确的 HTTP 错误（401/404）与网络传输/超时/连接错误：
+        // 如果是超时（AbortError）或网络连接层异常（DNS 解析失败、TLS 限制、TCP 连接拒绝、路由不可达等），
+        // 均返回 'timeout'（网络不可达/未经验证），使 resolveStreamUrl 在所有候选均探测失败时保留直链供客户端回退尝试播放。
+        return 'timeout'
     }
 }
 
@@ -5346,9 +5346,19 @@ class SubsonicHandler {
             for (const s of srcPriority) if (s !== source && !sourcesToTry.includes(s)) sourcesToTry.push(s)
         }
 
+        const resolveDeadline = Date.now() + 8000 // 整个解析和探测过程最多允许 8 秒全局预算，防止客户端因累计等待而超时
         let fallbackResult: { url: string; quality: string; selected?: string } | null = null
 
+        sourceLoop:
         for (const trySource of sourcesToTry) {
+            // 如果已超时且有 fallback 直链，提前熔断返回 fallback
+            if (fallbackResult && Date.now() >= resolveDeadline) {
+                if (cfg['subsonic.enableDebug']) {
+                    subsonicLog.debug(`[Subsonic] resolve deadline reached; fast fallback to timeout URL: ${fallbackResult.quality} -> ${String(fallbackResult.url).slice(0, 80)}`)
+                }
+                return fallbackResult
+            }
+
             const excludeApiSources: string[] = []
 
             // 跨平台时按歌名+歌手搜索替身；同源直接用原 songmid
@@ -5390,6 +5400,9 @@ class SubsonicHandler {
             const order = this.getQualityPriorityOrder(trySource, maxBitrate)
             for (const cand of candidates) {
                 for (const q of order) {
+                    if (fallbackResult && Date.now() >= resolveDeadline) {
+                        break sourceLoop
+                    }
                     try {
                         const r = await callUserApiGetMusicUrl(
                             trySource as any, cand.music as any, q, username,
@@ -5397,8 +5410,11 @@ class SubsonicHandler {
                             excludeApiSources.length ? excludeApiSources : undefined,
                         )
                         if (r?.url) {
+                            const remainingBudget = Math.max(600, resolveDeadline - Date.now())
+                            const probeTimeout = Math.min(2500, remainingBudget)
+
                             // 探测音频 URL 是否真实可读，避免返回 401 签名错误或 404 文件不存在的虚假链接
-                            const probeResult = await probeAudioUrl(r.url)
+                            const probeResult = await probeAudioUrl(r.url, probeTimeout)
                             const selected = trySource === source
                                 ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
                                 : `source:${source}->${trySource}/${q}`
@@ -5412,6 +5428,10 @@ class SubsonicHandler {
                                 }
                                 if (cfg['subsonic.enableDebug']) {
                                     subsonicLog.debug(`[Subsonic] candidate URL probe timeout (saved as fallback): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                }
+                                // 若时间预算已耗尽，不再继续串行探测其他源，直接返回该 fallback
+                                if (Date.now() >= resolveDeadline) {
+                                    break sourceLoop
                                 }
                             } else {
                                 if (cfg['subsonic.enableDebug']) {
