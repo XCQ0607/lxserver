@@ -17,6 +17,11 @@
         })();
     </script>
     <script src="/js/config.js"></script>
+    <script>
+        if (window.CONFIG && window.CONFIG['player.name']) {
+            document.title = window.CONFIG['player.name'];
+        }
+    </script>
     <!-- PostHog Analytics -->
     <script>
         if (!window.CONFIG || !window.CONFIG.disableTelemetry) {

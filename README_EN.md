@@ -271,7 +271,8 @@ The configuration file is persisted by default in the data directory at `data/co
 | `ADMIN_PATH` | `admin.path` | Backend management interface path | `/admin` |
 | `PLAYER_PATH` | `player.path` | Web player access path (default root `/`) | `/` |
 | `ADMIN_PASSWORD` | `admin.password` | Admin password (for management console and music player admin login) | `123456` |
-| `SERVER_NAME` | `serverName` | Sync service name | `lxserver` |
+| `SERVER_NAME` | `serverName` | Sync service name (shown in client pairing & admin console title) | `LX Sync Server` |
+| `PLAYER_NAME` | `player.name` | Web player name (shown in web player title & login card) | `LX Music Web` |
 | `ENABLE_DEBUG` | `debug.enabled` | Enable DEBUG mode (verbose debug and source sandbox logs, default false) | `false` |
 | `MAX_SNAPSHOT_NUM` | `maxSnapshotNum` | Max snapshots to keep | `10` |
 | `CONFIG_PATH` | - | Absolute path to external config file (defaults to `data/config.js`) | - |

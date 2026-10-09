@@ -160,6 +160,10 @@ module.exports = {
   // 环境变量: WEBDAV_EXCLUDE_MUSIC (true/false)
   "webdav.excludeMusic": false,
 
+  // Web播放器名称
+  // 环境变量: PLAYER_NAME
+  "player.name": "LX Music Web",
+
   // 是否启用 Web播放器 访问密码
   // 环境变量: ENABLE_WEBPLAYER_AUTH (true/false)
   "player.enableAuth": false,

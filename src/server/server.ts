@@ -1121,6 +1121,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       ? (pathname === '/' || (!pathname.startsWith('/api/') && !isSyncProtocolRequest && pathname !== '/js/config.js' && !isSubsonicRequest && (adminPath === '' || (pathname !== adminPath && !pathname.startsWith(adminPath + '/')))))
       : (pathname.startsWith(playerPath + '/') || pathname === playerPath)
 
+    // [新增] 根静态资源 (icon.svg / favicon.ico / manifest.json)
+    if (pathname === '/icon.svg' || pathname === '/favicon.ico' || pathname === '/manifest.json') {
+      const filePath = path.join(global.lx.staticPath, pathname.slice(1))
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        serveStatic(req, res, filePath)
+        return
+      }
+    }
+
     // [新增] 映射管理后台逻辑
     const isAdminRequest = adminPath && (pathname.startsWith(adminPath + '/') || pathname === adminPath)
 
@@ -1264,6 +1273,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'] || 2000,
         maxSnapshotNum: global.lx.config.maxSnapshotNum,
         'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
+        'player.name': global.lx.config['player.name'] || 'LX Music Web',
         'player.enableAuth': global.lx.config['player.enableAuth'] || false,
         port: global.lx.config.port,
         bindIP: global.lx.config.bindIP,
@@ -5917,6 +5927,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           'Cache-Control': 'no-cache'
         })
         res.end(JSON.stringify({
+          'player.name': global.lx.config['player.name'] || 'LX Music Web',
           'player.enableAuth': global.lx.config['player.enableAuth'] || false,
           'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
           'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'] || false,
@@ -7133,6 +7144,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
             'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
             'admin.password': global.lx.config['admin.password'],
+            'player.name': global.lx.config['player.name'] || 'LX Music Web',
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
             'player.password': global.lx.config['player.password'] || '',
             'webdav.enable': global.lx.config['webdav.enable'] ?? false,
@@ -7249,6 +7261,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['admin.password'] !== undefined) global.lx.config['admin.password'] = newConfig['admin.password']
 
               // Web播放器配置
+              if (newConfig['player.name'] !== undefined) global.lx.config['player.name'] = newConfig['player.name']
               if (newConfig['player.enableAuth'] !== undefined) global.lx.config['player.enableAuth'] = newConfig['player.enableAuth']
               if (newConfig['player.password'] !== undefined) global.lx.config['player.password'] = newConfig['player.password']
 
@@ -7466,6 +7479,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'debug.enabled': global.lx.config['debug.enabled'] || false,
                 disableTelemetry: global.lx.config.disableTelemetry,
                 'admin.password': global.lx.config['admin.password'],
+                'player.name': global.lx.config['player.name'],
                 'player.enableAuth': global.lx.config['player.enableAuth'],
                 'player.password': global.lx.config['player.password'],
                 'webdav.enable': global.lx.config['webdav.enable'],

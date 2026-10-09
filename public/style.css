@@ -45,70 +45,381 @@ body {
     box-shadow: var(--shadow-lg);
 }
 
-/* =============== 登录界面 =============== */
+/* =============== 现代化后台登录界面 =============== */
 .overlay {
     position: fixed;
     top: 0;
     left: 0;
-    width: 100%;
-    height: 100%;
-    background: linear-gradient(135deg, rgba(10, 14, 39, 0.95) 0%, rgba(18, 23, 41, 0.95) 100%);
+    width: 100vw;
+    height: 100vh;
+    background: #090d1a;
     display: flex;
     justify-content: center;
     align-items: center;
     z-index: 1000;
+    overflow: hidden;
+    user-select: none;
 }
 
-.login-box {
-    padding: 3rem;
-    width: 420px;
-    max-width: 90%;
-    text-align: center;
-    animation: fadeInUp 0.6s ease-out;
+.overlay input {
+    user-select: text;
 }
 
-.login-header {
+/* 动态氛围背景 */
+.admin-ambient-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    overflow: hidden;
+    z-index: 0;
+}
+
+.admin-aurora-blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(85px);
+    opacity: 0.55;
+    mix-blend-mode: screen;
+    animation: floatAuroraAdmin 18s ease-in-out infinite alternate;
+}
+
+.admin-aurora-1 {
+    width: 540px;
+    height: 540px;
+    background: radial-gradient(circle, #2563eb 0%, rgba(79, 70, 229, 0.45) 50%, transparent 70%);
+    top: -12%;
+    left: -8%;
+    animation-duration: 20s;
+}
+
+.admin-aurora-2 {
+    width: 600px;
+    height: 600px;
+    background: radial-gradient(circle, #7c3aed 0%, rgba(147, 51, 234, 0.4) 50%, transparent 70%);
+    bottom: -18%;
+    right: -10%;
+    animation-duration: 24s;
+    animation-delay: -5s;
+}
+
+.admin-aurora-3 {
+    width: 440px;
+    height: 440px;
+    background: radial-gradient(circle, #06b6d4 0%, rgba(14, 165, 233, 0.35) 50%, transparent 70%);
+    top: 42%;
+    left: 36%;
+    animation-duration: 16s;
+    animation-delay: -9s;
+}
+
+@keyframes floatAuroraAdmin {
+    0% {
+        transform: translate(0, 0) scale(1) rotate(0deg);
+    }
+    50% {
+        transform: translate(50px, 40px) scale(1.1) rotate(45deg);
+    }
+    100% {
+        transform: translate(-35px, -20px) scale(0.95) rotate(-30deg);
+    }
+}
+
+/* 背景微网格遮罩 */
+.admin-bg-grid-mask {
+    position: fixed;
+    inset: 0;
+    background-image: 
+        linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, #000 60%, transparent 100%);
+    -webkit-mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, #000 60%, transparent 100%);
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* 升腾漂浮图标容器 */
+#admin-notes-container {
+    position: fixed;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 1;
+}
+
+.admin-floating-note {
+    position: absolute;
+    bottom: -80px;
+    top: auto;
+    opacity: 0;
+    pointer-events: none;
+    color: rgba(255, 255, 255, 0.12);
+    text-shadow: 0 0 12px rgba(99, 102, 241, 0.35);
+    will-change: transform, opacity;
+    animation: adminNoteAscend 13s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes adminNoteAscend {
+    0% {
+        transform: translateY(0) translateX(0) rotate(0deg) scale(0.65);
+        opacity: 0;
+    }
+    15% {
+        opacity: 0.85;
+        transform: translateY(-15vh) translateX(14px) rotate(45deg) scale(0.85);
+    }
+    50% {
+        opacity: 0.85;
+        transform: translateY(-50vh) translateX(-16px) rotate(180deg) scale(1.02);
+    }
+    85% {
+        opacity: 0.75;
+        transform: translateY(-85vh) translateX(12px) rotate(315deg) scale(1.1);
+    }
+    100% {
+        transform: translateY(calc(-100vh - 120px)) translateX(0) rotate(360deg) scale(1.15);
+        opacity: 0;
+    }
+}
+
+/* Canvas 粒子背景 */
+#admin-particles-canvas {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 1;
+}
+
+/* 鼠标微光跟随 */
+#admin-cursor-glow {
+    position: fixed;
+    width: 460px;
+    height: 460px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.13) 0%, rgba(6, 182, 212, 0.04) 45%, transparent 70%);
+    pointer-events: none;
+    transform: translate(-50%, -50%);
+    transition: opacity 0.3s ease;
+    z-index: 2;
+}
+
+/* 磨砂玻璃卡片 */
+.admin-login-card {
+    position: relative;
+    z-index: 10;
+    background: rgba(15, 22, 38, 0.8);
+    backdrop-filter: blur(28px) saturate(190%);
+    -webkit-backdrop-filter: blur(28px) saturate(190%);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    box-shadow: 
+        0 30px 60px -12px rgba(0, 0, 0, 0.75),
+        0 18px 36px -18px rgba(0, 0, 0, 0.85),
+        inset 0 1px 0 rgba(255, 255, 255, 0.18),
+        inset 0 0 24px rgba(99, 102, 241, 0.06);
+    border-radius: 28px;
+    padding: 2.75rem 2.25rem;
+    width: 430px;
+    max-width: 92%;
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+}
+
+.admin-logo-glow {
+    position: relative;
+    width: 68px;
+    height: 68px;
+    border-radius: 22px;
+    margin: 0 auto 1.25rem;
     display: flex;
-    flex-direction: column;
     align-items: center;
-    margin-bottom: 1rem;
+    justify-content: center;
+    background: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+    box-shadow: 0 12px 28px -4px rgba(99, 102, 241, 0.45);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.logo-icon {
-    width: 56px;
-    height: 56px;
-    color: var(--accent-primary);
-    margin-bottom: 1rem;
+.admin-logo-glow:hover {
+    transform: scale(1.06) rotate(3deg);
 }
 
-.login-box h1 {
-    font-size: 2rem;
-    font-weight: 700;
-    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+.admin-logo-glow::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 26px;
+    background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+    filter: blur(14px);
+    opacity: 0.6;
+    z-index: -1;
+    animation: adminPulseGlow 3s ease-in-out infinite alternate;
+}
+
+@keyframes adminPulseGlow {
+    0% { opacity: 0.4; transform: scale(0.96); }
+    100% { opacity: 0.85; transform: scale(1.05); }
+}
+
+.admin-login-title {
+    font-size: 1.65rem;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    background: linear-gradient(135deg, #fff 0%, #e2e8f0 50%, #93c5fd 100%);
     -webkit-background-clip: text;
     -webkit-text-fill-color: transparent;
     background-clip: text;
+    margin-bottom: 0.35rem;
+    text-align: center;
 }
 
-.login-subtitle {
-    color: var(--text-secondary);
-    font-size: 0.95rem;
-    margin-bottom: 2rem;
+.admin-input-group {
+    position: relative;
+    margin-bottom: 1.25rem;
 }
 
-.login-box input {
+.admin-input-group .admin-input {
     width: 100%;
-    padding: 0.875rem 1.25rem;
-    margin: 1rem 0;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid var(--glass-border);
-    border-radius: 12px;
-    color: var(--text-primary);
-    font-size: 0.95rem;
-    transition: all 0.3s ease;
+    background: rgba(11, 16, 30, 0.75);
+    border: 1.5px solid rgba(255, 255, 255, 0.09);
+    border-radius: 14px;
+    padding: 13px 44px;
+    color: #fff;
+    font-size: 14.5px;
+    outline: none;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
 }
 
-/* .login-box input focus consolidated with form-input:focus below */
+.admin-input-group .admin-input::placeholder {
+    color: rgba(156, 163, 175, 0.6);
+}
+
+.admin-input-group .admin-input:hover {
+    border-color: rgba(255, 255, 255, 0.2);
+    background: rgba(16, 23, 42, 0.85);
+}
+
+.admin-input-group .admin-input:focus {
+    border-color: #6366f1;
+    background: rgba(18, 26, 48, 0.95);
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2), 0 4px 20px rgba(99, 102, 241, 0.18);
+}
+
+.admin-input-group .input-icon-left {
+    position: absolute;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(156, 163, 175, 0.65);
+    pointer-events: none;
+    transition: color 0.25s ease, transform 0.25s ease;
+    font-size: 14px;
+}
+
+.admin-input-group .admin-input:focus + .input-icon-left,
+.admin-input-group:focus-within .input-icon-left {
+    color: #818cf8;
+    transform: translateY(-50%) scale(1.1);
+}
+
+.admin-input-group .input-eye-btn {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(156, 163, 175, 0.65);
+    cursor: pointer;
+    padding: 6px;
+    background: transparent;
+    border: none;
+    outline: none;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.admin-input-group .input-eye-btn:hover {
+    color: #818cf8;
+    transform: translateY(-50%) scale(1.15);
+}
+
+.admin-btn-submit {
+    width: 100%;
+    padding: 13.5px 20px;
+    background: linear-gradient(135deg, #3b82f6 0%, #6366f1 50%, #8b5cf6 100%);
+    background-size: 200% 200%;
+    color: white;
+    border: none;
+    border-radius: 14px;
+    font-size: 14.5px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 8px 24px -4px rgba(99, 102, 241, 0.45);
+    transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.admin-btn-submit:hover:not(:disabled) {
+    background-position: 100% 0%;
+    box-shadow: 0 12px 30px -4px rgba(99, 102, 241, 0.65), 0 4px 12px rgba(59, 130, 246, 0.4);
+    transform: translateY(-1.5px) scale(1.01);
+}
+
+.admin-btn-submit:active:not(:disabled) {
+    transform: translateY(0.5px) scale(0.985);
+}
+
+.admin-btn-submit:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+    filter: grayscale(0.2);
+}
+
+.admin-login-error {
+    background: rgba(136, 19, 55, 0.45);
+    border: 1px solid rgba(244, 63, 94, 0.35);
+    color: #fda4af;
+    font-size: 12.5px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    margin-bottom: 1.1rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+    animation: fadeInSlide 0.25s ease forwards;
+}
+
+.shake-active {
+    animation: shakeHard 0.4s ease-in-out;
+}
+
+@keyframes shakeHard {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-9px); }
+    40% { transform: translateX(9px); }
+    60% { transform: translateX(-5px); }
+    80% { transform: translateX(5px); }
+}
+
+@keyframes fadeInSlide {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
 
 .btn-primary {
     width: auto;

@@ -236,6 +236,11 @@ declare namespace LX {
     'snapshot.backupPath'?: string
 
     /**
+     * Web播放器名称
+     */
+    'player.name'?: string
+
+    /**
      * 是否开启Web播放器访问密码
      */
     'player.enableAuth'?: boolean

@@ -388,6 +388,9 @@ if (envParams.PORT) {
   const port = parseInt(envParams.PORT, 10)
   if (!isNaN(port) && port > 0) global.lx.config.port = port
 }
+if (envParams.PLAYER_NAME) {
+  global.lx.config['player.name'] = envParams.PLAYER_NAME
+}
 if (envParams.ENABLE_WEBPLAYER_AUTH !== undefined) {
   setBoolConfig('player.enableAuth', envParams.ENABLE_WEBPLAYER_AUTH)
 }

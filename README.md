@@ -281,7 +281,8 @@ npm start
 | `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
 | `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
 | `ADMIN_PASSWORD`                      | `admin.password`                   | 管理员密码（用于登录控制台和音乐播放器管理员登录）                  | `123456`         |
-| `SERVER_NAME`                         | `serverName`                       | 同步服务名称                                                       | `lxserver`       |
+| `SERVER_NAME`                         | `serverName`                       | 同步服务名称（客户端连接展示名称及管理后台标题）                  | `LX Sync Server` |
+| `PLAYER_NAME`                         | `player.name`                      | Web 播放器名称（播放器网页标题及登录卡片标题）                     | `LX Music Web`   |
 | `ENABLE_DEBUG`                        | `debug.enabled`                    | 是否启用 DEBUG 模式 (开启后输出详细调试日志与音源内部日志，默认关闭) | `false`          |
 | `MAX_SNAPSHOT_NUM`                    | `maxSnapshotNum`                   | 保留的最大快照数量                                                 | `10`             |
 | `CONFIG_PATH`                         | -                                    | 指定外部配置文件的绝对路径 (默认使用 `data/config.js`)             | -                  |

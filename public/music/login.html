@@ -6,6 +6,12 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>LX Music Web - 登录</title>
     <script src="/js/config.js"></script>
+    <script>
+        (function() {
+            var name = (window.CONFIG && window.CONFIG['player.name']) || 'LX Music Web';
+            document.title = name + ' - 登录';
+        })();
+    </script>
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <script src="assets/tailwindcss.js"></script>
@@ -568,7 +574,7 @@
             <div class="logo-glow w-16 h-16 rounded-2xl mx-auto mb-3.5 flex items-center justify-center bg-gradient-to-br from-emerald-400 to-teal-600 shadow-xl shadow-emerald-500/20 transform hover:scale-105 transition-all duration-300">
                 <i class="fas fa-music text-white text-2xl drop-shadow-md"></i>
             </div>
-            <h1 class="card-title text-2xl sm:text-[26px] font-black tracking-tight mb-1.5 flex items-center justify-center transition-colors">
+            <h1 class="card-title text-2xl sm:text-[26px] font-black tracking-tight mb-1.5 flex items-center justify-center transition-colors" id="music-login-title">
                 LX Music Web
             </h1>
             <p id="mode-desc" class="text-xs text-gray-400 transition-all duration-300">登录账号以同步本地与云端歌单</p>
@@ -778,9 +784,21 @@
         (async () => {
             initTheme();
             initFloatingNotes();
+            const setPlayerName = (name) => {
+                if (!name) return;
+                document.title = `${name} - 登录`;
+                const titleEl = document.getElementById('music-login-title');
+                if (titleEl) titleEl.textContent = name;
+            };
+            if (window.CONFIG && window.CONFIG['player.name']) {
+                setPlayerName(window.CONFIG['player.name']);
+            }
             try {
                 const res = await fetch('/api/music/config');
                 const cfg = await res.json();
+                if (cfg['player.name']) {
+                    setPlayerName(cfg['player.name']);
+                }
                 if (!cfg['player.enableAuth']) {
                     window.location.replace('./');
                     return;
