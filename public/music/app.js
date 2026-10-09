@@ -202,6 +202,8 @@ async function checkServerOnline() {
 async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, targetIndex) {
     if (isServerReconnecting) return;
     isServerReconnecting = true;
+    const startCounter = loadingRequestCounter;
+    const targetSongId = cleanSongData(targetSong)?.id;
     console.log('[ServerReconnect] 启动服务端断线重连守护:', targetSong?.name, '断点位置:', resumeTime);
 
     setPlayerStatus('服务端连接中断，正在等待重连...', null, true);
@@ -219,9 +221,22 @@ async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, t
 
     const poll = async () => {
         if (!isServerReconnecting) return;
-        retryCount++;
+        if (loadingRequestCounter !== startCounter || (currentPlayingSong && cleanSongData(currentPlayingSong)?.id !== targetSongId)) {
+            console.log('[ServerReconnect] 用户已切换歌曲，终止旧歌曲重连任务');
+            isServerReconnecting = false;
+            return;
+        }
 
+        retryCount++;
         const isOnline = await checkServerOnline();
+
+        if (!isServerReconnecting) return;
+        if (loadingRequestCounter !== startCounter || (currentPlayingSong && cleanSongData(currentPlayingSong)?.id !== targetSongId)) {
+            console.log('[ServerReconnect] 用户已切换歌曲，终止旧歌曲重连任务');
+            isServerReconnecting = false;
+            return;
+        }
+
         if (isOnline) {
             console.log('[ServerReconnect] 服务端已恢复在线！耗费尝试次数:', retryCount);
             isServerReconnecting = false;
@@ -273,6 +288,7 @@ async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, t
 
 function handleUnexpectedPlaybackPause() {
     const requestId = currentRecoveryState?.thisRequestId;
+    const startCounter = loadingRequestCounter;
     if (!shouldAutoRecoverPlayback || !requestId || audio.ended || !audio.src) return false;
     if (playbackRecoveryTriggeredForRequestId === requestId) return false;
 
@@ -289,11 +305,12 @@ function handleUnexpectedPlaybackPause() {
     // 探测服务器是否掉线
     void (async () => {
         const isOnline = await checkServerOnline();
+        if (currentRecoveryState?.thisRequestId !== requestId || loadingRequestCounter !== startCounter) return;
         if (!isOnline && currentPlayingSong) {
             reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
             return;
         }
-        void runRecoveryFlow(new Error('播放链接意外暂停'));
+        void runRecoveryFlow(new Error('播放链接意外暂停'), savedTime);
     })();
 
     return true;
@@ -6248,13 +6265,16 @@ function playFromView(index) {
 }
 window.playFromView = playFromView;
 
-async function runRecoveryFlow(error, state = currentRecoveryState) {
+async function runRecoveryFlow(error, savedResumeTime, state = currentRecoveryState) {
     if (!state) return;
 
     if (state !== currentRecoveryState) {
         console.log('[Recovery] Aborted because user played another song.');
         return;
     }
+
+    const effectiveResumeTime = typeof savedResumeTime === 'number' ? savedResumeTime : (state.savedResumeTime || 0);
+    state.savedResumeTime = effectiveResumeTime;
 
     const currentPlatform = state.currentSong?.source || state.originalSong?.source;
 
@@ -6320,6 +6340,13 @@ async function runRecoveryFlow(error, state = currentRecoveryState) {
                     status: 'trying'
                 });
 
+                if (effectiveResumeTime > 0) {
+                    window._resumeInfo = {
+                        time: effectiveResumeTime,
+                        song: state.currentSong
+                    };
+                }
+
                 playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
                 return;
             }
@@ -6356,12 +6383,19 @@ async function runRecoveryFlow(error, state = currentRecoveryState) {
                 status: 'trying'
             });
 
+            if (effectiveResumeTime > 0) {
+                window._resumeInfo = {
+                    time: effectiveResumeTime,
+                    song: state.currentSong
+                };
+            }
+
             // Re-invoke playSong with isRetry = true so we don't reset recovery state
             playSong(state.currentSong, state.currentIndex, nextQuality, false, true);
         } else {
             // Quality degradation failed/exhausted, move to next recovery step
             state.currentStepIndex++;
-            await runRecoveryFlow(error, state);
+            await runRecoveryFlow(error, effectiveResumeTime, state);
         }
     } else if (currentStep === 'switch_platform') {
         RecoveryToast.show(state.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
@@ -6392,12 +6426,20 @@ async function runRecoveryFlow(error, state = currentRecoveryState) {
                 quality: bestNextQuality,
                 status: 'trying'
             });
+
+            if (effectiveResumeTime > 0) {
+                window._resumeInfo = {
+                    time: effectiveResumeTime,
+                    song: matchedSong
+                };
+            }
+
             // Keep this recovery step active so another platform can be tried if needed.
             playSong(matchedSong, state.currentIndex, bestNextQuality, false, true);
         } else {
             // No untried source remains, move to the next recovery strategy.
             state.currentStepIndex++;
-            await runRecoveryFlow(error, state);
+            await runRecoveryFlow(error, effectiveResumeTime, state);
         }
     } else if (currentStep === 'skip_next') {
         const isPlatformNotSupported = error && error.message && (
@@ -6425,6 +6467,15 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     if (window._autoSkipTimer) {
         clearTimeout(window._autoSkipTimer);
         window._autoSkipTimer = null;
+    }
+
+    if (!isRetry) {
+        lastKnownPlaybackTime = 0;
+        isServerReconnecting = false;
+        if (serverReconnectTimer) {
+            clearTimeout(serverReconnectTimer);
+            serverReconnectTimer = null;
+        }
     }
 
     const thisRequestId = ++loadingRequestCounter;
@@ -6657,6 +6708,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
             // 首先探测是否因后端服务重启/网络断开导致音频流中断
             const isOnline = await checkServerOnline();
+            if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
             if (!isOnline) {
                 playbackRecoveryTriggeredForRequestId = thisRequestId;
                 shouldAutoRecoverPlayback = false;
@@ -6678,25 +6730,35 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
             } catch (e) { }
             const mediaError = audio.error || new Error('媒体播放失败');
-            void runRecoveryFlow(mediaError);
+            void runRecoveryFlow(mediaError, savedTime);
         };
         audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
 
         audio.src = finalUrl;
 
         if (window._resumeInfo && window._resumeInfo.time > 0) {
-            const targetResumeTime = window._resumeInfo.time;
+            const resumeInfo = window._resumeInfo;
+            const currentSongId = cleanSongData(playbackSong)?.id;
+            const resumeSongId = cleanSongData(resumeInfo.song)?.id;
             delete window._resumeInfo;
-            const onMeta = () => {
-                if (targetResumeTime > 0 && targetResumeTime < (audio.duration || Infinity)) {
-                    audio.currentTime = targetResumeTime;
-                    console.log('[Resume] 已定位恢复至断点时间:', targetResumeTime);
+
+            if (currentSongId && resumeSongId && currentSongId === resumeSongId) {
+                const targetResumeTime = resumeInfo.time;
+                const resumeRequestId = thisRequestId;
+                const onMeta = () => {
+                    if (currentRecoveryState?.thisRequestId !== resumeRequestId) return;
+                    if (targetResumeTime > 0 && targetResumeTime < (audio.duration || Infinity)) {
+                        try {
+                            audio.currentTime = targetResumeTime;
+                            console.log('[Resume] 已定位恢复至断点时间:', targetResumeTime);
+                        } catch (e) { }
+                    }
+                };
+                if (audio.readyState >= 1) {
+                    onMeta();
+                } else {
+                    audio.addEventListener('loadedmetadata', onMeta, { once: true });
                 }
-            };
-            if (audio.readyState >= 1) {
-                onMeta();
-            } else {
-                audio.addEventListener('loadedmetadata', onMeta, { once: true });
             }
         }
 
@@ -7670,16 +7732,28 @@ function handlePlaybackStallOrWait() {
     if (audio.paused || audio.ended || isServerReconnecting) return;
 
     if (!playbackStallDetectionTimer) {
+        const stallRequestId = currentRecoveryState?.thisRequestId;
+        const stallSongId = cleanSongData(currentPlayingSong)?.id;
+
         playbackStallDetectionTimer = setTimeout(async () => {
             playbackStallDetectionTimer = null;
             if (audio.paused || audio.ended || isServerReconnecting) return;
+            if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
+
             // 超过 4 秒一直处于卡顿状态，探测服务端连通性
             const isOnline = await checkServerOnline();
+            if (audio.paused || audio.ended || isServerReconnecting) return;
+            if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
+
+            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
             if (!isOnline && currentPlayingSong) {
                 console.warn('[Player] 缓冲超时且服务端失联，触发自动重连恢复');
-                const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
                 shouldAutoRecoverPlayback = false;
                 reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
+            } else if (isOnline && currentPlayingSong && shouldAutoRecoverPlayback) {
+                console.warn('[Player] 服务端在线但音频持续卡死超时，触发播放恢复重试');
+                shouldAutoRecoverPlayback = false;
+                void runRecoveryFlow(new Error('音频缓冲超时停滞'), savedTime);
             }
         }, 4000);
     }

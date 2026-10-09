@@ -806,6 +806,10 @@
                     const autoData = await autoRes.json();
                     if (autoData.success) {
                         window.location.replace('./');
+                    } else {
+                        // 凭据已失效，清除本地失效凭据
+                        localStorage.removeItem('lx_sync_user');
+                        localStorage.removeItem('lx_sync_pass');
                     }
                 }
             } catch (e) {

@@ -191,9 +191,12 @@ const ICY_META_INTERVAL = 16000 // 标准 ICY 元数据间隔 16KB
 function safeRedirect(res: http.ServerResponse, targetUrl: string, extraHeaders?: Record<string, string | number>) {
     let loc = String(targetUrl || '').trim()
     try {
-        loc = encodeURI(loc)
+        if (/^https?:\/\//i.test(loc)) {
+            // 避免 encodeURI 对已编码的 URL 进行二次转义（如 %20 -> %2520）破坏上游签名参数
+            loc = encodeURI(decodeURI(loc))
+        }
     } catch {
-        // if encodeURI fails fallback to raw
+        // fallback to raw
     }
     res.writeHead(302, {
         Location: loc,
@@ -208,10 +211,10 @@ function safeRedirect(res: http.ServerResponse, targetUrl: string, extraHeaders?
  * 探测失败时可自动让 resolveStreamUrl 降级尝试次选音质或备用音源。
  */
 async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<boolean> {
-    if (!url || typeof url !== 'string' || !url.startsWith('http')) return false
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return false
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
-        const controller = new AbortController()
-        const timer = setTimeout(() => controller.abort(), timeoutMs)
         const resp = await fetch(url, {
             method: 'GET',
             headers: {
@@ -221,10 +224,20 @@ async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<boo
             signal: controller.signal,
         })
         clearTimeout(timer)
+        // 及时中止未读取的响应流以释放连接和上游带宽
+        try { controller.abort() } catch { }
+
         // 200 OK 或 206 Partial Content 说明资源可正常读取
-        return resp.status === 200 || resp.status === 206
+        if (resp.status !== 200 && resp.status !== 206) return false
+
+        // 检查 Content-Type：防止上游将失效链接重定向至 HTML 登录页或 JSON 错误提示
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase()
+        if (contentType.includes('text/html') || contentType.includes('application/json')) {
+            return false
+        }
+        return true
     } catch {
-        // 网络超时或失败时视为不可达
+        clearTimeout(timer)
         return false
     }
 }

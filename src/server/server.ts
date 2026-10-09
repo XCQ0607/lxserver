@@ -8909,7 +8909,7 @@ const getCacheRetentionMs = () => {
   return daysConfig * 24 * 60 * 60 * 1000
 }
 
-const cleanExpiredCacheFiles = () => {
+const cleanExpiredCacheFiles = async () => {
   try {
     const retentionMs = getCacheRetentionMs()
     if (retentionMs === 0) {
@@ -8925,31 +8925,35 @@ const cleanExpiredCacheFiles = () => {
     let totalCleaned = 0
     let totalBytesFreed = 0
 
-    const scanAndClean = (dir: string) => {
-      if (!fs.existsSync(dir)) return
-      const entries = fs.readdirSync(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name)
-        if (entry.isDirectory()) {
-          scanAndClean(fullPath)
-        } else if (entry.isFile()) {
-          if (entry.name === 'cache_index.json' || entry.name.endsWith('.json')) continue
-          try {
-            const stats = fs.statSync(fullPath)
-            const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
-            if (now - fileTime > retentionMs) {
-              fs.unlinkSync(fullPath)
-              totalCleaned++
-              totalBytesFreed += stats.size
-            }
-          } catch (e) {}
+    const scanAndCleanAsync = async (dir: string) => {
+      try {
+        const exists = await fs.promises.access(dir).then(() => true).catch(() => false)
+        if (!exists) return
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name)
+          if (entry.isDirectory()) {
+            await scanAndCleanAsync(fullPath)
+            await new Promise(resolve => setImmediate(resolve))
+          } else if (entry.isFile()) {
+            if (entry.name === 'cache_index.json' || entry.name.endsWith('.json')) continue
+            try {
+              const stats = await fs.promises.stat(fullPath)
+              const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
+              if (now - fileTime > retentionMs) {
+                await fs.promises.unlink(fullPath)
+                totalCleaned++
+                totalBytesFreed += stats.size
+              }
+            } catch (e) { }
+          }
         }
-      }
+      } catch (e) { }
     }
 
     const uniqueDirs = Array.from(new Set(cacheDirs))
     for (const d of uniqueDirs) {
-      scanAndClean(d)
+      await scanAndCleanAsync(d)
     }
     if (totalCleaned > 0) {
       const retentionDays = Math.round(retentionMs / (24 * 60 * 60 * 1000))
@@ -8960,5 +8964,5 @@ const cleanExpiredCacheFiles = () => {
   }
 }
 
-setTimeout(() => cleanExpiredCacheFiles(), 10000)
-setInterval(() => cleanExpiredCacheFiles(), 12 * 60 * 60 * 1000)
+setTimeout(() => void cleanExpiredCacheFiles(), 10000)
+setInterval(() => void cleanExpiredCacheFiles(), 12 * 60 * 60 * 1000)
