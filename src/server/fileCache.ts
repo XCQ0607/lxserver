@@ -2112,7 +2112,18 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         return
                     }
                     redirectCount++
-                    const nextUrl = new URL(location, currentUrl).toString()
+                    let nextUrl = ''
+                    try {
+                        nextUrl = new URL(location, currentUrl).toString()
+                    } catch {
+                        try {
+                            nextUrl = new URL(encodeURI(location), currentUrl).toString()
+                        } catch (err: any) {
+                            safeUnlink(fileStream, tempPath)
+                            fail(new Error(`Invalid redirect Location URL: ${location}`))
+                            return
+                        }
+                    }
                     console.log(`[文件缓存] 触发重定向 ${status} -> ${nextUrl} (${redirectCount}/${MAX_REDIRECTS})`)
                     downloadFrom(nextUrl)
                     return

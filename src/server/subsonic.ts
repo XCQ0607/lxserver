@@ -188,6 +188,47 @@ function signRadioToken(id: string, user: string): string {
  */
 const ICY_META_INTERVAL = 16000 // 标准 ICY 元数据间隔 16KB
 
+function safeRedirect(res: http.ServerResponse, targetUrl: string, extraHeaders?: Record<string, string | number>) {
+    let loc = String(targetUrl || '').trim()
+    try {
+        loc = encodeURI(loc)
+    } catch {
+        // if encodeURI fails fallback to raw
+    }
+    res.writeHead(302, {
+        Location: loc,
+        ...(extraHeaders || {}),
+    })
+    res.end()
+}
+
+/**
+ * 快速探测上游返回的音频直链是否真实可读（发送 Range: bytes=0-0 GET 请求）。
+ * 防止部分自定义源对某些歌曲返回 401 签名错误或 404 文件不存在的虚假链接，
+ * 探测失败时可自动让 resolveStreamUrl 降级尝试次选音质或备用音源。
+ */
+async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<boolean> {
+    if (!url || typeof url !== 'string' || !url.startsWith('http')) return false
+    try {
+        const controller = new AbortController()
+        const timer = setTimeout(() => controller.abort(), timeoutMs)
+        const resp = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Range': 'bytes=0-0',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+            signal: controller.signal,
+        })
+        clearTimeout(timer)
+        // 200 OK 或 206 Partial Content 说明资源可正常读取
+        return resp.status === 200 || resp.status === 206
+    } catch {
+        // 网络超时或失败时视为不可达
+        return false
+    }
+}
+
 function pipeIcyAudioStream(
     targetUrl: string,
     streamTitle: string,
@@ -200,12 +241,10 @@ function pipeIcyAudioStream(
     subsonicLog.info(`[Subsonic] Radio Stream requested: title="${streamTitle}", wantsIcy=${wantsIcy}, ua="${req.headers['user-agent']}"`)
 
     if (!wantsIcy) {
-        res.writeHead(302, {
-            Location: targetUrl,
+        safeRedirect(res, targetUrl, {
             'icy-name': encodeURIComponent(stationName || 'LX Radio'),
             'icy-description': encodeURIComponent(streamTitle || 'LX Radio Track'),
         })
-        res.end()
         onFinish?.()
         return
     }
@@ -282,8 +321,7 @@ function pipeIcyAudioStream(
     upstreamReq.on('error', (err: any) => {
         subsonicLog.warn('[Subsonic] ICY upstream request failed:', err?.message || err)
         if (!res.headersSent) {
-            res.writeHead(302, { Location: targetUrl })
-            res.end()
+            safeRedirect(res, targetUrl)
         } else {
             res.end()
         }
@@ -1411,15 +1449,15 @@ class SubsonicHandler {
         const qualitys = (music as any).types || (music as any)._types || meta.qualitys || meta.types || meta._types || (music as any)._qualitys || meta._qualitys || []
 
         const qMap: Record<string, { bitRate: number, suffix: string, contentType: string }> = {
-            'master': { bitRate: 2304, suffix: 'Master', contentType: 'audio/flac' },
-            'atmos_plus': { bitRate: 1500, suffix: 'Atmos+', contentType: 'audio/mp4' },
-            'atmos': { bitRate: 1000, suffix: 'Atmos', contentType: 'audio/mp4' },
-            'hires': { bitRate: 2304, suffix: 'Hi-Res', contentType: 'audio/flac' },
-            'flac24bit': { bitRate: 2304, suffix: 'Hi-Res', contentType: 'audio/flac' },
-            'flac': { bitRate: 999, suffix: '无损', contentType: 'audio/flac' },
-            '320k': { bitRate: 320, suffix: '320k', contentType: 'audio/mpeg' },
-            '192k': { bitRate: 192, suffix: '192k', contentType: 'audio/mpeg' },
-            '128k': { bitRate: 128, suffix: '128k', contentType: 'audio/mpeg' },
+            'master': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'atmos_plus': { bitRate: 1500, suffix: 'mp4', contentType: 'audio/mp4' },
+            'atmos': { bitRate: 1000, suffix: 'mp4', contentType: 'audio/mp4' },
+            'hires': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'flac24bit': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'flac': { bitRate: 999, suffix: 'flac', contentType: 'audio/flac' },
+            '320k': { bitRate: 320, suffix: 'mp3', contentType: 'audio/mpeg' },
+            '192k': { bitRate: 192, suffix: 'mp3', contentType: 'audio/mpeg' },
+            '128k': { bitRate: 128, suffix: 'mp3', contentType: 'audio/mpeg' },
         }
 
         const hasQuality = (q: string) => {
@@ -1440,11 +1478,11 @@ class SubsonicHandler {
 
         // 若是在线全网检索歌曲，没抓到 types 信息的兜底返回 320k
         if (music.id && music.id.includes('_')) {
-            return { bitRate: 320, size: 0, suffix: '320k', contentType: 'audio/mpeg' }
+            return { bitRate: 320, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
         }
 
         // 兜底返回 128k
-        return { bitRate: 128, size: 0, suffix: '128k', contentType: 'audio/mpeg' }
+        return { bitRate: 128, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
     }
 
     /**
@@ -5328,10 +5366,18 @@ class SubsonicHandler {
                             excludeApiSources.length ? excludeApiSources : undefined,
                         )
                         if (r?.url) {
-                            const selected = trySource === source
-                                ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
-                                : `source:${source}->${trySource}/${q}`
-                            return { url: r.url, quality: r.type || q, selected }
+                            // 探测音频 URL 是否真实可读，避免返回 401 签名错误或 404 文件不存在的虚假链接
+                            const isReachable = await probeAudioUrl(r.url)
+                            if (isReachable) {
+                                const selected = trySource === source
+                                    ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
+                                    : `source:${source}->${trySource}/${q}`
+                                return { url: r.url, quality: r.type || q, selected }
+                            } else {
+                                if (cfg['subsonic.enableDebug']) {
+                                    subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe failed): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                }
+                            }
                         }
                     } catch (err: any) {
                         // 收集本次失败过的自定义源，避免后续音质/平台重复试死源
@@ -5494,7 +5540,7 @@ class SubsonicHandler {
         }
 
         try {
-            const maxBitrate = parseInt(params.get('maxBitrate') || '0')
+            const maxBitrate = parseInt(params.get('maxBitrate') || params.get('maxBitRate') || '0')
             // [transcodeOffset] 客户端要求从第 N 秒开始（单位：秒）。
             // 仅在服务端转码链路上生效；直接 302 到音源直链时无法携带偏移（客户端自行 seek）。
             const timeOffsetSec = Math.max(0, Math.floor(Number(params.get('timeOffset') || 0)) || 0)
@@ -5566,8 +5612,8 @@ class SubsonicHandler {
                 const station = getRadioStation(username, id)
                 if (station && station.streamUrl) {
                     subsonicLog.debug(`[Subsonic] Redirecting user radio ${id} -> ${station.streamUrl}`)
-                    res.writeHead(302, { Location: station.streamUrl })
-                    return res.end()
+                    safeRedirect(res, station.streamUrl)
+                    return
                 }
                 return this.sendError(res, 70, 'Radio station not found', format)
             }
@@ -5795,8 +5841,7 @@ class SubsonicHandler {
                     await this.transcodeStream(req, res, result.url, maxBitrate, format, timeOffsetSec)
                     return
                 }
-                res.writeHead(302, { Location: result.url })
-                res.end()
+                safeRedirect(res, result.url)
             } else {
                 return this.sendError(res, 0, 'Could not resolve music URL', format)
             }
@@ -5854,8 +5899,7 @@ class SubsonicHandler {
         try { ok = await probeFfmpeg() } catch { ok = false }
         if (!ok) {
             subsonicLog.warn(`[Subsonic] transcode enabled but ffmpeg unavailable, fallback 302 -> ${String(url).slice(0, 60)}`)
-            res.writeHead(302, { Location: url })
-            res.end()
+            safeRedirect(res, url)
             return
         }
 
