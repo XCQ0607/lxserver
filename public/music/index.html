@@ -3704,15 +3704,19 @@
 
         <!-- Navbar / Controls -->
         <div onclick="event.stopPropagation()"
-            class="absolute top-0 inset-x-0 z-20 flex items-center justify-between px-6 h-20 pointer-events-none transition-all duration-300 [@media(max-height:500px)]:opacity-0 [@media(max-height:500px)]:pointer-events-none">
-            <button onclick="toggleLyrics()" id="btn-toggle-lyrics"
-                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/40 hover:t-bg-panel/80 rounded-full w-10 h-10 flex items-center justify-center transition-all shadow-sm backdrop-blur-md">
-                <i class="fas fa-chevron-down text-lg"></i>
+            class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-4 md:px-6 h-16 md:h-20 pt-[env(safe-area-inset-top,0px)] pointer-events-none transition-all duration-300">
+            <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
+                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full px-3.5 py-1.5 h-10 flex items-center justify-center gap-1.5 transition-all shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
+                <i class="fas fa-chevron-down text-base"></i>
+                <span class="text-xs font-semibold md:hidden">收起</span>
             </button>
-            <div class="flex-col items-center hidden md:flex">
-                <h2 class="text-sm font-bold text-gray-500 tracking-widest uppercase">Now Playing</h2>
+            <div class="flex-col items-center flex">
+                <h2 class="text-xs md:text-sm font-bold text-gray-400 tracking-widest uppercase">Now Playing</h2>
             </div>
-            <div class="w-10"></div> <!-- Spacer -->
+            <button onclick="toggleLyrics()" id="btn-close-lyrics" title="关闭歌词 / 返回"
+                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
+                <i class="fas fa-times text-base"></i>
+            </button>
         </div>
 
         <!-- Main Content -->
@@ -3785,13 +3789,12 @@
         <!-- Song Info -->
         <div id="player-song-info"
             class="w-full md:w-1/4 flex items-start md:items-center gap-2 md:gap-4 mb-2 md:mb-0 pr-8 md:pr-0 transition-all duration-300">
-            <div
-                class="w-12 h-12 md:w-14 md:h-14 bg-gray-200 rounded-md overflow-hidden shadow-sm relative group flex-shrink-0">
+            <div onclick="toggleLyrics()"
+                class="w-12 h-12 md:w-14 md:h-14 bg-gray-200 rounded-md overflow-hidden shadow-sm relative group flex-shrink-0 cursor-pointer">
                 <img id="player-cover" src="/music/assets/logo.svg" loading="lazy" fetchpriority="low"
                     onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');"
                     class="w-full h-full object-cover dynamic-logo is-placeholder" alt="专辑封面">
-                <div class="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer"
-                    onclick="toggleLyrics()">
+                <div class="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer">
                     <i class="fas fa-expand text-white"></i>
                 </div>
             </div>

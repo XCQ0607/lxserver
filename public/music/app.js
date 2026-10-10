@@ -39,6 +39,9 @@ const audio = document.getElementById('audio-player');
 if (audio) {
     audio.setAttribute('playsinline', '');
     audio.setAttribute('webkit-playsinline', '');
+    audio.preservesPitch = true;
+    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+    if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
 }
 let currentPlaybackRate = 1.0;
 
@@ -7582,8 +7585,11 @@ function toggleNoSleep(enable) {
 // Update Media Session State on Play/Pause
 audio.addEventListener('play', () => {
     toggleNoSleep(true);
-    // 确保播放时应用设置的倍速
-    audio.playbackRate = currentPlaybackRate;
+    // 确保播放时始终保持音调保真与倍速
+    audio.preservesPitch = true;
+    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+    if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
+    audio.playbackRate = currentPlaybackRate || 1.0;
 
     if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing';
@@ -16591,14 +16597,62 @@ function startToggleLyricsBtnTimer() {
     if (toggleLyricsBtnTimeout) clearTimeout(toggleLyricsBtnTimeout);
     toggleBtn.classList.remove('faint');
 
+    // 移动端/触摸屏永远不淡化退出按钮，保持绝对清晰可用
+    if (window.innerWidth < 1024) return;
+
     toggleLyricsBtnTimeout = setTimeout(() => {
-        // 只有当歌词页面处于显示状态时才淡化
+        // 只有当歌词页面处于显示状态且在桌面端才淡化
         const view = document.getElementById('view-player-detail');
         if (view && !view.classList.contains('translate-y-[100%]')) {
             toggleBtn.classList.add('faint');
         }
-    }, 3000);
+    }, 4000);
 }
+
+// 页面可见性恢复守护：防止切至后台重开后音调异常与 AudioContext 挂起
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        if (audio) {
+            audio.preservesPitch = true;
+            if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+            if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
+            audio.playbackRate = currentPlaybackRate || 1.0;
+        }
+        if (window._sharedAudioContext && window._sharedAudioContext.state === 'suspended' && audio && !audio.paused) {
+            window._sharedAudioContext.resume().catch(() => {});
+        }
+    }
+});
+
+// 移动端手势：在歌词详情页顶部下滑即可顺畅收起/退出歌词视图
+document.addEventListener('DOMContentLoaded', () => {
+    const detailView = document.getElementById('view-player-detail');
+    if (!detailView) return;
+    let touchStartY = 0;
+    let touchEndY = 0;
+
+    detailView.addEventListener('touchstart', (e) => {
+        if (!isLyricViewOpen || e.touches.length !== 1) return;
+        const lyricScrollEl = document.getElementById('lyric-container');
+        // 仅在歌词滚动到顶部或触摸顶部导航区域时允许下滑收起
+        if (lyricScrollEl && lyricScrollEl.scrollTop > 15 && e.touches[0].clientY > 120) return;
+        touchStartY = e.touches[0].clientY;
+        touchEndY = touchStartY;
+    }, { passive: true });
+
+    detailView.addEventListener('touchmove', (e) => {
+        if (!isLyricViewOpen || e.touches.length !== 1) return;
+        touchEndY = e.touches[0].clientY;
+    }, { passive: true });
+
+    detailView.addEventListener('touchend', () => {
+        if (!isLyricViewOpen) return;
+        const deltaY = touchEndY - touchStartY;
+        if (deltaY > 80) {
+            toggleLyrics();
+        }
+    }, { passive: true });
+});
 
 // 切换底部播放栏显示/隐藏 (移动端)
 function togglePlayerPanel() {

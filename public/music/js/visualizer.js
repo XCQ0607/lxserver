@@ -13,13 +13,13 @@ const musicVisualizer = (function () {
     const detailCanvas = document.getElementById('detail-visualizer');
     const playerFooter = document.getElementById('player-footer');
 
-    function isIOSDevice() {
+    function isMobileDevice() {
         if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
-            return window.iOSBackgroundAudio.isIOS();
+            if (window.iOSBackgroundAudio.isIOS()) return true;
         }
         const ua = navigator.userAgent;
-        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        return /iPhone|iPod/.test(ua) || isIPad;
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
     }
 
     /**
@@ -40,11 +40,11 @@ const musicVisualizer = (function () {
             return;
         }
 
-        // [iOS Fix] On iOS (Safari/WebKit), creating Web Audio createMediaElementSource silences native audio output.
-        // WebKit automatically suspends all AudioContexts when Safari is minimized or locked, killing background playback.
-        // To preserve native background and lock-screen playback on iOS, skip Web Audio hijacking when no external DSP is active.
-        if (isIOSDevice() && !hasEffectsAnalyser) {
-            console.log('[Visualizer] iOS device detected. Skipping AudioContext capture to preserve native background playback.');
+        // [Mobile Fix] On mobile devices (iOS & Android), creating Web Audio createMediaElementSource silences native audio output,
+        // suspends when backgrounded/locked, and causes severe sample rate / pitch mismatch drift when minimizing and reopening.
+        // To preserve native background playback and true pitch on all mobile devices, skip Web Audio hijacking when no external DSP is active.
+        if (isMobileDevice() && !hasEffectsAnalyser) {
+            console.log('[Visualizer] Mobile device detected. Skipping AudioContext capture to preserve native background playback and true pitch.');
             return;
         }
 
