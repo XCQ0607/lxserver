@@ -61,10 +61,17 @@ window.soundEffects = (function () {
         return isEqActive || isPitchActive || isReverbActive || isPannerActive;
     }
 
-    function isMobileDevice() {
+    function isIOSDevice() {
         if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
-            if (window.iOSBackgroundAudio.isIOS()) return true;
+            return window.iOSBackgroundAudio.isIOS();
         }
+        const ua = navigator.userAgent;
+        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return /iPhone|iPod/.test(ua) || isIPad;
+    }
+
+    function isMobileDevice() {
+        if (isIOSDevice()) return true;
         const ua = navigator.userAgent;
         const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
         return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
