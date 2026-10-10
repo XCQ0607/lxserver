@@ -3,8 +3,8 @@ layout: home
 
 hero:
   name: "LX Sync Server"
-  text: "云端同步与播放的完美结合"
-  tagline: "一个支持各大音乐平台搜索、在线播放以及数据云端同步的服务系统"
+  text: "私有云音乐与同步服务中心"
+  tagline: "聚合全网多源检索 · 本地高保真曲库 · LX 云端同步 · Subsonic 生态互联"
   image:
     src: /icon.svg
     alt: LX Sync Server
@@ -13,26 +13,52 @@ hero:
       text: 快速上手
       link: /guide/getting-started
     - theme: alt
-      text: 查看 GitHub
+      text: Web 播放器指南
+      link: /guide/web-player
+    - theme: alt
+      text: GitHub 仓库
       link: https://github.com/XCQ0607/lxserver
 
 features:
-  - title: 全新 Web 播放器
-    details: 内置先进的无缝播放器，支持多种显示模式、深色主题、聚合搜索与动态歌词，无论在哪都可以享受音乐。
-  - title: 完善的同步后端
-    details: 兼容 LX Music 的客户端，实现了歌单的无缝同步，随时随地备份您的音乐资产。支持多设备与多用户管理。
-  - title: 强大的数据视图
-    details: 在线控制台可视化管理设备状态、用户数据，提供完备的数据控制权及系统配置管理。
-  - title: 一键式多端连接
-    details: 通过 Docker 或简单命令行即可部署，并自持 WebDAV 增量云备份。
-  - title: 全平台桌面支持
-    details: 提供针对 Win/Mac/Linux 的桌面客户端，支持系统托盘常驻、自动避让端口及便携模式运行。
+  - icon: 🎵
+    title: 现代 Web 播放器
+    details: 内置功能完备的无缝 Web 播放器，支持浅/深色自适应、多源检索、高品质音频串流与动态歌词。
+  - icon: 🗄️
+    title: 本地高保真曲库
+    details: 管理本地与下载音乐，支持 Hi-Res/无损规格解析、高级布尔逻辑搜索（&/|/!）与状态查漏。
+  - icon: 🔄
+    title: 完善的同步后端
+    details: 深度兼容 LX Music 官方多端客户端，实现歌单无缝云端同步、快照备份与多账号权限隔离。
+  - icon: 📻
+    title: Subsonic 开放生态
+    details: 原生支持 Subsonic 协议，音流、Feishin 等第三方客户端一键接入，支持全网点播与本地播放。
+  - icon: 📊
+    title: 可视化数据中枢
+    details: 在线控制台直观管理设备连接、快照恢复、运行日志与 WebDAV 增量云端备份。
+  - icon: 💻
+    title: 全平台与多端支持
+    details: 提供 Docker 一键部署与跨平台桌面客户端（Win/Mac/Linux），支持托盘常驻与便携模式。
 
 ---
 
-<style>
-:root {
-  --vp-home-hero-name-color: transparent;
-  --vp-home-hero-name-background: -webkit-linear-gradient(120deg, #bd34fe 30%, #41d1ff);
-}
-</style>
+<div class="showcase-wrapper">
+  <div class="showcase-header">
+    <h2>✨ 沉浸式 Web 播放器实景</h2>
+    <p>随时随地在任何设备与浏览器中畅享您的私人音乐世界</p>
+  </div>
+  <div class="showcase-frame">
+    <img src="/player.png" alt="LX Music Web Player Interface" />
+  </div>
+</div>
+
+<div class="status-badge-container">
+  <div class="status-badge-title">开源项目生态与实时状态</div>
+  <div class="status-badges">
+    <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
+    <img src="https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
+    <a href="https://github.com/XCQ0607/lxserver/stargazers"><img src="https://img.shields.io/github/stars/XCQ0607/lxserver?style=flat-square&color=ffe16b" alt="GitHub stars"></a>
+    <a href="https://github.com/XCQ0607/lxserver/commits/main"><img src="https://img.shields.io/github/last-commit/XCQ0607/lxserver?style=flat-square&color=blueviolet" alt="Last Commit"></a>
+  </div>
+</div>

@@ -1852,16 +1852,18 @@ async function loadAboutContent() {
         if (!response.ok) throw new Error('Failed to load about.md');
         const text = await response.text();
 
-        // Render Markdown
-        if (window.marked) {
-            // Replace {{version}} and {{buildHash}} placeholder
-            const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
-            const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
-            let content = text.replace(/{{version}}/g, version);
-            content = content.replace(/{{buildHash}}/g, buildHash);
+        // Render Markdown or HTML directly
+        const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
+        const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
+        let content = text.replace(/{{version}}/g, version);
+        content = content.replace(/{{buildHash}}/g, buildHash);
+
+        if (content.trim().startsWith('<style') || content.trim().startsWith('<div') || content.trim().startsWith('<')) {
+            aboutContainer.innerHTML = content;
+        } else if (window.marked) {
             aboutContainer.innerHTML = window.marked.parse(content);
         } else {
-            aboutContainer.innerText = text; // Fallback
+            aboutContainer.innerText = content; // Fallback
         }
         aboutContainer.classList.remove('animate-pulse');
     } catch (e) {

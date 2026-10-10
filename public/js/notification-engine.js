@@ -56,6 +56,177 @@
         });
     }
 
+    /**
+     * 格式化通知日志文本，将其渲染为结构化美观的更新项列表与富文本
+     * 
+     * 支持的编写语法规范：
+     * 1. 编号要点 (Ordered)：行首为数字序号，如 "1. "、"2. "、"1) "，渲染为带微底色圆角的数字徽标
+     * 2. 符号要点 (Unordered)：行首为符号，如 "- "、"* "、"• "，渲染为发光的主题色微小圆点
+     * 3. 标题与说明自动拆分：条目中使用冒号（中英文皆可）隔开，如 "🎵 歌手页交互革新: 新增流式浮动小窗..."，冒号前标题自动加粗突出
+     * 4. 分类胶囊标签：支持 [新增]、[优化]、[修复]、[重构]、[Feature]、[Fix] 等语法，自动渲染为彩色微胶囊标签
+     * 5. 行内 Markdown 增强：
+     *    - **加粗文字**
+     *    - `代码/键值`
+     *    - 「中文强调」
+     * 6. 导言与普通段落：列表前后的普通说明行自动渲染为轻量说明导语，不挤占列表布局
+     */
+    function formatNotificationMessage(rawMessage, accentColor) {
+        if (!rawMessage) return '';
+
+        // 1. 转义 HTML 基础字符，防止 XSS
+        const escapeHtml = (str) => {
+            return String(str)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        };
+
+        // 2. 解析行内 Markdown 样式与标签
+        const parseInline = (text) => {
+            let t = text;
+            // **加粗**
+            t = t.replace(/\*\*(.+?)\*\*/g, '<strong style="color: var(--text-main, var(--text-primary, #111827)); font-weight: 600;">$1</strong>');
+            // `代码`
+            t = t.replace(/`([^`]+)`/g, `<code style="padding: 1px 5px; font-size: 11px; background: color-mix(in srgb, ${accentColor} 10%, rgba(125,125,125,0.08)); color: ${accentColor}; border-radius: 4px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;">$1</code>`);
+            // 「强调」
+            t = t.replace(/「([^」]+)」/g, `<span style="color: var(--text-main, var(--text-primary, #111827)); font-weight: 600;">「$1」</span>`);
+            
+            // 分类标签：[新增] [优化] [修复] [提示] 等
+            t = t.replace(/\[(新增|特性|新功能|Feature|Add)\]/gi, `<span class="ph-tag ph-tag-green">$1</span>`);
+            t = t.replace(/\[(修复|Bug|Fix)\]/gi, `<span class="ph-tag ph-tag-red">$1</span>`);
+            t = t.replace(/\[(优化|改进|重构|提升|Perf|Opt)\]/gi, `<span class="ph-tag ph-tag-blue">$1</span>`);
+            t = t.replace(/\[(警告|提示|注意|Warn)\]/gi, `<span class="ph-tag ph-tag-amber">$1</span>`);
+            return t;
+        };
+
+        const rawLines = rawMessage.split(/\r?\n/);
+        // 清理空行
+        const lines = rawLines.map(l => l.trim()).filter(l => l.length > 0);
+        if (lines.length === 0) return '';
+
+        // 判断是否包含列表项 (以数字序号或符号开头)
+        const isListItem = (line) => /^(\d+[\.、\)]|[-*•])\s+/.test(line);
+        const hasListItems = lines.some(isListItem);
+
+        if (!hasListItems) {
+            // 普通文本段落，逐段渲染
+            return lines.map(line => {
+                const escaped = escapeHtml(line);
+                return `<p style="margin: 0 0 8px; color: var(--text-main, var(--text-primary, #374151)); font-size: 13.5px; line-height: 1.6;">${parseInline(escaped)}</p>`;
+            }).join('');
+        }
+
+        let html = '';
+        let inList = false;
+
+        lines.forEach(line => {
+            const escaped = escapeHtml(line);
+            const matchOrdered = escaped.match(/^(\d+)[\.、\)]\s+(.*)/);
+            const matchUnordered = escaped.match(/^[-*•]\s+(.*)/);
+
+            if (matchOrdered || matchUnordered) {
+                if (!inList) {
+                    html += '<div class="ph-changelog-list" style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">';
+                    inList = true;
+                }
+
+                let badgeHtml = '';
+                let contentRaw = '';
+
+                if (matchOrdered) {
+                    const num = matchOrdered[1];
+                    contentRaw = matchOrdered[2];
+                    badgeHtml = `
+                        <div class="ph-num-badge" style="
+                            flex-shrink: 0;
+                            width: 19px; height: 19px;
+                            border-radius: 6px;
+                            background: color-mix(in srgb, ${accentColor} 14%, var(--bg-item-hover, rgba(0,0,0,0.06)));
+                            color: ${accentColor};
+                            font-size: 11px;
+                            font-weight: 700;
+                            display: flex; align-items: center; justify-content: center;
+                            margin-top: 2px;
+                        ">${num}</div>
+                    `;
+                } else {
+                    contentRaw = matchUnordered[1];
+                    badgeHtml = `
+                        <div class="ph-dot-badge" style="
+                            flex-shrink: 0;
+                            width: 6px; height: 6px;
+                            border-radius: 50%;
+                            background: ${accentColor};
+                            box-shadow: 0 0 6px color-mix(in srgb, ${accentColor} 60%, transparent);
+                            margin-top: 7px;
+                            margin-left: 4px; margin-right: 6px;
+                        "></div>
+                    `;
+                }
+
+                // 智能拆分 标题: 描述
+                let itemContentHtml = '';
+                const colonIndex = contentRaw.search(/[:：]/);
+                if (colonIndex > 0 && colonIndex < 35) {
+                    const titlePart = contentRaw.slice(0, colonIndex + 1);
+                    const descPart = contentRaw.slice(colonIndex + 1).trim();
+                    itemContentHtml = `
+                        <div style="flex: 1; font-size: 13px; line-height: 1.55; color: var(--text-muted, var(--text-secondary, #4b5563));">
+                            <span style="font-weight: 600; color: var(--text-main, var(--text-primary, #111827)); display: inline; margin-right: 4px;">
+                                ${parseInline(titlePart)}
+                            </span>
+                            ${descPart ? `<span>${parseInline(descPart)}</span>` : ''}
+                        </div>
+                    `;
+                } else {
+                    itemContentHtml = `
+                        <div style="flex: 1; font-size: 13px; line-height: 1.55; color: var(--text-main, var(--text-primary, #374151));">
+                            ${parseInline(contentRaw)}
+                        </div>
+                    `;
+                }
+
+                html += `
+                    <div class="ph-changelog-item" style="
+                        display: flex;
+                        align-items: flex-start;
+                        gap: 10px;
+                        padding: 8px 10px;
+                        border-radius: 10px;
+                        background: var(--bg-card, rgba(125, 125, 125, 0.04));
+                        border: 1px solid var(--border-dim, rgba(125, 125, 125, 0.06));
+                        transition: all 0.15s ease;
+                    ">
+                        ${badgeHtml}
+                        ${itemContentHtml}
+                    </div>
+                `;
+            } else {
+                if (inList) {
+                    html += '</div>';
+                    inList = false;
+                }
+                html += `
+                    <div class="ph-changelog-lead" style="
+                        margin: 0 0 6px;
+                        color: var(--text-muted, var(--text-secondary, #4b5563));
+                        font-size: 12.5px;
+                        line-height: 1.5;
+                        font-weight: 500;
+                    ">${parseInline(escaped)}</div>
+                `;
+            }
+        });
+
+        if (inList) {
+            html += '</div>';
+        }
+
+        return html;
+    }
+
     // 智能获取样式配置
     function getStyleConfig(type, title) {
         const t = (title || '').toLowerCase();
@@ -176,7 +347,7 @@
             animation: phFadeIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
         `;
 
-        // 注入全局动画样式
+        // 注入全局动画与列表美化样式
         if (!document.getElementById('ph-style')) {
             const style = document.createElement('style');
             style.id = 'ph-style';
@@ -185,6 +356,16 @@
                 .ph-btn { transition: all 0.2s; position: relative; overflow: hidden; }
                 .ph-btn:hover { filter: brightness(1.1); transform: translateY(-1px); }
                 .ph-btn:active { transform: scale(0.98); }
+                .ph-scroll-box::-webkit-scrollbar { width: 5px; }
+                .ph-scroll-box::-webkit-scrollbar-track { background: transparent; }
+                .ph-scroll-box::-webkit-scrollbar-thumb { background: var(--border-dim, rgba(150, 150, 150, 0.25)); border-radius: 10px; }
+                .ph-scroll-box::-webkit-scrollbar-thumb:hover { background: var(--text-dim, rgba(150, 150, 150, 0.45)); }
+                .ph-changelog-item:hover { background: color-mix(in srgb, var(--bg-item-hover, rgba(0,0,0,0.06)) 80%, transparent) !important; }
+                .ph-tag { display: inline-flex; align-items: center; padding: 1px 6px; font-size: 11px; font-weight: 700; border-radius: 4px; margin-right: 4px; }
+                .ph-tag-green { background: rgba(16,185,129,0.12); color: #10b981; }
+                .ph-tag-red { background: rgba(239,68,68,0.12); color: #ef4444; }
+                .ph-tag-blue { background: rgba(59,130,246,0.12); color: #3b82f6; }
+                .ph-tag-amber { background: rgba(245,158,11,0.12); color: #f59e0b; }
             `;
             document.head.appendChild(style);
         }
@@ -216,12 +397,12 @@
                 ${versionBadge}
                 ${item.ui.date ? `<p style="margin:0 0 8px; color: var(--text-dim, var(--text-muted, #6b7280)); font-size:12px;">发布日期: ${item.ui.date}</p>` : ''}
                 
-                <div style="margin-top: 14px; padding: 16px; background: var(--bg-item-hover, rgba(0,0,0,0.03)); border-radius: 16px; border: 1px solid var(--border-dim, rgba(0,0,0,0.06)); text-align: left; max-height: 200px; overflow-y: auto;">
+                <div class="ph-scroll-box" style="margin-top: 14px; padding: 14px 16px; background: var(--bg-item-hover, rgba(0,0,0,0.03)); border-radius: 16px; border: 1px solid var(--border-dim, rgba(0,0,0,0.06)); text-align: left; max-height: 220px; overflow-y: auto;">
                     <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 8px;">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="${styleConfig.color}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${sectionIcon}</svg>
                         <span style="font-size: 12px; font-weight: 700; color: var(--text-muted, var(--text-secondary, #4b5563)); text-transform: uppercase;">${sectionTitle}</span>
                     </div>
-                    <p style="margin:0; color: var(--text-main, var(--text-primary, #374151)); font-size:14px; line-height:1.6;">${message.replace(/\n/g, '<br/>')}</p>
+                    ${formatNotificationMessage(message, styleConfig.color)}
                 </div>
             </div>
 
