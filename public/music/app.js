@@ -4516,13 +4516,36 @@ function getImgUrl(item) {
     if (!item) return '/music/assets/logo.svg';
     const s = item;
     // 优先从标准 meta 获取
-    if (s.meta && s.meta.picUrl) return s.meta.picUrl;
-    // 兼容各种 SDK 的原始字段
-    return s.img || s.pic || s.picUrl || s.picture ||
+    let rawUrl = (s.meta && s.meta.picUrl) ||
+        s.img || s.pic || s.picUrl || s.picture ||
         (s.album && (s.album.picUrl || s.album.img || s.album.pic)) ||
         (s.al && (s.al.picUrl || s.al.img)) ||
-        (s.meta && (s.meta.img || s.meta.pic)) ||
-        '/music/assets/logo.svg';
+        (s.meta && (s.meta.img || s.meta.pic));
+
+    // 本地或缓存歌曲若未提前注入 pic，根据 filename 动态拼接服务端封面接口
+    if (!rawUrl && (s.filename || s._localFilename)) {
+        const fn = s.filename || s._localFilename;
+        if (s.hasCover !== false) {
+            const isCustom = s.isCustomDir || s._isCustom || s.customMusic || s.source === 'custom' || s.folder === 'custom';
+            const basePath = isCustom ? '/api/music/custom/cover' : '/api/music/cache/cover';
+            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
+            const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
+            rawUrl = `${basePath}?filename=${encodeURIComponent(fn)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+        }
+    }
+
+    if (!rawUrl) return '/music/assets/logo.svg';
+
+    // 协议自动补全与 HTTPS 升级（防止 mixed-content 与移动端/车机下载阻断）
+    if (typeof rawUrl === 'string') {
+        if (rawUrl.startsWith('//')) {
+            rawUrl = (window.location ? window.location.protocol : 'https:') + rawUrl;
+        } else if (rawUrl.startsWith('http://') && window.location && window.location.protocol === 'https:') {
+            rawUrl = rawUrl.replace(/^http:\/\//i, 'https://');
+        }
+    }
+
+    return rawUrl;
 }
 window.getImgUrl = getImgUrl;
 
@@ -6778,6 +6801,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
         // Always refresh the bottom-player badge, including cache hits that keep the same song object.
         updatePlayerInfo(playbackSong, currentQuality);
+        updateMediaSessionMetadata(playbackSong);
 
         // [Sync] 确定了最终播放音质后，若当前已就绪的歌词确实属于本歌曲，才以正确音质重写服务器端歌词缓存文件名
         // 关键防护：必须校验 lastLyricSongId 匹配当前歌曲，防止切歌时旧歌词异步残留写入新歌缓存文件
@@ -7619,10 +7643,18 @@ audio.addEventListener('playing', () => {
     setPlayerStatus('', true); // 恢复正常播放状态
     if ('mediaSession' in navigator) {
         updatePositionState(); // 立即同步
+        if (currentPlayingSong) {
+            updateMediaSessionMetadata(currentPlayingSong);
+        }
 
-        // [iOS Stability Fix] 针对 iOS 刷新后失效的问题，在 500ms 和 1200ms 再次强制刷新
-        // 确保系统在处理完 Web Audio 桥接流后，能再次接收到正确、有时长的 PositionState
-        setTimeout(updatePositionState, 500);
+        // [iOS & Bluetooth Sync] 针对 iOS 与车载蓝牙连接建立过程，在 500ms 和 1200ms 再次强制刷新元数据和进度
+        // 确保车载蓝牙 (AVRCP 1.6+) 在音频通道完全激活后能获取到封面位图及最新播放位置
+        setTimeout(() => {
+            updatePositionState();
+            if (currentPlayingSong && !audio.paused) {
+                updateMediaSessionMetadata(currentPlayingSong);
+            }
+        }, 500);
         setTimeout(updatePositionState, 1200);
     }
     if (lyricPlayer) {
@@ -7812,7 +7844,12 @@ audio.addEventListener('canplay', () => {
 });
 
 // Additional events to sync progress
-audio.addEventListener('loadedmetadata', updatePositionState);
+audio.addEventListener('loadedmetadata', () => {
+    updatePositionState();
+    if (currentPlayingSong) {
+        updateMediaSessionMetadata(currentPlayingSong);
+    }
+});
 audio.addEventListener('ratechange', updatePositionState);
 audio.addEventListener('seeked', () => {
     updatePositionState();
@@ -7918,25 +7955,56 @@ if ('mediaSession' in navigator) {
 }
 
 function updateMediaSessionMetadata(song) {
-    if (!('mediaSession' in navigator)) return;
+    if (!('mediaSession' in navigator) || !song) return;
 
-    const imgUrl = getImgUrl(song);
-    // Ensure absolute URL if possible
-    const fullImgUrl = new URL(imgUrl, window.location.href).href;
+    let imgUrl = getImgUrl(song);
+
+    // 蓝牙 AVRCP 1.6+ 基本图像描述符 (BIP) 协议规范仅支持 JPEG 与 PNG 位图格式。
+    // SVG 无法在蓝牙协议中传输，亦无法被移动端系统蓝牙服务转码为位图。
+    // 遇到缺省或 SVG 图标时，回退到 512x512 的栅格 PNG 图标以确保车载蓝牙与锁屏正常显示封面。
+    if (!imgUrl || imgUrl.endsWith('.svg') || imgUrl.includes('.svg') || imgUrl.includes('logo.svg')) {
+        imgUrl = '/music/assets/logo.png';
+    }
+
+    // 升级协议至 HTTPS，规避 iOS ATS 与 Android cleartextTraffic 拦截
+    if (typeof imgUrl === 'string') {
+        if (imgUrl.startsWith('//')) {
+            imgUrl = (window.location ? window.location.protocol : 'https:') + imgUrl;
+        } else if (imgUrl.startsWith('http://') && window.location && window.location.protocol === 'https:') {
+            imgUrl = imgUrl.replace(/^http:\/\//i, 'https://');
+        }
+    }
+
+    // 确保为完整的绝对路径 URL
+    let fullImgUrl;
+    try {
+        fullImgUrl = new URL(imgUrl, window.location.href).href;
+    } catch (e) {
+        fullImgUrl = imgUrl;
+    }
+
+    // 根据扩展名或实际路径动态识别正确的 MIME 类型（避免强制 image/jpeg 导致部分车机解码校验失败）
+    let mimeType = 'image/jpeg';
+    const cleanUrl = fullImgUrl.split('?')[0].toLowerCase();
+    if (cleanUrl.endsWith('.png')) {
+        mimeType = 'image/png';
+    } else if (cleanUrl.endsWith('.webp')) {
+        mimeType = 'image/webp';
+    }
+
+    const artworkSizes = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'];
+    const artwork = artworkSizes.map(size => ({
+        src: fullImgUrl,
+        sizes: size,
+        type: mimeType
+    }));
 
     try {
         navigator.mediaSession.metadata = new MediaMetadata({
-            title: song.name,
-            artist: song.singer,
-            album: song.albumName || '',
-            artwork: [
-                { src: fullImgUrl, sizes: '96x96', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '128x128', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '192x192', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '256x256', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '384x384', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '512x512', type: 'image/jpeg' }
-            ]
+            title: song.name || '',
+            artist: song.singer || '',
+            album: song.albumName || (song.album && song.album.name) || '',
+            artwork: artwork
         });
         // Reset playback state logic is handled by event listeners, but metadata update often implies new song start
         // updatePositionState() will be called when loadedmetadata fires for new source

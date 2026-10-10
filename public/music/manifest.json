@@ -10,6 +10,11 @@
             "src": "./assets/logo.svg",
             "sizes": "any",
             "type": "image/svg+xml"
+        },
+        {
+            "src": "./assets/logo.png",
+            "sizes": "512x512",
+            "type": "image/png"
         }
     ]
 }
