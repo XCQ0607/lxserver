@@ -53,12 +53,29 @@ class App {
             this.showApp();
             this.loadConfig(); // [新增] 初始化时加载配置，确保 configLoaded 标志位正确且持有环境变量数据
             this.loadDashboard();
+        } else {
+            this.initLoginScreenEffects();
         }
 
         // 绑定登录事件
         document.getElementById('login-btn')?.addEventListener('click', () => this.login());
+        document.getElementById('admin-login-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.login();
+        });
         document.getElementById('access-password')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') this.login();
+        });
+        document.getElementById('toggle-pwd-btn')?.addEventListener('click', () => {
+            const pwdInput = document.getElementById('access-password');
+            const icon = document.querySelector('#toggle-pwd-btn i');
+            if (pwdInput) {
+                const isPassword = pwdInput.type === 'password';
+                pwdInput.type = isPassword ? 'text' : 'password';
+                if (icon) {
+                    icon.className = isPassword ? 'fas fa-eye-slash text-indigo-400' : 'far fa-eye';
+                }
+            }
         });
 
         // 绑定退出登录
@@ -254,14 +271,154 @@ class App {
         document.getElementById('install-pwa-btn').style.display = 'none';
     }
 
+    initLoginScreenEffects() {
+        if (this._loginEffectsInited) return;
+        this._loginEffectsInited = true;
+
+        // 鼠标微光跟随
+        const cursorGlow = document.getElementById('admin-cursor-glow');
+        if (cursorGlow) {
+            window.addEventListener('mousemove', (e) => {
+                cursorGlow.style.left = e.clientX + 'px';
+                cursorGlow.style.top = e.clientY + 'px';
+            });
+        }
+
+        // 升腾浮动图标 (服务器/安全/音乐/数据)
+        const container = document.getElementById('admin-notes-container');
+        if (container) {
+            container.innerHTML = '';
+            const icons = [
+                'fa-server',
+                'fa-shield-halved',
+                'fa-bolt',
+                'fa-music',
+                'fa-database',
+                'fa-network-wired',
+                'fa-cloud',
+                'fa-sliders',
+                'fa-compact-disc',
+                'fa-lock',
+                'fa-chart-line',
+                'fa-key',
+                'fa-wave-square',
+                'fa-wifi',
+                'fa-headphones'
+            ];
+            const count = 26;
+            for (let i = 0; i < count; i++) {
+                const item = document.createElement('i');
+                const icon = icons[Math.floor(Math.random() * icons.length)];
+                const sizeClass = ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl'][Math.floor(Math.random() * 6)];
+                item.className = `fas ${icon} admin-floating-note ${sizeClass}`;
+                item.style.left = `${Math.random() * 95}%`;
+                
+                const duration = 12 + Math.random() * 12;
+                const delay = Math.random() * duration;
+                item.style.animationDuration = `${duration}s`;
+                item.style.animationDelay = `-${delay}s`;
+                container.appendChild(item);
+            }
+        }
+
+        // Canvas 动态星尘微光粒子
+        const canvas = document.getElementById('admin-particles-canvas');
+        if (canvas) {
+            const ctx = canvas.getContext('2d');
+            let width = (canvas.width = window.innerWidth);
+            let height = (canvas.height = window.innerHeight);
+
+            window.addEventListener('resize', () => {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            });
+
+            const particles = [];
+            const particleCount = 28;
+
+            for (let i = 0; i < particleCount; i++) {
+                particles.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    radius: Math.random() * 2 + 0.8,
+                    color: Math.random() > 0.5 ? 'rgba(99, 102, 241, ' : 'rgba(6, 182, 212, ',
+                    alpha: Math.random() * 0.45 + 0.1,
+                    speedY: Math.random() * 0.4 + 0.15,
+                    speedX: (Math.random() - 0.5) * 0.2,
+                    pulse: Math.random() * Math.PI,
+                });
+            }
+
+            const animateParticles = () => {
+                if (document.getElementById('login-overlay')?.classList.contains('hidden')) return;
+                ctx.clearRect(0, 0, width, height);
+                for (const p of particles) {
+                    p.y -= p.speedY;
+                    p.x += p.speedX;
+                    p.pulse += 0.02;
+
+                    if (p.y < -10) {
+                        p.y = height + 10;
+                        p.x = Math.random() * width;
+                    }
+                    if (p.x < -10) p.x = width + 10;
+                    if (p.x > width + 10) p.x = -10;
+
+                    const currentAlpha = p.alpha * (0.6 + 0.4 * Math.sin(p.pulse));
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color + currentAlpha + ')';
+                    ctx.shadowBlur = 8;
+                    ctx.shadowColor = p.color + '0.5)';
+                    ctx.fill();
+                }
+                requestAnimationFrame(animateParticles);
+            };
+            animateParticles();
+        }
+
+        // 动态设置后台登录卡片标题为配置的服务器名称 (serverName)
+        const loginTitleEl = document.getElementById('admin-login-title');
+        if (loginTitleEl && window.CONFIG && window.CONFIG.serverName) {
+            loginTitleEl.textContent = window.CONFIG.serverName;
+        }
+
+        setTimeout(() => {
+            document.getElementById('access-password')?.focus();
+        }, 150);
+    }
+
     async login() {
-        const password = document.getElementById('access-password').value;
+        const pwdInput = document.getElementById('access-password');
+        const password = pwdInput ? pwdInput.value : '';
         const errorEl = document.getElementById('login-error');
+        const errorBox = document.getElementById('login-error-box');
+        const card = document.getElementById('admin-login-card');
+        const btn = document.getElementById('login-btn');
+        const btnText = document.getElementById('login-btn-text');
+
+        const showError = (msg) => {
+            if (errorEl) errorEl.textContent = msg;
+            if (errorBox) errorBox.classList.remove('hidden');
+            if (card) {
+                card.classList.remove('shake-active');
+                void card.offsetWidth;
+                card.classList.add('shake-active');
+                setTimeout(() => card.classList.remove('shake-active'), 450);
+            }
+        };
 
         if (!password) {
-            errorEl.textContent = '请输入密码';
+            showError('请输入管理员访问密码');
+            pwdInput?.focus();
             return;
         }
+
+        if (errorBox) errorBox.classList.add('hidden');
+        if (btn) btn.disabled = true;
+        const origIcon = btn?.querySelector('i')?.className || 'fas fa-right-to-bracket text-sm';
+        if (btn?.querySelector('i')) btn.querySelector('i').className = 'fas fa-spinner fa-spin text-sm';
+        if (btnText) btnText.textContent = '验证凭据中...';
 
         try {
             const res = await this.request('/api/login', {
@@ -270,15 +427,41 @@ class App {
             });
 
             if (res.success) {
+                if (btn?.querySelector('i')) btn.querySelector('i').className = 'fas fa-check-circle text-sm';
+                if (btnText) btnText.textContent = '验证成功，正在进入...';
+                if (btn) {
+                    btn.classList.remove('admin-btn-submit');
+                    btn.classList.add('bg-emerald-600');
+                }
+
+                if (card) {
+                    card.style.transform = 'scale(0.95)';
+                    card.style.opacity = '0.3';
+                }
+
                 this.password = password;
                 localStorage.setItem('lx_auth', password);
-                this.showApp();
-                this.loadDashboard();
+                setTimeout(() => {
+                    this.showApp();
+                    this.loadDashboard();
+                }, 260);
             } else {
-                errorEl.textContent = '密码错误';
+                showError('密码错误，请重新输入');
+                if (btn) {
+                    btn.disabled = false;
+                    if (btn.querySelector('i')) btn.querySelector('i').className = origIcon;
+                }
+                if (btnText) btnText.textContent = '登录控制台';
+                pwdInput?.focus();
             }
         } catch (err) {
-            errorEl.textContent = '登录失败，请重试';
+            showError('登录失败，请检查服务端连接');
+            if (btn) {
+                btn.disabled = false;
+                if (btn.querySelector('i')) btn.querySelector('i').className = origIcon;
+            }
+            if (btnText) btnText.textContent = '登录控制台';
+            pwdInput?.focus();
         }
     }
 
@@ -395,16 +578,18 @@ class App {
             if (!response.ok) throw new Error('Failed to load about.md');
             const text = await response.text();
 
-            // Render Markdown
-            if (window.marked) {
-                // Replace {{version}} and {{buildHash}} placeholder
-                const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
-                const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
-                let content = text.replace(/{{version}}/g, version);
-                content = content.replace(/{{buildHash}}/g, buildHash);
+            // Render Markdown or HTML directly
+            const version = (window.CONFIG && window.CONFIG.version) || 'v1.0.0';
+            const buildHash = (window.CONFIG && window.CONFIG.buildHash) || 'unknown';
+            let content = text.replace(/{{version}}/g, version);
+            content = content.replace(/{{buildHash}}/g, buildHash);
+
+            if (content.trim().startsWith('<style') || content.trim().startsWith('<div') || content.trim().startsWith('<')) {
+                container.innerHTML = content;
+            } else if (window.marked) {
                 container.innerHTML = window.marked.parse(content);
             } else {
-                container.innerText = text;
+                container.innerText = content;
             }
         } catch (e) {
             console.error('Failed to load about content:', e);
@@ -431,6 +616,13 @@ class App {
             if (sidebarVersionEl) {
                 sidebarVersionEl.textContent = window.CONFIG.version;
                 sidebarVersionEl.classList.remove('hidden');
+            }
+        }
+        if (window.CONFIG && window.CONFIG.serverName) {
+            document.title = window.CONFIG.serverName + ' - 管理控制台';
+            const loginTitleEl = document.getElementById('admin-login-title');
+            if (loginTitleEl) {
+                loginTitleEl.textContent = window.CONFIG.serverName;
             }
         }
         // 初始化播放器链接
@@ -841,12 +1033,12 @@ class App {
             </div>
             <div class="user-selection-grid fade-in">
                 ${this.allUsers.map(user => {
-                    const isPublic = user.name === '_open';
-                    const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
-                    const roleText = isPublic ? '公共数据与歌单' : '用户数据';
-                    const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size: 1.5rem;' : '';
-                    const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
-                    return `
+            const isPublic = user.name === '_open';
+            const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
+            const roleText = isPublic ? '公共数据与歌单' : '用户数据';
+            const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size: 1.5rem;' : '';
+            const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
+            return `
                     <div class="user-select-card" onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
                         <div class="avatar" style="${avatarStyle}">${avatarHtml}</div>
                         <div class="name">${displayName}</div>
@@ -2425,9 +2617,12 @@ class App {
             if (form.elements['singer.sourcePriority']) {
                 form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
             }
-            form.elements['frontend.password'].value = config['frontend.password'] || '';
+            form.elements['admin.password'].value = config['admin.password'] || '';
 
             // Web播放器配置
+            if (form.elements['player.name']) {
+                form.elements['player.name'].value = config['player.name'] || 'LX Music Web';
+            }
             if (form.elements['player.enableAuth']) {
                 form.elements['player.enableAuth'].checked = config['player.enableAuth'] === true;
             }
@@ -3053,7 +3248,8 @@ class App {
             'user.enableLoginCacheRestriction': formData.get('user.enableLoginCacheRestriction') === 'on',
             'user.enableCacheSizeLimit': formData.get('user.enableCacheSizeLimit') === 'on',
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,
-            'frontend.password': formData.get('frontend.password'),
+            'admin.password': formData.get('admin.password'),
+            'player.name': (formData.get('player.name') || '').trim() || 'LX Music Web',
             'player.enableAuth': formData.get('player.enableAuth') === 'on',
             'player.password': formData.get('player.password'),
             'webdav.enable': formData.get('webdav.enable') === 'on',
@@ -3123,9 +3319,9 @@ class App {
             });
 
             // 如果密码改了，更新本地存储
-            if (config['frontend.password'] && config['frontend.password'] !== this.password) {
-                this.password = config['frontend.password'];
-                localStorage.setItem('lx_auth', config['frontend.password']);
+            if (config['admin.password'] && config['admin.password'] !== this.password) {
+                this.password = config['admin.password'];
+                localStorage.setItem('lx_auth', config['admin.password']);
             }
 
             // 更新侧边栏播放器链接

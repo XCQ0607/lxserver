@@ -1,6 +1,6 @@
 
 const config: LX.Config = {
-  serverName: 'lxserver', // 同步服务名称
+  serverName: 'LX Sync Server', // 同步服务名称
   'debug.enabled': false, // 是否启用 DEBUG 模式 (开发人员使用)
   'proxy.enabled': false, // 是否使用代理转发请求到本服务器
   'proxy.header': 'x-real-ip', // 代理转发的请求头 原始IP
@@ -39,7 +39,7 @@ const config: LX.Config = {
     // },
   ],
 
-  'frontend.password': '123456',
+  'admin.password': '123456',
 
   // WebDAV 配置
   'webdav.enable': false,
@@ -63,6 +63,7 @@ const config: LX.Config = {
   'snapshot.backupPath': '',
 
   // Web播放器配置
+  'player.name': 'LX Music Web',
   'player.enableAuth': false,
   'player.password': '123456',
 

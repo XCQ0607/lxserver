@@ -13,29 +13,65 @@ const musicVisualizer = (function () {
     const detailCanvas = document.getElementById('detail-visualizer');
     const playerFooter = document.getElementById('player-footer');
 
+    function isIOSDevice() {
+        if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
+            return window.iOSBackgroundAudio.isIOS();
+        }
+        const ua = navigator.userAgent;
+        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return /iPhone|iPod/.test(ua) || isIPad;
+    }
+
     /**
      * Initialize AudioContext and AnalyserNode.
      */
     function init() {
         if (isInitialized || !window.Wave || !audio) return;
 
-        try {
-            console.log('[Visualizer] Initializing AudioContext...');
-            audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        // If visualizer is disabled in settings, do NOT hijack the native audio output!
+        const isFooterOn = window.settings ? window.settings.showFooterVisualizer !== false : true;
+        const isDetailOn = window.settings ? window.settings.showDetailVisualizer : false;
+        const isAnyVisualizerWanted = isFooterOn || isDetailOn;
 
-            // 如果音效管理器已存在，使用它的分析器
-            if (window.soundEffects && window.soundEffects.getAnalyser()) {
+        const hasEffectsAnalyser = window.soundEffects && window.soundEffects.getAnalyser && window.soundEffects.getAnalyser();
+
+        if (!isAnyVisualizerWanted && !hasEffectsAnalyser) {
+            console.log('[Visualizer] Visualizer disabled. Skipping AudioContext creation to preserve native playback.');
+            return;
+        }
+
+        // [iOS Fix] On iOS (Safari/WebKit), creating Web Audio createMediaElementSource silences native audio output.
+        // WebKit automatically suspends all AudioContexts when Safari is minimized or locked, killing background playback.
+        // To preserve native background and lock-screen playback on iOS, skip Web Audio hijacking when no external DSP is active.
+        if (isIOSDevice() && !hasEffectsAnalyser) {
+            console.log('[Visualizer] iOS device detected. Skipping AudioContext capture to preserve native background playback.');
+            return;
+        }
+
+        try {
+            console.log('[Visualizer] Initializing AudioContext & Visualizer graph...');
+            audioContext = window._sharedAudioContext || (window.soundEffects && window.soundEffects.getContext && window.soundEffects.getContext()) || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());
+
+            if (hasEffectsAnalyser) {
                 audioAnalyser = window.soundEffects.getAnalyser();
+                audioSource = window.soundEffects.getSourceNode ? window.soundEffects.getSourceNode() : window._sharedAudioSourceNode;
                 console.log('[Visualizer] Using analyser from SoundEffectsManager');
             } else {
-                audioSource = audioContext.createMediaElementSource(audio);
-                audioAnalyser = audioContext.createAnalyser();
+                audioSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(audio));
+                audioAnalyser = window._sharedAudioAnalyser || (window._sharedAudioAnalyser = audioContext.createAnalyser());
+                
+                try { audioSource.disconnect(); } catch (_) { }
+                try { audioAnalyser.disconnect(); } catch (_) { }
                 audioSource.connect(audioAnalyser);
                 audioAnalyser.connect(audioContext.destination);
             }
 
             audioAnalyser.smoothingTimeConstant = 0.8;
             audioAnalyser.fftSize = 512;
+
+            if (audioContext.state === 'suspended') {
+                audioContext.resume().catch(() => {});
+            }
 
             waveFooter = new Wave(audioAnalyser, footerCanvas);
             waveDetail = new Wave(audioAnalyser, detailCanvas);

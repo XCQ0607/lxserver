@@ -28,7 +28,7 @@ export async function handleValidate(req: IncomingMessage, res: ServerResponse) 
         const targetOwner = (username && username !== 'default') ? username : 'open'
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '权限不足：管理自定义源需要先验证管理员身份。' }))
                 return
@@ -159,7 +159,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
         // 检查权限限制 (针对公开源)
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '公共源管理已受限，仅管理员可操作。' }))
                 return
@@ -180,7 +180,7 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
         // 核心安全校验：若脚本需要或者指定了 unsafe VM 模式，则必须验证管理员身份
         if (requireUnsafe || allowUnsafeVM) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '允许以 VM 模式运行脚本需要验证管理员身份。' }))
                 return
@@ -319,7 +319,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         // 核心安全校验：若脚本需要或者指定了 unsafe VM 模式，则必须验证管理员身份
         if (requireUnsafe || allowUnsafeVM) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '允许以 VM 模式运行脚本需要验证管理员身份。' }))
                 return
@@ -348,7 +348,7 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
         // 检查权限限制
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '公共源导入已受限，仅管理员可操作。' }))
                 return
@@ -557,7 +557,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
         // 检查权限限制
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '公共源状态切换已受限，仅管理员可操作。' }))
                 return
@@ -605,7 +605,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
         //    则必须校验管理员密码。
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '权限不足：管理全局公开自定义源需要验证管理员身份。' }))
                 return
@@ -634,7 +634,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
         // 核心安全校验：如果试图开启 VM 模式（或当前就是 VM 模式），必须要验证管理员密码
         if (target.allowUnsafeVM || allowUnsafeVM) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '开启/运行 VM 模式脚本需要验证管理员身份。' }))
                 return
@@ -718,7 +718,7 @@ export async function handleReorder(req: IncomingMessage, res: ServerResponse) {
         // 检查权限限制 (公开源排序)
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '公共源排序已受限，仅管理员可操作。' }))
                 return
@@ -809,7 +809,7 @@ export async function handleDelete(req: IncomingMessage, res: ServerResponse) {
         // 检查权限限制
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '公共源删除已受限，仅管理员可操作。' }))
                 return
@@ -853,7 +853,7 @@ export async function handleDelete(req: IncomingMessage, res: ServerResponse) {
         // 核心安全逻辑：删除全局公开源必须校验管理员权限
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '权限不足：删除全局公共源需要验证管理员身份。' }))
                 return
@@ -898,7 +898,7 @@ export async function handleUpdatePlatforms(req: IncomingMessage, res: ServerRes
         // 核心安全逻辑：如果是全局公开源且为 open 模式，需要验证管理员身份
         if (targetOwner === 'open') {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
                 res.writeHead(403, { 'Content-Type': 'application/json' })
                 res.end(JSON.stringify({ success: false, error: '权限不足：修改全局公开源平台配置需要管理员身份。' }))
                 return

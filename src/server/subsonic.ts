@@ -45,15 +45,15 @@ const musicSdk = musicSdkRaw as any
 
 // 服务端签名票据密钥
 // ─────────────────────────────────────────────
-// 进程级随机密钥备选（当未设置 frontend.password 时使用，避免硬编码常数字符串）
+// 进程级随机密钥备选（当未设置 admin.password 时使用，避免硬编码常数字符串）
 const processRandomSecret = crypto.randomBytes(32).toString('hex')
 
 function serverTicketSecret(): string {
-    return String((global.lx.config as any)?.['frontend.password'] || processRandomSecret)
+    return String((global.lx.config as any)?.['admin.password'] || processRandomSecret)
 }
 
 function radioTicketSecret(): string {
-    return String((global.lx.config as any)?.['frontend.password'] || processRandomSecret)
+    return String((global.lx.config as any)?.['admin.password'] || processRandomSecret)
 }
 
 /** 把错误原因压成可安全回传给客户端的一小段文本（截断 + 打码常见密钥参数） */
@@ -152,7 +152,7 @@ async function probeFfmpeg(): Promise<boolean> {
 class TranscodeSemaphore {
     private active = 0
     private queue: Array<() => void> = []
-    constructor(private max: number) {}
+    constructor(private max: number) { }
     async acquire(): Promise<void> {
         if (this.active < this.max) { this.active++; return }
         await new Promise<void>((resolve) => this.queue.push(resolve))
@@ -188,6 +188,76 @@ function signRadioToken(id: string, user: string): string {
  */
 const ICY_META_INTERVAL = 16000 // 标准 ICY 元数据间隔 16KB
 
+function safeRedirect(res: http.ServerResponse, targetUrl: string, extraHeaders?: Record<string, string | number>) {
+    let loc = String(targetUrl || '').trim()
+    try {
+        if (/^https?:\/\//i.test(loc)) {
+            // 避免 encodeURI 对已编码的 URL 进行二次转义（如 %20 -> %2520）破坏上游签名参数
+            loc = encodeURI(decodeURI(loc))
+        }
+    } catch {
+        // fallback to raw
+    }
+    res.writeHead(302, {
+        Location: loc,
+        ...(extraHeaders || {}),
+    })
+    res.end()
+}
+
+/**
+ * 快速探测上游返回的音频直链是否真实可读（发送 Range: bytes=0-0 GET 请求）。
+ * 区分明确的 401/404/403 错误状态与网络探测超时，防止上游响应缓慢时直接误杀有效直链。
+ */
+export type ProbeAudioResult = 'ok' | 'invalid' | 'timeout'
+
+async function probeAudioUrl(url: string, timeoutMs: number = 2500): Promise<ProbeAudioResult> {
+    if (!url || typeof url !== 'string' || !/^https?:\/\//i.test(url)) return 'invalid'
+    const controller = new AbortController()
+    let timedOut = false
+    const timer = setTimeout(() => {
+        timedOut = true
+        controller.abort()
+    }, timeoutMs)
+    try {
+        const resp = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Range': 'bytes=0-0',
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+            signal: controller.signal,
+        })
+        clearTimeout(timer)
+        // 及时中止未读取的响应流以释放连接和上游带宽
+        try { controller.abort() } catch { }
+
+        // 明确的错误状态码（如 401 签名失效、403 权限拒绝、404 文件不存在、410 资源下架或 5xx 故障）
+        if (resp.status === 401 || resp.status === 403 || resp.status === 404 || resp.status === 410 || resp.status >= 500) {
+            return 'invalid'
+        }
+
+        // 检查 Content-Type：防止上游将失效链接重定向至 HTML 登录页或 JSON 错误提示
+        const contentType = (resp.headers.get('content-type') || '').toLowerCase()
+        if (contentType.includes('text/html') || contentType.includes('application/json')) {
+            return 'invalid'
+        }
+
+        // 200 OK 或 206 Partial Content 说明资源可正常读取
+        if (resp.status === 200 || resp.status === 206) {
+            return 'ok'
+        }
+
+        return 'invalid'
+    } catch (err: any) {
+        clearTimeout(timer)
+        // 区分明确的 HTTP 错误（401/404）与网络传输/超时/连接错误：
+        // 如果是超时（AbortError）或网络连接层异常（DNS 解析失败、TLS 限制、TCP 连接拒绝、路由不可达等），
+        // 均返回 'timeout'（网络不可达/未经验证），使 resolveStreamUrl 在所有候选均探测失败时保留直链供客户端回退尝试播放。
+        return 'timeout'
+    }
+}
+
 function pipeIcyAudioStream(
     targetUrl: string,
     streamTitle: string,
@@ -200,12 +270,10 @@ function pipeIcyAudioStream(
     subsonicLog.info(`[Subsonic] Radio Stream requested: title="${streamTitle}", wantsIcy=${wantsIcy}, ua="${req.headers['user-agent']}"`)
 
     if (!wantsIcy) {
-        res.writeHead(302, {
-            Location: targetUrl,
+        safeRedirect(res, targetUrl, {
             'icy-name': encodeURIComponent(stationName || 'LX Radio'),
             'icy-description': encodeURIComponent(streamTitle || 'LX Radio Track'),
         })
-        res.end()
         onFinish?.()
         return
     }
@@ -282,8 +350,7 @@ function pipeIcyAudioStream(
     upstreamReq.on('error', (err: any) => {
         subsonicLog.warn('[Subsonic] ICY upstream request failed:', err?.message || err)
         if (!res.headersSent) {
-            res.writeHead(302, { Location: targetUrl })
-            res.end()
+            safeRedirect(res, targetUrl)
         } else {
             res.end()
         }
@@ -1244,8 +1311,8 @@ class SubsonicHandler {
                     return this.handleGetIndexes(res, username, format)
 
                 case 'startScan':
-                    // [新增] 本服曲库是在线聚合、无常驻扫描任务，返回 ok 只是为了不让客户端
-                    // 因 "Method not found" 报错；真实状态由 getScanStatus 统一返回（恒为未扫描）。
+                // [新增] 本服曲库是在线聚合、无常驻扫描任务，返回 ok 只是为了不让客户端
+                // 因 "Method not found" 报错；真实状态由 getScanStatus 统一返回（恒为未扫描）。
                 case 'getScanStatus':
                     return this.sendResponse(res, format === 'json'
                         ? { scanStatus: { scanning: false, count: 0 } }
@@ -1411,15 +1478,15 @@ class SubsonicHandler {
         const qualitys = (music as any).types || (music as any)._types || meta.qualitys || meta.types || meta._types || (music as any)._qualitys || meta._qualitys || []
 
         const qMap: Record<string, { bitRate: number, suffix: string, contentType: string }> = {
-            'master': { bitRate: 2304, suffix: 'Master', contentType: 'audio/flac' },
-            'atmos_plus': { bitRate: 1500, suffix: 'Atmos+', contentType: 'audio/mp4' },
-            'atmos': { bitRate: 1000, suffix: 'Atmos', contentType: 'audio/mp4' },
-            'hires': { bitRate: 2304, suffix: 'Hi-Res', contentType: 'audio/flac' },
-            'flac24bit': { bitRate: 2304, suffix: 'Hi-Res', contentType: 'audio/flac' },
-            'flac': { bitRate: 999, suffix: '无损', contentType: 'audio/flac' },
-            '320k': { bitRate: 320, suffix: '320k', contentType: 'audio/mpeg' },
-            '192k': { bitRate: 192, suffix: '192k', contentType: 'audio/mpeg' },
-            '128k': { bitRate: 128, suffix: '128k', contentType: 'audio/mpeg' },
+            'master': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'atmos_plus': { bitRate: 1500, suffix: 'mp4', contentType: 'audio/mp4' },
+            'atmos': { bitRate: 1000, suffix: 'mp4', contentType: 'audio/mp4' },
+            'hires': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'flac24bit': { bitRate: 2304, suffix: 'flac', contentType: 'audio/flac' },
+            'flac': { bitRate: 999, suffix: 'flac', contentType: 'audio/flac' },
+            '320k': { bitRate: 320, suffix: 'mp3', contentType: 'audio/mpeg' },
+            '192k': { bitRate: 192, suffix: 'mp3', contentType: 'audio/mpeg' },
+            '128k': { bitRate: 128, suffix: 'mp3', contentType: 'audio/mpeg' },
         }
 
         const hasQuality = (q: string) => {
@@ -1440,11 +1507,11 @@ class SubsonicHandler {
 
         // 若是在线全网检索歌曲，没抓到 types 信息的兜底返回 320k
         if (music.id && music.id.includes('_')) {
-            return { bitRate: 320, size: 0, suffix: '320k', contentType: 'audio/mpeg' }
+            return { bitRate: 320, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
         }
 
         // 兜底返回 128k
-        return { bitRate: 128, size: 0, suffix: '128k', contentType: 'audio/mpeg' }
+        return { bitRate: 128, size: 0, suffix: 'mp3', contentType: 'audio/mpeg' }
     }
 
     /**
@@ -2801,7 +2868,7 @@ class SubsonicHandler {
             if (type === 'random') {
                 for (let i = pool.length - 1; i > 0; i--) {
                     const j = Math.floor(Math.random() * (i + 1))
-                    ;[pool[i], pool[j]] = [pool[j], pool[i]]
+                        ;[pool[i], pool[j]] = [pool[j], pool[i]]
                 }
             }
 
@@ -4976,7 +5043,7 @@ class SubsonicHandler {
                     const shuffled = cloudSongs.slice()
                     for (let i = shuffled.length - 1; i > 0; i--) {
                         const j = Math.floor(Math.random() * (i + 1))
-                        ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
+                            ;[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]]
                     }
                     const picked = shuffled.slice(0, size).map((s: any) => ({ music: s, listId: parentId }))
                     return this.renderRandomSongs(res, picked, format, rootKey, username)
@@ -5089,7 +5156,7 @@ class SubsonicHandler {
             const a = arr.slice()
             for (let i = a.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1))
-                ;[a[i], a[j]] = [a[j], a[i]]
+                    ;[a[i], a[j]] = [a[j], a[i]]
             }
             return a
         }
@@ -5279,7 +5346,19 @@ class SubsonicHandler {
             for (const s of srcPriority) if (s !== source && !sourcesToTry.includes(s)) sourcesToTry.push(s)
         }
 
+        const resolveDeadline = Date.now() + 8000 // 整个解析和探测过程最多允许 8 秒全局预算，防止客户端因累计等待而超时
+        let fallbackResult: { url: string; quality: string; selected?: string } | null = null
+
+        sourceLoop:
         for (const trySource of sourcesToTry) {
+            // 如果已超时且有 fallback 直链，提前熔断返回 fallback
+            if (fallbackResult && Date.now() >= resolveDeadline) {
+                if (cfg['subsonic.enableDebug']) {
+                    subsonicLog.debug(`[Subsonic] resolve deadline reached; fast fallback to timeout URL: ${fallbackResult.quality} -> ${String(fallbackResult.url).slice(0, 80)}`)
+                }
+                return fallbackResult
+            }
+
             const excludeApiSources: string[] = []
 
             // 跨平台时按歌名+歌手搜索替身；同源直接用原 songmid
@@ -5321,6 +5400,9 @@ class SubsonicHandler {
             const order = this.getQualityPriorityOrder(trySource, maxBitrate)
             for (const cand of candidates) {
                 for (const q of order) {
+                    if (fallbackResult && Date.now() >= resolveDeadline) {
+                        break sourceLoop
+                    }
                     try {
                         const r = await callUserApiGetMusicUrl(
                             trySource as any, cand.music as any, q, username,
@@ -5328,10 +5410,34 @@ class SubsonicHandler {
                             excludeApiSources.length ? excludeApiSources : undefined,
                         )
                         if (r?.url) {
+                            const remainingBudget = Math.max(600, resolveDeadline - Date.now())
+                            const probeTimeout = Math.min(2500, remainingBudget)
+
+                            // 探测音频 URL 是否真实可读，避免返回 401 签名错误或 404 文件不存在的虚假链接
+                            const probeResult = await probeAudioUrl(r.url, probeTimeout)
                             const selected = trySource === source
                                 ? (q !== requestedQuality ? `quality:${source}/${q}` : undefined)
                                 : `source:${source}->${trySource}/${q}`
-                            return { url: r.url, quality: r.type || q, selected }
+
+                            if (probeResult === 'ok') {
+                                return { url: r.url, quality: r.type || q, selected }
+                            } else if (probeResult === 'timeout') {
+                                // 区分探测超时与明确失效（401/404）：超时保留为候选回退，避免上游延迟导致整首歌误报错误
+                                if (!fallbackResult) {
+                                    fallbackResult = { url: r.url, quality: r.type || q, selected }
+                                }
+                                if (cfg['subsonic.enableDebug']) {
+                                    subsonicLog.debug(`[Subsonic] candidate URL probe timeout (saved as fallback): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                }
+                                // 若时间预算已耗尽，不再继续串行探测其他源，直接返回该 fallback
+                                if (Date.now() >= resolveDeadline) {
+                                    break sourceLoop
+                                }
+                            } else {
+                                if (cfg['subsonic.enableDebug']) {
+                                    subsonicLog.debug(`[Subsonic] candidate URL unreachable (probe invalid): ${trySource} ${q} -> ${String(r.url).slice(0, 80)}`)
+                                }
+                            }
                         }
                     } catch (err: any) {
                         // 收集本次失败过的自定义源，避免后续音质/平台重复试死源
@@ -5345,6 +5451,14 @@ class SubsonicHandler {
                     }
                 }
             }
+        }
+
+        // 所有候选均未能通过即时 probe 探测，但存在超时的备选直链时，回退使用该直链供客户端尝试播放
+        if (fallbackResult) {
+            if (cfg['subsonic.enableDebug']) {
+                subsonicLog.debug(`[Subsonic] all candidates finished; returning timeout fallback URL: ${fallbackResult.quality} -> ${String(fallbackResult.url).slice(0, 80)}`)
+            }
+            return fallbackResult
         }
 
         throw new Error('Could not resolve music URL (all quality/source candidates failed)')
@@ -5494,7 +5608,7 @@ class SubsonicHandler {
         }
 
         try {
-            const maxBitrate = parseInt(params.get('maxBitrate') || '0')
+            const maxBitrate = parseInt(params.get('maxBitrate') || params.get('maxBitRate') || '0')
             // [transcodeOffset] 客户端要求从第 N 秒开始（单位：秒）。
             // 仅在服务端转码链路上生效；直接 302 到音源直链时无法携带偏移（客户端自行 seek）。
             const timeOffsetSec = Math.max(0, Math.floor(Number(params.get('timeOffset') || 0)) || 0)
@@ -5566,8 +5680,8 @@ class SubsonicHandler {
                 const station = getRadioStation(username, id)
                 if (station && station.streamUrl) {
                     subsonicLog.debug(`[Subsonic] Redirecting user radio ${id} -> ${station.streamUrl}`)
-                    res.writeHead(302, { Location: station.streamUrl })
-                    return res.end()
+                    safeRedirect(res, station.streamUrl)
+                    return
                 }
                 return this.sendError(res, 70, 'Radio station not found', format)
             }
@@ -5795,8 +5909,7 @@ class SubsonicHandler {
                     await this.transcodeStream(req, res, result.url, maxBitrate, format, timeOffsetSec)
                     return
                 }
-                res.writeHead(302, { Location: result.url })
-                res.end()
+                safeRedirect(res, result.url)
             } else {
                 return this.sendError(res, 0, 'Could not resolve music URL', format)
             }
@@ -5854,8 +5967,7 @@ class SubsonicHandler {
         try { ok = await probeFfmpeg() } catch { ok = false }
         if (!ok) {
             subsonicLog.warn(`[Subsonic] transcode enabled but ffmpeg unavailable, fallback 302 -> ${String(url).slice(0, 60)}`)
-            res.writeHead(302, { Location: url })
-            res.end()
+            safeRedirect(res, url)
             return
         }
 
@@ -5871,8 +5983,8 @@ class SubsonicHandler {
         const proc = spawn('ffmpeg', args, { stdio: ['ignore', 'pipe', 'pipe'] })
         const contentType = targetFormat === 'mp3' ? 'audio/mpeg'
             : targetFormat === 'opus' ? 'audio/ogg'
-            : targetFormat === 'aac' ? 'audio/aac'
-            : 'application/octet-stream'
+                : targetFormat === 'aac' ? 'audio/aac'
+                    : 'application/octet-stream'
 
         res.writeHead(200, { 'Content-Type': contentType, 'Cache-Control': 'no-cache' })
 
@@ -5916,7 +6028,7 @@ class SubsonicHandler {
     ) {
         // [coverArtScaling] 客户端实际会带 size（实测 92/120 次请求带），此前被完全忽略
         const coverSize = Math.max(0, Math.min(parseInt(params.get('size') || '0') || 0, 1500))
-        ;(res as any).__coverSize = coverSize
+            ; (res as any).__coverSize = coverSize
 
         let id = params.get('id')
         if (!id) {

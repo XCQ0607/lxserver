@@ -1,167 +1,1058 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" class="theme-dark">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LX Music Web</title>
+    <title>LX Music Web - 登录</title>
     <script src="/js/config.js"></script>
+    <script>
+        (function() {
+            var name = (window.CONFIG && window.CONFIG['player.name']) || 'LX Music Web';
+            document.title = name + ' - 登录';
+        })();
+    </script>
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
     <script src="assets/tailwindcss.js"></script>
     <script src="js/tailwind_setup.js"></script>
     <style>
+        :root {
+            --primary: #10b981;
+            --primary-glow: rgba(16, 185, 129, 0.4);
+            --accent: #06b6d4;
+            --accent-glow: rgba(6, 182, 212, 0.35);
+        }
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+        }
+
+        input {
+            user-select: text;
+        }
+
         body {
             margin: 0;
             min-height: 100vh;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: linear-gradient(135deg, #10b981, #14b8a6, #3b82f6);
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            overflow: hidden;
+            transition: background 0.4s ease, color 0.4s ease;
         }
 
-        .theme-gradient-bg {
-            background: linear-gradient(135deg, #10b981, #0d9488) !important;
+        /* ===== 暗色模式 (Dark Theme) ===== */
+        html.theme-dark body {
+            background: #090d16;
+            color: #f3f4f6;
         }
 
-        .theme-gradient-btn {
-            background: linear-gradient(to right, #10b981, #0d9488) !important;
-            border: none !important;
+        html.theme-dark .bg-grid-mask {
+            background-image: 
+                linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
         }
 
-        .theme-gradient-btn:hover {
-            background: linear-gradient(to right, #059669, #0f766e) !important;
+        html.theme-dark .glass-card {
+            background: rgba(18, 24, 38, 0.78);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 
+                0 30px 60px -12px rgba(0, 0, 0, 0.7),
+                0 18px 36px -18px rgba(0, 0, 0, 0.8),
+                inset 0 1px 0 rgba(255, 255, 255, 0.18),
+                inset 0 0 20px rgba(16, 185, 129, 0.04);
+        }
+
+        html.theme-dark .modern-input {
+            background: rgba(11, 15, 25, 0.7);
+            border: 1.5px solid rgba(255, 255, 255, 0.08);
+            color: #ffffff;
+        }
+
+        html.theme-dark .modern-input:hover {
+            border-color: rgba(255, 255, 255, 0.18);
+            background: rgba(15, 21, 34, 0.85);
+        }
+
+        html.theme-dark .modern-input:focus {
+            border-color: #10b981;
+            background: rgba(16, 24, 39, 0.95);
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.18), 0 4px 20px rgba(16, 185, 129, 0.15);
+        }
+
+        html.theme-dark .card-title {
+            color: #ffffff;
+        }
+
+        html.theme-dark .segmented-bg {
+            background: rgba(0, 0, 0, 0.45);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        html.theme-dark .floating-note {
+            color: rgba(255, 255, 255, 0.12);
+            text-shadow: 0 0 12px rgba(16, 185, 129, 0.25);
+        }
+
+        /* ===== 亮色模式 (Light Theme) ===== */
+        html.theme-light body {
+            background: #f0fdf4;
+            color: #1e293b;
+        }
+
+        html.theme-light .bg-grid-mask {
+            background-image: 
+                linear-gradient(to right, rgba(16, 185, 129, 0.06) 1px, transparent 1px),
+                linear-gradient(to bottom, rgba(16, 185, 129, 0.06) 1px, transparent 1px);
+        }
+
+        html.theme-light .glass-card {
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid rgba(255, 255, 255, 0.9);
+            box-shadow: 
+                0 30px 60px -12px rgba(16, 185, 129, 0.18),
+                0 18px 36px -18px rgba(0, 0, 0, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 1),
+                inset 0 0 20px rgba(16, 185, 129, 0.06);
+        }
+
+        html.theme-light .modern-input {
+            background: rgba(248, 250, 252, 0.85);
+            border: 1.5px solid rgba(203, 213, 225, 0.8);
+            color: #0f172a;
+        }
+
+        html.theme-light .modern-input::placeholder {
+            color: #94a3b8;
+        }
+
+        html.theme-light .modern-input:hover {
+            border-color: rgba(16, 185, 129, 0.4);
+            background: #ffffff;
+        }
+
+        html.theme-light .modern-input:focus {
+            border-color: #10b981;
+            background: #ffffff;
+            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.15), 0 4px 16px rgba(16, 185, 129, 0.12);
+        }
+
+        html.theme-light .card-title {
+            color: #0f172a;
+        }
+
+        html.theme-light .segmented-bg {
+            background: rgba(241, 245, 249, 0.9);
+            border: 1px solid rgba(203, 213, 225, 0.7);
+        }
+
+        html.theme-light #mode-desc,
+        html.theme-light #footer-tip,
+        html.theme-light .sub-text {
+            color: #64748b !important;
+        }
+
+        html.theme-light .floating-note {
+            color: rgba(16, 185, 129, 0.18);
+            text-shadow: 0 0 12px rgba(16, 185, 129, 0.18);
+        }
+
+        /* 动态极光渐变背景与微网格 */
+        .ambient-canvas {
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            overflow: hidden;
+            z-index: 0;
+        }
+
+        .aurora-blob {
+            position: absolute;
+            border-radius: 50%;
+            filter: blur(80px);
+            opacity: 0.55;
+            mix-blend-mode: screen;
+            animation: floatAurora 18s ease-in-out infinite alternate;
+        }
+
+        html.theme-light .aurora-blob {
+            opacity: 0.4;
+            mix-blend-mode: normal;
+        }
+
+        .aurora-1 {
+            width: 520px;
+            height: 520px;
+            background: radial-gradient(circle, #059669 0%, rgba(16, 185, 129, 0.4) 50%, transparent 70%);
+            top: -10%;
+            left: -5%;
+            animation-duration: 20s;
+        }
+
+        .aurora-2 {
+            width: 580px;
+            height: 580px;
+            background: radial-gradient(circle, #0284c7 0%, rgba(6, 182, 212, 0.4) 50%, transparent 70%);
+            bottom: -15%;
+            right: -10%;
+            animation-duration: 24s;
+            animation-delay: -5s;
+        }
+
+        .aurora-3 {
+            width: 420px;
+            height: 420px;
+            background: radial-gradient(circle, #6366f1 0%, rgba(99, 102, 241, 0.3) 50%, transparent 70%);
+            top: 45%;
+            left: 35%;
+            animation-duration: 16s;
+            animation-delay: -9s;
+        }
+
+        @keyframes floatAurora {
+            0% {
+                transform: translate(0, 0) scale(1) rotate(0deg);
+            }
+            50% {
+                transform: translate(50px, 40px) scale(1.1) rotate(45deg);
+            }
+            100% {
+                transform: translate(-30px, -20px) scale(0.95) rotate(-30deg);
+            }
+        }
+
+        /* 动态背景微网格遮罩 */
+        .bg-grid-mask {
+            position: fixed;
+            inset: 0;
+            background-size: 40px 40px;
+            mask-image: radial-gradient(ellipse 80% 80% at 50% 50%, #000 60%, transparent 100%);
+            pointer-events: none;
+            z-index: 1;
+            transition: background 0.4s ease;
+        }
+
+        /* 动态从下向上升腾漂浮的音乐图标容器 */
+        #notes-container {
+            position: fixed;
+            inset: 0;
+            overflow: hidden;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        .floating-note {
+            position: absolute;
+            bottom: -80px;
+            top: auto;
+            opacity: 0;
+            pointer-events: none;
+            will-change: transform, opacity;
+            animation: noteAscend 12s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+        }
+
+        @keyframes noteAscend {
+            0% {
+                transform: translateY(0) translateX(0) rotate(0deg) scale(0.65);
+                opacity: 0;
+            }
+            15% {
+                opacity: 0.85;
+                transform: translateY(-15vh) translateX(14px) rotate(45deg) scale(0.85);
+            }
+            50% {
+                opacity: 0.85;
+                transform: translateY(-50vh) translateX(-16px) rotate(180deg) scale(1.02);
+            }
+            85% {
+                opacity: 0.75;
+                transform: translateY(-85vh) translateX(12px) rotate(315deg) scale(1.1);
+            }
+            100% {
+                transform: translateY(calc(-100vh - 120px)) translateX(0) rotate(360deg) scale(1.15);
+                opacity: 0;
+            }
+        }
+
+        /* 动态 Canvas 粒子背景 */
+        #particles-canvas {
+            position: fixed;
+            inset: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 1;
+        }
+
+        /* 鼠标微光跟随层 */
+        #cursor-glow {
+            position: fixed;
+            width: 450px;
+            height: 450px;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(16, 185, 129, 0.12) 0%, rgba(6, 182, 212, 0.04) 45%, transparent 70%);
+            pointer-events: none;
+            transform: translate(-50%, -50%);
+            transition: opacity 0.3s ease;
+            z-index: 2;
+        }
+
+        /* 磨砂玻璃卡片 */
+        .glass-card {
+            backdrop-filter: blur(28px) saturate(190%);
+            -webkit-backdrop-filter: blur(28px) saturate(190%);
+            transition: background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+        }
+
+        /* 左上角精美主题切换 Toggle (Floating Capsule) */
+        .theme-toggle-btn {
+            position: fixed;
+            top: 24px;
+            left: 24px;
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 7px 14px;
+            border-radius: 9999px;
+            cursor: pointer;
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            outline: none;
+        }
+
+        html.theme-dark .theme-toggle-btn {
+            background: rgba(18, 24, 38, 0.75);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            color: #f3f4f6;
+            box-shadow: 0 8px 24px -4px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+        }
+
+        html.theme-light .theme-toggle-btn {
+            background: rgba(255, 255, 255, 0.85);
+            border: 1px solid rgba(203, 213, 225, 0.8);
+            color: #0f172a;
+            box-shadow: 0 8px 20px -4px rgba(16, 185, 129, 0.15), inset 0 1px 0 #ffffff;
+        }
+
+        .theme-toggle-btn:hover {
+            transform: translateY(-1.5px) scale(1.03);
+            border-color: #10b981;
+        }
+
+        .theme-toggle-btn:active {
+            transform: translateY(0.5px) scale(0.97);
+        }
+
+        .theme-icon-box {
+            position: relative;
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .theme-icon {
+            position: absolute;
+            transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        html.theme-dark .icon-sun {
+            transform: rotate(90deg) scale(0);
+            opacity: 0;
+        }
+        html.theme-dark .icon-moon {
+            transform: rotate(0) scale(1);
+            opacity: 1;
+            color: #38bdf8;
+        }
+
+        html.theme-light .icon-sun {
+            transform: rotate(0) scale(1);
+            opacity: 1;
+            color: #f59e0b;
+        }
+        html.theme-light .icon-moon {
+            transform: rotate(-90deg) scale(0);
+            opacity: 0;
+        }
+
+        /* 选项卡胶囊滑块 */
+        .tab-pill {
+            position: absolute;
+            top: 4px;
+            bottom: 4px;
+            width: calc(50% - 6px);
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(16, 185, 129, 0.9), rgba(5, 150, 105, 0.9));
+            box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4);
+            transition: all 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+            z-index: 1;
+        }
+
+        .tab-btn {
+            position: relative;
+            z-index: 2;
+            transition: color 0.3s ease;
+        }
+
+        /* 输入框高质感交互 */
+        .input-wrapper {
+            position: relative;
+            transition: all 0.3s ease;
+        }
+
+        .modern-input {
+            width: 100%;
+            border-radius: 14px;
+            padding: 13px 44px 13px 46px;
+            font-size: 14.5px;
+            outline: none;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 16px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(156, 163, 175, 0.7);
+            transition: color 0.25s ease, transform 0.25s ease;
+            pointer-events: none;
+        }
+
+        .modern-input:focus + .input-icon,
+        .input-wrapper:focus-within .input-icon {
+            color: #10b981;
+            transform: translateY(-50%) scale(1.1);
+        }
+
+        .input-action-btn {
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: rgba(156, 163, 175, 0.7);
+            cursor: pointer;
+            padding: 6px;
+            transition: all 0.2s ease;
+            background: transparent;
+            border: none;
+            outline: none;
+        }
+
+        .input-action-btn:hover {
+            color: #10b981;
+            transform: translateY(-50%) scale(1.12);
+        }
+
+        /* 渐变流光按钮 */
+        .btn-gradient-submit {
+            background: linear-gradient(135deg, #10b981 0%, #059669 50%, #0284c7 100%);
+            background-size: 200% 200%;
+            border: none;
+            box-shadow: 0 8px 24px -4px rgba(16, 185, 129, 0.45);
+            transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .btn-gradient-submit:hover:not(:disabled) {
+            background-position: 100% 0%;
+            box-shadow: 0 12px 30px -4px rgba(16, 185, 129, 0.6), 0 4px 12px rgba(6, 182, 212, 0.4);
+            transform: translateY(-1.5px) scale(1.01);
+        }
+
+        .btn-gradient-submit:active:not(:disabled) {
+            transform: translateY(0.5px) scale(0.985);
+        }
+
+        .btn-gradient-submit:disabled {
+            opacity: 0.7;
+            cursor: not-allowed;
+            filter: grayscale(0.2);
+        }
+
+        /* 模式切换过渡容器 */
+        .form-panel {
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .form-panel.hidden-panel {
+            display: none;
+            opacity: 0;
+            transform: translateY(8px);
+        }
+
+        .form-panel.active-panel {
+            display: block;
+            opacity: 1;
+            transform: translateY(0);
+            animation: fadeInSlide 0.3s ease forwards;
+        }
+
+        @keyframes fadeInSlide {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* 抖动动画 */
+        @keyframes shakeHard {
+            0%, 100% { transform: translateX(0); }
+            20% { transform: translateX(-9px); }
+            40% { transform: translateX(9px); }
+            60% { transform: translateX(-5px); }
+            80% { transform: translateX(5px); }
+        }
+
+        .shake-active {
+            animation: shakeHard 0.4s ease-in-out;
+        }
+
+        /* 呼吸光晕 Logo */
+        .logo-glow {
+            position: relative;
+        }
+        .logo-glow::after {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 26px;
+            background: linear-gradient(135deg, #10b981, #06b6d4);
+            filter: blur(12px);
+            opacity: 0.6;
+            z-index: -1;
+            animation: pulseGlow 3s ease-in-out infinite alternate;
+        }
+
+        @keyframes pulseGlow {
+            0% { opacity: 0.4; transform: scale(0.96); }
+            100% { opacity: 0.8; transform: scale(1.04); }
         }
     </style>
 </head>
 
 <body>
 
-    <!-- Background Animation -->
-    <div class="absolute inset-0 overflow-hidden pointer-events-none">
-        <div class="absolute w-96 h-96 t-bg-panel/10 rounded-full blur-3xl -top-48 -left-48 animate-pulse"></div>
-        <div class="absolute w-96 h-96 t-bg-panel/10 rounded-full blur-3xl -bottom-48 -right-48 animate-pulse"
-            style="animation-delay: 1s;"></div>
+    <!-- 动态氛围背景 -->
+    <div class="ambient-canvas">
+        <div class="aurora-blob aurora-1"></div>
+        <div class="aurora-blob aurora-2"></div>
+        <div class="aurora-blob aurora-3"></div>
     </div>
+    <div class="bg-grid-mask"></div>
+    
+    <!-- 从下往上升腾飘浮的音乐图标 -->
+    <div id="notes-container"></div>
 
-    <!-- Auth Card -->
-    <div class="relative z-10 t-bg-panel/95 backdrop-blur-xl rounded-3xl shadow-2xl p-10 w-full max-w-md mx-4 transform transition-all duration-500"
-        id="auth-card">
-        <!-- Logo & Title -->
-        <div class="text-center mb-8">
-            <div
-                class="w-20 h-20 theme-gradient-bg rounded-2xl mx-auto mb-4 flex items-center justify-center shadow-lg transform hover:scale-105 transition-transform">
-                <i class="fas fa-music text-white text-3xl"></i>
+    <canvas id="particles-canvas"></canvas>
+    <div id="cursor-glow"></div>
+
+    <!-- 左上方精美主题切换 Toggle -->
+    <button type="button" onclick="toggleTheme()" class="theme-toggle-btn" id="theme-toggle-btn" title="切换亮色/暗色主题">
+        <div class="theme-icon-box">
+            <i class="fas fa-sun theme-icon icon-sun text-sm"></i>
+            <i class="fas fa-moon theme-icon icon-moon text-sm"></i>
+        </div>
+        <span id="theme-label" class="text-xs font-semibold tracking-wide">暗色模式</span>
+    </button>
+
+    <!-- 主登录卡片 -->
+    <div class="relative z-10 glass-card rounded-3xl p-8 sm:p-10 w-full max-w-[430px] mx-4 transition-all duration-500" id="auth-card">
+        
+        <!-- Header: Logo & Title -->
+        <div class="text-center mb-7">
+            <div class="logo-glow w-16 h-16 rounded-2xl mx-auto mb-3.5 flex items-center justify-center bg-gradient-to-br from-emerald-400 to-teal-600 shadow-xl shadow-emerald-500/20 transform hover:scale-105 transition-all duration-300">
+                <i class="fas fa-music text-white text-2xl drop-shadow-md"></i>
             </div>
-            <h1 class="text-3xl font-black t-text-main mb-2">LX Music Web</h1>
-            <p class="text-gray-500 text-sm">输入密码以访问播放器</p>
+            <h1 class="card-title text-2xl sm:text-[26px] font-black tracking-tight mb-1.5 flex items-center justify-center transition-colors" id="music-login-title">
+                LX Music Web
+            </h1>
+            <p id="mode-desc" class="text-xs text-gray-400 transition-all duration-300">登录账号以同步本地与云端歌单</p>
         </div>
 
-        <!-- Password Input -->
-        <form onsubmit="handleLogin(event)" class="space-y-6">
-            <div class="relative">
-                <div class="absolute left-4 top-1/2 -translate-y-1/2 t-text-muted">
-                    <i class="fas fa-lock"></i>
+        <!-- 模式切换选择器 (Segmented Control) -->
+        <div class="relative segmented-bg p-1 rounded-2xl mb-6 flex items-center justify-between transition-colors">
+            <div id="tab-pill" class="tab-pill left-[4px]"></div>
+            
+            <button type="button" onclick="switchLoginMode('user')" id="btn-tab-user"
+                class="tab-btn w-1/2 py-2.5 text-xs sm:text-[13px] font-bold text-white flex items-center justify-center gap-2 rounded-xl focus:outline-none">
+                <i class="fas fa-user-circle"></i>
+                <span>用户账号登录</span>
+            </button>
+
+            <button type="button" onclick="switchLoginMode('player')" id="btn-tab-player"
+                class="tab-btn w-1/2 py-2.5 text-xs sm:text-[13px] font-bold text-gray-400 flex items-center justify-center gap-2 rounded-xl focus:outline-none hover:text-gray-200">
+                <i class="fas fa-key"></i>
+                <span>播放器访问密码</span>
+            </button>
+        </div>
+
+        <!-- 表单区域 -->
+        <form onsubmit="handleLoginSubmit(event)" id="login-form" class="space-y-4">
+            
+            <!-- 用户账号模式表单 -->
+            <div id="user-mode-panel" class="form-panel active-panel space-y-4">
+                <!-- 账号输入框（无预填、无多余提示） -->
+                <div class="input-wrapper">
+                    <input type="text" id="auth-username-input" placeholder="输入账号 / 用户名"
+                        class="modern-input" autocomplete="off" spellcheck="false">
+                    <i class="fas fa-user input-icon"></i>
                 </div>
-                <input type="password" id="auth-password-input" placeholder="请输入访问密码"
-                    class="w-full pl-12 pr-4 py-4 t-bg-main border-2 t-border-main rounded-xl focus:outline-none focus:border-emerald-500 focus:ring-4 focus:ring-emerald-100 transition-all t-text-main placeholder-gray-400"
-                    autocomplete="current-password">
+
+                <!-- 用户密码输入框 -->
+                <div class="input-wrapper">
+                    <input type="password" id="auth-user-password-input" placeholder="输入密码"
+                        class="modern-input" autocomplete="current-password">
+                    <i class="fas fa-lock input-icon"></i>
+                    <button type="button" onclick="togglePasswordVisibility('auth-user-password-input', this)" class="input-action-btn" title="显示/隐藏密码">
+                        <i class="far fa-eye"></i>
+                    </button>
+                </div>
             </div>
 
-            <!-- Error Message -->
-            <div id="auth-error" class="hidden text-red-500 text-sm text-center bg-red-50 py-2 px-4 rounded-lg">
-                <i class="fas fa-exclamation-circle mr-1"></i>
-                <span>密码错误，请重试</span>
+            <!-- 播放器密码模式表单 (Guest/Player Password Only) -->
+            <div id="player-mode-panel" class="form-panel hidden-panel space-y-4">
+                <!-- 播放器访问密码输入框 -->
+                <div class="input-wrapper">
+                    <input type="password" id="auth-player-password-input" placeholder="输入播放器访问密码"
+                        class="modern-input" autocomplete="current-password">
+                    <i class="fas fa-shield-alt input-icon"></i>
+                    <button type="button" onclick="togglePasswordVisibility('auth-player-password-input', this)" class="input-action-btn" title="显示/隐藏密码">
+                        <i class="far fa-eye"></i>
+                    </button>
+                </div>
+                <p class="sub-text text-[11.5px] text-gray-400/80 px-1 leading-relaxed">
+                    <i class="fas fa-info-circle text-emerald-500 mr-1"></i> 无需账号，输入访问密码直接进入播放器。
+                </p>
             </div>
 
-            <!-- Submit Button -->
+            <!-- 错误提示框 -->
+            <div id="auth-error" class="hidden text-rose-300 text-xs text-center bg-rose-950/50 border border-rose-500/30 py-2.5 px-4 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-rose-950/40">
+                <i class="fas fa-exclamation-circle text-rose-400 flex-shrink-0"></i>
+                <span id="auth-error-msg">账号或密码错误</span>
+            </div>
+
+            <!-- 登录提交按钮 -->
             <button type="submit" id="submit-btn"
-                class="w-full py-4 theme-gradient-btn text-white font-bold rounded-xl shadow-lg shadow-emerald-200 hover:shadow-xl hover:shadow-emerald-300 transform hover:scale-[1.02] active:scale-[0.98] transition-all">
-                <i class="fas fa-sign-in-alt mr-2"></i>
-                进入播放器
+                class="btn-gradient-submit w-full py-3.5 mt-2 text-white font-bold rounded-xl text-sm flex items-center justify-center gap-2 shadow-lg focus:outline-none">
+                <i class="fas fa-sign-in-alt"></i>
+                <span id="submit-btn-text">登录账号</span>
             </button>
         </form>
 
-        <!-- Footer -->
-        <div class="mt-8 text-center text-xs t-text-muted">
-            <p>请联系管理员获取访问密码</p>
+        <!-- 底部说明与快捷帮助 -->
+        <div class="mt-7 pt-4 border-t border-black/5 dark:border-white/5 flex items-center justify-between text-[11.5px] text-gray-500">
+            <span id="footer-tip">请联系系统管理员获取凭据</span>
+            <button type="button" onclick="clearSavedSessions()" class="hover:text-emerald-500 dark:hover:text-gray-300 transition-colors focus:outline-none" title="清理保存在本机的已存凭据">
+                <i class="fas fa-trash-alt mr-1"></i>重置本地凭据
+            </button>
         </div>
     </div>
 
     <script>
-        // 如果未开启认证或已有有效 Session，直接跳转到播放器
+        // 当前模式: 'user' (用户账号) 或 'player' (播放器密码)
+        let currentMode = 'user';
+
+        // ===== 主题管理 (Theme Management) =====
+        function applyTheme(theme) {
+            const html = document.documentElement;
+            const themeLabel = document.getElementById('theme-label');
+            if (theme === 'light') {
+                html.classList.remove('theme-dark');
+                html.classList.add('theme-light');
+                if (themeLabel) themeLabel.textContent = '亮色模式';
+            } else {
+                html.classList.remove('theme-light');
+                html.classList.add('theme-dark');
+                if (themeLabel) themeLabel.textContent = '暗色模式';
+            }
+            localStorage.setItem('lx_web_theme', theme);
+            updateTabPillTextColor();
+        }
+
+        function toggleTheme() {
+            const isDark = document.documentElement.classList.contains('theme-dark');
+            applyTheme(isDark ? 'light' : 'dark');
+        }
+
+        function initTheme() {
+            const saved = localStorage.getItem('lx_web_theme');
+            if (saved === 'light' || saved === 'dark') {
+                applyTheme(saved);
+            } else {
+                // 跟随系统偏好
+                const prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+                applyTheme(prefersDark ? 'dark' : 'light');
+            }
+        }
+
+        function updateTabPillTextColor() {
+            const isLight = document.documentElement.classList.contains('theme-light');
+            const btnUser = document.getElementById('btn-tab-user');
+            const btnPlayer = document.getElementById('btn-tab-player');
+            if (currentMode === 'user') {
+                btnUser.className = 'tab-btn w-1/2 py-2.5 text-xs sm:text-[13px] font-bold text-white flex items-center justify-center gap-2 rounded-xl focus:outline-none';
+                btnPlayer.className = `tab-btn w-1/2 py-2.5 text-xs sm:text-[13px] font-bold ${isLight ? 'text-gray-500 hover:text-gray-800' : 'text-gray-400 hover:text-gray-200'} flex items-center justify-center gap-2 rounded-xl focus:outline-none`;
+            } else {
+                btnPlayer.className = 'tab-btn w-1/2 py-2.5 text-xs sm:text-[13px] font-bold text-white flex items-center justify-center gap-2 rounded-xl focus:outline-none';
+                btnUser.className = `tab-btn w-1/2 py-2.5 text-xs sm:text-[13px] font-bold ${isLight ? 'text-gray-500 hover:text-gray-800' : 'text-gray-400 hover:text-gray-200'} flex items-center justify-center gap-2 rounded-xl focus:outline-none`;
+            }
+        }
+
+        // 切换登录模式
+        function switchLoginMode(mode) {
+            if (currentMode === mode) return;
+            currentMode = mode;
+
+            const tabPill = document.getElementById('tab-pill');
+            const userPanel = document.getElementById('user-mode-panel');
+            const playerPanel = document.getElementById('player-mode-panel');
+            const modeDesc = document.getElementById('mode-desc');
+            const submitBtnText = document.getElementById('submit-btn-text');
+            const errorDiv = document.getElementById('auth-error');
+
+            errorDiv.classList.add('hidden');
+            updateTabPillTextColor();
+
+            if (mode === 'user') {
+                tabPill.style.transform = 'translateX(0)';
+                userPanel.classList.remove('hidden-panel');
+                userPanel.classList.add('active-panel');
+                playerPanel.classList.add('hidden-panel');
+                playerPanel.classList.remove('active-panel');
+
+                modeDesc.textContent = '登录账号以同步本地与云端歌单';
+                submitBtnText.textContent = '登录账号';
+                document.getElementById('auth-username-input').focus();
+            } else {
+                tabPill.style.transform = 'translateX(100%)';
+                playerPanel.classList.remove('hidden-panel');
+                playerPanel.classList.add('active-panel');
+                userPanel.classList.add('hidden-panel');
+                userPanel.classList.remove('active-panel');
+
+                modeDesc.textContent = '输入播放器访问密码直接进入播放器';
+                submitBtnText.textContent = '进入播放器';
+                document.getElementById('auth-player-password-input').focus();
+            }
+        }
+
+        // 显示/隐藏密码明文
+        function togglePasswordVisibility(inputId, btn) {
+            const input = document.getElementById(inputId);
+            const icon = btn.querySelector('i');
+            if (input.type === 'password') {
+                input.type = 'text';
+                icon.classList.remove('fa-eye', 'far');
+                icon.classList.add('fa-eye-slash', 'fas');
+            } else {
+                input.type = 'password';
+                icon.classList.remove('fa-eye-slash', 'fas');
+                icon.classList.add('fa-eye', 'far');
+            }
+        }
+
+        // 清理本地保存的凭据
+        function clearSavedSessions() {
+            localStorage.removeItem('lx_sync_user');
+            localStorage.removeItem('lx_sync_pass');
+            localStorage.removeItem('lx_sync_mode');
+            localStorage.removeItem('lx_user_token');
+            const errorDiv = document.getElementById('auth-error');
+            const errorMsg = document.getElementById('auth-error-msg');
+            errorDiv.classList.remove('hidden', 'bg-rose-950/50', 'border-rose-500/30', 'text-rose-300');
+            errorDiv.classList.add('bg-emerald-950/50', 'border-emerald-500/30', 'text-emerald-300');
+            errorMsg.textContent = '已清除本地保存的凭据与缓存';
+            setTimeout(() => {
+                errorDiv.classList.add('hidden');
+                errorDiv.classList.remove('bg-emerald-950/50', 'border-emerald-500/30', 'text-emerald-300');
+                errorDiv.classList.add('bg-rose-950/50', 'border-rose-500/30', 'text-rose-300');
+            }, 2500);
+        }
+
+        // 页面初始化检查（静默恢复与认证开关）
         (async () => {
+            initTheme();
+            initFloatingNotes();
+            const setPlayerName = (name) => {
+                if (!name) return;
+                document.title = `${name} - 登录`;
+                const titleEl = document.getElementById('music-login-title');
+                if (titleEl) titleEl.textContent = name;
+            };
+            if (window.CONFIG && window.CONFIG['player.name']) {
+                setPlayerName(window.CONFIG['player.name']);
+            }
             try {
-                const res = await fetch('/api/music/config')
-                const cfg = await res.json()
-                if (!cfg['player.enableAuth']) {
-                    window.location.replace('./')
-                    return
+                const res = await fetch('/api/music/config');
+                const cfg = await res.json();
+                if (cfg['player.name']) {
+                    setPlayerName(cfg['player.name']);
                 }
-                const verifyRes = await fetch('/api/music/auth/verify')
-                const verifyData = await verifyRes.json()
+                if (!cfg['player.enableAuth']) {
+                    window.location.replace('./');
+                    return;
+                }
+
+                const verifyRes = await fetch('/api/music/auth/verify');
+                const verifyData = await verifyRes.json();
                 if (verifyData.valid) {
-                    window.location.replace('./')
+                    window.location.replace('./');
+                    return;
+                }
+
+                // Safari / 浏览器凭据自动静默恢复 (通过 Token 校验)
+                const savedUser = localStorage.getItem('lx_sync_user');
+                const savedToken = localStorage.getItem('lx_user_token');
+                if (savedUser && savedToken) {
+                    console.log('[Login] 检测到已保存的用户 Token，正在尝试自动恢复 Session...');
+                    const tokenVerifyRes = await fetch('/api/music/auth/verify', {
+                        headers: {
+                            'x-user-name': savedUser,
+                            'x-user-token': savedToken
+                        }
+                    });
+                    const tokenVerifyData = await tokenVerifyRes.json();
+                    if (tokenVerifyData.valid) {
+                        window.location.replace('./');
+                        return;
+                    } else {
+                        // Token 已失效，清除本地失效凭据
+                        localStorage.removeItem('lx_sync_user');
+                        localStorage.removeItem('lx_user_token');
+                        localStorage.removeItem('lx_sync_pass');
+                    }
                 }
             } catch (e) {
-                console.error('[Login] 初始化检查失败:', e)
+                console.error('[Login] 初始化检查失败:', e);
             }
-        })()
+        })();
 
-        async function handleLogin(event) {
-            event.preventDefault()
-            const password = document.getElementById('auth-password-input').value
-            const errorDiv = document.getElementById('auth-error')
-            const submitBtn = document.getElementById('submit-btn')
-            const card = document.getElementById('auth-card')
+        // 提交登录表单
+        async function handleLoginSubmit(event) {
+            event.preventDefault();
+            const submitBtn = document.getElementById('submit-btn');
+            const submitBtnText = document.getElementById('submit-btn-text');
+            const errorDiv = document.getElementById('auth-error');
+            const errorMsg = document.getElementById('auth-error-msg');
+            const card = document.getElementById('auth-card');
 
-            if (!password) return
+            let payload = {};
+            if (currentMode === 'user') {
+                const username = document.getElementById('auth-username-input').value.trim();
+                const password = document.getElementById('auth-user-password-input').value;
+                if (!username) {
+                    showError('请输入用户名');
+                    document.getElementById('auth-username-input').focus();
+                    return;
+                }
+                if (!password) {
+                    showError('请输入密码');
+                    document.getElementById('auth-user-password-input').focus();
+                    return;
+                }
+                payload = { mode: 'user', username, password };
+            } else {
+                const password = document.getElementById('auth-player-password-input').value;
+                if (!password) {
+                    showError('请输入播放器访问密码');
+                    document.getElementById('auth-player-password-input').focus();
+                    return;
+                }
+                payload = { mode: 'player', password };
+            }
 
-            submitBtn.disabled = true
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>验证中...'
-            errorDiv.classList.add('hidden')
+            submitBtn.disabled = true;
+            const originalIcon = submitBtn.querySelector('i').className;
+            submitBtn.querySelector('i').className = 'fas fa-spinner fa-spin';
+            submitBtnText.textContent = '验证凭据中...';
+            errorDiv.classList.add('hidden');
 
             try {
                 const res = await fetch('/api/music/auth', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
-                })
-                const data = await res.json()
+                    body: JSON.stringify(payload)
+                });
+                const data = await res.json();
 
                 if (data.success) {
-                    submitBtn.innerHTML = '<i class="fas fa-check mr-2"></i>验证成功，跳转中...'
-                    setTimeout(() => window.location.replace('./'), 300)
+                    submitBtn.querySelector('i').className = 'fas fa-check-circle';
+                    submitBtnText.textContent = '验证成功，正在进入...';
+                    submitBtn.classList.remove('btn-gradient-submit');
+                    submitBtn.classList.add('bg-emerald-500');
+
+                    if (data.mode === 'user' && data.username) {
+                        localStorage.setItem('lx_sync_user', data.username);
+                        localStorage.setItem('lx_sync_mode', 'local');
+                        if (data.token) {
+                            localStorage.setItem('lx_user_token', data.token);
+                        }
+                        // 移除本地明文密码存储
+                        localStorage.removeItem('lx_sync_pass');
+                    }
+
+                    // 优雅缩放淡出跳转
+                    card.style.transform = 'scale(0.95)';
+                    card.style.opacity = '0.4';
+                    setTimeout(() => window.location.replace('./'), 260);
                 } else {
-                    errorDiv.classList.remove('hidden')
-                    // 抖动效果
-                    card.style.transform = 'translateX(-8px)'
-                    setTimeout(() => card.style.transform = 'translateX(8px)', 80)
-                    setTimeout(() => card.style.transform = 'translateX(-5px)', 160)
-                    setTimeout(() => card.style.transform = 'translateX(0)', 240)
-
-                    const input = document.getElementById('auth-password-input')
-                    input.value = ''
-                    input.classList.add('border-red-500')
-                    setTimeout(() => input.classList.remove('border-red-500'), 500)
-                    input.focus()
-
-                    submitBtn.disabled = false
-                    submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>进入播放器'
+                    showError(data.message || (currentMode === 'user' ? '账号或密码错误' : '播放器访问密码错误'));
+                    shakeCard(card);
+                    submitBtn.disabled = false;
+                    submitBtn.querySelector('i').className = originalIcon;
+                    submitBtnText.textContent = currentMode === 'user' ? '登录账号' : '进入播放器';
                 }
             } catch (e) {
-                console.error('[Login] 请求失败:', e)
-                errorDiv.querySelector('span').textContent = '网络错误，请稍后重试'
-                errorDiv.classList.remove('hidden')
-                submitBtn.disabled = false
-                submitBtn.innerHTML = '<i class="fas fa-sign-in-alt mr-2"></i>进入播放器'
+                console.error('[Login] 请求失败:', e);
+                showError('网络连接异常，请检查服务端状态');
+                shakeCard(card);
+                submitBtn.disabled = false;
+                submitBtn.querySelector('i').className = originalIcon;
+                submitBtnText.textContent = currentMode === 'user' ? '登录账号' : '进入播放器';
             }
         }
 
+        function showError(msg) {
+            const errorDiv = document.getElementById('auth-error');
+            const errorMsg = document.getElementById('auth-error-msg');
+            errorDiv.classList.remove('hidden');
+            errorMsg.textContent = msg;
+        }
+
+        function shakeCard(card) {
+            card.classList.remove('shake-active');
+            void card.offsetWidth; // 触发 reflow
+            card.classList.add('shake-active');
+            setTimeout(() => card.classList.remove('shake-active'), 450);
+        }
+
+        // 鼠标微光移动视差效果
+        const cursorGlow = document.getElementById('cursor-glow');
+        window.addEventListener('mousemove', (e) => {
+            cursorGlow.style.left = e.clientX + 'px';
+            cursorGlow.style.top = e.clientY + 'px';
+        });
+
+        // 动态生成从下至上持续升腾的音乐图标
+        function initFloatingNotes() {
+            const container = document.getElementById('notes-container');
+            if (!container) return;
+            container.innerHTML = '';
+            const noteIcons = [
+                'fa-music',
+                'fa-headphones',
+                'fa-headphones-simple',
+                'fa-compact-disc',
+                'fa-record-vinyl',
+                'fa-guitar',
+                'fa-drum',
+                'fa-microphone',
+                'fa-microphone-lines',
+                'fa-wave-square',
+                'fa-sliders',
+                'fa-sliders-h',
+                'fa-volume-high',
+                'fa-volume-low',
+                'fa-podcast',
+                'fa-radio',
+                'fa-satellite-dish',
+                'fa-circle-play',
+                'fa-circle-pause',
+                'fa-forward-step',
+                'fa-shuffle',
+                'fa-repeat',
+                'fa-heart',
+                'fa-file-audio',
+                'fa-icons',
+                'fa-bolt-lightning'
+            ];
+            const count = 30;
+            for (let i = 0; i < count; i++) {
+                const note = document.createElement('i');
+                const icon = noteIcons[Math.floor(Math.random() * noteIcons.length)];
+                const sizeClass = ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl', 'text-3xl'][Math.floor(Math.random() * 7)];
+                note.className = `fas ${icon} floating-note ${sizeClass}`;
+                note.style.left = `${Math.random() * 96}%`;
+                
+                // 错开上升周期，全屏随时分布，无缝循环
+                const duration = 12 + Math.random() * 12;
+                const delay = Math.random() * duration;
+                note.style.animationDuration = `${duration}s`;
+                note.style.animationDelay = `-${delay}s`;
+                container.appendChild(note);
+            }
+        }
+
+        // 优雅 Canvas 动态漂浮星尘微光粒子
+        (function initCanvasParticles() {
+            const canvas = document.getElementById('particles-canvas');
+            const ctx = canvas.getContext('2d');
+            let width = (canvas.width = window.innerWidth);
+            let height = (canvas.height = window.innerHeight);
+
+            window.addEventListener('resize', () => {
+                width = canvas.width = window.innerWidth;
+                height = canvas.height = window.innerHeight;
+            });
+
+            const particles = [];
+            const particleCount = 28;
+
+            for (let i = 0; i < particleCount; i++) {
+                particles.push({
+                    x: Math.random() * width,
+                    y: Math.random() * height,
+                    radius: Math.random() * 2 + 0.8,
+                    color: Math.random() > 0.5 ? 'rgba(16, 185, 129, ' : 'rgba(6, 182, 212, ',
+                    alpha: Math.random() * 0.45 + 0.1,
+                    speedY: Math.random() * 0.4 + 0.15,
+                    speedX: (Math.random() - 0.5) * 0.2,
+                    pulse: Math.random() * Math.PI,
+                });
+            }
+
+            function animate() {
+                ctx.clearRect(0, 0, width, height);
+                for (const p of particles) {
+                    p.y -= p.speedY;
+                    p.x += p.speedX;
+                    p.pulse += 0.02;
+
+                    if (p.y < -10) {
+                        p.y = height + 10;
+                        p.x = Math.random() * width;
+                    }
+                    if (p.x < -10) p.x = width + 10;
+                    if (p.x > width + 10) p.x = -10;
+
+                    const currentAlpha = p.alpha * (0.6 + 0.4 * Math.sin(p.pulse));
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color + currentAlpha + ')';
+                    ctx.shadowBlur = 8;
+                    ctx.shadowColor = p.color + '0.5)';
+                    ctx.fill();
+                }
+                requestAnimationFrame(animate);
+            }
+            animate();
+        })();
+
         document.addEventListener('DOMContentLoaded', () => {
-            document.getElementById('auth-password-input').focus()
-        })
+            const userInput = document.getElementById('auth-username-input');
+            if (userInput) userInput.focus();
+        });
     </script>
 </body>
 

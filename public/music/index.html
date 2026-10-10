@@ -17,6 +17,11 @@
         })();
     </script>
     <script src="/js/config.js"></script>
+    <script>
+        if (window.CONFIG && window.CONFIG['player.name']) {
+            document.title = window.CONFIG['player.name'];
+        }
+    </script>
     <!-- PostHog Analytics -->
     <script>
         if (!window.CONFIG || !window.CONFIG.disableTelemetry) {
@@ -547,7 +552,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div id="search-results" class="flex-1 overflow-y-auto p-2 space-y-1 min-h-[calc(100vh-200px)] pb-60">
+                        <div id="search-results" class="flex-1 min-h-0 overflow-y-auto p-2 space-y-1">
                             <!-- Items will be injected here -->
                             <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
                                 <i class="fas fa-music text-6xl opacity-20"></i>
@@ -2472,6 +2477,7 @@
                                             <option value="root">运行目录 (仅本地)</option>
                                         </select>
 
+
                                         <div class="mt-4 mb-2 flex items-center justify-between">
                                             <div class="text-sm font-bold t-text-main flex items-center">
                                                 歌曲命名方式
@@ -3665,7 +3671,7 @@
                 <div id="view-about"
                     class="absolute inset-0 overflow-y-auto custom-scrollbar px-6 pt-6 pb-44 md:pb-32 hidden opacity-0 transition-all duration-300">
                     <div
-                        class="t-bg-panel rounded-2xl shadow-sm border t-border-main p-8 max-w-3xl mx-auto w-full prose prose-emerald">
+                        class="t-bg-panel rounded-3xl shadow-md border t-border-main p-6 sm:p-10 max-w-4xl mx-auto w-full transition-all">
                         <div id="about-content" class="animate-pulse">
                             <div class="h-8 bg-gray-200 rounded w-1/3 mb-4"></div>
                             <div class="h-4 bg-gray-200 rounded w-full mb-2"></div>
@@ -5023,6 +5029,10 @@
                     class="p-2 t-text-muted hover:text-blue-500 transition-colors">
                     <i class="fas fa-sync-alt"></i>
                 </button>
+                <button onclick="cleanOrphanLyrics()" title="清理未引用歌词"
+                    class="p-2 t-text-muted hover:text-amber-500 transition-colors">
+                    <i class="fas fa-broom"></i>
+                </button>
                 <button onclick="toggleCacheDrawer()" title="关闭"
                     class="p-2 t-text-muted hover:text-blue-500 transition-colors">
                     <i class="fas fa-times text-lg"></i>
@@ -5861,7 +5871,7 @@
     </div>
 
     <!-- Audio Element -->
-    <audio id="audio-player" crossorigin="anonymous"></audio>
+    <audio id="audio-player" playsinline webkit-playsinline crossorigin="anonymous"></audio>
 
     <!-- External Scripts Section (Placed at the end for performance) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
@@ -5873,6 +5883,7 @@
     <script src="js/idb_store.js"></script>
     <script src="js/user_sync.js"></script>
     <script src="js/batch_pagination.js"></script>
+    <script src="js/server_file_state.js"></script>
     <script src="js/single_song_ops.js"></script>
     <script src="js/theme_manager.js"></script>
     <script src="js/list_search.js"></script>

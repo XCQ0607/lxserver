@@ -10,6 +10,7 @@ import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { buildLyrics, parseLyrics } from '../utils/lrcTool'
 import { formatPlayTime } from '../utils/common'
+import { getUserSpace } from '../user'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
@@ -21,6 +22,7 @@ export const CACHE_NAMING_PATTERNS = {
 }
 
 let currentNamingPattern = CACHE_NAMING_PATTERNS.SIMPLE
+const userNamingPatternMap = new Map<string, string>()
 
 export const normalizeNamingPattern = (pattern: unknown) => {
     if (Object.values(CACHE_NAMING_PATTERNS).includes(pattern as string)) {
@@ -31,7 +33,44 @@ export const normalizeNamingPattern = (pattern: unknown) => {
 
 export const setNamingPattern = (pattern: unknown) => {
     currentNamingPattern = normalizeNamingPattern(pattern)
+    // 仅更新全局回退值，清空缓存映射以使未自定义用户继承新全局值，绝不覆盖用户已保存的个性化设置
+    userNamingPatternMap.clear()
     return currentNamingPattern
+}
+
+export const getNamingPattern = () => currentNamingPattern
+
+export const getUserNamingPattern = (username?: string): string => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    if (userNamingPatternMap.has(normalizedUsername)) {
+        return userNamingPatternMap.get(normalizedUsername)!
+    }
+    try {
+        const userSpace = getUserSpace(normalizedUsername)
+        const settingsPath = path.join(userSpace.dataManage.userDir, 'settings.json')
+        if (fs.existsSync(settingsPath)) {
+            const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+            if (settings && settings.serverCacheNamingPattern) {
+                const pat = normalizeNamingPattern(settings.serverCacheNamingPattern)
+                userNamingPatternMap.set(normalizedUsername, pat)
+                return pat
+            }
+        }
+    } catch (e) { }
+
+    const fallback = normalizeNamingPattern(global.lx?.config?.['cache.namingPattern'] || currentNamingPattern)
+    userNamingPatternMap.set(normalizedUsername, fallback)
+    return fallback
+}
+
+export const setUserNamingPattern = (username: string | undefined, pattern: unknown): string => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const normalizedPattern = normalizeNamingPattern(pattern)
+    userNamingPatternMap.set(normalizedUsername, normalizedPattern)
+    if (normalizedUsername === '_open') {
+        currentNamingPattern = normalizedPattern
+    }
+    return normalizedPattern
 }
 
 // Define the two possible cache roots
@@ -41,8 +80,50 @@ export const CACHE_ROOTS = {
 }
 
 let currentCacheLocation = CACHE_ROOTS.ROOT
+const userCacheLocationMap = new Map<string, string>()
 const CACHE_LIST_SYNC_TTL = 30 * 1000
 const cacheListSyncState: Map<string, { lastSync: number, pending?: Promise<void> }> = new Map()
+
+export const getUserCacheLocation = (username?: string): string => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    if (userCacheLocationMap.has(normalizedUsername)) {
+        return userCacheLocationMap.get(normalizedUsername)!
+    }
+    try {
+        const userSpace = getUserSpace(normalizedUsername)
+        const settingsPath = path.join(userSpace.dataManage.userDir, 'settings.json')
+        if (fs.existsSync(settingsPath)) {
+            const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+            if (settings && (settings.serverCacheLocation === CACHE_ROOTS.DATA || settings.serverCacheLocation === CACHE_ROOTS.ROOT)) {
+                userCacheLocationMap.set(normalizedUsername, settings.serverCacheLocation)
+                return settings.serverCacheLocation
+            }
+        }
+    } catch (e) { }
+
+    const fallback = global.lx?.config?.serverCacheLocation || currentCacheLocation
+    userCacheLocationMap.set(normalizedUsername, fallback)
+    return fallback
+}
+
+export const invalidateUserCacheLocations = (): void => {
+    userCacheLocationMap.clear()
+    userNamingPatternMap.clear()
+    currentCacheLocation = global.lx?.config?.serverCacheLocation || CACHE_ROOTS.ROOT
+    currentNamingPattern = normalizeNamingPattern(global.lx?.config?.['cache.namingPattern'] || CACHE_NAMING_PATTERNS.SIMPLE)
+}
+
+export const setUserCacheLocation = (username: string | undefined, location: unknown): string => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    if (location === CACHE_ROOTS.DATA || location === CACHE_ROOTS.ROOT) {
+        userCacheLocationMap.set(normalizedUsername, location)
+        if (normalizedUsername === '_open') {
+            currentCacheLocation = location
+        }
+        return location
+    }
+    return getUserCacheLocation(normalizedUsername)
+}
 
 // Helper to get actual directory path
 // [Unified Enhancement] Cache Progress Tracker
@@ -61,7 +142,7 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
     const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
     const folderName = isOnlyDownload ? 'music' : 'cache'
-    const loc = location || currentCacheLocation
+    const loc = location || getUserCacheLocation(userDirName)
     let baseDir = ''
     if (loc === CACHE_ROOTS.DATA) {
         baseDir = path.join(global.lx.dataPath, folderName)
@@ -122,6 +203,9 @@ export interface CacheItem {
     bitrate?: number
     sampleRate?: number
     bitDepth?: number
+    // 各平台原生标识（tx 的 mid/strMediaMid、kg 的 hash、wy 的 songId 等），
+    // 规范化 ID 无法反推它们，缺了就没法从缓存条目还原出可解析的歌曲对象
+    nativeIds?: Record<string, string>
 }
 
 export type CacheFolder = 'cache' | 'music'
@@ -147,12 +231,14 @@ class CacheIndexManager {
     }
 
     private getKey(username: string, folder: 'cache' | 'music', location?: string) {
-        return `${location || currentCacheLocation}:${username}:${folder}`
+        const loc = location || getUserCacheLocation(username)
+        return `${loc}:${username}:${folder}`
     }
 
     load(username: string, folder: 'cache' | 'music', location?: string) {
-        const key = this.getKey(username, folder, location)
-        const file = this.getIndexFile(username, folder, location)
+        const loc = location || getUserCacheLocation(username)
+        const key = this.getKey(username, folder, loc)
+        const file = this.getIndexFile(username, folder, loc)
         if (fs.existsSync(file)) {
             try {
                 const data = JSON.parse(fs.readFileSync(file, 'utf-8'))
@@ -167,7 +253,7 @@ class CacheIndexManager {
     }
 
     save(username: string, folder: 'cache' | 'music', location?: string) {
-        const loc = location || currentCacheLocation
+        const loc = location || getUserCacheLocation(username)
         const key = this.getKey(username, folder, loc)
         const index = this.indexes.get(key)
         if (!index) return
@@ -472,6 +558,24 @@ export const normalizeSongId = (songInfo: any): string => {
 /**
  * Extract rich metadata from Lx songInfo object
  */
+// 各平台解析音源时要用的原生标识字段；normalizeSongId 会把它们统一成 "source_原生ID"，
+// 反向拆不出来，所以缓存/下载条目落索引时必须原样留一份
+const NATIVE_ID_KEYS = ['hash', 'hashMid', 'mid', 'strMediaMid', 'songId', 'songmid', 'sid',
+    'copyrightId', 'mediaMid', 'albumMid', 'albumId', 'singerId', 'otherSource']
+
+export const extractNativeIds = (songInfo: any): Record<string, string> | undefined => {
+    if (!songInfo) return undefined
+    const meta = songInfo.meta || {}
+    const out: Record<string, string> = {}
+    for (const key of NATIVE_ID_KEYS) {
+        const value = songInfo[key] !== undefined && songInfo[key] !== null && songInfo[key] !== ''
+            ? songInfo[key]
+            : (meta[key] !== undefined && meta[key] !== null && meta[key] !== '' ? meta[key] : null)
+        if (value !== null) out[key] = String(value)
+    }
+    return Object.keys(out).length > 0 ? out : undefined
+}
+
 export const extractSongMetadata = (songInfo: any) => {
     const meta = songInfo.meta || {}
     const id = normalizeSongId(songInfo)
@@ -580,7 +684,7 @@ export const detectDownloadSource = (rawUrl: string, fallbackSource?: string) =>
 }
 
 // Generate consistent filename based on pattern with collision handling
-export const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, username?: string) => {
+export const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: boolean, username?: string, namingPattern?: string) => {
     const sanitizeFilename = (str: any) => String(str || '').replace(/[\\/:*?"<>|]/g, '_')
 
     const id = normalizeSongId(songInfo)
@@ -593,14 +697,16 @@ export const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: bo
         'Unknown Album'
     const albumStr = sanitizeFilename(albumValue)
 
+    const pattern = namingPattern ? normalizeNamingPattern(namingPattern) : getUserNamingPattern(username)
+
     let baseName = ''
-    if (currentNamingPattern === CACHE_NAMING_PATTERNS.SIMPLE) {
+    if (pattern === CACHE_NAMING_PATTERNS.SIMPLE) {
         baseName = `${nameStr} - ${singerStr} - ${sanitizeFilename(q)} - ${albumStr}`
-    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME_QUALITY_ALBUM) {
+    } else if (pattern === CACHE_NAMING_PATTERNS.SINGER_NAME_QUALITY_ALBUM) {
         baseName = `${singerStr} - ${nameStr} - ${sanitizeFilename(q)} - ${albumStr}`
-    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME) {
+    } else if (pattern === CACHE_NAMING_PATTERNS.SINGER_NAME) {
         baseName = `${singerStr} - ${nameStr}`
-    } else if (currentNamingPattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
+    } else if (pattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
         baseName = `${nameStr} - ${singerStr}`
     } else {
         // Default/Standard: {Name}_-_{Singer}_-_{Source}_-_{ID}_-_{Quality}
@@ -609,7 +715,7 @@ export const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: bo
 
     // --- Collision Handling ---
     // Only apply suffix logic if we have a username and it's not the standard pattern (which is already unique)
-    if (username && currentNamingPattern !== CACHE_NAMING_PATTERNS.STANDARD) {
+    if (username && pattern !== CACHE_NAMING_PATTERNS.STANDARD) {
         const folder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
         const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
         const existingItems = indexManager.getAll(normalizedUsername, folder)
@@ -628,7 +734,7 @@ export const getFileName = (songInfo: any, quality?: string, isOnlyDownload?: bo
             const itemNormalizedName = sanitizeFilename(item.name || 'Unknown').toLowerCase()
             const itemNormalizedSinger = sanitizeFilename(item.singer || 'Unknown').toLowerCase()
 
-            if (currentNamingPattern === CACHE_NAMING_PATTERNS.SINGER_NAME || currentNamingPattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
+            if (pattern === CACHE_NAMING_PATTERNS.SINGER_NAME || pattern === CACHE_NAMING_PATTERNS.NAME_SINGER) {
                 // 对于仅包含“歌手-歌名”的模式，只要歌手和歌名一样，必定产生同名文件冲突
                 return itemNormalizedName === normalizedName && itemNormalizedSinger === normalizedSinger
             } else {
@@ -960,7 +1066,8 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
         }
     }
 
-    const syncKey = `${currentCacheLocation}:${normalizedUsername}`
+    const userLoc = getUserCacheLocation(normalizedUsername)
+    const syncKey = `${userLoc}:${normalizedUsername}`
     const syncState = cacheListSyncState.get(syncKey) || { lastSync: 0 }
     syncState.lastSync = Date.now()
     cacheListSyncState.set(syncKey, syncState)
@@ -979,7 +1086,8 @@ export const getCacheList = async (username?: string) => {
     const hasCacheIndex = fs.existsSync(path.join(cacheDir, 'cache_index.json'))
     const hasMusicIndex = fs.existsSync(path.join(musicDir, 'music_index.json'))
 
-    const syncKey = `${currentCacheLocation}:${normalizedUsername}`
+    const userLoc = getUserCacheLocation(normalizedUsername)
+    const syncKey = `${userLoc}:${normalizedUsername}`
     const syncState = cacheListSyncState.get(syncKey) || { lastSync: 0 }
     const mustSync = !hasCacheIndex || !hasMusicIndex
     const shouldSync = mustSync || Date.now() - syncState.lastSync > CACHE_LIST_SYNC_TTL
@@ -1019,7 +1127,7 @@ export const getCacheList = async (username?: string) => {
 }
 
 /**
- * Batch rename existing files to the current naming pattern
+ * Batch rename existing files to the user's configured naming pattern
  */
 export const batchRenameCacheFiles = async (username: string | undefined) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
@@ -1049,7 +1157,8 @@ export const batchRenameCacheFiles = async (username: string | undefined) => {
             }
 
             const newBaseName = getFileName(songInfo, item.quality, folder === 'music', normalizedUsername)
-            const newFilename = `${newBaseName}.${item.ext}`
+            const subPath = item.subPath || ''
+            const newFilename = subPath ? path.join(subPath, `${newBaseName}.${item.ext}`).replace(/\\/g, '/') : `${newBaseName}.${item.ext}`
 
             if (newFilename === item.filename) {
                 skipCount++
@@ -1063,13 +1172,15 @@ export const batchRenameCacheFiles = async (username: string | undefined) => {
             try {
                 if (fs.existsSync(oldPath)) {
                     if (!fs.existsSync(newPath)) {
+                        const targetDir = path.dirname(newPath)
+                        if (!fs.existsSync(targetDir)) fs.mkdirSync(targetDir, { recursive: true })
                         const oldStats = fs.statSync(oldPath)
                         const externalCover = readCoverCache(item.filename, normalizedUsername, oldStats)
                         fs.renameSync(oldPath, newPath)
 
                         if (item.lyricFilename) {
                             const oldLrcPath = path.join(dir, item.lyricFilename)
-                            const newLrcFilename = `${newBaseName}.lrc`
+                            const newLrcFilename = subPath ? path.join(subPath, `${newBaseName}.lrc`).replace(/\\/g, '/') : `${newBaseName}.lrc`
                             const newLrcPath = path.join(dir, newLrcFilename)
                             if (fs.existsSync(oldLrcPath)) {
                                 fs.renameSync(oldLrcPath, newLrcPath)
@@ -1354,10 +1465,11 @@ const setIndexCoverState = (filename: string, username: string, coverType: Cache
  */
 export const getCacheCover = async (filename: string, username?: string) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const userLoc = getUserCacheLocation(normalizedUsername)
 
     const locations = [
-        currentCacheLocation,
-        currentCacheLocation === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
+        userLoc,
+        userLoc === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
     ]
     const roots: Array<'cache' | 'music'> = ['cache', 'music']
 
@@ -1547,9 +1659,15 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
         // 1. Search by exact ID and Quality (Primary Check)
         // exactQuality=true 时：精确匹配，不允许 fallback 到不同音质
         const useExact = !!songInfo.exactQuality
-        const folderTypes: Array<'cache' | 'music'> = ['cache', 'music']
-        for (const folder of folderTypes) {
-            const cached = indexManager.get(normalizedUsername, id, folder, quality, useExact)
+        // 同一音质的下载文件优先于缓存副本；任意音质的兜底仍保持缓存目录优先，避免高音质被降级
+        const lookupOrder: Array<{ folder: 'cache' | 'music'; anyQuality: boolean }> = [
+            { folder: 'music', anyQuality: false },
+            { folder: 'cache', anyQuality: false },
+            { folder: 'cache', anyQuality: true },
+            { folder: 'music', anyQuality: true }
+        ]
+        for (const { folder, anyQuality } of lookupOrder) {
+            const cached = indexManager.get(normalizedUsername, id, folder, quality, !anyQuality || useExact)
             if (cached) {
                 // 二次校验：exactQuality 模式下确保音质匹配
                 if (useExact && quality && cached.quality !== quality) continue
@@ -1761,13 +1879,14 @@ export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string,
             quality = audioResult.quality || quality
             baseName = path.basename(audioResult.path, path.extname(audioResult.path))
         } else {
-            // Audio not found, fallback to target dir
-            dir = ensureDir(username, isOnlyDownload)
-            if (songInfo.quality) {
-                baseName = getFileName(songInfo, songInfo.quality, isOnlyDownload, username)
-            } else {
-                baseName = getFileName(songInfo, 'unknown', isOnlyDownload, username)
+            // 音质尚未确定且本地无同名音频：此时写出的文件名只能兜底成 unknown，
+            // 而索引配对按同名 basename 进行，这份文件永远无人引用（孤儿），故不落盘
+            if (!songInfo.quality) {
+                console.log(`[文件缓存] 音质未确定且音频未缓存，跳过歌词落盘: ${id}`)
+                return false
             }
+            dir = ensureDir(username, isOnlyDownload)
+            baseName = getFileName(songInfo, songInfo.quality, isOnlyDownload, username)
         }
 
         const lyricFile = baseName + '.lrc'
@@ -1800,6 +1919,88 @@ export const saveLyricCache = (songInfo: any, lyricsObj: any, username?: string,
         console.error(`[文件缓存] 保存歌词缓存失败: ${err.message}`)
         return false
     }
+}
+
+const QUALITY_TOKENS = ['flac24bit', 'atmos_plus', 'atmos', 'hires', 'master', 'ape', 'wav', 'flac', 'unknown', '192k', '320k', '128k']
+
+// 只把文件名里的音质段换成目标音质；其余段（歌名/歌手/源/ID/专辑）必须原本就一致
+const qualitySegmentOf = (baseName: string) => {
+    const sep = baseName.includes('_-_') ? '_-_' : ' - '
+    const found = baseName.split(sep).find(s => QUALITY_TOKENS.includes(s.trim().toLowerCase()))
+    return found ? found.trim().toLowerCase() : null
+}
+
+const swapQualitySegment = (baseName: string, targetQuality: string): string | null => {
+    const sep = baseName.includes('_-_') ? '_-_' : ' - '
+    const segments = baseName.split(sep)
+    const index = segments.findIndex(s => QUALITY_TOKENS.includes(s.trim().toLowerCase()))
+    if (index === -1) return null
+    if (segments[index].trim().toLowerCase() === targetQuality.toLowerCase()) return null
+    segments[index] = targetQuality
+    return segments.join(sep)
+}
+
+const collectLyricFiles = (dirPath: string, baseDir: string, acc: string[] = []) => {
+    if (!fs.existsSync(dirPath)) return acc
+    for (const entry of fs.readdirSync(dirPath, { withFileTypes: true })) {
+        const fullPath = path.join(dirPath, entry.name)
+        if (entry.isDirectory()) {
+            collectLyricFiles(fullPath, baseDir, acc)
+        } else if (entry.name.toLowerCase().endsWith('.lrc')) {
+            acc.push(path.relative(baseDir, fullPath).replace(/\\/g, '/'))
+        }
+    }
+    return acc
+}
+
+/**
+ * 音频落盘后，把"除音质段外与音频同名且未被任何索引引用"的孤儿 .lrc 改名对齐到音频，并登记进索引。
+ * 只在音频所在同一子目录内查找，避免把分类子目录里的歌词搬到根目录。
+ */
+export const alignOrphanLyric = (username: string | undefined, songId: string, quality: string | undefined, folder: CacheFolder) => {
+    if (!songId || !quality) return false
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const item = indexManager.get(normalizedUsername, songId, folder, quality, true)
+    if (!item?.filename) return false
+    const dir = getCacheDir(normalizedUsername, folder === 'music')
+    const audioPath = resolveCacheRelativePath(dir, item.filename)
+    if (!audioPath || !fs.existsSync(audioPath)) return false
+    const targetLrcPath = path.join(path.dirname(audioPath), path.basename(audioPath, path.extname(audioPath)) + '.lrc')
+    if (fs.existsSync(targetLrcPath)) {
+        // 歌词先落盘、名字已对上的常见情况：这里只补登记，不做改名
+        const targetRel = path.relative(dir, targetLrcPath).replace(/\\/g, '/')
+        if (item.lyricFilename === targetRel && item.hasLyric) return false
+        item.lyricFilename = targetRel
+        item.hasLyric = true
+        indexManager.save(normalizedUsername, folder)
+        console.log(`[文件缓存] 已登记与音频同名的歌词: ${targetRel}`)
+        return true
+    }
+
+    const referenced = new Set(indexManager.getAll(normalizedUsername, folder).map(i => i.lyricFilename).filter(Boolean))
+    const waitingQualities = new Set(indexManager.getAll(normalizedUsername, folder)
+        .filter(i => i.id === item.id && i.quality && i.quality !== quality && !i.lyricFilename)
+        .map(i => String(i.quality).toLowerCase()))
+    for (const relative of collectLyricFiles(dir, dir)) {
+        if (referenced.has(relative)) continue
+        const candidatePath = resolveCacheRelativePath(dir, relative)
+        if (!candidatePath || path.dirname(candidatePath) !== path.dirname(targetLrcPath)) continue
+        const candidateQuality = qualitySegmentOf(path.basename(candidatePath, '.lrc'))
+        // 同一首歌的另一音质已在该目录里且还没歌词时，那份 .lrc 归它，不抢
+        if (candidateQuality && waitingQualities.has(candidateQuality)) continue
+        if (swapQualitySegment(path.basename(candidatePath, '.lrc'), quality) !== path.basename(targetLrcPath, '.lrc')) continue
+        try {
+            fs.renameSync(candidatePath, targetLrcPath)
+        } catch (e) {
+            continue
+        }
+        item.lyricFilename = path.relative(dir, targetLrcPath).replace(/\\/g, '/')
+        item.hasLyric = true
+        indexManager.save(normalizedUsername, folder)
+        console.log(`[文件缓存] 未引用歌词已对齐至音频: ${relative} -> ${item.lyricFilename}`)
+        return true
+    }
+    return false
 }
 
 const ensureCachedLyrics = async (
@@ -1928,6 +2129,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
     if (result.exists && !result.isCollision) {
         const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
         if (result.folder === targetFolder && result.path) {
+            alignOrphanLyric(username, normalizeSongId(songInfo), quality || result.quality, targetFolder)
             await ensureCachedLyrics(songInfo, quality || result.quality, username, isOnlyDownload, result.path, targetFolder, shouldCacheLyric, shouldEmbedLyric)
             console.log(`[文件缓存] 歌曲已存在于 ${targetFolder}，跳过下载: ${result.filename}`)
             // 通知前端轮询：目标目录文件已存在，视为立即完成
@@ -2007,10 +2209,20 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                 sampleRate: inspection.sampleRate,
                 bitDepth: inspection.bitDepth,
                 metadataWritable,
-                metadataError: metadataWritable ? undefined : getMetadataUnsupportedMessage(audioContainer)
+                metadataError: metadataWritable ? undefined : getMetadataUnsupportedMessage(audioContainer),
+                nativeIds: cachedItem?.nativeIds || extractNativeIds(songInfo)
             }, 'music')
 
             await ensureCachedLyrics(songInfo, actualQuality, username, true, finalPath, 'music', shouldCacheLyric, shouldEmbedLyric)
+            alignOrphanLyric(username, id, actualQuality, 'music')
+
+            // 音频/歌词/封面都已迁到下载目录，删除缓存副本，避免双份占盘且播放继续命中缓存
+            try {
+                removeCacheFile(result.filename, normalizedUsername, 'cache')
+                console.log(`[文件缓存] 已删除缓存副本: ${result.filename}`)
+            } catch (e) {
+                console.warn(`[文件缓存] 删除缓存副本失败: ${result.filename}`, e)
+            }
 
             console.log(`[文件缓存] 已复制缓存歌曲至下载目录: ${path.basename(finalPath)}`)
             cacheProgress.set(songKey, { progress: 100, status: 'finished', total: stat.size, received: stat.size })
@@ -2112,7 +2324,18 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         return
                     }
                     redirectCount++
-                    const nextUrl = new URL(location, currentUrl).toString()
+                    let nextUrl = ''
+                    try {
+                        nextUrl = new URL(location, currentUrl).toString()
+                    } catch {
+                        try {
+                            nextUrl = new URL(encodeURI(location), currentUrl).toString()
+                        } catch (err: any) {
+                            safeUnlink(fileStream, tempPath)
+                            fail(new Error(`Invalid redirect Location URL: ${location}`))
+                            return
+                        }
+                    }
                     console.log(`[文件缓存] 触发重定向 ${status} -> ${nextUrl} (${redirectCount}/${MAX_REDIRECTS})`)
                     downloadFrom(nextUrl)
                     return
@@ -2232,6 +2455,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         bitrate: inspection.bitrate,
                         sampleRate: inspection.sampleRate,
                         bitDepth: inspection.bitDepth,
+                        nativeIds: extractNativeIds(songInfo)
                     }, folderType)
 
                     let tagger: any
@@ -2277,6 +2501,7 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                     }
 
                     await ensureCachedLyrics(songInfo, actualQuality, username, isOnlyDownload, finalPath, folderType, shouldCacheLyric, shouldEmbedLyric)
+                    alignOrphanLyric(username, id, actualQuality, folderType)
 
                     cacheProgress.set(songKey, { progress: 100, status: 'finished', total: total || received, received, speed: 0, updatedAt: Date.now() })
                     setTimeout(() => cacheProgress.delete(songKey), 30000)
@@ -2591,14 +2816,15 @@ export const setIndexEmbedLyric = (
     return false
 }
 
-export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerResponse, filename: string, username?: string) => {
-    const locations = [
-        currentCacheLocation,
-        currentCacheLocation === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
-    ]
-    const roots = ['cache', 'music']
-    let filePath = ''
+export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerResponse, filename: string, username?: string, folder?: CacheFolder) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const userLoc = getUserCacheLocation(normalizedUsername)
+    const locations = [
+        userLoc,
+        userLoc === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
+    ]
+    const roots: CacheFolder[] = folder ? [folder] : ['cache', 'music']
+    let filePath = ''
     for (const loc of locations) {
         for (const folder of roots) {
             const dir = getCacheDir(normalizedUsername, folder === 'music', loc)
@@ -2675,6 +2901,69 @@ export const clearAllCache = (username?: string) => {
         indexManager.save(normalizedUsername, folder as any)
     }
     return { deletedCount, freedSize }
+}
+
+export interface OrphanLyricItem {
+    filename: string
+    folder: CacheFolder
+    size: number
+    mtime: number
+}
+
+/**
+ * 扫描磁盘上存在、但没有被任何索引条目引用的 .lrc（音质未定时写下的兜底名、改名残留等）
+ */
+export const listOrphanLyrics = (username?: string): OrphanLyricItem[] => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const orphans: OrphanLyricItem[] = []
+    for (const folder of ['cache', 'music'] as CacheFolder[]) {
+        const dir = getCacheDir(normalizedUsername, folder === 'music')
+        if (!fs.existsSync(dir)) continue
+        const referenced = new Set(indexManager.getAll(normalizedUsername, folder).map(i => i.lyricFilename).filter(Boolean))
+        for (const relative of collectLyricFiles(dir, dir)) {
+            if (referenced.has(relative)) continue
+            const fullPath = resolveCacheRelativePath(dir, relative)
+            if (!fullPath || !fs.existsSync(fullPath)) continue
+            const stats = fs.statSync(fullPath)
+            orphans.push({ filename: relative, folder, size: stats.size, mtime: stats.mtimeMs })
+        }
+    }
+    return orphans
+}
+
+export const deleteOrphanLyrics = (items: Array<{ filename: string; folder?: CacheFolder }>, username?: string) => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    let deletedCount = 0
+    let freedSize = 0
+    const failures: Array<{ filename: string; message: string }> = []
+
+    for (const item of items) {
+        const filename = item.filename
+        try {
+            if (!filename || typeof filename !== 'string') throw new Error('Invalid filename')
+            if (!filename.toLowerCase().endsWith('.lrc')) throw new Error('只允许删除 .lrc 文件')
+            const folders = item.folder ? [item.folder] : (['cache', 'music'] as CacheFolder[])
+            let removed = false
+            for (const folder of folders) {
+                const dir = getCacheDir(normalizedUsername, folder === 'music')
+                const fullPath = resolveCacheRelativePath(dir, filename)
+                if (!fullPath || !fs.existsSync(fullPath)) continue
+                const referenced = indexManager.getAll(normalizedUsername, folder).some(i => i.lyricFilename === filename)
+                if (referenced) throw new Error(`${filename} 仍被索引引用，请先用缓存列表删除`)
+                const size = fs.statSync(fullPath).size
+                fs.unlinkSync(fullPath)
+                cleanEmptyParentDirs(fullPath, dir)
+                freedSize += size
+                removed = true
+            }
+            if (!removed) throw new Error('File not found')
+            deletedCount++
+            console.log(`[文件缓存] 已删除未引用歌词: ${filename}`)
+        } catch (e: any) {
+            failures.push({ filename, message: e?.message || 'Delete failed' })
+        }
+    }
+    return { deletedCount, freedSize, failures }
 }
 
 export const clearLyricCache = (username?: string) => {
@@ -2915,7 +3204,7 @@ export const switchBaseLocation = async (filenames: string[], username: string |
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
     let successCount = 0
     let failCount = 0
-    const sourceLoc = currentCacheLocation
+    const sourceLoc = getUserCacheLocation(normalizedUsername)
     const targetLoc = sourceLoc === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA
 
     const folders: Array<'cache' | 'music'> = ['cache', 'music']

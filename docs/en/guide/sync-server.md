@@ -7,7 +7,7 @@ LX Music Sync Server includes a professional Web Management Console (located by 
 Accessing the management console (default `http://IP:9527/admin`) requires entering the administrator password.
 
 - **Default Password**: `123456`
-- **Modify Password**: You can override the default password by setting the environment variable `FRONTEND_PASSWORD`, or go to the "System Config" page to modify it after logging in. The password will be persisted in the `data/config.js` file on the server.
+- **Modify Password**: You can override the default password by setting the environment variable `ADMIN_PASSWORD`, or go to the "System Config" page to modify it after logging in. The password will be persisted in the `data/config.js` file on the server.
 
 ## 🔗 Client Sync & Connection Setup
 

@@ -188,13 +188,28 @@ class LocalClient {
 
     async login() {
         try {
+            const token = (typeof userToken !== 'undefined' && userToken) || localStorage.getItem('lx_user_token');
+            const authHeaders = typeof getUserAuthHeaders === 'function'
+                ? getUserAuthHeaders()
+                : (token ? { 'x-user-token': token, 'x-user-name': this.username || '' } : {});
+
+            if (token) {
+                const res = await fetch(`${this.baseUrl}/auth/verify`, {
+                    headers: authHeaders
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.valid) return true;
+                }
+            }
+            if (!this.password) return false;
             const res = await fetch(`${this.baseUrl}/verify`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+                headers: { 'Content-Type': 'application/json', ...authHeaders },
                 body: JSON.stringify({ username: this.username, password: this.password })
             });
             const data = await res.json();
-            return data.success;
+            return !!data.success;
         } catch (e) { return false; }
     }
 

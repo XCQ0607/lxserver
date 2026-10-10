@@ -8,7 +8,7 @@
   <h1>LX Sync Server</h1> -->
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -20,6 +20,15 @@
     <img src="https://img.shields.io/github/commit-activity/m/XCQ0607/lxserver?style=flat-square&color=ff69b4" alt="Commit Activity">
     <a href="https://github.com/XCQ0607/lxserver/releases"><img src="https://img.shields.io/github/downloads/XCQ0607/lxserver/total?style=flat-square&color=blue" alt="Total Downloads"></a>
   </p>
+  <p>
+    <a href="https://www.star-history.com/xcq0607/lxserver">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=XCQ0607/lxserver&type=trending&theme=dark" />
+        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=XCQ0607/lxserver&type=trending" />
+        <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=XCQ0607/lxserver&type=trending" />
+      </picture>
+    </a>
+  </p>
 </div>
 
 [帮助文档 Documentation](https://xcq0607.github.io/lxserver/) | [同步服务器 SyncServer](md/lxserver.md) | [更新日志 Changelog](changelog.md) | [English](README_EN.md)
@@ -30,100 +39,73 @@
 
 ## ✨ Web 播放器核心特性
 
-### 1. 现代化界面
+### 1. 现代化界面与全能播放控制
 
-采用清爽的现代化 UI 设计，支持深色模式，提供极致的视觉体验。
-
-<p align="center">
-  <img src="md/player.png" width="800" alt="Web Player Interface">
-</p>
-
-### 2. 多源搜索
-
-支持聚合搜索各大音乐平台的资源，想听什么搜什么。
+采用清新现代的响应式 UI 设计，支持深浅色模式切换与沉浸式全屏歌词；底栏集成音质切换、倍速播放、睡眠定时等完整控制。
 
 <p align="center">
-  <img src="md/search.png" width="800" alt="Search Interface">
+  <img src="md/player.png" width="800" alt="Web 播放器主界面">
+</p>
+<p align="center">
+  <img src="md/controller.png" width="800" alt="播放控制栏">
 </p>
 
-### 3. 内容与播放列表
+### 2. 多源聚合搜索与歌手专辑
 
-支持**多平台歌单**的浏览、搜索与一键播放，提供直观的**歌单详情**面板，包含封面、作者、简介等完整信息。**播放队列**支持拖拽排序、批量管理及快速定位当前播放。
+聚合各大音乐平台在线资源，秒级检索歌曲、歌手与完整专辑，支持一键收藏与作品快速回溯。
 
 <p align="center">
-  <img src="md/musiclist.png" width="800" alt="歌单浏览">
+  <img src="md/search.png" width="800" alt="多源搜索">
 </p>
-
-<p align="center">
-  <img src="md/musiclist-detail.png" width="400" alt="歌单详情">
-  <img src="md/playlist.png" width="400" alt="播放队列管理">
-</p>
-
-### 4. 强大的播放控制
-
-支持播放模式切换、音质选择、歌词显示、睡眠定时、播放倍数等功能。
-
-<p align="center">
-  <img src="md/controller.png" width="800" alt="Controller">
-</p>
-
-### 5. 缓存管理
-
-内置**全自动化缓存系统**，可自动保存歌词、链接及歌曲文件，通过专门的**缓存控制面板**实现颗粒化管理，极大提升弱网环境下的播放流畅度。
-
-<p align="center">
-  <img src="md/cache.png" width="800" alt="缓存自动化管理">
-</p>
-
-### 6. 歌词卡片分享
-
-新增**歌词卡片分享**功能，支持自定义卡片比例（竖版/横版/方版）、色彩风格（深色/浅色/专辑色）及歌词行数，一键生成精美海报，支持旋转缩放。
-
-<p align="center">
-  <img src="md/share.png" width="800" alt="歌词卡片社交分享">
-</p>
-
-### 7. 主题定制与系统功能
-
-支持**多套现代化主题**（如森之韵、深海鲨、暖阳意、绯红月等），并可根据系统自动切换暗亮模式。系统设置支持**自动更新网络歌单**、**账号设置自动备份**及**多维度代理**配置，确保播放顺滑稳定。
-
-<p align="center">
-  <img src="md/theme.png" width="400" alt="现代化主题切换">
-  <img src="md/settings.png" width="400" alt="全方位系统配置">
-</p>
-
-### 8. 自定义源管理
-
-支持导入自定义源脚本，扩展更多音乐来源。
-
-<p align="center">
-  <img src="md/source.png" width="800" alt="Source Management">
-</p>
-
-### 9. 专辑与歌手搜索与收藏
-
-支持搜索专辑与歌手，并支持一键收藏，方便快速找回你喜爱的音乐人与专辑。
-
 <p align="center">
   <img src="md/album.png" width="400" alt="专辑展示">
   <img src="md/singer.png" width="400" alt="歌手展示">
 </p>
 
-### 10. Subsonic 协议与全网检索支持
+### 3. 多平台歌单与播放队列管理
 
-全面适配 Subsonic 协议，支持使用各类 Subsonic 客户端（如音流、Feishin 等）连接并播放本站资源。可通过客户端的音乐目录选择本地、全部在线或指定平台，也可在关键词前使用 `wy:`、`kg:`、`tx:`、`kw:`、`mg:` 指定平台，使用 `all:` / `online:` 或 `local:` 强制全部在线或本地搜索。
+支持同步浏览多平台热门网络歌单与详情；右侧便捷抽屉面板支持播放队列拖拽排序及自动化本地缓存管理。
 
 <p align="center">
-  <img src="md/subsonic.png" width="400" alt="Subsonic 支持">
-  <img src="md/subsonic-search.png" width="400" alt="Subsonic 在线全网搜索">
+  <img src="md/musiclist.png" width="400" alt="歌单广场">
+  <img src="md/musiclist-detail.png" width="400" alt="歌单详情">
+</p>
+<p align="center">
+  <img src="md/playlist.png" width="280" alt="播放队列抽屉">
+  <img src="md/cache.png" width="280" alt="缓存管理抽屉">
 </p>
 
-### 11. 公共曲库与共享收藏
+### 4. 本地音乐库与共享收藏
 
-在后台系统配置中开启 **“开启公共收藏和歌曲”** 之后，所有用户（无论未登录或不同账号）均可共同拥有并共享一个公共曲库与公开歌单列表。
+统一管理服务器本地存储、下载及缓存的音频文件，支持无损规格解析、布尔逻辑搜索（`&`、`|`、`!`）、状态查漏与批量操作；支持开启多用户公共共享曲库。
 
 <p align="center">
-  <img src="md/_open_song.png" width="800" alt="公共曲库与共享收藏">
+  <img src="md/localmusic.png" width="800" alt="本地音乐库与高级检索">
+</p>
+<p align="center">
+  <img src="md/favorite.png" width="800" alt="收藏与共享曲库">
+</p>
+
+### 5. 个性化主题、歌词卡片与自定义源
+
+提供多套精美色彩主题与暗亮模式切换；支持一键生成多比例高清歌词分享卡片；支持导入自定义音源脚本扩展无限可能。
+
+<p align="center">
+  <img src="md/theme.png" width="400" alt="多套色彩主题">
+  <img src="md/settings.png" width="400" alt="全方位系统配置">
+</p>
+<p align="center">
+  <img src="md/share.png" width="380" alt="歌词卡片社交分享">
+  <img src="md/source.png" width="420" alt="自定义源管理">
+</p>
+
+### 6. Subsonic 协议与多端互联
+
+全面兼容 Subsonic API 协议，支持使用各类第三方客户端（音流、Feishin 等）连接播放，支持客户端内全网在线搜索与本地资源检索。
+
+<p align="center">
+  <img src="md/subsonic.png" width="500" alt="Subsonic 客户端连接">
+  <img src="md/subsonic-search.png" width="300" alt="Subsonic 在线全网搜索">
 </p>
 
 ## 🔒 访问控制与安全
@@ -207,7 +189,7 @@ services:
       - ./music:/server/music
     environment:
       - NODE_ENV=production
-      # - FRONTEND_PASSWORD=123456
+      # - ADMIN_PASSWORD=123456
       # - ENABLE_WEBPLAYER_AUTH=true
       # - WEBPLAYER_PASSWORD=yourpassword
       # - ADMIN_PATH=/music
@@ -236,12 +218,15 @@ npm start
 ### 3. 服务连接与客户端配置指南
 
 #### ① Web 界面访问
+
 - **Web 播放器**: `http://<服务器IP>:9527`（默认根路径，可通过 `PLAYER_PATH` 环境变量或后台配置自定义路径，如 `/music`）
   - 若启用了播放器访问密码认证（`ENABLE_WEBPLAYER_AUTH`），首次访问需输入播放器密码（默认 `123456`）。
 - **管理后台**: `http://<服务器IP>:9527/admin`（默认路径为 `/admin`，可通过 `ADMIN_PATH` 自定义，默认管理员密码: `123456`）。
 
 #### ② LX Music 客户端同步配置（桌面端 / 移动端）
+
 进入客户端「设置 → 同步设置」，选择自定义连接：
+
 - **模式一：用户路径模式（推荐，默认开启 `USER_ENABLE_PATH=true`）**
   - **连接 URL**: `http://<服务器IP>:9527/<用户名>`（例如：`http://192.168.1.100:9527/user1`）
   - **连接密码**: 对应用户的独立密码
@@ -252,7 +237,9 @@ npm start
   - **特点**: URL 无需携带用户名，服务端通过鉴权密码自动匹配用户。**注意：此模式下所有用户的密码必须唯一，不允许不同用户使用相同密码**。
 
 #### ③ Subsonic 音乐客户端配置（音流 / Feishin / Symfonium 等）
+
 全面兼容 Subsonic API 协议，客户端中填写：
+
 - **服务器地址 (Server URL)**:
   - **默认共享主端口**: `http://<服务器IP>:9527/rest`（子路径由 `SUBSONIC_PATH` 决定，默认 `/rest`）
   - **独立监听端口模式**（若配置了 `SUBSONIC_PORT` > 0，例如 `4533`）: `http://<服务器IP>:4533/rest`
@@ -275,70 +262,71 @@ npm start
 
 系统配置文件已默认持久化在数据目录中的 `data/config.js`（Docker 部署只需挂载 `./data` 卷即可在容器更新、重启后永久保留配置，若根目录下存在旧 `config.js` 会自动平滑迁移）。环境变量优先级最高：
 
-| 环境变量                                | 对应配置项                           | 说明                                                               | 默认值             |
-| --------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ | ------------------ |
-| `PORT`                                | `port`                             | 服务端口                                                           | `9527`           |
-| `ADMIN_PATH`                          | `admin.path`                       | 后台管理界面访问路径                                              | `/admin`           |
-| `PLAYER_PATH`                         | `player.path`                      | Web 播放器访问路径 (默认为根路径 `/`)                             | `/`                |
-| `FRONTEND_PASSWORD`                   | `frontend.password`                | Web 管理界面访问密码                                               | `123456`         |
-| `SERVER_NAME`                         | `serverName`                       | 同步服务名称                                                       | `lxserver`       |
-| `ENABLE_DEBUG`                        | `debug.enabled`                    | 是否启用 DEBUG 模式 (开启后输出详细调试日志与音源内部日志，默认关闭) | `false`          |
-| `MAX_SNAPSHOT_NUM`                    | `maxSnapshotNum`                   | 保留的最大快照数量                                                 | `10`             |
-| `CONFIG_PATH`                         | -                                    | 指定外部配置文件的绝对路径 (默认使用 `data/config.js`)             | -                  |
-| `DATA_PATH`                           | -                                    | 指定数据存储目录的绝对路径                                         | `./data`         |
-| `LOG_PATH`                            | -                                    | 指定日志输出目录的绝对路径                                         | `./logs`         |
-| `PROXY_HEADER`                        | `proxy.header`                     | 代理转发 IP 头 (如 `x-real-ip`)                                  | -                  |
-| `USER_ENABLE_ROOT`                    | `user.enableRoot`                  | 启用根路径 (开启后连接URL即为 `ip:port`，不允许不同用户密码相同) | `false`          |
-| `USER_ENABLE_PATH`                    | `user.enablePath`                  | 启用用户路径 (开启后连接URL需为 `ip:port/用户名`，允许密码相同)  | `true`           |
-| `WEBDAV_ENABLE`                       | `webdav.enable`                    | 是否启用 WebDAV 同步与备份                                         | `false`          |
-| `WEBDAV_URL`                          | `webdav.url`                       | WebDAV 地址                                                        | -                  |
-| `WEBDAV_USERNAME`                     | `webdav.username`                  | WebDAV 用户名                                                      | -                  |
-| `WEBDAV_PASSWORD`                     | `webdav.password`                  | WebDAV 密码                                                        | -                  |
-| `WEBDAV_SYNC_PATH`                    | `webdav.syncPath`                  | WebDAV 增量同步远端路径                                            | `/lx-sync`         |
-| `WEBDAV_BACKUP_PATH`                  | `webdav.backupPath`                | WebDAV 全量备份远端路径                                            | `/lx-sync-backups` |
-| `SYNC_INTERVAL`                       | `sync.interval`                    | WebDAV 增量同步检测间隔(分钟)                                      | `60`             |
-| `BACKUP_INTERVAL`                     | `sync.backupInterval`              | WebDAV 全量备份间隔(小时)                                          | `24`             |
-| `WEBDAV_EXCLUDE_CACHE`                | `webdav.excludeCache`              | 排除缓存目录同步 (`data/<用户>/cache`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除）| `false` |
-| `WEBDAV_EXCLUDE_MUSIC`                | `webdav.excludeMusic`              | 排除下载目录同步 (`data/<用户>/music`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除）| `false` |
-| `ENABLE_WEBPLAYER_AUTH`               | `player.enableAuth`                | 是否启用 Web 播放器访问密码                                        | `false`          |
-| `WEBPLAYER_PASSWORD`                  | `player.password`                  | Web 播放器访问密码                                                 | `123456`         |
-| `DISABLE_TELEMETRY`                   | `disableTelemetry`                 | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                 | `false`          |
-| `ENABLE_PUBLIC_USER_RESTRICTION`      | `user.enablePublicRestriction`     | 是否启用公开用户权限限制 (限制上传、删除公开源、缓存到服务器等)    | `true`           |
-| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `user.enablePublicNonAdminLocalMusic` | 是否开启非管理员访问本地音乐 (允许未登录管理员的公开账号访问本地音乐) | `false`          |
-| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `user.enablePublicNonAdminBrowserDownload` | 是否开启非管理员浏览器下载 (允许未登录管理员的公开/普通账号使用浏览器下载歌曲) | `true` |
-| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | 是否开启非管理员服务器缓存 (允许未登录管理员的公开/普通账号将歌曲缓存到服务器) | `false` |
-| `ENABLE_PUBLIC_FAVORITES`             | `user.enablePublicFavorites`       | 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏) | `false`          |
-| `ENABLE_PUBLIC_NON_ADMIN_ACCESS`      | `user.enablePublicNonAdminAccess`  | 是否开启非管理员访问公开收藏和歌曲 (允许未登录管理员的公开账号查看) | `false`          |
-| `ENABLE_CUSTOM_MUSIC_DIR`             | `user.enableCustomMusicDir`        | 是否开启自定义歌曲目录总开关                                       | `false`          |
-| `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)      | `false`          |
-| `ENABLE_CACHE_SIZE_LIMIT`             | `user.enableCacheSizeLimit`        | 是否启用缓存空间限制 (开启后超出容量将按 LRU 自动清理)             | `false`          |
-| `CACHE_SIZE_LIMIT`                    | `user.cacheSizeLimit`              | 缓存空间限制大小 (单位: MB)                                        | `2000`           |
-| `CONFIG_BACKUP_ENABLE`                | `configBackup.enable`              | 是否启用配置文件自动备份功能 (每天生成一份历史配置副本)           | `true`           |
-| `CONFIG_BACKUP_RETENTION_DAYS`        | `configBackup.retentionDays`       | 配置文件备份保留天数 (自动清理过期备份)                             | `7`              |
-| `CONFIG_BACKUP_DIR`                   | `configBackup.dir`                 | 配置文件备份存储目录路径 (支持绝对路径或相对 `./data`)              | `backups`        |
-| `SNAPSHOT_BACKUP_PATH`                | `snapshot.backupPath`              | 歌单快照自定义存储路径 (支持绝对路径或相对 `./data`，各用户独立隔离)| -                |
-| `LIST_ADD_MUSIC_LOCATION_TYPE`        | `list.addMusicLocationType`        | 添加歌曲到列表时的位置 (`top` / `bottom`)                      | `top`            |
-| `PROXY_ALL_ENABLED`                   | `proxy.all.enabled`                | 是否启用外发请求代理 (针对 Music SDK)                              | `false`          |
-| `PROXY_ALL_ADDRESS`                   | `proxy.all.address`                | 代理地址 (支持 http:// 或 socks5://)                               | -                  |
-| `SINGER_SOURCE_PRIORITY`              | `singer.sourcePriority`            | 歌手信息获取来源优先级 (如 `tx,wy` 或 `wy,tx`)                 | `tx,wy`          |
-| `SUBSONIC_ENABLE`                     | `subsonic.enable`                  | 是否启用 Subsonic 协议支持                                         | `true`           |
-| `SUBSONIC_PATH`                       | `subsonic.path`                    | Subsonic 接口访问路径 (默认为 `/rest`)                              | `/rest`          |
-| `SUBSONIC_PORT`                       | `subsonic.port`                    | Subsonic 独立监听端口 (`0` 为关闭独立端口，与主服务共用端口)       | `0`              |
-| `SUBSONIC_ENABLE_DEBUG`               | `subsonic.enableDebug`             | 是否开启 Subsonic 调试日志模式                                     | `false`          |
-| `SUBSONIC_ONLINE_SEARCH`              | `subsonic.onlineSearch`            | 是否开启 Subsonic 在线全网搜索                                     | `true`           |
-| `SUBSONIC_ONLINE_SEARCH_MODE`         | `subsonic.onlineSearchMode`        | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)        | `fallback`       |
-| `SUBSONIC_ONLINE_SEARCH_SOURCES`      | `subsonic.onlineSearchSources`     | Subsonic 在线搜索默认音源列表                                      | `wy,tx,kw,kg,mg` |
-| `SUBSONIC_PUBLIC_LEADERBOARDS`        | `subsonic.publicLeaderboards`      | 是否开启 Subsonic 公开排行榜 (将在线排行榜映射为只读歌单)          | `true`           |
-| `SUBSONIC_LEADERBOARD_SOURCE`         | `subsonic.leaderboardSource`       | Subsonic 公开排行榜默认音源平台 (仅支持单选, 如 `tx`, `wy` 等)     | `tx`             |
-| `SUBSONIC_LYRIC_TRANSLATION`          | `subsonic.lyricTranslation`        | Subsonic 歌词中是否包含翻译                                        | `true`           |
-| `SUBSONIC_CACHE_ON_PLAY`            | `subsonic.cacheOnPlay`             | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)          | `false`          |
-| `SUBSONIC_PLAY_CACHE_FIRST`          | `subsonic.playCacheFirst`          | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输      | `true`           |
-| `SUBSONIC_QUALITY_ENABLED`            | `subsonic.quality.enabled`         | Subsonic 是否开启音质优选                                          | `true`           |
-| `SUBSONIC_QUALITY_PRIORITY`           | `subsonic.quality.priority`        | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                  | `flac,320k,128k` |
-| `ARTIST_MAX_FETCH_PAGES`              | `artist.maxFetchPages`             | 歌手歌曲最大抓取页数                                               | `20`             |
-| `CACHE_NAMING_PATTERN`                | `cache.namingPattern`              | 缓存文件命名规则 (`simple` / `custom`)                            | `simple`         |
-| `SYSTEM_ALLOW_UNSAFE_VM`              | `system.allowUnsafeVM`             | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                  | `false`          |
-| `LX_USER_<用户名>`                    | `users` 数组                       | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)           | -                  |
+| 环境变量                                     | 对应配置项                                   | 说明                                                                                               | 默认值               |
+| -------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------- |
+| `PORT`                                     | `port`                                     | 服务端口                                                                                           | `9527`             |
+| `ADMIN_PATH`                               | `admin.path`                               | 后台管理界面访问路径                                                                               | `/admin`           |
+| `PLAYER_PATH`                              | `player.path`                              | Web 播放器访问路径 (默认为根路径 `/`)                                                            | `/`                |
+| `ADMIN_PASSWORD`                           | `admin.password`                           | 管理员密码（用于登录控制台和音乐播放器管理员登录）                                                 | `123456`           |
+| `SERVER_NAME`                              | `serverName`                               | 同步服务名称（客户端连接展示名称及管理后台标题）                                                   | `LX Sync Server`   |
+| `PLAYER_NAME`                              | `player.name`                              | Web 播放器名称（播放器网页标题及登录卡片标题）                                                     | `LX Music Web`     |
+| `ENABLE_DEBUG`                             | `debug.enabled`                            | 是否启用 DEBUG 模式 (开启后输出详细调试日志与音源内部日志，默认关闭)                               | `false`            |
+| `MAX_SNAPSHOT_NUM`                         | `maxSnapshotNum`                           | 保留的最大快照数量                                                                                 | `10`               |
+| `CONFIG_PATH`                              | -                                            | 指定外部配置文件的绝对路径 (默认使用 `data/config.js`)                                           | -                    |
+| `DATA_PATH`                                | -                                            | 指定数据存储目录的绝对路径                                                                         | `./data`           |
+| `LOG_PATH`                                 | -                                            | 指定日志输出目录的绝对路径                                                                         | `./logs`           |
+| `PROXY_HEADER`                             | `proxy.header`                             | 代理转发 IP 头 (如 `x-real-ip`)                                                                  | -                    |
+| `USER_ENABLE_ROOT`                         | `user.enableRoot`                          | 启用根路径 (开启后连接URL即为 `ip:port`，不允许不同用户密码相同)                                 | `false`            |
+| `USER_ENABLE_PATH`                         | `user.enablePath`                          | 启用用户路径 (开启后连接URL需为 `ip:port/用户名`，允许密码相同)                                  | `true`             |
+| `WEBDAV_ENABLE`                            | `webdav.enable`                            | 是否启用 WebDAV 同步与备份                                                                         | `false`            |
+| `WEBDAV_URL`                               | `webdav.url`                               | WebDAV 地址                                                                                        | -                    |
+| `WEBDAV_USERNAME`                          | `webdav.username`                          | WebDAV 用户名                                                                                      | -                    |
+| `WEBDAV_PASSWORD`                          | `webdav.password`                          | WebDAV 密码                                                                                        | -                    |
+| `WEBDAV_SYNC_PATH`                         | `webdav.syncPath`                          | WebDAV 增量同步远端路径                                                                            | `/lx-sync`         |
+| `WEBDAV_BACKUP_PATH`                       | `webdav.backupPath`                        | WebDAV 全量备份远端路径                                                                            | `/lx-sync-backups` |
+| `SYNC_INTERVAL`                            | `sync.interval`                            | WebDAV 增量同步检测间隔(分钟)                                                                      | `60`               |
+| `BACKUP_INTERVAL`                          | `sync.backupInterval`                      | WebDAV 全量备份间隔(小时)                                                                          | `24`               |
+| `WEBDAV_EXCLUDE_CACHE`                     | `webdav.excludeCache`                      | 排除缓存目录同步 (`data/<用户>/cache`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
+| `WEBDAV_EXCLUDE_MUSIC`                     | `webdav.excludeMusic`                      | 排除下载目录同步 (`data/<用户>/music`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
+| `ENABLE_WEBPLAYER_AUTH`                    | `player.enableAuth`                        | 是否启用 Web 播放器访问密码                                                                        | `false`            |
+| `WEBPLAYER_PASSWORD`                       | `player.password`                          | Web 播放器访问密码                                                                                 | `123456`           |
+| `DISABLE_TELEMETRY`                        | `disableTelemetry`                         | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                                                 | `false`            |
+| `ENABLE_PUBLIC_USER_RESTRICTION`           | `user.enablePublicRestriction`             | 是否启用公开用户权限限制 (限制上传、删除公开源、缓存到服务器等)                                    | `true`             |
+| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC`      | `user.enablePublicNonAdminLocalMusic`      | 是否开启非管理员访问本地音乐 (允许未登录管理员的公开账号访问本地音乐)                              | `false`            |
+| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `user.enablePublicNonAdminBrowserDownload` | 是否开启非管理员浏览器下载 (允许未登录管理员的公开/普通账号使用浏览器下载歌曲)                     | `true`             |
+| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE`     | `user.enablePublicNonAdminServerCache`     | 是否开启非管理员服务器缓存 (允许未登录管理员的公开/普通账号将歌曲缓存到服务器)                     | `false`            |
+| `ENABLE_PUBLIC_FAVORITES`                  | `user.enablePublicFavorites`               | 是否开启公开收藏和歌曲 (开启后允许公开/未登录用户查看及播放公开收藏)                               | `false`            |
+| `ENABLE_PUBLIC_NON_ADMIN_ACCESS`           | `user.enablePublicNonAdminAccess`          | 是否开启非管理员访问公开收藏和歌曲 (允许未登录管理员的公开账号查看)                                | `false`            |
+| `ENABLE_CUSTOM_MUSIC_DIR`                  | `user.enableCustomMusicDir`                | 是否开启自定义歌曲目录总开关                                                                       | `false`            |
+| `ENABLE_LOGIN_USER_CACHE_RESTRICTION`      | `user.enableLoginCacheRestriction`         | 是否启用登录用户缓存限制 (开启后限非管理员登录用户的缓存设置)                                      | `false`            |
+| `ENABLE_CACHE_SIZE_LIMIT`                  | `user.enableCacheSizeLimit`                | 是否启用缓存空间限制 (开启后超出容量将按 LRU 自动清理)                                             | `false`            |
+| `CACHE_SIZE_LIMIT`                         | `user.cacheSizeLimit`                      | 缓存空间限制大小 (单位: MB)                                                                        | `2000`             |
+| `CONFIG_BACKUP_ENABLE`                     | `configBackup.enable`                      | 是否启用配置文件自动备份功能 (每天生成一份历史配置副本)                                            | `true`             |
+| `CONFIG_BACKUP_RETENTION_DAYS`             | `configBackup.retentionDays`               | 配置文件备份保留天数 (自动清理过期备份)                                                            | `7`                |
+| `CONFIG_BACKUP_DIR`                        | `configBackup.dir`                         | 配置文件备份存储目录路径 (支持绝对路径或相对 `./data`)                                           | `backups`          |
+| `SNAPSHOT_BACKUP_PATH`                     | `snapshot.backupPath`                      | 歌单快照自定义存储路径 (支持绝对路径或相对 `./data`，各用户独立隔离)                             | -                    |
+| `LIST_ADD_MUSIC_LOCATION_TYPE`             | `list.addMusicLocationType`                | 添加歌曲到列表时的位置 (`top` / `bottom`)                                                      | `top`              |
+| `PROXY_ALL_ENABLED`                        | `proxy.all.enabled`                        | 是否启用外发请求代理 (针对 Music SDK)                                                              | `false`            |
+| `PROXY_ALL_ADDRESS`                        | `proxy.all.address`                        | 代理地址 (支持 http:// 或 socks5://)                                                               | -                    |
+| `SINGER_SOURCE_PRIORITY`                   | `singer.sourcePriority`                    | 歌手信息获取来源优先级 (如 `tx,wy` 或 `wy,tx`)                                                 | `tx,wy`            |
+| `SUBSONIC_ENABLE`                          | `subsonic.enable`                          | 是否启用 Subsonic 协议支持                                                                         | `true`             |
+| `SUBSONIC_PATH`                            | `subsonic.path`                            | Subsonic 接口访问路径 (默认为 `/rest`)                                                           | `/rest`            |
+| `SUBSONIC_PORT`                            | `subsonic.port`                            | Subsonic 独立监听端口 (`0` 为关闭独立端口，与主服务共用端口)                                     | `0`                |
+| `SUBSONIC_ENABLE_DEBUG`                    | `subsonic.enableDebug`                     | 是否开启 Subsonic 调试日志模式                                                                     | `false`            |
+| `SUBSONIC_ONLINE_SEARCH`                   | `subsonic.onlineSearch`                    | 是否开启 Subsonic 在线全网搜索                                                                     | `true`             |
+| `SUBSONIC_ONLINE_SEARCH_MODE`              | `subsonic.onlineSearchMode`                | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)                                  | `fallback`         |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES`           | `subsonic.onlineSearchSources`             | Subsonic 在线搜索默认音源列表                                                                      | `wy,tx,kw,kg,mg`   |
+| `SUBSONIC_PUBLIC_LEADERBOARDS`             | `subsonic.publicLeaderboards`              | 是否开启 Subsonic 公开排行榜 (将在线排行榜映射为只读歌单)                                          | `true`             |
+| `SUBSONIC_LEADERBOARD_SOURCE`              | `subsonic.leaderboardSource`               | Subsonic 公开排行榜默认音源平台 (仅支持单选, 如 `tx`, `wy` 等)                                 | `tx`               |
+| `SUBSONIC_LYRIC_TRANSLATION`               | `subsonic.lyricTranslation`                | Subsonic 歌词中是否包含翻译                                                                        | `true`             |
+| `SUBSONIC_CACHE_ON_PLAY`                   | `subsonic.cacheOnPlay`                     | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)                                         | `false`            |
+| `SUBSONIC_PLAY_CACHE_FIRST`                | `subsonic.playCacheFirst`                  | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输                                   | `true`             |
+| `SUBSONIC_QUALITY_ENABLED`                 | `subsonic.quality.enabled`                 | Subsonic 是否开启音质优选                                                                          | `true`             |
+| `SUBSONIC_QUALITY_PRIORITY`                | `subsonic.quality.priority`                | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                                                | `flac,320k,128k`   |
+| `ARTIST_MAX_FETCH_PAGES`                   | `artist.maxFetchPages`                     | 歌手歌曲最大抓取页数                                                                               | `20`               |
+| `CACHE_NAMING_PATTERN`                     | `cache.namingPattern`                      | 缓存文件命名规则 (`simple` / `custom`)                                                         | `simple`           |
+| `SYSTEM_ALLOW_UNSAFE_VM`                   | `system.allowUnsafeVM`                     | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                                                  | `false`            |
+| `LX_USER_<用户名>`                         | `users` 数组                               | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)                                           | -                    |
 
 > **高级用户配置说明**：环境变量 `LX_USER_<用户名>` 仅用于快速添加用户及设置密码。若需为特定用户配置独立的高级选项（如开启个人自定义音乐目录、分配操作权限 `allowOperateCustomMusicDir` 或写入权限 `allowWriteCustomMusicDir`、调整快照数量等），请直接在 `config.js` 的 `users` 数组中手动配置对应字段，或者在后台管理界面的“用户管理”面板中通过图形界面修改。
 
@@ -364,7 +352,6 @@ npm start
 
 - 修改自 [lyswhut/lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server)。
 - Web 播放器逻辑参考 [lx-music-desktop](https://github.com/lyswhut/lx-music-desktop)。
-- 接口实现基于 `musicsdk`。
 
 ### 👥 贡献者 (Contributors)
 
@@ -372,18 +359,15 @@ npm start
   <img src="https://contrib.rocks/image?repo=xcq0607/lxserver" />
 </a>
 
-
 ## 📈 Star History
 
-<a href="https://gitdata.xuanhun520.com/?repos=xcq0607/lxserver&type=Date">
-<picture >
-  <source media="(prefers-color-scheme: dark) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-  <source  media="(prefers-color-scheme: light) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=light" />
-  <img style="width: 800px; height: 533px;" alt="Star History Chart" src="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-</picture>
+<a href="https://www.star-history.com/?repos=xcq0607%2Flxserver&type=timeline&logscale=&releases=&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xcq0607/lxserver&type=timeline&theme=dark&logscale&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xcq0607/lxserver&type=timeline&logscale&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xcq0607/lxserver&type=timeline&logscale&legend=bottom-right" />
+ </picture>
 </a>
-
-
 
 ## 📄 开源协议
 

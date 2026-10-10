@@ -77,6 +77,10 @@ module.exports = {
   // 环境变量: CACHE_SIZE_LIMIT
   "user.cacheSizeLimit": 2000,
 
+  // 缓存文件自动保留天数 (单位: 天，0 为永久保留)
+  // 环境变量: CACHE_MAX_AGE_DAYS
+  "cache.maxAgeDays": 14,
+
   // 最大快照数 (用于数据回滚)
   // 环境变量: MAX_SNAPSHOT_NUM
   "maxSnapshotNum": 10,
@@ -90,9 +94,9 @@ module.exports = {
   // 说明：仅收集版本号、运行环境（Docker/Node）、OS类型等非敏感信息用于项目改进。绝对匿名，不收集IP。
   "disableTelemetry": false,
 
-  // 前端管理控制台访问密码
-  // 环境变量: FRONTEND_PASSWORD
-  "frontend.password": "123456",
+  // 管理员密码（用于登录管理控制台和在音乐播放器界面登录管理员）
+  // 环境变量: ADMIN_PASSWORD
+  "admin.password": "123456",
 
   // 用户列表
   // 环境变量: LX_USER_<用户名>=<密码> (例如: LX_USER_user1=123456)
@@ -155,6 +159,10 @@ module.exports = {
   // 开启后，各用户音乐下载目录将不参与增量同步及全量备份；之前已同步到云端的文件不会被删除，只有开启后新产生的变动才会被跳过
   // 环境变量: WEBDAV_EXCLUDE_MUSIC (true/false)
   "webdav.excludeMusic": false,
+
+  // Web播放器名称
+  // 环境变量: PLAYER_NAME
+  "player.name": "LX Music Web",
 
   // 是否启用 Web播放器 访问密码
   // 环境变量: ENABLE_WEBPLAYER_AUTH (true/false)

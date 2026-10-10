@@ -366,13 +366,18 @@ function updatePaginationInfo(start, end, total, current, totalPages) {
     const lastBtn = document.getElementById('search-btn-last');
     if (firstBtn) firstBtn.disabled = pageNum <= 1;
     if (prevBtn) prevBtn.disabled = pageNum <= 1;
-    if (nextBtn) nextBtn.disabled = pageNum >= pageCount && !isNetwork;
+    // 歌手/专辑搜索还能向后端追加下一页，下一页按钮要一直可用；歌曲搜索已一次取回，末页就禁用
+    const canAppendFromServer = isNetwork && window.serverPagedSearch !== false;
+    if (nextBtn) nextBtn.disabled = pageNum >= pageCount && !canAppendFromServer;
     if (lastBtn) lastBtn.disabled = pageNum >= pageCount;
 }
 
 function goToResultPage(page) {
     currentPage = page;
     window.currentPage = page;
+    if (window.savedNetworkSearchState && window.currentSearchScope === 'network') {
+        window.savedNetworkSearchState.page = page;
+    }
     renderResults(window.viewingPlaylist);
     scrollToSearchResultsTop();
 }
@@ -397,7 +402,8 @@ async function nextPage() {
         currentPage++;
         renderResults(window.viewingPlaylist);
         scrollToSearchResultsTop();
-    } else if (window.currentSearchScope === 'network') {
+    } else if (window.currentSearchScope === 'network' && window.serverPagedSearch !== false) {
+        // 只有歌手/专辑这类「一次一页」的搜索才需要向后端追加；歌曲搜索的数据已一次性取回
         const btn = document.getElementById('search-btn-next');
         const oldHtml = btn ? btn.innerHTML : '';
         if (btn) {
@@ -409,9 +415,7 @@ async function nextPage() {
             // 翻页时也让列表回到顶端，虽然是追加模式，但因为是用户主动点击下一页，体感上是进入新内容
             scrollToSearchResultsTop();
 
-            //翻页步长
-            const FETCH_PAGES_STEP = 1;
-            const nextNetPage = (window.currentNetworkPage || 1) + FETCH_PAGES_STEP;
+            const nextNetPage = (window.currentNetworkPage || 1) + 1;
             await window.doSearch(nextNetPage, true);
         } finally {
             if (btn) {

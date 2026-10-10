@@ -51,19 +51,51 @@ window.soundEffects = (function () {
     };
 
     let dryGainNode, wetGainNode, mixerNode;
+    let isGraphBuilt = false;
 
-    function init() {
-        if (audioContext) return;
+    function hasActiveEffects() {
+        const isEqActive = settings.eq && settings.eq.some(val => val !== 0);
+        const isPitchActive = settings.pitch !== 1.0;
+        const isReverbActive = settings.reverb && settings.reverb.id && settings.reverb.id !== 'none';
+        const isPannerActive = settings.panner && settings.panner.enable;
+        return isEqActive || isPitchActive || isReverbActive || isPannerActive;
+    }
+
+    function isIOSDevice() {
+        if (window.iOSBackgroundAudio && typeof window.iOSBackgroundAudio.isIOS === 'function') {
+            return window.iOSBackgroundAudio.isIOS();
+        }
+        const ua = navigator.userAgent;
+        const isIPad = /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+        return /iPhone|iPod/.test(ua) || isIPad;
+    }
+
+    function init(force = false) {
+        if (audioContext && isGraphBuilt) return;
+        loadSettings();
+        if (!force && (isIOSDevice() || !hasActiveEffects())) {
+            console.log('[SoundEffects] No custom sound effects enabled or iOS device detected. Keeping direct native audio output (zero throttling).');
+            return;
+        }
         const audio = document.getElementById('audio-player');
         if (!audio) return;
 
-        console.log('[SoundEffects] Initializing AudioContext...');
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        console.log('[SoundEffects] Initializing AudioContext and DSP graph...');
+        audioContext = window._sharedAudioContext || (window._sharedAudioContext = new (window.AudioContext || window.webkitAudioContext)());
 
-        // 1. Create Nodes
-        mediaSource = audioContext.createMediaElementSource(audio);
-        analyser = audioContext.createAnalyser();
-        analyser.fftSize = 512;
+        // 1. Create or Reuse Nodes
+        if (!mediaSource) {
+            mediaSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(audio));
+        }
+        if (!analyser) {
+            analyser = window._sharedAudioAnalyser || (window._sharedAudioAnalyser = audioContext.createAnalyser());
+            analyser.fftSize = 512;
+            analyser.smoothingTimeConstant = 0.8;
+        }
+
+        // Disconnect any bypass link (e.g. created previously by visualizer)
+        try { mediaSource.disconnect(); } catch (_) { }
+        try { analyser.disconnect(); } catch (_) { }
 
         // EQ Filters
         eqFilters = freqs.map(freq => {
@@ -116,6 +148,12 @@ window.soundEffects = (function () {
             window.iOSBackgroundAudio.init(audioContext, analyser);
         }
 
+        isGraphBuilt = true;
+
+        if (audioContext.state === 'suspended') {
+            audioContext.resume().catch(() => {});
+        }
+
         // 3. Load Settings
         loadSettings();
         applySettings();
@@ -123,34 +161,46 @@ window.soundEffects = (function () {
         initPitchShifter();
     }
 
+    let pitchShifterInitPromise = null;
+
     async function initPitchShifter() {
-        if (!audioContext) return;
-        if (pitchShifterNode) return;
+        if (!audioContext) return null;
+        if (pitchShifterNode) return pitchShifterNode;
+        if (pitchShifterInitPromise) return pitchShifterInitPromise;
 
-        try {
-            console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
-            await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
+        pitchShifterInitPromise = (async () => {
+            try {
+                console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/pitch-shifter/phase-vocoder.js');
+                await audioContext.audioWorklet.addModule('/music/js/pitch-shifter/phase-vocoder.js');
 
-            pitchShifterNode = new AudioWorkletNode(audioContext, 'phase-vocoder-processor', {
-                numberOfInputs: 1,
-                numberOfOutputs: 1,
-                outputChannelCount: [2],
-                processorOptions: { blockSize: 2048 }
-            });
-            pitchFactorParam = pitchShifterNode.parameters.get('pitchFactor');
+                if (!pitchShifterNode) {
+                    pitchShifterNode = new AudioWorkletNode(audioContext, 'phase-vocoder-processor', {
+                        numberOfInputs: 1,
+                        numberOfOutputs: 1,
+                        outputChannelCount: [2],
+                        processorOptions: { blockSize: 2048 }
+                    });
+                    pitchFactorParam = pitchShifterNode.parameters.get('pitchFactor');
 
-            console.log('[SoundEffects] Pitch Shifter Node created successfully');
+                    console.log('[SoundEffects] Pitch Shifter Node created successfully');
 
-            // Apply the pitch param since node was just created
-            applyPitch();
+                    // Apply the pitch param since node was just created
+                    applyPitch();
 
-            // If settings already have a pitch, apply it and connect if needed
-            if (settings.pitch !== 1.0) {
-                connectPitchShifter();
+                    // If settings already have a pitch, apply it and connect if needed
+                    if (settings.pitch !== 1.0) {
+                        connectPitchShifter();
+                    }
+                }
+                return pitchShifterNode;
+            } catch (e) {
+                console.error('[SoundEffects] Failed to initialize pitch shifter:', e);
+                pitchShifterInitPromise = null;
+                return null;
             }
-        } catch (e) {
-            console.error('[SoundEffects] Failed to initialize pitch shifter:', e);
-        }
+        })();
+
+        return pitchShifterInitPromise;
     }
 
     function connectPitchShifter() {
@@ -158,19 +208,27 @@ window.soundEffects = (function () {
             // Already loaded, just connect
             try { mixerNode.disconnect(pannerNode); } catch (e) { }
             try { mixerNode.disconnect(pitchShifterNode); } catch (e) { }
+            try { pitchShifterNode.disconnect(pannerNode); } catch (e) { }
             mixerNode.connect(pitchShifterNode);
             pitchShifterNode.connect(pannerNode);
         } else {
-            initPitchShifter();
+            initPitchShifter().then(node => {
+                if (node && settings.pitch !== 1.0) {
+                    try { mixerNode.disconnect(pannerNode); } catch (e) { }
+                    try { mixerNode.disconnect(node); } catch (e) { }
+                    try { node.disconnect(pannerNode); } catch (e) { }
+                    mixerNode.connect(node);
+                    node.connect(pannerNode);
+                }
+            });
         }
     }
 
     function disconnectPitchShifter() {
         if (pitchShifterNode) {
-            try {
-                mixerNode.disconnect(pitchShifterNode);
-                pitchShifterNode.disconnect(pannerNode);
-            } catch (e) { }
+            try { mixerNode.disconnect(pitchShifterNode); } catch (e) { }
+            try { pitchShifterNode.disconnect(pannerNode); } catch (e) { }
+            try { mixerNode.disconnect(pannerNode); } catch (e) { }
             mixerNode.connect(pannerNode);
         }
     }
@@ -494,22 +552,21 @@ window.soundEffects = (function () {
             }
         },
         open: function () {
-            if (!audioContext) init(); // Ensure init is called if not already
+            // 打开面板时只加载并显示设置，不在此强制初始化 Web Audio 图
+            loadSettings();
+            if (isIOSDevice() && window.showInfo) {
+                window.showInfo('提示：iOS 系统限制，开启自定义音效将导致退至后台或锁屏时暂停播放。如需后台播放请保持音效关闭。', 5000);
+            }
             const modal = document.getElementById('sound-effects-modal');
+            if (!modal) return;
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             // Background animation
             setTimeout(() => {
                 const content = document.getElementById('sound-effects-content');
-                if (content) { // Check if content exists before trying to access its classList
+                if (content) {
                     content.classList.remove('translate-y-10', 'opacity-0');
                 }
-                // The provided code edit had modal.querySelector('.bg-t-bg-panel') but the original open()
-                // targets 'sound-effects-content' for animation. I'll stick to the original's target
-                // but use the new animation classes if they were intended.
-                // For now, I'll keep the original animation logic for 'content' as it's more consistent
-                // with the original structure, unless the user explicitly wants to change the animated element.
-                // Given the instruction is about refactoring the return and listeners, I'll keep the animation target.
             }, 10);
             renderUI();
         },
@@ -525,6 +582,7 @@ window.soundEffects = (function () {
             }, 300);
         },
         setEQ: function (index, val) {
+            if (!audioContext || !isGraphBuilt) init(true);
             val = parseInt(val);
             settings.eq[index] = val;
             if (eqFilters[index]) eqFilters[index].gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
@@ -533,6 +591,7 @@ window.soundEffects = (function () {
             renderUI();
         },
         applyPreset: function (name) {
+            if (!audioContext || !isGraphBuilt) init(true);
             const allPresets = [...defaultPresets, ...customPresets];
             const p = allPresets.find(p => p.name === name);
             if (p) {
@@ -550,11 +609,14 @@ window.soundEffects = (function () {
         resetEQ: function () {
             settings.eq = Array(10).fill(0);
             activePresetName = '';
-            eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
+            if (eqFilters.length && audioContext) {
+                eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
+            }
             saveSettings();
             renderUI();
         },
         setReverb: function (id) {
+            if (!audioContext || !isGraphBuilt) init(true);
             settings.reverb.id = id;
             const rev = reverbOptions.find(r => r.id === id);
             if (rev) {
@@ -570,6 +632,7 @@ window.soundEffects = (function () {
             renderUI(); // Update radio selection state
         },
         setPitch: function (val) {
+            if (!audioContext || !isGraphBuilt) init(true);
             const oldPitch = settings.pitch;
             settings.pitch = parseFloat(val);
 
@@ -592,19 +655,23 @@ window.soundEffects = (function () {
             this.setPitch(1.0);
         },
         setPanner: function (key, val) {
+            if (!audioContext || !isGraphBuilt) init(true);
             if (key === 'enable') settings.panner.enable = val;
             else settings.panner[key] = parseInt(val);
             updatePanner();
             saveSettings();
             renderUI();
         },
-        getAnalyser: () => analyser,
+        getContext: () => audioContext || window._sharedAudioContext || null,
+        getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
+        getAnalyser: () => analyser || window._sharedAudioAnalyser || null,
         setReverbGain: function (type, val) {
+            if (!audioContext || !isGraphBuilt) init(true);
             if (type === 'main') settings.reverb.mainGain = val;
             else settings.reverb.sendGain = val;
             saveSettings();
 
-            if (window._soundEffectsGains) {
+            if (window._soundEffectsGains && audioContext) {
                 if (type === 'main') window._soundEffectsGains.dry.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
                 else window._soundEffectsGains.wet.gain.setTargetAtTime(val, audioContext.currentTime, 0.1);
             }

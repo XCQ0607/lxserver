@@ -5,7 +5,7 @@
 <div align="center">
   <p>
     <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
-    <img src="https://img.shields.io/badge/version-v2.1.2-blue?style=flat-square" alt="Version">
+    <img src="https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square" alt="Version">
     <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
@@ -17,6 +17,15 @@
     <img src="https://img.shields.io/github/commit-activity/m/XCQ0607/lxserver?style=flat-square&color=ff69b4" alt="Commit Activity">
     <a href="https://github.com/XCQ0607/lxserver/releases"><img src="https://img.shields.io/github/downloads/XCQ0607/lxserver/total?style=flat-square&color=blue" alt="Total Downloads"></a>
   </p>
+  <p>
+    <a href="https://www.star-history.com/xcq0607/lxserver">
+      <picture>
+        <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/badge?repo=XCQ0607/lxserver&type=trending&theme=dark" />
+        <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/badge?repo=XCQ0607/lxserver&type=trending" />
+        <img alt="GitHub Trending Repository of the Day" src="https://api.star-history.com/badge?repo=XCQ0607/lxserver&type=trending" />
+      </picture>
+    </a>
+  </p>
 </div>
 
 [Documentation](https://xcq0607.github.io/lxserver/) | [SyncServer](md/lxserver_EN.md) | [Changelog](changelog.md) | [中文版](README.md)
@@ -26,95 +35,73 @@ This project features a powerful built-in **Web Player**, allowing you to enjoy 
 
 ## ✨ Web Player Key Features
 
-### 1. Modern Interface
-Featuring a clean, modern UI design with support for dark mode, providing a top-tier visual experience.
+### 1. Modern Interface & Full Playback Controls
+
+Featuring a clean, responsive UI with automatic Light/Dark mode and full-screen lyrics mode. The integrated player bar offers sound quality switching, playback speed, and sleep timers.
+
 <p align="center">
   <img src="md/player.png" width="800" alt="Web Player Interface">
 </p>
-
-### 2. Multi-source Search
-Supports aggregated searching across major music platforms, search and listen to anything you want.
 <p align="center">
-  <img src="md/search.png" width="800" alt="Search Interface">
+  <img src="md/controller.png" width="800" alt="Playback Controls">
 </p>
 
-### 3. Content & Playlists
-  
-Browse and search **multi-platform playlists** with ease. View comprehensive **playlist details** including covers, authors, and descriptions. Manage your **playback queue** with drag-and-drop sorting, batch operations, and quick positioning.
+### 2. Multi-source Search, Artists & Albums
+
+Aggregates online resources across major platforms to quickly search tracks, artists, and complete albums with one-click favoriting and instant playback.
 
 <p align="center">
-  <img src="md/musiclist.png" width="800" alt="Playlist Browsing">
+  <img src="md/search.png" width="800" alt="Multi-source Search">
 </p>
-
-<p align="center">
-  <img src="md/musiclist-detail.png" width="400" alt="Playlist Details">
-  <img src="md/playlist.png" width="400" alt="Queue Management">
-</p>
-
-### 4. Powerful Playback Controls
-Supports playback mode switching, sound quality selection, lyrics display, sleep timer, playback speed control, and more.
-
-<p align="center">
-  <img src="md/controller.png" width="800" alt="Controller">
-</p>
-
-### 5. Cache Management
-  
-Features a **fully automated caching system** for lyrics, links, and song files, managed via a dedicated **cache control panel** for smooth playback even in weak network conditions.
-
-<p align="center">
-  <img src="md/cache.png" width="800" alt="Automated Cache Management">
-</p>
-
-### 6. Lyric Card Sharing
-  
-Introducing **Lyric Card Sharing**—generate stunning posters with customizable aspect ratios (Portrait/Landscape/Square), color styles (Dark/Light/Album colors), and line counts, with support for rotation and scaling.
-
-<p align="center">
-  <img src="md/share.png" width="800" alt="Social Lyric Card Sharing">
-</p>
-
-### 7. Themes & System Configuration
-  
-Choose from multiple **modern themes** (Emerald, Deep Blue, Warm Sun, Nebula, Crimson) with automatic Light/Dark mode switching. Powerful system settings include **auto-updating network playlists**, **automatic config backups**, and multi-dimensional proxy support for seamless playback.
-
-<p align="center">
-  <img src="md/theme.png" width="400" alt="Modern Theme Switching">
-  <img src="md/settings.png" width="400" alt="System Configuration">
-</p>
-
-### 8. Custom Source Management
-
-Supports importing custom source scripts to expand music sources even further.
-
-<p align="center">
-  <img src="md/source.png" width="800" alt="Source Management">
-</p>
-
-### 9. Album & Artist Search & Collection
-
-Search for albums and artists and favorite them with one click for quick access to your favorite music.
-
 <p align="center">
   <img src="md/album.png" width="400" alt="Album Display">
   <img src="md/singer.png" width="400" alt="Artist Display">
 </p>
 
-### 10. Subsonic Protocol & Global Search Support
+### 3. Playlists & Queue Management
 
-Fully compatible with the Subsonic protocol, allowing you to use various Subsonic clients (e.g., Yinliu, Feishin, etc.) to connect and play music. Supports specifying platform prefixes such as `wy:`, `kg:`, `tx:`, `kw:`, `mg:`, or using `online:` / `local:` prefixes to force global online or local search within Subsonic clients.
+Browse and sync popular online playlists. Convenient side drawers provide intuitive queue drag-and-drop sorting and automated local caching.
 
 <p align="center">
-  <img src="md/subsonic.png" width="400" alt="Subsonic Support">
-  <img src="md/subsonic-search.png" width="400" alt="Subsonic Online Search">
+  <img src="md/musiclist.png" width="400" alt="Playlist Browsing">
+  <img src="md/musiclist-detail.png" width="400" alt="Playlist Details">
+</p>
+<p align="center">
+  <img src="md/playlist.png" width="280" alt="Playback Queue Drawer">
+  <img src="md/cache.png" width="280" alt="Cache Management Drawer">
 </p>
 
-### 11. Public Library & Shared Favorites
+### 4. Local Music Library & Shared Favorites
 
-When **"Enable Public Favorites and Songs"** is enabled in the backend settings, all users (guests or different accounts) can share a common public music library and public playlists.
+Centrally manages local, downloaded, and cached music with audio specs parsing (Hi-Res / Lossless), Boolean logic search (`&`, `|`, `!`), integrity checks, and batch operations. Supports public shared libraries.
 
 <p align="center">
-  <img src="md/_open_song.png" width="800" alt="Public Library & Shared Favorites">
+  <img src="md/localmusic.png" width="800" alt="Local Music Library & Advanced Search">
+</p>
+<p align="center">
+  <img src="md/favorite.png" width="800" alt="Favorites & Shared Library">
+</p>
+
+### 5. Themes, Lyric Cards & Custom Sources
+
+Choose from multiple modern color palettes with light/dark modes. Generate high-res lyric cards with custom aspect ratios, and import custom scripts to expand music sources.
+
+<p align="center">
+  <img src="md/theme.png" width="400" alt="Modern Themes">
+  <img src="md/settings.png" width="400" alt="System Configuration">
+</p>
+<p align="center">
+  <img src="md/share.png" width="380" alt="Lyric Card Sharing">
+  <img src="md/source.png" width="420" alt="Custom Source Management">
+</p>
+
+### 6. Subsonic Protocol Ecosystem
+
+Fully compatible with the Subsonic API. Connect using third-party clients (such as Yinliu, Feishin, Symfonium) with global online search and local playback support.
+
+<p align="center">
+  <img src="md/subsonic.png" width="500" alt="Subsonic Support">
+  <img src="md/subsonic-search.png" width="300" alt="Subsonic Online Search">
 </p>
 
 ## 🔒 Access Control & Security
@@ -197,7 +184,7 @@ services:
       - ./music:/server/music
     environment:
       - NODE_ENV=production
-      # - FRONTEND_PASSWORD=123456
+      # - ADMIN_PASSWORD=123456
       # - ENABLE_WEBPLAYER_AUTH=true
       # - WEBPLAYER_PASSWORD=yourpassword
       # - ADMIN_PATH=
@@ -270,8 +257,9 @@ The configuration file is persisted by default in the data directory at `data/co
 | `PORT` | `port` | Service port | `9527` |
 | `ADMIN_PATH` | `admin.path` | Backend management interface path | `/admin` |
 | `PLAYER_PATH` | `player.path` | Web player access path (default root `/`) | `/` |
-| `FRONTEND_PASSWORD` | `frontend.password` | Web dashboard password | `123456` |
-| `SERVER_NAME` | `serverName` | Sync service name | `lxserver` |
+| `ADMIN_PASSWORD` | `admin.password` | Admin password (for management console and music player admin login) | `123456` |
+| `SERVER_NAME` | `serverName` | Sync service name (shown in client pairing & admin console title) | `LX Sync Server` |
+| `PLAYER_NAME` | `player.name` | Web player name (shown in web player title & login card) | `LX Music Web` |
 | `ENABLE_DEBUG` | `debug.enabled` | Enable DEBUG mode (verbose debug and source sandbox logs, default false) | `false` |
 | `MAX_SNAPSHOT_NUM` | `maxSnapshotNum` | Max snapshots to keep | `10` |
 | `CONFIG_PATH` | - | Absolute path to external config file (defaults to `data/config.js`) | - |
@@ -354,7 +342,6 @@ Anonymous telemetry via PostHog is used for:
 
 - Forked from [lyswhut/lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server).
 - Web player logic inspired by [lx-music-desktop](https://github.com/lyswhut/lx-music-desktop).
-- API based on `musicsdk`.
 
 ### 👥 Contributors
 
@@ -365,12 +352,12 @@ Anonymous telemetry via PostHog is used for:
 ## 📈 Star History
 
 
-<a href="https://gitdata.xuanhun520.com/?repos=xcq0607/lxserver&type=Date">
-<picture >
-  <source media="(prefers-color-scheme: dark) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-  <source  media="(prefers-color-scheme: light) and (max-width: 800px)" srcset="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=light" />
-  <img style="width: 800px; height: 533px;" alt="Star History Chart" src="https://gitdata.xuanhun520.com/api/starimg?repos=xcq0607/lxserver&type=Date&theme=dark" />
-</picture>
+<a href="https://www.star-history.com/?repos=xcq0607%2Flxserver&type=timeline&logscale=&releases=&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=xcq0607/lxserver&type=timeline&theme=dark&logscale&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=xcq0607/lxserver&type=timeline&logscale&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=xcq0607/lxserver&type=timeline&logscale&legend=bottom-right" />
+ </picture>
 </a>
 
 

@@ -339,8 +339,8 @@ if (envParams.LIST_ADD_MUSIC_LOCATION_TYPE) {
       break
   }
 }
-if (envParams.FRONTEND_PASSWORD) {
-  global.lx.config['frontend.password'] = envParams.FRONTEND_PASSWORD
+if (envParams.ADMIN_PASSWORD) {
+  global.lx.config['admin.password'] = envParams.ADMIN_PASSWORD
 }
 if (envParams.WEBDAV_ENABLE !== undefined) {
   setBoolConfig('webdav.enable', envParams.WEBDAV_ENABLE)
@@ -387,6 +387,9 @@ if (envParams.ENABLE_DEBUG !== undefined) {
 if (envParams.PORT) {
   const port = parseInt(envParams.PORT, 10)
   if (!isNaN(port) && port > 0) global.lx.config.port = port
+}
+if (envParams.PLAYER_NAME) {
+  global.lx.config['player.name'] = envParams.PLAYER_NAME
 }
 if (envParams.ENABLE_WEBPLAYER_AUTH !== undefined) {
   setBoolConfig('player.enableAuth', envParams.ENABLE_WEBPLAYER_AUTH)

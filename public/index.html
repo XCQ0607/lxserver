@@ -18,6 +18,11 @@
         })();
     </script>
     <script src="/js/config.js"></script>
+    <script>
+        if (window.CONFIG && window.CONFIG.serverName) {
+            document.title = window.CONFIG.serverName + ' - 管理控制台';
+        }
+    </script>
     <!-- PostHog Analytics -->
     <script>
         if (!window.CONFIG || !window.CONFIG.disableTelemetry) {
@@ -61,19 +66,62 @@
 <body>
     <!-- 登录界面 -->
     <div id="login-overlay" class="overlay">
-        <div class="login-box glass">
-            <div class="login-header">
-                <svg class="logo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M9 18V5l12-2v13M6 15v8m6-8v8" />
-                </svg>
-                <h1>LX Sync Server</h1>
+        <!-- 动态氛围背景 -->
+        <div class="admin-ambient-canvas">
+            <div class="admin-aurora-blob admin-aurora-1"></div>
+            <div class="admin-aurora-blob admin-aurora-2"></div>
+            <div class="admin-aurora-blob admin-aurora-3"></div>
+        </div>
+        <div class="admin-bg-grid-mask"></div>
+        <div id="admin-notes-container"></div>
+        <canvas id="admin-particles-canvas"></canvas>
+        <div id="admin-cursor-glow"></div>
+
+        <div class="admin-login-card" id="admin-login-card">
+            <div class="text-center mb-6">
+                <div class="admin-logo-glow">
+                    <svg class="w-8 h-8 text-white drop-shadow-md" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                        <path d="M9 18V5l12-2v13M6 15v8m6-8v8" stroke-linecap="round" stroke-linejoin="round" />
+                    </svg>
+                </div>
+                <h1 class="admin-login-title" id="admin-login-title">LX Sync Server</h1>
+                <div class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-indigo-500/10 border border-indigo-500/25 text-indigo-300">
+                    <i class="fas fa-shield-halved text-[11px] text-indigo-400"></i>
+                    <span>管理控制台 · 安全验证</span>
+                </div>
             </div>
-            <p class="login-subtitle">管理控制台</p>
-            <input type="password" id="access-password" placeholder="请输入访问密码" autocomplete="off" />
-            <button id="login-btn" class="btn-primary">
-                <span>登录</span>
-            </button>
-            <p id="login-error" class="error-msg"></p>
+
+            <!-- 错误提示框 -->
+            <div id="login-error-box" class="admin-login-error hidden">
+                <i class="fas fa-circle-exclamation flex-shrink-0 text-rose-400"></i>
+                <span id="login-error"></span>
+            </div>
+
+            <form id="admin-login-form" onsubmit="return false;" class="space-y-4">
+                <div class="admin-input-group">
+                    <input type="password" id="access-password" class="admin-input" placeholder="请输入管理员访问密码" autocomplete="current-password" spellcheck="false" />
+                    <i class="fas fa-lock input-icon-left"></i>
+                    <button type="button" class="input-eye-btn" id="toggle-pwd-btn" title="显示/隐藏密码" tabindex="-1">
+                        <i class="far fa-eye"></i>
+                    </button>
+                </div>
+
+                <button id="login-btn" type="submit" class="admin-btn-submit">
+                    <i class="fas fa-right-to-bracket text-sm"></i>
+                    <span id="login-btn-text">登录控制台</span>
+                </button>
+            </form>
+
+            <div class="mt-6 pt-4 border-t border-white/5 flex items-center justify-between text-xs text-slate-400">
+                <span class="flex items-center gap-1.5">
+                    <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+                    <span>服务状态正常</span>
+                </span>
+                <a href="/music/" class="text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1 no-underline font-medium">
+                    <span>进入音乐播放器</span>
+                    <i class="fas fa-arrow-right text-[10px]"></i>
+                </a>
+            </div>
         </div>
     </div>
 
@@ -84,7 +132,7 @@
         <aside class="sidebar glass">
             <div class="sidebar-header">
                 <div style="display: flex; align-items: center;">
-                    <img src="/icon.svg" class="logo-icon" alt="Logo"
+                    <img src="icon.svg" class="logo-icon" alt="Logo"
                         style="width: 32px; height: 32px; margin-right: 8px;">
                     <h2>LX Sync</h2>
                 </div>
@@ -813,25 +861,30 @@
                             </div>
                             <div class="config-card-body">
                                 <div class="config-field">
-                                    <label class="config-label">前端访问密码</label>
-                                    <input type="password" name="frontend.password" class="form-input config-input"
-                                        placeholder="管理控制台登录密码" />
-                                    <div class="config-divider"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">启用 Web 播放器密码</span>
-                                            <span class="config-toggle-desc">开启后访问播放器需要验证密码</span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="player.enableAuth" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
+                                    <label class="config-label">播放器名称</label>
+                                    <input type="text" name="player.name" class="form-input config-input"
+                                        placeholder="LX Music Web" />
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">管理员密码</label>
+                                    <input type="password" name="admin.password" class="form-input config-input"
+                                        placeholder="用于登录控制台和播放器管理员" />
+                                </div>
+                                <div class="config-divider"></div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">启用 Web 播放器密码</span>
+                                        <span class="config-toggle-desc">开启后访问播放器需要验证密码</span>
                                     </div>
-                                    <div class="config-field">
-                                        <label class="config-label">Web 播放器访问密码</label>
-                                        <input type="password" name="player.password" class="form-input config-input"
-                                            placeholder="播放器专属密码" />
-                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="player.enableAuth" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">Web 播放器访问密码</label>
+                                    <input type="password" name="player.password" class="form-input config-input"
+                                        placeholder="播放器专属密码" />
                                 </div>
                             </div>
                         </div>
@@ -1287,6 +1340,14 @@
                                     <label class="config-label">空间限制大小 (MB)</label>
                                     <input type="number" name="user.cacheSizeLimit" class="form-input config-input"
                                         placeholder="默认 2000" min="10" />
+                                </div>
+                                <div class="config-field">
+                                    <label class="config-label">缓存文件自动保留时间 (天)</label>
+                                    <input type="number" name="cache.maxAgeDays" class="form-input config-input"
+                                        placeholder="默认 14" min="0" />
+                                    <span class="config-field-desc" style="display:block; margin-top:4px; font-size:12px; color:rgba(255,255,255,0.6);">
+                                        后台每12小时自动扫描并清理超出保留天数的未访问音频与歌词缓存文件。<strong>设为 0 表示永久保留，永不自动删除。</strong>
+                                    </span>
                                 </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
@@ -2208,9 +2269,9 @@
 
                 <!-- 关于视图 -->
                 <div id="view-about" class="view">
-                    <div class="glass" style="padding: 40px; max-width: 900px; margin: 0 auto;">
+                    <div class="glass" style="padding: 36px 32px; max-width: 980px; margin: 0 auto; border-radius: 24px;">
                         <div id="about-content" class="about-content"
-                            style="line-height: 1.8; color: var(--text-primary);">
+                            style="line-height: 1.6; color: var(--text-primary);">
                             <!-- Markdown content will be rendered here -->
                             <div style="text-align: center; color: var(--text-secondary);">加载中...</div>
                         </div>

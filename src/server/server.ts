@@ -99,7 +99,7 @@ const serializeDislikeRules = (rules: string, username?: string) => {
 }
 
 // ===== Player Session Store =====
-const playerSessions = new Map<string, { createdAt: number }>()
+const playerSessions = new Map<string, { createdAt: number, user?: string | null }>()
 const SESSION_TTL = 24 * 60 * 60 * 1000 // 24小时
 const SESSION_COOKIE_NAME = 'lx_player_session'
 
@@ -220,19 +220,22 @@ const parseCookies = (cookieHeader: string | undefined): Record<string, string> 
   )
 }
 
-/** 检查请求是否携带有效的 Player Session Cookie */
+/** 检查请求是否携带有效的 Player Session Cookie 或有效的用户凭证 */
 const checkPlayerAuth = (req: IncomingMessage): boolean => {
   if (!global.lx.config['player.enableAuth']) return true // 未开启认证，直接放行
   const cookies = parseCookies(req.headers['cookie'])
   const sessionId = cookies[SESSION_COOKIE_NAME]
-  if (!sessionId) return false
-  const session = playerSessions.get(sessionId)
-  if (!session) return false
-  if (Date.now() - session.createdAt > SESSION_TTL) {
-    playerSessions.delete(sessionId)
-    return false
+  if (sessionId) {
+    const session = playerSessions.get(sessionId)
+    if (session && Date.now() - session.createdAt <= SESSION_TTL) {
+      return true
+    }
+    if (session) playerSessions.delete(sessionId)
   }
-  return true
+  // Safari / Token 备选鉴权: 若 Cookie 丢失但请求中携带了有效的用户 Token
+  const user = verifyUserAuth(req)
+  if (user) return true
+  return false
 }
 
 /** 定期清理过期 Session（每小时） */
@@ -708,6 +711,8 @@ const reloadServerData = async () => {
           backupInterval: global.lx.config['sync.backupInterval'],
         })
       }
+      // 刷新缓存位置映射，使 _open 等未自定义位置的用户回退到最新的全局 serverCacheLocation
+      fileCache.invalidateUserCacheLocations()
       startupLog.info(`Config re-loaded and merged from ${configPath}.`)
     } catch (err: any) {
       startupLog.error('Failed to reload config file:', err.message)
@@ -1116,6 +1121,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       ? (pathname === '/' || (!pathname.startsWith('/api/') && !isSyncProtocolRequest && pathname !== '/js/config.js' && !isSubsonicRequest && (adminPath === '' || (pathname !== adminPath && !pathname.startsWith(adminPath + '/')))))
       : (pathname.startsWith(playerPath + '/') || pathname === playerPath)
 
+    // [新增] 根静态资源 (icon.svg / favicon.ico / manifest.json)
+    if (pathname === '/icon.svg' || pathname === '/favicon.ico' || pathname === '/manifest.json') {
+      const filePath = path.join(global.lx.staticPath, pathname.slice(1))
+      if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+        serveStatic(req, res, filePath)
+        return
+      }
+    }
+
     // [新增] 映射管理后台逻辑
     const isAdminRequest = adminPath && (pathname.startsWith(adminPath + '/') || pathname === adminPath)
 
@@ -1259,6 +1273,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'] || 2000,
         maxSnapshotNum: global.lx.config.maxSnapshotNum,
         'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
+        'player.name': global.lx.config['player.name'] || 'LX Music Web',
         'player.enableAuth': global.lx.config['player.enableAuth'] || false,
         port: global.lx.config.port,
         bindIP: global.lx.config.bindIP,
@@ -1320,7 +1335,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         void readBody(req).then(body => {
           try {
             const { password } = JSON.parse(body)
-            if (password === global.lx.config['frontend.password']) {
+            if (password === global.lx.config['admin.password']) {
               loginLog.info(`Admin login success from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
@@ -1342,7 +1357,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 获取服务器状态
       if (pathname === '/api/status' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -1414,7 +1429,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/users') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -1680,7 +1695,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/data' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -1742,7 +1757,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 获取快照列表
       if (pathname === '/api/data/snapshots' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -1784,7 +1799,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 下载快照数据
       if (pathname === '/api/data/snapshot' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -1836,7 +1851,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 恢复快照
       if (pathname === '/api/data/restore-snapshot' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -2033,7 +2048,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 删除快照 API
       if (pathname === '/api/data/delete-snapshot' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
 
         if (!userParam) {
@@ -2076,7 +2091,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 上传快照 API
       if (pathname === '/api/data/upload-snapshot' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        const isAdminAuth = auth === global.lx.config['frontend.password']
+        const isAdminAuth = auth === global.lx.config['admin.password']
         const userParam = urlObj.searchParams.get('user')
         const time = parseInt(urlObj.searchParams.get('time') || '0')
         const filename = urlObj.searchParams.get('filename')
@@ -2257,7 +2272,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const targetUserParam = urlObj.searchParams.get('user')
         const reqUsername = (req.headers['x-user-name'] as string) || targetUserParam || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         let username: string | null = null
 
         const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
@@ -2301,7 +2316,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const targetUserParam = urlObj.searchParams.get('user')
         const reqUsername = (req.headers['x-user-name'] as string) || targetUserParam || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         let username: string | null = null
 
         const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
@@ -2313,7 +2328,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, error: '权限不足：未开启公开访问。' }))
             return
           }
-          if (auth !== global.lx.config['frontend.password']) {
+          if (auth !== global.lx.config['admin.password']) {
             res.writeHead(403, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, error: '权限不足：公共歌单修改受限，请先验证管理员身份。' }))
             return
@@ -2359,7 +2374,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userParam = url.searchParams.get('user') || ''
         const reqUsername = (req.headers['x-user-name'] as string) || userParam
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
 
         const canAccessOpen = global.lx.config['user.enablePublicFavorites'] && (
           global.lx.config['user.enablePublicNonAdminAccess'] || isAdmin || !!verifyUserAuth(req)
@@ -2803,7 +2818,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (isPublic) {
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
               return
@@ -2852,7 +2867,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (isPublic) {
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限不足：公共用户受限模式下需要管理员权限' }))
               return
@@ -3022,7 +3037,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           // 公开用户：若开启了限制，需要管理员密码
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, error: '权限不足：公共用户保存设置受限，请先验证管理员身份。' }))
               return
@@ -3056,6 +3071,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8')
+
+            if (settings.serverCacheLocation !== undefined) {
+              fileCache.setUserCacheLocation(resolvedUsername!, settings.serverCacheLocation)
+            }
+            if (settings.serverCacheNamingPattern !== undefined) {
+              fileCache.setUserNamingPattern(resolvedUsername!, settings.serverCacheNamingPattern)
+            }
 
             // 如果更新了网络歌单自动检测设置，同步更新后台任务调度器
             if (settings.networkListAutoCheckInterval !== undefined || settings.autoUpdateNetworkList !== undefined) {
@@ -3352,7 +3374,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if ((pathname === '/api/tasks/status' || pathname === '/api/music/tasks/status') && req.method === 'GET') {
         const reqUsername = req.headers['x-user-name'] as string
         const isPublic = !reqUsername || reqUsername === 'default'
-        
+
         if (!isPublic && !verifyUserAuth(req)) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
@@ -3369,11 +3391,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if ((pathname === '/api/tasks/trigger' || pathname === '/api/music/tasks/trigger') && req.method === 'POST') {
         const reqUsername = req.headers['x-user-name'] as string
         const isPublic = !reqUsername || reqUsername === 'default'
-        
+
         if (isPublic) {
           if (global.lx.config['user.enablePublicRestriction']) {
             const auth = req.headers['x-frontend-auth']
-            if (auth !== global.lx.config['frontend.password']) {
+            if (auth !== global.lx.config['admin.password']) {
               res.writeHead(403, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, message: '权限不足：受限模式下需要管理员权限' }))
               return
@@ -3403,7 +3425,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // GET  /api/tasks/user-data?task=<taskId>  → 返回当前用户该任务的状态数据
       // POST /api/tasks/user-data?task=<taskId>  → 更新（如清除红点）
       if ((pathname === '/api/tasks/user-data' || pathname === '/api/music/tasks/user-data') &&
-          (req.method === 'GET' || req.method === 'POST')) {
+        (req.method === 'GET' || req.method === 'POST')) {
         const reqUsername = req.headers['x-user-name'] as string
         const isPublic = !reqUsername || reqUsername === 'default'
         let targetUser = '_open'
@@ -3569,8 +3591,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] File Cache APIs
       // 1. Config Cache Location
       if (pathname === '/api/music/cache/config' && req.method === 'POST') {
-        const reqUsername = req.headers['x-user-name'] as string
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+        let username = '_open'
 
         // 具名用户必须通过 Token（或兼容密码）验证身份
         if (!isPublic) {
@@ -3580,6 +3603,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
           }
+          username = verified
         }
 
         void readBody(req).then(async body => {
@@ -3587,29 +3611,40 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const { location, namingPattern } = JSON.parse(body)
             let updated = false
 
+            const userSpace = getUserSpace(username)
+            const settingsPath = path.join(userSpace.dataManage.userDir, File.userSettingsJSON)
+            let userSettings: any = {}
+            if (fs.existsSync(settingsPath)) {
+              try {
+                userSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
+              } catch (e) { }
+            }
+
             if (location) {
-              if (location !== fileCache.getCacheLocation()) {
+              if (location !== fileCache.getUserCacheLocation(username)) {
                 // 公开用户：需要管理员密码才能修改
                 if (isPublic && global.lx.config['user.enablePublicRestriction']) {
                   const auth = req.headers['x-frontend-auth']
-                  if (auth !== global.lx.config['frontend.password']) {
+                  if (auth !== global.lx.config['admin.password']) {
                     res.writeHead(403, { 'Content-Type': 'application/json' })
                     res.end(JSON.stringify({ success: false, error: '权限不足：公共用户修改缓存位置受限，请输入管理员密码。' }))
                     return
                   }
                 }
-                fileCache.setCacheLocation(location)
+                fileCache.setUserCacheLocation(username, location)
+                userSettings.serverCacheLocation = location
                 updated = true
               }
             }
 
             if (namingPattern) {
-              const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
-              if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
+              const normalizedNamingPattern = fileCache.setUserNamingPattern(username, namingPattern)
+              userSettings.serverCacheNamingPattern = normalizedNamingPattern
               updated = true
             }
 
             if (updated) {
+              fs.writeFileSync(settingsPath, JSON.stringify(userSettings, null, 2), 'utf8')
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
             } else {
@@ -3644,7 +3679,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        const effectiveLocation = locationQuery || fileCache.getCacheLocation()
+        const effectiveLocation = locationQuery || fileCache.getUserCacheLocation(username)
         const cacheDir = fileCache.getCacheDir(username, false, effectiveLocation)
         const downloadDir = fileCache.getCacheDir(username, true, effectiveLocation)
 
@@ -3787,7 +3822,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/subdirs/rename' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
         let username = '_open'
 
@@ -3829,7 +3864,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 检查文件夹是否有效
       if (pathname === '/api/utils/check-dir' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
           return
@@ -3868,7 +3903,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/subdirs/delete' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
         let username = '_open'
 
@@ -3998,7 +4033,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
         const auth = req.headers['x-frontend-auth']
         const isPublic = username === '_open'
-        const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
+        const isAdmin = auth === global.lx.config['admin.password'] || username === 'admin'
         const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
         const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
 
@@ -4015,7 +4050,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (concurrency !== undefined) serverDownloadQueue.setConcurrency(username, concurrency)
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth === global.lx.config['frontend.password']) {
+              if (auth === global.lx.config['admin.password']) {
                 const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
                 if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
               }
@@ -4123,7 +4158,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             const auth = req.headers['x-frontend-auth']
-            const isAdmin = auth === global.lx.config['frontend.password'] || username === 'admin'
+            const isAdmin = auth === global.lx.config['admin.password'] || username === 'admin'
             const enablePublicRestriction = global.lx.config['user.enablePublicRestriction']
             const isServerCacheAllowed = global.lx.config['user.enablePublicNonAdminServerCache'] !== false
 
@@ -4134,7 +4169,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
-              if (auth === global.lx.config['frontend.password']) {
+              if (auth === global.lx.config['admin.password']) {
                 const normalizedNamingPattern = fileCache.setNamingPattern(namingPattern)
                 if (global.lx.config) global.lx.config['cache.namingPattern'] = normalizedNamingPattern
               }
@@ -4251,7 +4286,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
             username = verified
           }
-          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username)
+          const folderParam = urlObj.searchParams.get('folder')
+          const requestedFolder = folderParam === 'cache' || folderParam === 'music' ? folderParam as fileCache.CacheFolder : undefined
+          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username, requestedFolder)
           return
         }
       }
@@ -4332,6 +4369,69 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      // 6.5 未引用歌词（孤儿 .lrc）扫描与删除
+      if (pathname === '/api/music/cache/lyric/orphans' && req.method === 'GET') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        try {
+          const data = fileCache.listOrphanLyrics(username)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, data }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: e.message || 'Failed to list orphan lyrics' }))
+        }
+        return
+      }
+
+      if (pathname === '/api/music/cache/lyric/orphans/delete' && req.method === 'POST') {
+        const reqUsername = (req.headers['x-user-name'] as string) || ''
+        const isPublic = !reqUsername || reqUsername === 'default'
+        let username = '_open'
+
+        if (!isPublic) {
+          const verified = verifyUserAuth(req)
+          if (!verified) {
+            res.writeHead(401, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+            return
+          }
+          username = verified
+        }
+        void readBody(req).then(body => {
+          try {
+            const payload = JSON.parse(body)
+            const rawItems = Array.isArray(payload.items) ? payload.items : []
+            if (rawItems.length === 0) throw new Error('Missing items')
+            const items = rawItems.map((item: any) => {
+              if (typeof item === 'string') return { filename: item }
+              if (!item || typeof item.filename !== 'string') throw new Error('Invalid item')
+              if (item.folder !== undefined && item.folder !== 'cache' && item.folder !== 'music') throw new Error('Invalid folder')
+              return { filename: item.filename, folder: item.folder }
+            })
+            const result = fileCache.deleteOrphanLyrics(items, username)
+            accessLog.info(`orphan lyrics deleted user=${username} count=${result.deletedCount} failures=${result.failures.length}`)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: result.failures.length === 0, data: result }))
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: e.message || 'Bad Request' }))
+          }
+        })
+        return
+      }
+
       // 7. Get Cache Progress
       if (pathname === '/api/music/cache/progress' && req.method === 'GET') {
         const ids = urlObj.searchParams.get('ids')?.split(',') || []
@@ -4351,7 +4451,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const targetUserParam = urlObj.searchParams.get('user')
         const reqUsername = targetUserParam || (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open' || targetUserParam === '_open'
         let username = '_open'
 
@@ -4437,7 +4537,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname === '/api/music/cache/remove' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
         const auth = req.headers['x-frontend-auth']
-        const isAdmin = !!(auth && auth === global.lx.config['frontend.password'])
+        const isAdmin = !!(auth && auth === global.lx.config['admin.password'])
         const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === '_open'
         let username = '_open'
 
@@ -5613,7 +5713,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/data/delete-playlist' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5652,7 +5752,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 删除歌曲
       if (pathname === '/api/data/delete-song' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5706,7 +5806,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 重命名歌单
       if (pathname === '/api/data/rename-playlist' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5760,7 +5860,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 批量删除歌曲
       if (pathname === '/api/data/batch-delete-songs' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -5827,6 +5927,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           'Cache-Control': 'no-cache'
         })
         res.end(JSON.stringify({
+          'player.name': global.lx.config['player.name'] || 'LX Music Web',
           'player.enableAuth': global.lx.config['player.enableAuth'] || false,
           'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'] || false,
           'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'] || false,
@@ -5838,26 +5939,61 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
-      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session）
+      // [新增] Web播放器认证 API（颁发 HttpOnly Cookie Session，支持用户账号登录 / 播放器访问密码双模式）
       if (pathname === '/api/music/auth' && req.method === 'POST') {
         void readBody(req).then(body => {
           try {
-            const { password } = JSON.parse(body)
-            const correctPassword = global.lx.config['player.password'] || ''
+            const { password, username, mode } = JSON.parse(body)
+            const correctPlayerPassword = global.lx.config['player.password'] || ''
+            const isPlayerMode = mode === 'player' || (!username && mode !== 'user')
 
-            if (password === correctPassword) {
+            // 1. 播放器访问密码模式（无账号访客进入）
+            if (isPlayerMode) {
+              if (correctPlayerPassword && password === correctPlayerPassword) {
+                const sessionId = generateSessionId()
+                playerSessions.set(sessionId, { createdAt: Date.now(), user: null })
+                loginLog.info(`Player guest login success from ${ip}`)
+                res.writeHead(200, {
+                  'Content-Type': 'application/json',
+                  'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
+                })
+                res.end(JSON.stringify({
+                  success: true,
+                  mode: 'player',
+                  username: null,
+                  token: null
+                }))
+                return
+              } else {
+                loginLog.warn(`Player guest login failed from ${ip}`)
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: '播放器访问密码错误' }))
+                return
+              }
+            }
+
+            // 2. 用户账号登录模式
+            const matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
+            if (matchedUser) {
               const sessionId = generateSessionId()
-              playerSessions.set(sessionId, { createdAt: Date.now() })
-              loginLog.info(`Player login success from ${ip}`)
+              playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser.name })
+              loginLog.info(`Player login success (${matchedUser.name}) from ${ip}`)
+              const userToken = generateSessionId()
+              userSessions.set(userToken, { username: matchedUser.name, createdAt: Date.now() })
               res.writeHead(200, {
                 'Content-Type': 'application/json',
-                'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${SESSION_TTL / 1000}`
+                'Set-Cookie': `${SESSION_COOKIE_NAME}=${sessionId}; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=${SESSION_TTL / 1000}`
               })
-              res.end(JSON.stringify({ success: true }))
+              res.end(JSON.stringify({
+                success: true,
+                mode: 'user',
+                username: matchedUser.name,
+                token: userToken
+              }))
             } else {
-              loginLog.warn(`Player login failed from ${ip}`)
+              loginLog.warn(`Player user login failed (${username || 'unknown'}) from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify({ success: false }))
+              res.end(JSON.stringify({ success: false, message: '账号或密码错误' }))
             }
           } catch (err: any) {
             res.writeHead(500)
@@ -5874,7 +6010,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (sessionId) playerSessions.delete(sessionId)
         res.writeHead(200, {
           'Content-Type': 'application/json',
-          'Set-Cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0`
+          'Set-Cookie': `${SESSION_COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Secure; Max-Age=0`
         })
         res.end(JSON.stringify({ success: true }))
         return
@@ -5895,7 +6031,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const type = urlObj.searchParams.get('type') || 'song' // 新增 type 参数: song, singer, album, playlist
         const limit = parseInt(urlObj.searchParams.get('limit') || '20')
         const page = parseInt(urlObj.searchParams.get('page') || '1')
-        const fetchPages = parseInt(urlObj.searchParams.get('pages') || '1') // 新增：一次请求多少页
+        // 调用方显式要了 N 条时只取够 N 条（如本地音乐匹配一首歌），不传就是取该平台全量
+        const requestedLimit = urlObj.searchParams.get('limit') ? parseInt(urlObj.searchParams.get('limit') || '0') : 0
 
         if (!name) {
           res.writeHead(400); res.end('Missing name'); return
@@ -5906,45 +6043,114 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             throw new Error(`Source ${source} is not supported`)
           }
 
-          let result
+          // 搜索结果统一成对象返回：list 是去重后的条目，total/allPage 是平台自报值（可能不可信），
+          // fetchedPages 是本次实际取到的页数，hasMore 表示被页数墙或预算截断、还有数据没取到。
+          let result: any
           if (type === 'song') {
-            const PAGE_SIZE = 20
-            let allSongs: any[] = []
-            // 根据前端给定的起始页 (page) 和 请求量 (pages) 进行拉取
-            const startPage = page
-            const endPage = page + fetchPages - 1
+            const api = musicSdk[source].musicSearch
+            // 调用方显式带了 limit 时，走「第 page 页、每页 limit 条」的传统分页（本地音乐的在线匹配靠它翻页）；
+            // 不带 limit 才是搜索界面的用法：按各源 musicSearch.js 里实测出的 limit 取全量。
+            const singlePage = requestedLimit > 0
+            const startPage = singlePage ? page : 1
+            const pageSize: number = singlePage
+              ? Math.min(requestedLimit, api.limit || 20)
+              : (api.limit || 20)
+            const startedAt = Date.now()
+            const first: any = await api.search(name, startPage, pageSize)
+            const firstList: any[] = (first && first.list) || []
+            const rawTotal = first && typeof first.total === 'number' && first.total > 0 ? first.total : firstList.length
+            const rawAllPage = first && typeof first.allPage === 'number' && first.allPage > 0
+              ? first.allPage
+              : Math.ceil(rawTotal / pageSize)
+            // 平台自报的 total/allPage 不可全信（tx 报 45206 条 = 754 页，实测取不到那么多），
+            // 所以取数上限是「allPage 推算 + 页数墙 + 条数预算 + 时间预算」四重收紧，而不是照 total 硬翻页。
+            const SEARCH_PAGE_CAP = 60
+            const SEARCH_MAX_ITEMS = 4000
+            const SEARCH_MAX_MS = 15000
+            const capPages = singlePage ? startPage : Math.max(1, Math.min(
+              Number.isFinite(rawAllPage) ? rawAllPage : 1,
+              SEARCH_PAGE_CAP
+            ))
 
-            for (let p = startPage; p <= endPage; p++) {
-              const searchData = await musicSdk[source].musicSearch.search(name, p, PAGE_SIZE)
-              const pageList: any[] = searchData.list || []
-              allSongs = allSongs.concat(pageList)
-              // 如果本页返回数量小于 PAGE_SIZE，说明已经是最后页
-              if (pageList.length < PAGE_SIZE) break
+            const seen = new Set<string>()
+            const allSongs: any[] = []
+            const pushItems = (pageList: any[]): number => {
+              // 返回本页贡献的新条目数（0 表示整页都是已见过的 → 平台已开始回绕）
+              let fresh = 0
+              for (const item of pageList) {
+                const key = `${source}_${item.id ?? item.songmid ?? item.mid ?? item.hash ?? item.copyrightId ?? item.strMediaMid ?? `${item.name || ''}-${item.singer || ''}`}`
+                if (seen.has(key)) continue
+                seen.add(key)
+                allSongs.push(item)
+                fresh++
+              }
+              return fresh
             }
-            result = allSongs
+            pushItems(firstList)
+
+            // 必须串行翻页：2026-10-09 实测并发（3 路）取 kw 同一关键词三次只拿回 3000/2000/2000 条
+            // （串行是 3045 条），tx 并发 60 页只回 240 条 —— 平台在快速连发时会返回重复或漂移的页。
+            let fetchedPages = startPage
+            let stopReason = 'all-pages'
+            for (let p = startPage + 1; p <= capPages; p++) {
+              if (Date.now() - startedAt > SEARCH_MAX_MS) { stopReason = 'time-budget'; break }
+              if (allSongs.length >= SEARCH_MAX_ITEMS) { stopReason = 'item-budget'; break }
+              let pageData: any
+              try {
+                pageData = await api.search(name, p, pageSize)
+              } catch (e) {
+                // 平台自己的页数墙（kg 的 try max num 等）：撞到就到此为止
+                stopReason = 'page-wall'
+                break
+              }
+              const pageList: any[] = (pageData && pageData.list) || []
+              fetchedPages = p
+              if (pageList.length === 0) { stopReason = 'empty-page'; break }
+              if (pushItems(pageList) === 0) { stopReason = 'repeat-page'; break }
+            }
+            if (singlePage) {
+              stopReason = 'single-page'
+            } else if (fetchedPages < capPages && stopReason === 'all-pages') {
+              stopReason = 'page-cap'
+            }
+
+            const list = requestedLimit > 0 ? allSongs.slice(0, requestedLimit) : allSongs
+            // 取完一整轮（empty-page/repeat-page/all-pages）就不算还有剩，别用「条数 < 平台报的 total」误判：
+            // kw 报 3600 条里本身就含跨页重复，串行取到第 18 页也只有 3045 条新内容。
+            const finished = stopReason === 'empty-page' || stopReason === 'repeat-page' || stopReason === 'all-pages'
+            result = {
+              list,
+              total: rawTotal,
+              allPage: rawAllPage,
+              pageSize,
+              fetchedPages,
+              stopReason,
+              hasMore: singlePage ? firstList.length >= pageSize : !finished,
+              source,
+            }
           } else if (type === 'singer') {
             if (!musicSdk[source].extendSearch || !musicSdk[source].extendSearch.searchSinger) {
               throw new Error(`Source ${source} does not support singer search`)
             }
             const searchData = await musicSdk[source].extendSearch.searchSinger(name, page, limit)
-            result = searchData.list || []
+            result = { list: searchData.list || [], total: searchData.total || 0, allPage: searchData.allPage || 1, pageSize: limit, fetchedPages: page, source }
           } else if (type === 'album') {
             if (!musicSdk[source].extendSearch || !musicSdk[source].extendSearch.searchAlbum) {
               throw new Error(`Source ${source} does not support album search`)
             }
             const searchData = await musicSdk[source].extendSearch.searchAlbum(name, page, limit)
-            result = searchData.list || []
+            result = { list: searchData.list || [], total: searchData.total || 0, allPage: searchData.allPage || 1, pageSize: limit, fetchedPages: page, source }
           } else if (type === 'playlist') {
             if (!musicSdk[source].extendSearch || !musicSdk[source].extendSearch.searchPlaylist) {
               throw new Error(`Source ${source} does not support playlist search`)
             }
             const searchData = await musicSdk[source].extendSearch.searchPlaylist(name, page, limit)
-            result = searchData.list || []
+            result = { list: searchData.list || [], total: searchData.total || 0, allPage: searchData.allPage || 1, pageSize: limit, fetchedPages: page, source }
           } else {
             throw new Error(`Invalid search type: ${type}`)
           }
 
-          fs.appendFileSync(path.join(process.cwd(), 'debug.txt'), `[Search] Source: ${source}, Type: ${type}, Query: ${name}, StartPage: ${page}, Pages: ${fetchPages}, Result Count: ${result.length}\n`)
+          fs.appendFileSync(path.join(process.cwd(), 'debug.txt'), `[Search] Source: ${source}, Type: ${type}, Query: ${name}, FetchedPages: ${result.fetchedPages}, Returned: ${result.list.length}, PlatformTotal: ${result.total}\n`)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (err: any) {
@@ -6682,7 +6888,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 管理员身份验证接口
       if (pathname === '/api/admin/verify' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth === global.lx.config['frontend.password']) {
+        if (auth === global.lx.config['admin.password']) {
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
         } else {
@@ -6700,7 +6906,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       if (pathname.startsWith('/api/custom-source/') && req.method === 'POST' && pathname !== '/api/custom-source/validate') {
         if (global.lx.config['user.enablePublicRestriction']) {
           const auth = req.headers['x-frontend-auth']
-          const isAdmin = auth === global.lx.config['frontend.password']
+          const isAdmin = auth === global.lx.config['admin.password']
           const user = verifyUserAuth(req)
           if (!isAdmin && !user) {
             res.writeHead(403, { 'Content-Type': 'application/json' })
@@ -6722,7 +6928,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         // 鉴权逻辑：如果开启了页面公开访问限制
         if (global.lx.config['user.enablePublicRestriction']) {
           const auth = req.headers['x-frontend-auth']
-          const isAdmin = auth === global.lx.config['frontend.password']
+          const isAdmin = auth === global.lx.config['admin.password']
           const user = verifyUserAuth(req)
           if (!isAdmin && !user) {
             res.writeHead(403, { 'Content-Type': 'application/json' })
@@ -6752,7 +6958,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         // [修改] 优先从 Header 获取，如果没有则尝试从 URL 参数获取 (用于支持下载和预览)
         const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
 
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -6910,7 +7116,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Configuration API
       if (pathname === '/api/config') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -6936,7 +7142,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
             'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
-            'frontend.password': global.lx.config['frontend.password'],
+            'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
+            'admin.password': global.lx.config['admin.password'],
+            'player.name': global.lx.config['player.name'] || 'LX Music Web',
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
             'player.password': global.lx.config['player.password'] || '',
             'webdav.enable': global.lx.config['webdav.enable'] ?? false,
@@ -7030,6 +7238,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['user.enableLoginCacheRestriction'] !== undefined) global.lx.config['user.enableLoginCacheRestriction'] = newConfig['user.enableLoginCacheRestriction']
               if (newConfig['user.enableCacheSizeLimit'] !== undefined) global.lx.config['user.enableCacheSizeLimit'] = newConfig['user.enableCacheSizeLimit']
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
+              if (newConfig['cache.maxAgeDays'] !== undefined) global.lx.config['cache.maxAgeDays'] = Math.max(0, parseInt(newConfig['cache.maxAgeDays']) || 0)
               if (newConfig['system.allowUnsafeVM'] !== undefined) global.lx.config['system.allowUnsafeVM'] = newConfig['system.allowUnsafeVM']
 
               let warning = ''
@@ -7049,9 +7258,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   warning += '检测到重复密码！开启“根路径”模式要求所有用户密码唯一，否则可能导致连接错误。'
                 }
               }
-              if (newConfig['frontend.password'] !== undefined) global.lx.config['frontend.password'] = newConfig['frontend.password']
+              if (newConfig['admin.password'] !== undefined) global.lx.config['admin.password'] = newConfig['admin.password']
 
               // Web播放器配置
+              if (newConfig['player.name'] !== undefined) global.lx.config['player.name'] = newConfig['player.name']
               if (newConfig['player.enableAuth'] !== undefined) global.lx.config['player.enableAuth'] = newConfig['player.enableAuth']
               if (newConfig['player.password'] !== undefined) global.lx.config['player.password'] = newConfig['player.password']
 
@@ -7081,18 +7291,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               if (newConfig['proxy.all.enabled'] !== undefined) global.lx.config['proxy.all.enabled'] = newConfig['proxy.all.enabled']
               if (newConfig['proxy.all.address'] !== undefined) global.lx.config['proxy.all.address'] = validateAndCleanProxy(newConfig['proxy.all.address'])
-              // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
-              ;(['music', 'customSource', 'app'] as const).forEach(cat => {
-                const cfg: any = global.lx.config
-                const kEnabled = `proxy.${cat}.enabled`
-                const kAddress = `proxy.${cat}.address`
-                if (newConfig[kEnabled] !== undefined) {
-                  cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
-                }
-                if (newConfig[kAddress] !== undefined) {
-                  cfg[kAddress] = newConfig[kAddress] === null ? '' : validateAndCleanProxy(newConfig[kAddress])
-                }
-              })
+                // 细分代理：null 表示「沿用统一开关」(写回 undefined，序列化时省略)
+                ; (['music', 'customSource', 'app'] as const).forEach(cat => {
+                  const cfg: any = global.lx.config
+                  const kEnabled = `proxy.${cat}.enabled`
+                  const kAddress = `proxy.${cat}.address`
+                  if (newConfig[kEnabled] !== undefined) {
+                    cfg[kEnabled] = newConfig[kEnabled] === null ? undefined : !!newConfig[kEnabled]
+                  }
+                  if (newConfig[kAddress] !== undefined) {
+                    cfg[kAddress] = newConfig[kAddress] === null ? '' : validateAndCleanProxy(newConfig[kAddress])
+                  }
+                })
 
               if (newConfig['admin.path'] !== undefined || newConfig['player.path'] !== undefined) {
                 const adminPath = (newConfig['admin.path'] !== undefined ? newConfig['admin.path'] : (global.lx.config['admin.path'] ?? '/admin'))
@@ -7263,11 +7473,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
                 'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
                 'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
+                'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
                 maxSnapshotNum: global.lx.config.maxSnapshotNum,
                 'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
                 'debug.enabled': global.lx.config['debug.enabled'] || false,
                 disableTelemetry: global.lx.config.disableTelemetry,
-                'frontend.password': global.lx.config['frontend.password'],
+                'admin.password': global.lx.config['admin.password'],
+                'player.name': global.lx.config['player.name'],
                 'player.enableAuth': global.lx.config['player.enableAuth'],
                 'player.password': global.lx.config['player.password'],
                 'webdav.enable': global.lx.config['webdav.enable'],
@@ -7367,7 +7579,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 获取备份列表及状态
       if (pathname === '/api/config/backups' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7437,7 +7649,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 手动立即备份
       if (pathname === '/api/config/backup-now' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7467,7 +7679,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 下载指定备份文件
       if (pathname === '/api/config/backups/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7507,7 +7719,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 删除指定备份文件
       if (pathname.startsWith('/api/config/backups/') && req.method === 'DELETE') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7543,7 +7755,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [配置备份管理 API] 从备份文件还原配置
       if (pathname === '/api/config/backups/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
           return
@@ -7597,7 +7809,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Test Proxy API
       if (pathname === '/api/config/test-proxy' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7650,7 +7862,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Logs API
       if (pathname === '/api/logs' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7679,7 +7891,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Stats API
       if (pathname === '/api/stats' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7703,7 +7915,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Test Connection API
       if (pathname === '/api/webdav/test' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7726,7 +7938,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Sync File API
       if (pathname === '/api/webdav/sync-file' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7763,7 +7975,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Backup API
       if (pathname === '/api/webdav/backup' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7788,7 +8000,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Sync All Files API
       if (pathname === '/api/webdav/sync' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7811,7 +8023,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Backups List API
       if (pathname === '/api/webdav/backups' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7840,7 +8052,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Delete Backup API
       if (pathname === '/api/webdav/backup' && req.method === 'DELETE') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7885,7 +8097,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Restore API
       if (pathname === '/api/webdav/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7924,7 +8136,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Logs API
       if (pathname === '/api/webdav/logs' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7948,7 +8160,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // WebDAV Progress SSE API
       if (pathname === '/api/webdav/progress' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -7982,7 +8194,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 本地备份下载 API
       if (pathname === '/api/backup/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401); res.end('Unauthorized'); return
         }
 
@@ -8017,7 +8229,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 本地备份还原 API
       if (pathname === '/api/backup/upload' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401); res.end('Unauthorized'); return
         }
 
@@ -8059,7 +8271,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] 管理重载 API
       if (pathname === '/api/admin/reload' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401); res.end('Unauthorized'); return
         }
 
@@ -8076,7 +8288,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // Restart Server API
       if (pathname === '/api/restart' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8108,7 +8320,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - List Files
       if (pathname === '/api/files' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8151,7 +8363,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - Download File
       if (pathname === '/api/files/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8183,7 +8395,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - Create/Update File
       if (pathname === '/api/files' && (req.method === 'POST' || req.method === 'PUT')) {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8223,7 +8435,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // File Management - Delete File
       if (pathname === '/api/files' && req.method === 'DELETE') {
         const auth = req.headers['x-frontend-auth']
-        if (auth !== global.lx.config['frontend.password']) {
+        if (auth !== global.lx.config['admin.password']) {
           res.writeHead(401)
           res.end('Unauthorized')
           return
@@ -8744,11 +8956,11 @@ export const startServer = async (port: number, ip: string) => {
     if (fs.existsSync(settingsPath)) {
       const savedSettings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
       if (savedSettings.serverCacheLocation) {
-        fileCache.setCacheLocation(savedSettings.serverCacheLocation)
+        fileCache.setUserCacheLocation('_open', savedSettings.serverCacheLocation)
         console.log(`[缓存] 从配置恢复服务器缓存路径: ${savedSettings.serverCacheLocation}`)
       }
       if (savedSettings.serverCacheNamingPattern) {
-        const normalizedNamingPattern = fileCache.setNamingPattern(savedSettings.serverCacheNamingPattern)
+        const normalizedNamingPattern = fileCache.setUserNamingPattern('_open', savedSettings.serverCacheNamingPattern)
         console.log(`[缓存] 从配置恢复缓存文件命名模式: ${normalizedNamingPattern}`)
       }
     }
@@ -8838,3 +9050,70 @@ export const removeDevice = async (userName: string, clientId: string) => {
   const userSpace = getUserSpace(userName)
   await userSpace.removeDevice(clientId)
 }
+
+// ===== 缓存生命周期自动过期清理任务 (支持 0 永久保留) =====
+const getCacheRetentionMs = () => {
+  const daysConfig = global.lx.config && typeof global.lx.config['cache.maxAgeDays'] !== 'undefined'
+    ? Number(global.lx.config['cache.maxAgeDays'])
+    : 14
+  if (isNaN(daysConfig) || daysConfig <= 0) return 0 // 0 表示永久保留，不清理
+  return daysConfig * 24 * 60 * 60 * 1000
+}
+
+const cleanExpiredCacheFiles = async () => {
+  try {
+    const retentionMs = getCacheRetentionMs()
+    if (retentionMs === 0) {
+      // 设置为 0，永久保留缓存
+      return
+    }
+
+    const cacheDirs = [
+      path.join(process.cwd(), 'cache'),
+      path.join(global.lx.dataPath, 'cache'),
+    ]
+    const now = Date.now()
+    let totalCleaned = 0
+    let totalBytesFreed = 0
+
+    const scanAndCleanAsync = async (dir: string) => {
+      try {
+        const exists = await fs.promises.access(dir).then(() => true).catch(() => false)
+        if (!exists) return
+        const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+        for (const entry of entries) {
+          const fullPath = path.join(dir, entry.name)
+          if (entry.isDirectory()) {
+            await scanAndCleanAsync(fullPath)
+            await new Promise(resolve => setImmediate(resolve))
+          } else if (entry.isFile()) {
+            if (entry.name === 'cache_index.json' || entry.name.endsWith('.json')) continue
+            try {
+              const stats = await fs.promises.stat(fullPath)
+              const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
+              if (now - fileTime > retentionMs) {
+                await fs.promises.unlink(fullPath)
+                totalCleaned++
+                totalBytesFreed += stats.size
+              }
+            } catch (e) { }
+          }
+        }
+      } catch (e) { }
+    }
+
+    const uniqueDirs = Array.from(new Set(cacheDirs))
+    for (const d of uniqueDirs) {
+      await scanAndCleanAsync(d)
+    }
+    if (totalCleaned > 0) {
+      const retentionDays = Math.round(retentionMs / (24 * 60 * 60 * 1000))
+      console.log(`[文件缓存] [${retentionDays}天过期清理] 成功清理 ${totalCleaned} 个过期缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
+    }
+  } catch (err) {
+    console.error('[文件缓存] 自动清理异常:', err)
+  }
+}
+
+setTimeout(() => void cleanExpiredCacheFiles(), 10000)
+setInterval(() => void cleanExpiredCacheFiles(), 12 * 60 * 60 * 1000)

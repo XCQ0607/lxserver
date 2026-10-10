@@ -11,7 +11,7 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 1. **运行时环境变量 (Environment Variables)**：具有极高优先级。例如 `PORT=9527`。
 2. **WebDAV 云端同步数据 (WebDAV Cloud Data)**：若配置了 WebDAV，启动时系统会尝试从云端恢复。**云端恢复的内容会覆盖本地 `config.js` 并触发热重载**。
 3. **显式自定义配置文件路径 (Custom Config File)**：通过 `CONFIG_PATH` 指定的文件。
-4. **全局默认入口配置 (Global Config.js)**：项目根目录下的 `config.js`。
+4. **全局默认入口配置 (Global Config.js)**：项目数据目录或根目录下的 `data/config.js`。
 5. **系统级默认常量 (Default Consts)**：`src/defaultConfig.ts`。
 
 ---
@@ -24,17 +24,17 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 
 此模块管理 Node.js 监听进程以及网络栈的基础设定。
 
-| 环境变量映射键 (ENV)  | 系统默认值    | 数据类型 | 作用域与适用场景                                                                                                                                    |
-| :-------------------- | :------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT`              | `9527`      | Integer  | **服务监听端口**。建议避免使用主机中其他高频占用的端口（如 80、443、3306）。                                                                  |
-| `BIND_IP`           | `0.0.0.0`   | String   | **服务绑定的 IP 接口范围**。设定为 `127.0.0.1` 仅接受本机 Lookback 调用；设定为 `0.0.0.0` 意味着同时监听主机所有内外部可用网络适配器。    |
-| `ADMIN_PATH`        | `'/admin'`  | String   | **后台管理界面访问路径**。默认为 `/admin`。                                                                                                    |
-| `PLAYER_PATH`       | `'/'`       | String   | **Web 播放器访问路径**。默认为根路径 `/`。                                                                                                     |
-| `SERVER_NAME`       | `lxserver` | String | **同步服务名称**。在客户端连接时显示的服务器标识名称。 |
-| `PROXY_HEADER`      | `x-real-ip` | String   | **逆向代理远端 IP 穿透标识**。当系统运行于 Nginx 等反向代理或负载均衡器后方时，用于提取客户端真实的源端 IP 地址，保障设备审计日志的准确溯源。 |
+| 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
+| :-------------------- | :------------ | :------- | :------------------------------------------------------------------------------------------------------------------ |
+| `PORT` | `9527` | Integer | **服务监听端口**。建议避免使用主机中其他高频占用的端口（如 80、443、3306）。 |
+| `BIND_IP` | `0.0.0.0` | String | **服务绑定 IP 接口范围**。设定为 `127.0.0.1` 仅接受本机 Lookback 调用；设定为 `0.0.0.0` 意味着同时监听主机所有内外部可用网络适配器。 |
+| `ADMIN_PATH` | `'/admin'` | String | **后台管理界面访问路径**。默认为 `/admin`。 |
+| `PLAYER_PATH` | `'/'` | String | **Web 播放器访问路径**。默认为根路径 `/`。 |
+| `SERVER_NAME` | `LX Sync Server` | String | **同步服务名称**。在客户端配对连接时显示的服务器标识名称，并动态应用于管理控制台标题与登录卡片标题。 |
+| `PROXY_HEADER` | `x-real-ip` | String | **反向代理远端 IP 穿透标头**。当系统运行在 Nginx 等反向代理或负载均衡器后方时，用于提取客户端真实的源端 IP 地址，保障设备审计日志的准确溯源。 |
 | `PROXY_ALL_ENABLED` | `false` | Boolean | **启用全局外发请求代理**。开启后，服务端发起的网络请求（如搜索、播放链接解析）将通过指定的代理服务器。 |
 | `PROXY_ALL_ADDRESS` | `''` | String | **代理地址**。支持 `http://` 或 `socks5://` 协议，如 `socks5://127.0.0.1:10808`。 |
-| `DISABLE_TELEMETRY` | `false`     | Boolean  | **系统遥测反馈熔断器**。置为 `true` 将完全阻断系统与外界节点之间的匿名状态探针报文，同时禁用所有的系统级别新版本更新或公告下发。            |
+| `DISABLE_TELEMETRY` | `false` | Boolean | **系统遥测反馈熔断器**。置为 `true` 将完全阻断系统与外界节点之间的匿名状态探针报文，同时禁用所有的系统级别新版本更新或公告下发。 |
 
 > 💡 **布尔类型环境变量格式说明**：
 > 所有布尔类型的环境变量支持不区分大小写的多种灵活写法：
@@ -45,44 +45,54 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 
 此模块涉及对连接客户端的状态监控以及物理存储层面的隔离规范。
 
-| 环境变量映射键 (ENV)  | 系统默认值 | 数据类型 | 作用域与适用场景                                                                                                                                                                |
+| 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
 | :-------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FRONTEND_PASSWORD` | `123456` | String   | **主控台 Root 级加密通行凭证**。用于登录管理后台（默认 `/admin`）的管理员密码，首次建站建议立即修改。                                        |
-| `MAX_SNAPSHOT_NUM`  | `10`     | Integer  | **时间快照保留阈值设定**。系统留存的历史归档快照队列最大允许长度。超出该队列限额的早期历史将会被底层定时 GC 任务循环丢弃。                                                |
+| `ADMIN_PASSWORD` | `123456` | String | **主控室 Root 级加密通行凭证**。用于登录管理后台（默认 `/admin`）的管理员密码，首次建站建议立即修改。 |
+| `MAX_SNAPSHOT_NUM` | `10` | Integer | **时间快照保留阈值设定**。系统留存的历史归档快照队列最大允许长度。超出该队列限额的早期历史将会被底层定时 GC 任务循环丢弃。 |
 | `DATA_PATH` | `./data` | String | **数据目录路径**。指定持久化数据（如 users.json, 歌单快照等）的存储位置。 |
 | `LOG_PATH` | `./logs` | String | **日志目录路径**。指定系统运行日志的存储位置。 |
-| `CONFIG_PATH` | `''` | String | **外部配置路径**。手动指定一个额外的 `config.js` 文件路径。 |
-| `USER_ENABLE_PATH`  | `true`   | Boolean  | **启用用户路径模式（推荐）**。开启后客户端连接 URL 为 `http://ip:port/<用户名>`，数据按用户隔离，**允许多个不同用户使用相同密码**。 |
-| `USER_ENABLE_ROOT`  | `false`  | Boolean  | **启用根路径模式**。开启后客户端连接 URL 为 `http://ip:port`（无用户名），服务端自动根据密码匹配用户。**开启时要求所有用户密码必须唯一**。 |
+| `CONFIG_PATH` | `''` | String | **外部配置路径**。手动指定一个额外的 `config.js` 外部配置文件绝对路径。 |
+| `USER_ENABLE_PATH` | `true` | Boolean | **启用用户路径模式（推荐）**。开启后客户端连接 URL 为 `http://ip:port/<用户名>`，数据按用户隔离，**允许多个不同用户使用相同密码**。 |
+| `USER_ENABLE_ROOT` | `false` | Boolean | **启用根路径模式**。开启后客户端连接 URL 为 `http://ip:port`（无用户名），服务端自动根据密码匹配用户，**开启时要求所有用户密码必须唯一**。 |
 | `ENABLE_PUBLIC_USER_RESTRICTION` | `true` | Boolean | **限制公开用户权限**。开启后，非管理员公开用户将被限制上传、删除公开源、缓存到服务器等敏感操作。 |
 | `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `false` | Boolean | **开启非管理员访问本地音乐**。开启后，允许未登录管理员的公开账号访问本地音乐。 |
 | `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `true` | Boolean | **开启非管理员浏览器下载**。开启后，允许未登录管理员的公开/普通账号使用浏览器下载歌曲。 |
 | `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `false` | Boolean | **开启非管理员服务器缓存**。开启后，允许未登录管理员的公开/普通账号将歌曲缓存或写入服务器存储。 |
+| `ENABLE_PUBLIC_FAVORITES` | `false` | Boolean | **开启公开收藏和歌曲**。开启后允许公开/未登录用户查看及播放公开收藏。 |
+| `ENABLE_PUBLIC_NON_ADMIN_ACCESS` | `false` | Boolean | **开启非管理员访问公开收藏和歌曲**。开启后允许未登录管理员的公开账号查看公开收藏。 |
+| `ENABLE_CUSTOM_MUSIC_DIR` | `false` | Boolean | **开启自定义歌曲目录总开关**。开启后允许优先使用自定义目录加载与存放歌曲。 |
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `false` | Boolean | **限制登录用户缓存设置**。开启后，非管理员登录用户将被限制修改核心缓存项（缓存歌词、缓存歌曲链接、缓存歌曲文件及仅下载模式）。 |
 | `ENABLE_CACHE_SIZE_LIMIT` | `false` | Boolean | **启用自动缓存清理**。开启后，系统将监控并限制用户缓存总量，超出阈值时按 LRU 顺序自动删除最旧文件。 |
 | `CACHE_SIZE_LIMIT` | `2000` | Integer | **缓存容量阈值 (MB)**。自动清理机制生效的容量上限。 |
 
-### 三、 WebDAV 配置
+### 三、 WebDAV 云端备份与同步
 
-只有下述环境变量群组存在被赋权（特别是 `WEBDAV_URL` 链路合法生效）时，服务底层的周期轮询异步守护进程才会被完全唤醒：
+只有下述环境变量群组存在有效配置（特别是 `WEBDAV_URL` 链路合法生效）时，服务底层的周期轮询异步守护进程才会被完全唤醒：
 
-| 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景                                                                                               |
+| 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
 | :------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------- |
-| `WEBDAV_URL`       | `''`     | String   | 各类实现了标准 WebDAV 协议网关接口的完整 URI（含 HTTPS 声明），例如：`https://dav.jianguoyun.com/dav/Sync`。 |
-| `WEBDAV_USERNAME`  | `''`     | String   | 用于 WebDAV 服务节点握手鉴权的授权标识名。                                                                     |
-| `WEBDAV_PASSWORD`  | `''`     | String   | 远端 WebDAV 网关通行密匙（强烈推荐使用独立的应用专用授权密码以降低泄漏次生风险）。                             |
-| `SYNC_INTERVAL`    | `60`     | Integer  | 触发全量热备、拉取比对同步推流周期的冷缩缓冲定时参数（单位：分钟）。                                           |
+| `WEBDAV_ENABLE` | `false` | Boolean | **是否启用 WebDAV 同步与备份**。 |
+| `WEBDAV_URL` | `''` | String | 各类实现了标准 WebDAV 协议网关接口的完整 URI（含 HTTPS 声明），例如：`https://dav.jianguoyun.com/dav/Sync`。 |
+| `WEBDAV_USERNAME` | `''` | String | 用于 WebDAV 服务节点握手鉴权的授权标识名称。 |
+| `WEBDAV_PASSWORD` | `''` | String | 远端 WebDAV 网关通行密匙（强烈推荐使用独立的应用专用授权密码以降低泄露次生风险）。 |
+| `WEBDAV_SYNC_PATH` | `'/lx-sync'` | String | WebDAV 增量同步远端路径。 |
+| `WEBDAV_BACKUP_PATH` | `'/lx-sync-backups'` | String | WebDAV 全量备份远端路径。 |
+| `SYNC_INTERVAL` | `60` | Integer | 触发全量热备、拉取比对同步推流周期的冷缩缓冲定时参数（单位：分钟）。 |
+| `BACKUP_INTERVAL` | `24` | Integer | 全量备份间隔（单位：小时）。 |
+| `WEBDAV_EXCLUDE_CACHE` | `false` | Boolean | **排除缓存目录同步**（`data/<用户>/cache`）。开启后各用户缓存目录不参与增量同步与全量备份。 |
+| `WEBDAV_EXCLUDE_MUSIC` | `false` | Boolean | **排除音乐下载目录同步**（`data/<用户>/music`）。开启后各用户下载歌曲目录不参与增量同步与全量备份。 |
 
 > 🔖 **状态无感迁移与初始化机制 (Stateful Resurrection)**：
 > 1. **云端优先恢复**：若启动时探测到此组变量，系统会优先尝试从云端拉取存档。
-> 2. **环境驱动落盘**：若云端配置为空（如首次在 Docker/云端部署），系统会**自动将当前运行环境中的生效配置（如通过环境变量设置的端口、密码等）持久化写入数据目录 `data/config.js` 并同步上传至云端**进行初始化。这确保了您仅通过环境变量即可完成云端数据的首次“开荒”建立。
+> 2. **环境驱动落盘**：若云端配置为空（如首次在 Docker/云端部署），系统将**自动将当前运行环境中的生效配置（如通过环境变量设置的端口、密码等）持久化写入数据目录 `data/config.js` 并同步上传至云端**进行初始化。这确保了您仅通过环境变量即可完成云端数据的首次建立。
 
 ### 四、 Web 端复合媒体播放空间防护逻辑
 
-| 环境变量映射键 (ENV)      | 系统默认值 | 数据类型 | 作用域与适用场景                                                                                                    |
+| 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
 | :------------------------ | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------ |
-| `ENABLE_WEBPLAYER_AUTH` | `false`  | Boolean  | 是否针对于衍生开辟出的浏览器访问界面（默认根路径 `/` 渲染的应用实体）建立起单独的阻入型防御围栏墙，拒绝散客直面。 |
-| `WEBPLAYER_PASSWORD`    | `123456` | String   | 上层鉴权模式若生效，则用以核对的单独密匙字典。这赋予管理员解耦听众层级与后端控制台不同级别的密钥能力。              |
+| `PLAYER_NAME` | `LX Music Web` | String | **Web 播放器名称**。应用于 Web 音乐播放器网页标题与登录卡片标题。 |
+| `ENABLE_WEBPLAYER_AUTH` | `false` | Boolean | 是否针对衍生开辟出的浏览器访问界面（默认根路径 `/` 渲染的应用实体）建立起单独的阻入型防御围栏，拒绝访客免密直接访问。 |
+| `WEBPLAYER_PASSWORD` | `123456` | String | 上层鉴权模式若生效，则用以核对的单独密钥字典。这赋予管理员解耦听众层级与后端控制台不同级别的密钥能力。 |
 
 ### 五、 播放列表管理策略
 
@@ -90,25 +100,35 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 | :--- | :--- | :--- | :--- |
 | `LIST_ADD_MUSIC_LOCATION_TYPE` | `top` | String | **新歌添加位置**。可选值为 `top`（添加到列表顶部）或 `bottom`（添加到列表底部）。 |
 
+### 六、 本地配置自动备份
+
+| 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
+| :--- | :--- | :--- | :--- |
+| `CONFIG_BACKUP_ENABLE` | `true` | Boolean | **是否启用本地配置自动备份**。每天自动生成一份 `config.js` 本地副本。 |
+| `CONFIG_BACKUP_RETENTION_DAYS` | `7` | Integer | **本地备份保留天数**。超出天数的历史配置备份将自动清理。 |
+| `CONFIG_BACKUP_DIR` | `''` | String | **备份存放目录**。留空则默认存于 `<data>/backups`。 |
+
 ### 七、 Subsonic 协议配置
 
 | 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
 | :--- | :--- | :--- | :--- |
 | `SUBSONIC_ENABLE` | `true` | Boolean | **启用 Subsonic 协议**。开启后允许使用兼容 Subsonic 协议的客户端连接。 |
 | `SUBSONIC_PATH` | `'/rest'` | String | **Subsonic 访问路径**。默认为 `/rest`。 |
+| `SUBSONIC_PORT` | `0` | Integer | **Subsonic 独立监听端口**。`0` 表示走主服务端口；大于 `0` 时单独监听该端口，仅允许 Subsonic 流量。 |
 | `SUBSONIC_ENABLE_DEBUG` | `false` | Boolean | **是否开启 Subsonic 调试日志模式**。默认为 `false`。 |
 | `SUBSONIC_ONLINE_SEARCH` | `true` | Boolean | **是否开启 Subsonic 在线全网搜索**。开启后支持自动在线匹配并播放库外资源。 |
 | `SUBSONIC_ONLINE_SEARCH_MODE` | `'fallback'` | String | **Subsonic 在线搜索模式**。可选值为 `fallback`（回退模式）、`merge`（合并模式）、`local_only`（仅本地）。 |
 | `SUBSONIC_ONLINE_SEARCH_SOURCES` | `'wy,tx,kw,kg,mg'` | String | **Subsonic 在线搜索默认音源列表**。多个音源用英文逗号分割。 |
+| `SUBSONIC_PUBLIC_LEADERBOARDS` | `false` | Boolean | **是否在 Subsonic 中公开在线排行榜**。开启后作为只读虚拟播放列表展示。 |
 | `SUBSONIC_LYRIC_TRANSLATION` | `true` | Boolean | **Subsonic 歌词中是否包含翻译**。开启后在 Subsonic 客户端中请求歌词时将带上翻译。 |
 
 ### 八、 业务功能扩展配置
 
 | 环境变量映射键 (ENV) | 系统默认值 | 数据类型 | 作用域与适用场景 |
 | :--- | :--- | :--- | :--- |
-| `SINGER_SOURCE_PRIORITY` | `'tx,wy'` | String | **歌手信息源优先级**。控制歌手详情、照片及 Mid 的获取源优先顺序。可选值为 `tx` (腾讯) 和 `wy` (网易)，多个来源用英文逗号隔开，排列靠前者优先尝试。 |
+| `SINGER_SOURCE_PRIORITY` | `'tx,wy'` | String | **歌手信息源优先级**。控制歌手详情、照片及 Mid 的获取源优先顺序。可选值为 `tx` (腾讯) 与 `wy` (网易)，多个来源用英文逗号隔开，排列靠前者优先尝试。 |
 | `ARTIST_MAX_FETCH_PAGES` | `20` | Integer | **歌手歌曲最大抓取页数**。抓取歌手全量歌曲时的页数上限。 |
-| `CACHE_NAMING_PATTERN` | `'simple'` | String | **缓存文件命名规则**。可选值为 `simple`（简单规则）或 `custom`（自定义规则）。 |
+| `CACHE_NAMING_PATTERN` | `'simple'` | String | **缓存文件命名规则**。可选值为 `simple`（简单规则）与 `custom`（自定义规则）。 |
 | `SYSTEM_ALLOW_UNSAFE_VM` | `false` | Boolean | **是否允许运行 VM 模式自定义源脚本**。开启后允许加载含有高风险 VM 沙箱特性的自定义源脚本（需注意安全风险）。 |
 
 ### 九、 (高阶特性) CLI 环境下静默预置账户
@@ -120,7 +140,7 @@ LX Music Sync Server 构建了统一的基础模型骨架（位于 `src/defaultC
 #### 环境变量派发启动示例：
 
 ```bash
-# 执行此系统声明，启动伴随的脚本任务会将此三个实体记录落地到数据系统进行授权签发。
+# 执行此系统声明，启动伴随的脚本任务会将此三个实体记录落地到数据系统进行授权签发：
 export LX_USER_foo="mypassword123"
 export LX_USER_bar="mypassword321"
 export LX_USER_hello="12345"

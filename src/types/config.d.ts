@@ -139,6 +139,10 @@ declare namespace LX {
      * 缓存空间限制大小 (MB)
      */
     'user.cacheSizeLimit'?: number
+    /**
+     * 缓存文件自动保留天数 (0 为永久保留)
+     */
+    'cache.maxAgeDays'?: number
 
     /**
      * 公共最大备份快照数
@@ -156,9 +160,9 @@ declare namespace LX {
     users: UserConfig[]
 
     /**
-     * 前端访问密码
+     * 管理员密码（用于登录管理控制台和在音乐播放器界面登录管理员）
      */
-    'frontend.password'?: string
+    'admin.password'?: string
 
     /**
      * 是否启用 WebDAV 同步服务
@@ -230,6 +234,11 @@ declare namespace LX {
      * 相对路径基于 data 目录，绝对路径直接使用
      */
     'snapshot.backupPath'?: string
+
+    /**
+     * Web播放器名称
+     */
+    'player.name'?: string
 
     /**
      * 是否开启Web播放器访问密码

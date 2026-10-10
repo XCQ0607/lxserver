@@ -30,7 +30,7 @@ This module manages the Node.js listening process and the basic settings of the 
 | `BIND_IP` | `0.0.0.0` | String | **Scope of service binding IP interfaces**. Set to `127.0.0.1` to accept only local Lookback calls; set to `0.0.0.0` means listening to all internal and external available network adapters of the host simultaneously. |
 | `ADMIN_PATH` | `'/admin'` | String | **Backend management interface path**. Default is `/admin`. |
 | `PLAYER_PATH` | `'/'` | String | **Web player access path**. Default is the root path `/`. |
-| `SERVER_NAME` | `lxserver` | String | **Sync service name**. Showed in client connections. |
+| `SERVER_NAME` | `LX Sync Server` | String | **Sync service name**. Showed in client connections, backend management console title, and admin login card title. |
 | `PROXY_HEADER` | `x-real-ip` | String | **Reverse proxy remote IP penetration identifier**. When the system runs behind reverse proxies or load balancers such as Nginx, it is used to extract the true client source IP address to ensure accurate traceability of equipment audit logs. |
 | `PROXY_ALL_ENABLED` | `false` | Boolean | **Enable global outgoing request proxy**. If enabled, network requests from the server (e.g. search, resolving) will go through the proxy. |
 | `PROXY_ALL_ADDRESS` | `''` | String | **Proxy address**. Supports `http://` or `socks5://`, e.g. `socks5://127.0.0.1:10808`. |
@@ -47,7 +47,7 @@ This module involves monitoring the status of connected clients and isolation sp
 
 | Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
 | :-------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `FRONTEND_PASSWORD` | `123456` | String | **Control Panel Admin Password**. Used to log into the management console (default `/admin`). Recommended to modify immediately on setup. |
+| `ADMIN_PASSWORD` | `123456` | String | **Admin Password**. Used to log into the management console (default `/admin`) and the music player admin login. Recommended to modify immediately on setup. |
 | `MAX_SNAPSHOT_NUM` | `10` | Integer | **Time snapshot retention threshold setting**. The maximum allowed length of the historical archive snapshot queue retained by the system. Early histories exceeding this queue limit will be cyclically discarded by the underlying timed GC task. |
 | `DATA_PATH` | `./data` | String | **Data directory path**. Specifies where persistence data (users.json, snapshots) are stored. |
 | `LOG_PATH` | `./logs` | String | **Log directory path**. Specifies where system logs are stored. |
@@ -81,6 +81,7 @@ The underlying periodic polling asynchronous daemon of the service will only be 
 
 | Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
 | :------------------------ | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------ |
+| `PLAYER_NAME` | `LX Music Web` | String | **Web player name**. Displayed on the web player tab title, and the player login card title. |
 | `ENABLE_WEBPLAYER_AUTH` | `false` | Boolean | Whether to establish a separate entry-blocking defense wall for the derived browser access interface (rendered under default root path `/`) and refuse direct face-to-face from visitors. |
 | `WEBPLAYER_PASSWORD` | `123456` | String | If the upper-level authentication mode takes effect, it is the separate password dictionary for verification. This gives administrators the ability to decouple keys for different levels of the audience layer and the backend control panel. |
 

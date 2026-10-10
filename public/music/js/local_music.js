@@ -901,7 +901,13 @@ window.LocalMusicManager = {
         }
 
         await this.fetchData();
+        window.ServerFileState?.repaintAll();
         if (btn) btn.classList.remove('fa-spin');
+    },
+
+    // 服务器文件发生增删（下载/缓存完成）后静默重拉，让列表里的目录状态及时更新
+    reloadAfterServerChange() {
+        this.fetchData(true);
     },
 
     toggleFilterPanel() {
@@ -1511,7 +1517,7 @@ window.LocalMusicManager = {
                     </button>
                     <!-- Download -->
                     <button data-lm-action="download" data-lm-index="${index}"
-                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-blue-500 hover:border-blue-300 transition-all shadow-sm shrink-0" title="保存到设备">
+                            class="w-7 h-7 flex items-center justify-center rounded-full t-bg-main border t-border-main t-text-main hover:text-blue-500 hover:border-blue-300 transition-all shadow-sm shrink-0" title="下载 / 保存到设备">
                         <i class="fas fa-download text-[10px]"></i>
                     </button>
                     <button data-lm-action="playlist" data-lm-index="${index}"
@@ -2159,19 +2165,47 @@ window.LocalMusicManager = {
 
 
 
-    downloadSingle(index) {
-        const item = this.displayData[index];
-        if (!item) return;
+    // 把服务器缓存条目还原成下载弹窗需要的歌曲信息
+    toSongInfo(item) {
+        const rawId = String(item.songmid || item.id || '')
+        // 索引里存的是规范化 ID（带 source_ 前缀），而音源解析要的是平台原生 ID
+        const prefix = `${item.source}_`
+        const nativeId = rawId.startsWith(prefix) ? rawId.slice(prefix.length) : rawId
+        const nativeIds = item.nativeIds || {}
+        return {
+            ...nativeIds,
+            id: rawId,
+            songmid: nativeIds.songmid || nativeId,
+            name: item.name,
+            singer: item.singer,
+            source: item.source,
+            albumName: item.album,
+            img: item.img,
+            interval: item.interval,
+            quality: item.quality,
+            types: item.quality ? { [item.quality]: {} } : {},
+            _serverFile: item.filename ? { filename: item.filename, folder: item.folder } : null
+        };
+    },
+
+    saveFileToDevice(item) {
         const username = this.getCurrentUsername();
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
         const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
-
         const a = document.createElement('a');
         a.href = url;
         a.download = item.filename;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
+    },
+
+    async downloadSingle(index) {
+        const item = this.displayData[index];
+        if (!item) return;
+        // 与搜索界面走同一条下载链路：浏览器下载 / 服务器下载 + 音质选择（含已缓存、已下载标注）
+        if (window.downloadSong) await downloadSong(this.toSongInfo(item));
+        else if (typeof showError === 'function') showError('下载功能未就绪');
     },
 
     batchDownloadToDevice() {
@@ -2182,20 +2216,9 @@ window.LocalMusicManager = {
             return;
         }
 
-        const username = this.getCurrentUsername();
-        const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
-
         // Use a slight delay to prevent browser from blocking multiple downloads
         targets.forEach((item, idx) => {
-            setTimeout(() => {
-                const url = `/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(item.filename)}?folder=${item.folder}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = item.filename;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-            }, idx * 500);
+            setTimeout(() => this.saveFileToDevice(item), idx * 500);
         });
 
         if (typeof showInfo === 'function') showInfo(`已开始下载 ${targets.length} 个文件到设备`);

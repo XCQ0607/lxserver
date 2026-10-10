@@ -190,6 +190,9 @@ class DownloadManager {
             if (!Array.isArray(items)) return;
             const remoteIds = new Set();
             const updatedTasks = [];
+            // [Fix] 收集因服务端状态推进而刚完成的任务，最后统一调用 completeServerTask
+            const justCompletedTasks = [];
+            let serverFileChanged = false;
             items.forEach(item => {
                 remoteIds.add(item.id);
                 let task = this.tasks.find(t => t.isServer && (t.serverQueueId === item.id || t.id === item.id));
@@ -204,17 +207,20 @@ class DownloadManager {
                         serverSongKey: item.songKey || '',
                         quality: item.quality || item.requestedQuality || '',
                         status: item.status || 'waiting',
-                        progress: item.progress || 0,
-                        downloadedBytes: item.received || 0,
-                        totalBytes: item.total || 0,
-                        speed: item.speed || 0,
+                        // [Fix] 使用 ?? 避免服务端返回 0 时覆盖本地真实进度
+                        progress: item.progress ?? 0,
+                        downloadedBytes: item.received ?? 0,
+                        totalBytes: item.total ?? 0,
+                        speed: item.speed ?? 0,
                         errorMsg: item.errorMsg || '',
                         retryCount: 0,
                         maxRetries: 2,
                         controller: null
                     };
                     this.tasks.push(task);
+                    if (task.status === 'finished' || task.status === 'exists') serverFileChanged = true;
                 } else {
+                    const wasActive = ['waiting', 'starting', 'downloading', 'tagging', 'paused'].includes(task.status);
                     task.song = item.songInfo || task.song;
                     task.serverManaged = true;
                     task.serverQueueRegistered = true;
@@ -222,21 +228,34 @@ class DownloadManager {
                     task.serverSongKey = item.songKey || task.serverSongKey;
                     task.quality = item.quality || task.quality;
                     task.status = item.status || task.status;
-                    task.progress = item.progress || 0;
-                    task.downloadedBytes = item.received || 0;
-                    task.totalBytes = item.total || 0;
-                    task.speed = item.speed || 0;
+                    // [Fix] 使用 ?? 避免服务端返回 0 时覆盖本地真实进度
+                    task.progress = item.progress ?? 0;
+                    task.downloadedBytes = item.received ?? 0;
+                    task.totalBytes = item.total ?? 0;
+                    task.speed = item.speed ?? 0;
                     task.errorMsg = item.errorMsg || '';
+                    if (wasActive && (task.status === 'finished' || task.status === 'exists')) {
+                        serverFileChanged = true;
+                        // [Fix] 收集刚完成的任务，稍后调用 completeServerTask 以触发 processQueue
+                        justCompletedTasks.push({ task, status: task.status });
+                    }
                 }
                 updatedTasks.push(task);
             });
             if (!this.serverQueuePending) {
+                const droppedActive = this.tasks.some(t => t.serverManaged && !remoteIds.has(t.serverQueueId || t.id)
+                    && ['waiting', 'starting', 'downloading', 'tagging'].includes(t.status));
                 this.tasks = this.tasks.filter(task => !task.serverManaged || remoteIds.has(task.serverQueueId || task.id));
+                if (droppedActive) serverFileChanged = true;
             }
             this.serverQueueLoaded = true;
             if (render) this.renderList();
             else updatedTasks.forEach(task => this.renderTask(task));
             this.saveTasks();
+            // 队列里的任务落盘完成 = 服务器文件变了，重拉状态并刷新列表徽标与音质标注
+            if (serverFileChanged) this.notifyServerFilesChanged();
+            // [Fix] 对刚完成的任务调用 completeServerTask，从而触发 processQueue 推进队列
+            justCompletedTasks.forEach(({ task, status }) => this.completeServerTask(task, status));
         } catch (error) {
             console.warn('[DownloadManager] Failed to sync server queue:', error);
         } finally {
@@ -314,11 +333,18 @@ class DownloadManager {
         );
     }
 
+    // 服务器上的文件发生增删：重拉状态映射、重画列表徽标，并让本地音乐列表静默刷新
+    notifyServerFilesChanged() {
+        window.ServerFileState?.repaintAll();
+        window.LocalMusicManager?.reloadAfterServerChange?.();
+    }
+
     completeServerTask(task, status = 'finished') {
         task.status = status;
         task.progress = 100;
         task.errorMsg = '';
         task.speed = 0;
+        if (status === 'finished') this.notifyServerFilesChanged();
 
         if (this.shouldAutoSyncLyric(task)) {
             window.requestServerLyricCache(task.song, task.quality).then((synced) => {
@@ -473,21 +499,8 @@ class DownloadManager {
                         // → 如果之前进度很高或在嵌入中，说明已从内存队列移除，逻辑上视为已完成
                         console.log(`[DownloadManager] Missing progress info for ${task.id}, status: ${task.status}, prog: ${task.progress}`);
                         if (task.progress >= 99 || task.status === 'tagging') {
-                            task.status = 'finished';
-                            task.progress = 100;
-                            task.errorMsg = '';
-                            task.speed = 0;
                             task.missingProgressCount = 0;
-
-                            // 成功完成后触发歌词同步（补充）
-                            if (this.shouldAutoSyncLyric(task)) {
-                                window.requestServerLyricCache(task.song, task.quality).then((synced) => {
-                                    if (synced) setTimeout(() => this.checkTaskLyric(task), 2000);
-                                });
-                            }
-
-                            this.renderTask(task);
-                            this.saveTasks();
+                            this.completeServerTask(task);
                             this.processQueue();
                         } else if (task.isServer) {
                             task.missingProgressCount = (task.missingProgressCount || 0) + 1;
@@ -690,10 +703,12 @@ class DownloadManager {
 
         // Keep large batches responsive by limiting concurrent preflight requests.
         const results = await this.mapWithConcurrency(songs, 8, async (song) => {
-            const targetPref = song.quality || window.settings?.preferredQuality || 'flac';
-            const quality = song.quality || (window.QualityManager ? window.QualityManager.getBestQuality(song, targetPref) : targetPref);
-            const cacheResult = await checkServerCache(song, quality, true);
-            return { song, quality, cacheResult };
+            // _serverFile 是前端定位服务器文件用的私有字段，不提交给服务端、也不入本地任务存储
+            const { _serverFile, ...cleanSong } = song;
+            const targetPref = cleanSong.quality || window.settings?.preferredQuality || 'flac';
+            const quality = cleanSong.quality || (window.QualityManager ? window.QualityManager.getBestQuality(cleanSong, targetPref) : targetPref);
+            const cacheResult = await checkServerCache(cleanSong, quality, true);
+            return { song: cleanSong, quality, cacheResult };
         });
 
         let skipCount = 0;

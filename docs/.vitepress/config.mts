@@ -1,7 +1,9 @@
 import { defineConfig } from 'vitepress'
+import pkg from '../../package.json'
 
 export default defineConfig({
   base: "/lxserver/",
+  lastUpdated: true,
   head: [
     ['link', { rel: 'icon', href: '/lxserver/icon.svg' }]
   ],
@@ -26,7 +28,16 @@ export default defineConfig({
           { text: '用户指南', link: '/guide/getting-started' },
           { text: '配置指南', link: '/guide/configuration' },
           { text: 'API 文档', link: '/api/reference' },
-          { text: '关于', link: '/about' }
+          { text: '关于', link: '/about' },
+          {
+            text: `v${pkg.version}`,
+            items: [
+              { text: `最新版本: v${pkg.version}`, link: 'https://github.com/XCQ0607/lxserver/releases' },
+              { text: '更新日志 (Changelog)', link: 'https://github.com/XCQ0607/lxserver/blob/main/changelog.md' },
+              { text: '发布历史 (Releases)', link: 'https://github.com/XCQ0607/lxserver/releases' },
+              { text: '源码仓库 (GitHub)', link: 'https://github.com/XCQ0607/lxserver' }
+            ]
+          }
         ],
         sidebar: [
           {
@@ -55,8 +66,24 @@ export default defineConfig({
             ]
           }
         ],
+        lastUpdated: {
+          text: '最后更新于',
+          formatOptions: {
+            dateStyle: 'full',
+            timeStyle: 'medium',
+            timeZone: 'Asia/Shanghai'
+          }
+        },
+        docFooter: {
+          prev: '上一页',
+          next: '下一页'
+        },
+        editLink: {
+          pattern: 'https://github.com/XCQ0607/lxserver/edit/main/docs/:path',
+          text: '在 GitHub 上编辑此页'
+        },
         footer: {
-          message: 'Released under the Apache-2.0 License.',
+          message: `Released under the Apache-2.0 License. (v${pkg.version})`,
           copyright: 'Copyright © 2026 xcq0607 & Contributors'
         }
       }
@@ -73,7 +100,16 @@ export default defineConfig({
           { text: 'Usage Guide', link: '/en/guide/getting-started' },
           { text: 'Config Guide', link: '/en/guide/configuration' },
           { text: 'API Docs', link: '/en/api/reference' },
-          { text: 'About', link: '/en/about' }
+          { text: 'About', link: '/en/about' },
+          {
+            text: `v${pkg.version}`,
+            items: [
+              { text: `Latest: v${pkg.version}`, link: 'https://github.com/XCQ0607/lxserver/releases' },
+              { text: 'Changelog', link: 'https://github.com/XCQ0607/lxserver/blob/main/changelog.md' },
+              { text: 'Release History', link: 'https://github.com/XCQ0607/lxserver/releases' },
+              { text: 'Repository', link: 'https://github.com/XCQ0607/lxserver' }
+            ]
+          }
         ],
         sidebar: [
           {
@@ -102,8 +138,24 @@ export default defineConfig({
             ]
           }
         ],
+        lastUpdated: {
+          text: 'Last updated',
+          formatOptions: {
+            dateStyle: 'full',
+            timeStyle: 'medium',
+            timeZone: 'Asia/Shanghai'
+          }
+        },
+        docFooter: {
+          prev: 'Previous page',
+          next: 'Next page'
+        },
+        editLink: {
+          pattern: 'https://github.com/XCQ0607/lxserver/edit/main/docs/:path',
+          text: 'Edit this page on GitHub'
+        },
         footer: {
-          message: 'Released under the Apache-2.0 License.',
+          message: `Released under the Apache-2.0 License. (v${pkg.version})`,
           copyright: 'Copyright © 2026 xcq0607 & Contributors'
         }
       }
