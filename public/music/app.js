@@ -8013,6 +8013,97 @@ function updateMediaSessionMetadata(song) {
     }
 }
 
+// ==================== AirPlay & Remote Playback 投音管理 ====================
+function initAirPlay() {
+    const audioElement = document.getElementById('audio-player');
+    if (!audioElement) return;
+
+    const desktopBtn = document.getElementById('btn-airplay-desktop');
+    const mobileBtn = document.getElementById('btn-airplay-mobile');
+    const buttons = [desktopBtn, mobileBtn].filter(Boolean);
+
+    if (buttons.length === 0) return;
+
+    const setVisible = (show) => {
+        buttons.forEach(btn => {
+            if (show) {
+                btn.classList.remove('hidden');
+                if (btn === mobileBtn) btn.classList.add('flex');
+            } else {
+                btn.classList.add('hidden');
+                if (btn === mobileBtn) btn.classList.remove('flex');
+            }
+        });
+    };
+
+    const updateWirelessActive = (isWireless) => {
+        buttons.forEach(btn => {
+            if (isWireless) {
+                btn.classList.add('text-emerald-500', 'border-emerald-500', 'bg-emerald-50', 'dark:bg-emerald-950/30');
+                btn.classList.remove('text-gray-500', 'border-gray-300');
+                btn.setAttribute('title', '隔空播放中 (已连接无线设备)');
+            } else {
+                btn.classList.remove('text-emerald-500', 'border-emerald-500', 'bg-emerald-50', 'dark:bg-emerald-950/30');
+                btn.classList.add('text-gray-500', 'border-gray-300');
+                btn.setAttribute('title', '隔空播放 / 无线投音 (AirPlay)');
+            }
+        });
+    };
+
+    const triggerPicker = () => {
+        if (typeof audioElement.webkitShowPlaybackTargetPicker === 'function') {
+            try {
+                audioElement.webkitShowPlaybackTargetPicker();
+            } catch (err) {
+                console.warn('[AirPlay] webkitShowPlaybackTargetPicker 调用失败:', err);
+            }
+        } else if (audioElement.remote && typeof audioElement.remote.prompt === 'function') {
+            audioElement.remote.prompt().catch(err => {
+                console.log('[RemotePlayback] 投屏选择取消或失败:', err);
+            });
+        }
+    };
+
+    buttons.forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            triggerPicker();
+        });
+    });
+
+    // 1. WebKit 原生 AirPlay 协议 (iOS / iPadOS / macOS Safari)
+    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+        audioElement.addEventListener('webkitplaybacktargetavailabilitychanged', (event) => {
+            const isAvail = event.availability === 'available';
+            setVisible(isAvail);
+            console.log('[AirPlay] 检测到可用 AirPlay 设备:', event.availability);
+        });
+
+        audioElement.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', () => {
+            const isWireless = !!audioElement.webkitCurrentPlaybackTargetIsWireless;
+            updateWirelessActive(isWireless);
+            console.log('[AirPlay] 当前是否为无线投音输出:', isWireless);
+        });
+    } else if (audioElement.remote && typeof audioElement.remote.prompt === 'function') {
+        // 2. W3C 标准 Remote Playback API (Chrome, Edge, Cast)
+        if (typeof audioElement.remote.watchAvailability === 'function') {
+            audioElement.remote.watchAvailability((available) => {
+                setVisible(available);
+            }).catch(() => {
+                setVisible(true);
+            });
+        } else {
+            setVisible(true);
+        }
+    }
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initAirPlay);
+} else {
+    initAirPlay();
+}
+
 
 function seek(e) {
     // Prevent seek if audio is not ready or has infinite duration (live stream)

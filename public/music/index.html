@@ -3834,6 +3834,15 @@
                     onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
                     <i class="fas fa-sliders-h text-[10px]"></i>
                 </button>
+                <!-- AirPlay Button (Mobile) -->
+                <button id="btn-airplay-mobile"
+                    class="hidden md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0 items-center justify-center transition-colors"
+                    title="隔空播放 (AirPlay)">
+                    <svg class="w-2.5 h-2.5 inline-block" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
+                        <polygon points="12 15 17 21 7 21 12 15" fill="currentColor"/>
+                    </svg>
+                </button>
                 <!-- Comment button (Mobile) -->
                 <button
                     class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
@@ -3978,6 +3987,15 @@
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5 transition-colors"
                 onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
                 <i class="fas fa-sliders-h text-sm"></i>
+            </button>
+            <!-- AirPlay Button (Desktop) -->
+            <button id="btn-airplay-desktop"
+                class="hidden text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5 transition-colors"
+                title="隔空播放 / 无线投音 (AirPlay)">
+                <svg class="w-3.5 h-3.5 inline-block -mt-0.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M5 17H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1"/>
+                    <polygon points="12 15 17 21 7 21 12 15" fill="currentColor"/>
+                </svg>
             </button>
             <!-- Share Card button (Desktop) -->
             <button
@@ -5868,7 +5886,7 @@
     </div>
 
     <!-- Audio Element -->
-    <audio id="audio-player" playsinline webkit-playsinline crossorigin="anonymous"></audio>
+    <audio id="audio-player" playsinline webkit-playsinline x-webkit-airplay="allow" crossorigin="anonymous"></audio>
 
     <!-- External Scripts Section (Placed at the end for performance) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
