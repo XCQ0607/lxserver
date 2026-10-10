@@ -39,6 +39,9 @@ const audio = document.getElementById('audio-player');
 if (audio) {
     audio.setAttribute('playsinline', '');
     audio.setAttribute('webkit-playsinline', '');
+    audio.preservesPitch = true;
+    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+    if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
 }
 let currentPlaybackRate = 1.0;
 
@@ -186,6 +189,68 @@ let currentPlaybackErrorHandler = null; // 当前音频地址的错误恢复监�
 let shouldAutoRecoverPlayback = false;
 let playbackRecoveryTriggeredForRequestId = 0;
 
+let lastAudioDeviceChangeTime = 0;
+let lastKnownAudioDevices = null;
+
+async function setupAudioDeviceChangeListener() {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+
+    const handleDeviceChange = async () => {
+        const now = Date.now();
+        lastAudioDeviceChangeTime = now;
+        console.log('[Audio] Audio output/input device change detected (e.g. earphone plugged/unplugged).');
+
+        let deviceRemoved = false;
+        try {
+            if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
+                const currentDevices = await navigator.mediaDevices.enumerateDevices();
+                const currentAudioDevices = currentDevices.filter(d => d.kind === 'audiooutput' || d.kind === 'audioinput');
+                if (lastKnownAudioDevices && currentAudioDevices.length < lastKnownAudioDevices.length) {
+                    deviceRemoved = true;
+                }
+                lastKnownAudioDevices = currentAudioDevices;
+            }
+        } catch (e) { }
+
+        // 当耳机/蓝牙断开时，系统一般会自动暂停音频并触发 devicechange。
+        // 为杜绝外放尴尬，若音频处于播放中或处于自动恢复标记中，或者设备减少，立即主动停播
+        if ((audio && !audio.paused) || shouldAutoRecoverPlayback || deviceRemoved) {
+            console.log('[Audio] Halting playback due to device change to prevent blasting sound via phone speaker.');
+            shouldAutoRecoverPlayback = false;
+            try {
+                if (audio) audio.pause();
+            } catch (e) { }
+            if (typeof setPlayerStatus === 'function') setPlayerStatus('', false);
+            if (typeof updatePlayButton === 'function') updatePlayButton(false);
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+            }
+            if (typeof lyricPlayer !== 'undefined' && lyricPlayer && typeof lyricPlayer.pause === 'function') {
+                lyricPlayer.pause();
+            }
+        }
+    };
+
+    try {
+        if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            lastKnownAudioDevices = devices.filter(d => d.kind === 'audiooutput' || d.kind === 'audioinput');
+        }
+    } catch (e) { }
+
+    if (typeof navigator.mediaDevices.addEventListener === 'function') {
+        navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    } else if ('ondevicechange' in navigator.mediaDevices) {
+        navigator.mediaDevices.ondevicechange = handleDeviceChange;
+    }
+}
+
+try {
+    setupAudioDeviceChangeListener();
+} catch (e) {
+    console.warn('[Audio] Failed to setup audio device change listener:', e);
+}
+
 let isServerReconnecting = false;
 let serverReconnectTimer = null;
 let serverReconnectAbortCtrl = null;
@@ -254,6 +319,14 @@ async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, t
                 serverReconnectTimer = null;
             }
 
+            // 若在断线重连期间或近期发生了音频设备变更（例如耳机拔出），保持暂停状态，防止外放
+            if (Date.now() - lastAudioDeviceChangeTime < 4000) {
+                console.log('[ServerReconnect] 检测到音频设备变动（如耳机断开），恢复已在线但不自动外放');
+                setPlayerStatus('服务器已连接（已暂停）');
+                updatePlayButton(false);
+                return;
+            }
+
             setPlayerStatus('服务器已连接，正在恢复播放...', null, true);
             if (window.showToast) {
                 window.showToast('success', '服务器已重新上线，正在无缝恢复播放...', 3000);
@@ -301,6 +374,14 @@ function handleUnexpectedPlaybackPause() {
     if (!shouldAutoRecoverPlayback || !requestId || audio.ended || !audio.src) return false;
     if (playbackRecoveryTriggeredForRequestId === requestId) return false;
 
+    // 1. 如果最近发生了音频设备变更（如耳机拔出、蓝牙断开，通常在 3.5 秒内），
+    // 属于系统意图暂停以避免外放，绝对不能触发自动恢复，必须保持暂停状态！
+    if (Date.now() - lastAudioDeviceChangeTime < 3500) {
+        console.log('[Audio] Playback paused shortly after audio device change. Suppressing auto-recovery.');
+        shouldAutoRecoverPlayback = false;
+        return false;
+    }
+
     // 记录暂停瞬间的断点位置
     const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
 
@@ -319,7 +400,11 @@ function handleUnexpectedPlaybackPause() {
             reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
             return;
         }
-        void runRecoveryFlow(new Error('播放链接意外暂停'), savedTime);
+
+        // 如果服务器完全在线，且音频既没有触发 error 也没有处于卡顿超时，
+        // 说明这是正常的用户/系统暂停（例如耳机拔出、锁屏暂停、蓝牙按键暂停、来电打断等），
+        // 绝不能在服务器正常在线时误以为“链接异常”而重新调用 runRecoveryFlow 外放音乐！
+        console.log('[Audio] Clean external/system pause detected while server is online. Preserving paused state.');
     })();
 
     return true;
@@ -4516,13 +4601,36 @@ function getImgUrl(item) {
     if (!item) return '/music/assets/logo.svg';
     const s = item;
     // 优先从标准 meta 获取
-    if (s.meta && s.meta.picUrl) return s.meta.picUrl;
-    // 兼容各种 SDK 的原始字段
-    return s.img || s.pic || s.picUrl || s.picture ||
+    let rawUrl = (s.meta && s.meta.picUrl) ||
+        s.img || s.pic || s.picUrl || s.picture ||
         (s.album && (s.album.picUrl || s.album.img || s.album.pic)) ||
         (s.al && (s.al.picUrl || s.al.img)) ||
-        (s.meta && (s.meta.img || s.meta.pic)) ||
-        '/music/assets/logo.svg';
+        (s.meta && (s.meta.img || s.meta.pic));
+
+    // 本地或缓存歌曲若未提前注入 pic，根据 filename 动态拼接服务端封面接口
+    if (!rawUrl && (s.filename || s._localFilename)) {
+        const fn = s.filename || s._localFilename;
+        if (s.hasCover !== false) {
+            const isCustom = s.isCustomDir || s._isCustom || s.customMusic || s.source === 'custom' || s.folder === 'custom';
+            const basePath = isCustom ? '/api/music/custom/cover' : '/api/music/cache/cover';
+            const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
+            const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
+            rawUrl = `${basePath}?filename=${encodeURIComponent(fn)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+        }
+    }
+
+    if (!rawUrl) return '/music/assets/logo.svg';
+
+    // 协议自动补全与 HTTPS 升级（防止 mixed-content 与移动端/车机下载阻断）
+    if (typeof rawUrl === 'string') {
+        if (rawUrl.startsWith('//')) {
+            rawUrl = (window.location ? window.location.protocol : 'https:') + rawUrl;
+        } else if (rawUrl.startsWith('http://') && window.location && window.location.protocol === 'https:') {
+            rawUrl = rawUrl.replace(/^http:\/\//i, 'https://');
+        }
+    }
+
+    return rawUrl;
 }
 window.getImgUrl = getImgUrl;
 
@@ -6796,6 +6904,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
         // Always refresh the bottom-player badge, including cache hits that keep the same song object.
         updatePlayerInfo(playbackSong, currentQuality);
+        updateMediaSessionMetadata(playbackSong);
 
         // [Sync] 确定了最终播放音质后，若当前已就绪的歌词确实属于本歌曲，才以正确音质重写服务器端歌词缓存文件名
         // 关键防护：必须校验 lastLyricSongId 匹配当前歌曲，防止切歌时旧歌词异步残留写入新歌缓存文件
@@ -7603,8 +7712,11 @@ function toggleNoSleep(enable) {
 // Update Media Session State on Play/Pause
 audio.addEventListener('play', () => {
     toggleNoSleep(true);
-    // 确保播放时应用设置的倍速
-    audio.playbackRate = currentPlaybackRate;
+    // 确保播放时始终保持音调保真与倍速
+    audio.preservesPitch = true;
+    if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+    if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
+    audio.playbackRate = currentPlaybackRate || 1.0;
 
     if ('mediaSession' in navigator) {
         navigator.mediaSession.playbackState = 'playing';
@@ -7634,10 +7746,18 @@ audio.addEventListener('playing', () => {
     setPlayerStatus('', true); // 恢复正常播放状态
     if ('mediaSession' in navigator) {
         updatePositionState(); // 立即同步
+        if (currentPlayingSong) {
+            updateMediaSessionMetadata(currentPlayingSong);
+        }
 
-        // [iOS Stability Fix] 针对 iOS 刷新后失效的问题，在 500ms 和 1200ms 再次强制刷新
-        // 确保系统在处理完 Web Audio 桥接流后，能再次接收到正确、有时长的 PositionState
-        setTimeout(updatePositionState, 500);
+        // [iOS & Bluetooth Sync] 针对 iOS 与车载蓝牙连接建立过程，在 500ms 和 1200ms 再次强制刷新元数据和进度
+        // 确保车载蓝牙 (AVRCP 1.6+) 在音频通道完全激活后能获取到封面位图及最新播放位置
+        setTimeout(() => {
+            updatePositionState();
+            if (currentPlayingSong && !audio.paused) {
+                updateMediaSessionMetadata(currentPlayingSong);
+            }
+        }, 500);
         setTimeout(updatePositionState, 1200);
     }
     if (lyricPlayer) {
@@ -7657,6 +7777,7 @@ audio.addEventListener('pause', () => {
     setPlayerStatus('', false); // 使用智能状态显示
     updatePlayButton(false);
     handleUnexpectedPlaybackPause();
+    shouldAutoRecoverPlayback = false;
 
     if (lyricPlayer) {
         lyricPlayer.pause();
@@ -7826,7 +7947,12 @@ audio.addEventListener('canplay', () => {
 });
 
 // Additional events to sync progress
-audio.addEventListener('loadedmetadata', updatePositionState);
+audio.addEventListener('loadedmetadata', () => {
+    updatePositionState();
+    if (currentPlayingSong) {
+        updateMediaSessionMetadata(currentPlayingSong);
+    }
+});
 audio.addEventListener('ratechange', updatePositionState);
 audio.addEventListener('seeked', () => {
     updatePositionState();
@@ -7932,25 +8058,56 @@ if ('mediaSession' in navigator) {
 }
 
 function updateMediaSessionMetadata(song) {
-    if (!('mediaSession' in navigator)) return;
+    if (!('mediaSession' in navigator) || !song) return;
 
-    const imgUrl = getImgUrl(song);
-    // Ensure absolute URL if possible
-    const fullImgUrl = new URL(imgUrl, window.location.href).href;
+    let imgUrl = getImgUrl(song);
+
+    // 蓝牙 AVRCP 1.6+ 基本图像描述符 (BIP) 协议规范仅支持 JPEG 与 PNG 位图格式。
+    // SVG 无法在蓝牙协议中传输，亦无法被移动端系统蓝牙服务转码为位图。
+    // 遇到缺省或 SVG 图标时，回退到 512x512 的栅格 PNG 图标以确保车载蓝牙与锁屏正常显示封面。
+    if (!imgUrl || imgUrl.endsWith('.svg') || imgUrl.includes('.svg') || imgUrl.includes('logo.svg')) {
+        imgUrl = '/music/assets/logo.png';
+    }
+
+    // 升级协议至 HTTPS，规避 iOS ATS 与 Android cleartextTraffic 拦截
+    if (typeof imgUrl === 'string') {
+        if (imgUrl.startsWith('//')) {
+            imgUrl = (window.location ? window.location.protocol : 'https:') + imgUrl;
+        } else if (imgUrl.startsWith('http://') && window.location && window.location.protocol === 'https:') {
+            imgUrl = imgUrl.replace(/^http:\/\//i, 'https://');
+        }
+    }
+
+    // 确保为完整的绝对路径 URL
+    let fullImgUrl;
+    try {
+        fullImgUrl = new URL(imgUrl, window.location.href).href;
+    } catch (e) {
+        fullImgUrl = imgUrl;
+    }
+
+    // 根据扩展名或实际路径动态识别正确的 MIME 类型（避免强制 image/jpeg 导致部分车机解码校验失败）
+    let mimeType = 'image/jpeg';
+    const cleanUrl = fullImgUrl.split('?')[0].toLowerCase();
+    if (cleanUrl.endsWith('.png')) {
+        mimeType = 'image/png';
+    } else if (cleanUrl.endsWith('.webp')) {
+        mimeType = 'image/webp';
+    }
+
+    const artworkSizes = ['96x96', '128x128', '192x192', '256x256', '384x384', '512x512'];
+    const artwork = artworkSizes.map(size => ({
+        src: fullImgUrl,
+        sizes: size,
+        type: mimeType
+    }));
 
     try {
         navigator.mediaSession.metadata = new MediaMetadata({
-            title: song.name,
-            artist: song.singer,
-            album: song.albumName || '',
-            artwork: [
-                { src: fullImgUrl, sizes: '96x96', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '128x128', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '192x192', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '256x256', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '384x384', type: 'image/jpeg' },
-                { src: fullImgUrl, sizes: '512x512', type: 'image/jpeg' }
-            ]
+            title: song.name || '',
+            artist: song.singer || '',
+            album: song.albumName || (song.album && song.album.name) || '',
+            artwork: artwork
         });
         // Reset playback state logic is handled by event listeners, but metadata update often implies new song start
         // updatePositionState() will be called when loadedmetadata fires for new source
@@ -16645,14 +16802,62 @@ function startToggleLyricsBtnTimer() {
     if (toggleLyricsBtnTimeout) clearTimeout(toggleLyricsBtnTimeout);
     toggleBtn.classList.remove('faint');
 
+    // 移动端/触摸屏永远不淡化退出按钮，保持绝对清晰可用
+    if (window.innerWidth < 1024) return;
+
     toggleLyricsBtnTimeout = setTimeout(() => {
-        // 只有当歌词页面处于显示状态时才淡化
+        // 只有当歌词页面处于显示状态且在桌面端才淡化
         const view = document.getElementById('view-player-detail');
         if (view && !view.classList.contains('translate-y-[100%]')) {
             toggleBtn.classList.add('faint');
         }
-    }, 3000);
+    }, 4000);
 }
+
+// 页面可见性恢复守护：防止切至后台重开后音调异常与 AudioContext 挂起
+document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        if (audio) {
+            audio.preservesPitch = true;
+            if ('webkitPreservesPitch' in audio) audio.webkitPreservesPitch = true;
+            if ('mozPreservesPitch' in audio) audio.mozPreservesPitch = true;
+            audio.playbackRate = currentPlaybackRate || 1.0;
+        }
+        if (window._sharedAudioContext && window._sharedAudioContext.state === 'suspended' && audio && !audio.paused) {
+            window._sharedAudioContext.resume().catch(() => {});
+        }
+    }
+});
+
+// 移动端手势：在歌词详情页顶部下滑即可顺畅收起/退出歌词视图
+document.addEventListener('DOMContentLoaded', () => {
+    const detailView = document.getElementById('view-player-detail');
+    if (!detailView) return;
+    let touchStartY = 0;
+    let touchEndY = 0;
+
+    detailView.addEventListener('touchstart', (e) => {
+        if (!isLyricViewOpen || e.touches.length !== 1) return;
+        const lyricScrollEl = document.getElementById('lyric-container');
+        // 仅在歌词滚动到顶部或触摸顶部导航区域时允许下滑收起
+        if (lyricScrollEl && lyricScrollEl.scrollTop > 15 && e.touches[0].clientY > 120) return;
+        touchStartY = e.touches[0].clientY;
+        touchEndY = touchStartY;
+    }, { passive: true });
+
+    detailView.addEventListener('touchmove', (e) => {
+        if (!isLyricViewOpen || e.touches.length !== 1) return;
+        touchEndY = e.touches[0].clientY;
+    }, { passive: true });
+
+    detailView.addEventListener('touchend', () => {
+        if (!isLyricViewOpen) return;
+        const deltaY = touchEndY - touchStartY;
+        if (deltaY > 80) {
+            toggleLyrics();
+        }
+    }, { passive: true });
+});
 
 // 切换底部播放栏显示/隐藏 (移动端)
 function togglePlayerPanel() {

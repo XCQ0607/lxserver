@@ -70,11 +70,18 @@ window.soundEffects = (function () {
         return /iPhone|iPod/.test(ua) || isIPad;
     }
 
+    function isMobileDevice() {
+        if (isIOSDevice()) return true;
+        const ua = navigator.userAgent;
+        const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+        return /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || (isTouch && window.innerWidth < 1024);
+    }
+
     function init(force = false) {
         if (audioContext && isGraphBuilt) return;
         loadSettings();
-        if (!force && (isIOSDevice() || !hasActiveEffects())) {
-            console.log('[SoundEffects] No custom sound effects enabled or iOS device detected. Keeping direct native audio output (zero throttling).');
+        if (!force && (isMobileDevice() || !hasActiveEffects())) {
+            console.log('[SoundEffects] No custom sound effects enabled or mobile device detected. Keeping direct native audio output (zero throttling).');
             return;
         }
         const audio = document.getElementById('audio-player');
@@ -632,9 +639,21 @@ window.soundEffects = (function () {
             renderUI(); // Update radio selection state
         },
         setPitch: function (val) {
-            if (!audioContext || !isGraphBuilt) init(true);
+            val = parseFloat(val);
+            if (!audioContext || !isGraphBuilt) {
+                if (val === 1.0 && !hasActiveEffects()) {
+                    settings.pitch = 1.0;
+                    saveSettings();
+                    const label = document.getElementById('pitch-val');
+                    if (label) label.innerText = '1.00x';
+                    const slider = document.getElementById('pitch-slider');
+                    if (slider) slider.value = 1.0;
+                    return;
+                }
+                init(true);
+            }
             const oldPitch = settings.pitch;
-            settings.pitch = parseFloat(val);
+            settings.pitch = val;
 
             if (settings.pitch !== 1.0 && oldPitch === 1.0) {
                 connectPitchShifter();
@@ -652,7 +671,16 @@ window.soundEffects = (function () {
             if (slider) slider.value = settings.pitch;
         },
         resetPitch: function () {
-            this.setPitch(1.0);
+            settings.pitch = 1.0;
+            if (isGraphBuilt) {
+                disconnectPitchShifter();
+                applyPitch();
+            }
+            saveSettings();
+            const label = document.getElementById('pitch-val');
+            if (label) label.innerText = '1.00x';
+            const slider = document.getElementById('pitch-slider');
+            if (slider) slider.value = 1.0;
         },
         setPanner: function (key, val) {
             if (!audioContext || !isGraphBuilt) init(true);
