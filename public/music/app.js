@@ -181,6 +181,68 @@ let currentPlaybackErrorHandler = null; // 当前音频地址的错误恢复监�
 let shouldAutoRecoverPlayback = false;
 let playbackRecoveryTriggeredForRequestId = 0;
 
+let lastAudioDeviceChangeTime = 0;
+let lastKnownAudioDevices = null;
+
+async function setupAudioDeviceChangeListener() {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices) return;
+
+    const handleDeviceChange = async () => {
+        const now = Date.now();
+        lastAudioDeviceChangeTime = now;
+        console.log('[Audio] Audio output/input device change detected (e.g. earphone plugged/unplugged).');
+
+        let deviceRemoved = false;
+        try {
+            if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
+                const currentDevices = await navigator.mediaDevices.enumerateDevices();
+                const currentAudioDevices = currentDevices.filter(d => d.kind === 'audiooutput' || d.kind === 'audioinput');
+                if (lastKnownAudioDevices && currentAudioDevices.length < lastKnownAudioDevices.length) {
+                    deviceRemoved = true;
+                }
+                lastKnownAudioDevices = currentAudioDevices;
+            }
+        } catch (e) { }
+
+        // 当耳机/蓝牙断开时，系统一般会自动暂停音频并触发 devicechange。
+        // 为杜绝外放尴尬，若音频处于播放中或处于自动恢复标记中，或者设备减少，立即主动停播
+        if ((audio && !audio.paused) || shouldAutoRecoverPlayback || deviceRemoved) {
+            console.log('[Audio] Halting playback due to device change to prevent blasting sound via phone speaker.');
+            shouldAutoRecoverPlayback = false;
+            try {
+                if (audio) audio.pause();
+            } catch (e) { }
+            if (typeof setPlayerStatus === 'function') setPlayerStatus('', false);
+            if (typeof updatePlayButton === 'function') updatePlayButton(false);
+            if ('mediaSession' in navigator) {
+                navigator.mediaSession.playbackState = 'paused';
+            }
+            if (typeof lyricPlayer !== 'undefined' && lyricPlayer && typeof lyricPlayer.pause === 'function') {
+                lyricPlayer.pause();
+            }
+        }
+    };
+
+    try {
+        if (typeof navigator.mediaDevices.enumerateDevices === 'function') {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            lastKnownAudioDevices = devices.filter(d => d.kind === 'audiooutput' || d.kind === 'audioinput');
+        }
+    } catch (e) { }
+
+    if (typeof navigator.mediaDevices.addEventListener === 'function') {
+        navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange);
+    } else if ('ondevicechange' in navigator.mediaDevices) {
+        navigator.mediaDevices.ondevicechange = handleDeviceChange;
+    }
+}
+
+try {
+    setupAudioDeviceChangeListener();
+} catch (e) {
+    console.warn('[Audio] Failed to setup audio device change listener:', e);
+}
+
 let isServerReconnecting = false;
 let serverReconnectTimer = null;
 let serverReconnectAbortCtrl = null;
@@ -249,6 +311,14 @@ async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, t
                 serverReconnectTimer = null;
             }
 
+            // 若在断线重连期间或近期发生了音频设备变更（例如耳机拔出），保持暂停状态，防止外放
+            if (Date.now() - lastAudioDeviceChangeTime < 4000) {
+                console.log('[ServerReconnect] 检测到音频设备变动（如耳机断开），恢复已在线但不自动外放');
+                setPlayerStatus('服务器已连接（已暂停）');
+                updatePlayButton(false);
+                return;
+            }
+
             setPlayerStatus('服务器已连接，正在恢复播放...', null, true);
             if (window.showToast) {
                 window.showToast('success', '服务器已重新上线，正在无缝恢复播放...', 3000);
@@ -296,6 +366,14 @@ function handleUnexpectedPlaybackPause() {
     if (!shouldAutoRecoverPlayback || !requestId || audio.ended || !audio.src) return false;
     if (playbackRecoveryTriggeredForRequestId === requestId) return false;
 
+    // 1. 如果最近发生了音频设备变更（如耳机拔出、蓝牙断开，通常在 3.5 秒内），
+    // 属于系统意图暂停以避免外放，绝对不能触发自动恢复，必须保持暂停状态！
+    if (Date.now() - lastAudioDeviceChangeTime < 3500) {
+        console.log('[Audio] Playback paused shortly after audio device change. Suppressing auto-recovery.');
+        shouldAutoRecoverPlayback = false;
+        return false;
+    }
+
     // 记录暂停瞬间的断点位置
     const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
 
@@ -314,7 +392,11 @@ function handleUnexpectedPlaybackPause() {
             reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
             return;
         }
-        void runRecoveryFlow(new Error('播放链接意外暂停'), savedTime);
+
+        // 如果服务器完全在线，且音频既没有触发 error 也没有处于卡顿超时，
+        // 说明这是正常的用户/系统暂停（例如耳机拔出、锁屏暂停、蓝牙按键暂停、来电打断等），
+        // 绝不能在服务器正常在线时误以为“链接异常”而重新调用 runRecoveryFlow 外放音乐！
+        console.log('[Audio] Clean external/system pause detected while server is online. Preserving paused state.');
     })();
 
     return true;
@@ -7554,6 +7636,7 @@ audio.addEventListener('pause', () => {
     setPlayerStatus('', false); // 使用智能状态显示
     updatePlayButton(false);
     handleUnexpectedPlaybackPause();
+    shouldAutoRecoverPlayback = false;
 
     if (lyricPlayer) {
         lyricPlayer.pause();
