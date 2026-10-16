@@ -175,6 +175,16 @@
                 </a>
 
                 <!-- 新增：WebDAV同步菜单 -->
+                <!-- Subsonic 配置菜单 -->
+                <a href="#" class="nav-item" data-view="subsonic">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M9 18V5l12-2v13"></path>
+                        <circle cx="6" cy="18" r="3"></circle>
+                        <circle cx="18" cy="16" r="3"></circle>
+                    </svg>
+                    <span>Subsonic 配置</span>
+                </a>
+
                 <a href="#" class="nav-item" data-view="webdav">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path
@@ -1365,6 +1375,45 @@
                             </div>
                         </div>
 
+                        <!-- 保存操作栏 -->
+                        <div class="config-actions-bar glass">
+                            <div class="config-actions-hint">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                    style="width:16px;height:16px;flex-shrink:0;color:var(--accent-primary)">
+                                    <circle cx="12" cy="12" r="10" />
+                                    <line x1="12" y1="16" x2="12" y2="12" />
+                                    <line x1="12" y1="8" x2="12.01" y2="8" />
+                                </svg>
+                                <span>配置修改后需要保存方可生效，部分配置需重启服务器</span>
+                            </div>
+                            <div class="config-actions-btns">
+                                <button type="button" id="reload-config-btn" class="btn-secondary"
+                                    style="white-space: nowrap; flex-shrink: 0;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        style="width:15px;height:15px;">
+                                        <polyline points="23 4 23 10 17 10" />
+                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+                                    </svg>
+                                    重新加载
+                                </button>
+                                <button type="submit" class="btn-primary" style="white-space: nowrap; flex-shrink: 0;">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                        style="width:15px;height:15px;">
+                                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" />
+                                        <polyline points="17 21 17 13 7 13 7 21" />
+                                        <polyline points="7 3 7 8 15 8" />
+                                    </svg>
+                                    保存配置
+                                </button>
+                            </div>
+                        </div>
+
+                    </form>
+                </div>
+
+                                <!-- Subsonic 配置独立视图 -->
+                <div id="view-subsonic" class="view">
+                    <form id="subsonic-form" class="config-form">
                         <!-- Subsonic 协议配置卡片 -->
                         <div class="config-card glass">
                             <div class="config-card-header">
@@ -1780,7 +1829,7 @@
                             </div>
                         </div>
 
-                        <!-- 保存操作栏 -->
+                                                <!-- 保存操作栏 -->
                         <div class="config-actions-bar glass">
                             <div class="config-actions-hint">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
@@ -1789,18 +1838,9 @@
                                     <line x1="12" y1="16" x2="12" y2="12" />
                                     <line x1="12" y1="8" x2="12.01" y2="8" />
                                 </svg>
-                                <span>配置修改后需要保存方可生效，部分配置需重启服务器</span>
+                                <span>Subsonic 配置修改后需保存方可生效，部分配置需重启服务器</span>
                             </div>
                             <div class="config-actions-btns">
-                                <button type="button" id="reload-config-btn" class="btn-secondary"
-                                    style="white-space: nowrap; flex-shrink: 0;">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                        style="width:15px;height:15px;">
-                                        <polyline points="23 4 23 10 17 10" />
-                                        <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
-                                    </svg>
-                                    重新加载
-                                </button>
                                 <button type="submit" class="btn-primary" style="white-space: nowrap; flex-shrink: 0;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                         style="width:15px;height:15px;">
@@ -1808,15 +1848,14 @@
                                         <polyline points="17 21 17 13 7 13 7 21" />
                                         <polyline points="7 3 7 8 15 8" />
                                     </svg>
-                                    保存配置
+                                    保存 Subsonic 配置
                                 </button>
                             </div>
                         </div>
-
                     </form>
                 </div>
 
-                <!-- WebDAV 同步与云端备份视图 (现代化重构) -->
+<!-- WebDAV 同步与云端备份视图 (现代化重构) -->
                 <div id="view-webdav" class="view">
                     <div class="webdav-container">
                         <!-- 动态任务进度中心 (默认隐藏，进行备份/恢复/同步时动态展示并常驻状态) -->
