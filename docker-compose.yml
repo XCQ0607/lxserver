@@ -7,7 +7,8 @@ services:
     restart: always
     ports:
       - "9527:9527"
-      - "4050:4050"
+      # Subsonic 独立监听端口：仅当 subsonic.standalone 启用时按需取消注释以暴露到主机
+      # - "4050:4050"
     volumes:
       # 数据持久化
       - ./data:/server/data

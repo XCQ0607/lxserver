@@ -2714,6 +2714,8 @@ class App {
                     : false;
                 standaloneToggle.checked = enabled;
                 standaloneFields.classList.toggle('hidden', !enabled);
+                const portInput = form.elements['subsonic.port'];
+                if (portInput) portInput.min = enabled ? '1' : '0';
                 standaloneToggle.onchange = () => {
                     const on = standaloneToggle.checked;
                     standaloneFields.classList.toggle('hidden', !on);
@@ -2721,6 +2723,8 @@ class App {
                     if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
                         portInput.value = 4050;
                     }
+                    // 独立监听关闭时端口最小值允许为 0，开启时最小为 1
+                    portInput.min = on ? '1' : '0';
                     // 关闭开关不再清零端口：端口值保留，重新开启无需重填
                     if (portErrEl && !on) {
                         portErrEl.style.display = 'none';
@@ -3368,26 +3372,28 @@ class App {
                 } else {
                     showSuccess('配置保存成功！');
                 }
-                // 若改动了需重启才生效的配置，提醒并支持一键重启
-                if (needRestart) {
-                    const ok = await showSelect(
-                        '需要重启服务器',
-                        `你修改了以下「需重启才能生效」的配置：\n\n• ${changedRestartKeys.join('\n• ')}\n\n` +
-                        `当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？`,
-                        { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
-                    );
-                    if (ok) {
-                        try {
-                            const r = await this.request('/api/restart', { method: 'POST' });
-                            if (r.success) {
-                                showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
-                                setTimeout(() => window.location.reload(), 5000);
-                            } else {
-                                showError('重启失败: ' + (r.message || '未知错误'));
-                            }
-                        } catch (e) {
-                            showError('重启请求失败: ' + e.message);
+            }
+            // 即使静默保存（如「重载配置 / 刷新用户」调用 saveConfig(true)），
+            // 只要改动了需重启才生效的配置（subsonic.standalone / subsonic.port 等），
+            // 也必须提示重启，否则独立端口仍在监听而表单已显示关闭，造成状态不一致
+            if (needRestart) {
+                const ok = await showSelect(
+                    '需要重启服务器',
+                    `你修改了以下「需重启才能生效」的配置：\n\n• ${changedRestartKeys.join('\n• ')}\n\n` +
+                    `当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？`,
+                    { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
+                );
+                if (ok) {
+                    try {
+                        const r = await this.request('/api/restart', { method: 'POST' });
+                        if (r.success) {
+                            showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
+                            setTimeout(() => window.location.reload(), 5000);
+                        } else {
+                            showError('重启失败: ' + (r.message || '未知错误'));
                         }
+                    } catch (e) {
+                        showError('重启请求失败: ' + e.message);
                     }
                 }
             }
