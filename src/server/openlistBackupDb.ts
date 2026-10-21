@@ -39,6 +39,9 @@ export interface BackupFileRow {
   source: string | null
   songmid: string | null
   quality: string | null
+  singer: string | null
+  album: string | null
+  img: string | null
   status: BackupStatus
   error: string | null
   retry_count: number
@@ -58,6 +61,9 @@ export interface UpsertBackupInput {
   source?: string | null
   songmid?: string | null
   quality?: string | null
+  singer?: string | null
+  album?: string | null
+  img?: string | null
   mode?: string | null
   status?: BackupStatus
 }
@@ -120,6 +126,10 @@ export function getBackupDb(): DatabaseSync {
   try { db.exec(`ALTER TABLE openlist_backup_attachments ADD COLUMN deleted_at INTEGER`) } catch { /* 列已存在 */ }
   // 远端文件最后编辑时间（来自 OpenList getFileInfo 的 modified）
   try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN remote_mtime INTEGER`) } catch { /* 列已存在 */ }
+  // 媒体元数据：补全歌手/专辑/封面，使「上传→下载还原」能恢复完整媒体信息（跨设备同步亦依赖此）
+  try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN singer TEXT`) } catch { /* 列已存在 */ }
+  try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN album TEXT`) } catch { /* 列已存在 */ }
+  try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN img TEXT`) } catch { /* 列已存在 */ }
   // 老数据迁移：原本仅 status='deleted'（硬删除）的记录补 deleted_at，保持隐藏
   try { db.exec(`UPDATE openlist_backup_files SET deleted_at = updated_at WHERE status = 'deleted' AND deleted_at IS NULL`) } catch { /* ignore */ }
   try { db.exec(`UPDATE openlist_backup_attachments SET deleted_at = updated_at WHERE status = 'deleted' AND deleted_at IS NULL`) } catch { /* ignore */ }
@@ -196,8 +206,8 @@ export function upsertBackupFile(input: UpsertBackupInput): BackupFileRow {
   const now = Date.now()
   const status = input.status ?? 'pending'
   const stmt = db.prepare(`INSERT INTO openlist_backup_files
-    (user, folder_type, local_path, remote_path, size, name, source, songmid, quality, mode, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (user, folder_type, local_path, remote_path, size, name, source, songmid, quality, singer, album, img, mode, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(user, folder_type, local_path) DO UPDATE SET
       remote_path = excluded.remote_path,
       size = excluded.size,
@@ -205,6 +215,9 @@ export function upsertBackupFile(input: UpsertBackupInput): BackupFileRow {
       source = excluded.source,
       songmid = excluded.songmid,
       quality = excluded.quality,
+      singer = excluded.singer,
+      album = excluded.album,
+      img = excluded.img,
       -- 备份策略(mode)仅在建表时写入，冲突时保留原值，避免后续同步/全局开关变化静默覆盖用户设定的备份策略
       status = excluded.status,
       updated_at = excluded.updated_at,
@@ -214,7 +227,8 @@ export function upsertBackupFile(input: UpsertBackupInput): BackupFileRow {
   stmt.run(
     input.user, input.folderType, input.localPath, input.remotePath,
     input.size ?? null, name, input.source ?? null,
-    input.songmid ?? null, input.quality ?? null, input.mode ?? null, status, now, now,
+    input.songmid ?? null, input.quality ?? null, input.singer ?? null, input.album ?? null, input.img ?? null,
+    input.mode ?? null, status, now, now,
   )
   const row = getBackupByLocalPath(input.user, input.folderType, input.localPath)!
   // 若本地文件已存在则登记到本地文件表（下载/缓存落盘后由各路径登记，此处兜底；文件尚不存在时 upsertLocalFile 自动跳过）

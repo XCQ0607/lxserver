@@ -201,12 +201,38 @@ function removeLocalCache(row: { user: string; folder_type: string; songmid: str
   }
 }
 
+interface DownloadMeta {
+  name?: string | null
+  singer?: string | null
+  album?: string | null
+  img?: string | null
+  source?: string | null
+  songmid?: string | null
+  quality?: string | null
+}
+
+/**
+ * 从本地文件名尽力解析出 歌手/标题（针对 OpenList 中「非本系统上传」的文件，库里没有媒体元数据时兜底）。
+ * 仅识别常见 "歌手 - 标题" / "标题" 形态，解析不出则回退为整文件名。
+ */
+function parseFilenameMeta(localPath: string): DownloadMeta {
+  const base = path.basename(localPath, path.extname(localPath))
+  const m = base.match(/^(.+?)\s*[-–—]\s*(.+)$/)
+  if (m && m[2].trim()) return { singer: m[1].trim(), name: m[2].trim() }
+  return { name: base }
+}
+
 /**
  * 下载/同步把远端文件落到本地后，登记为缓存条目，使应用能当作缓存文件使用。
- * 以「文件名(去扩展名)」作为缓存 id（v1 最佳努力；若远端文件名遵循命名约定则可被正确匹配）。
+ * 优先用备份行里已存的媒体元数据（本系统上传过的文件可完整还原）；没有则退化为文件名解析。
  * 返回用于回填备份行的 songmid。
  */
-function registerDownloadedCache(user: string, folderType: 'cache' | 'music', localPath: string): string {
+function registerDownloadedCache(
+  user: string,
+  folderType: 'cache' | 'music',
+  localPath: string,
+  meta?: DownloadMeta,
+): string {
   const base = path.basename(localPath)
   const ext = path.extname(base)
   const id = base.slice(0, Math.max(0, base.length - ext.length))
@@ -219,18 +245,18 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
   } catch { /* ignore */ }
   registerOpenListCacheFile(normalizeUser(user), {
     id,
-    songmid: id,
-    name: id,
-    singer: '',
-    album: '',
+    songmid: meta?.songmid || id,
+    name: meta?.name || id,
+    singer: meta?.singer || '',
+    album: meta?.album || '',
     albumId: '',
-    img: '',
+    img: meta?.img || '',
     interval: 0,
-    source: '',
+    source: meta?.source || '',
     requestedSource: '',
     downloadSource: '',
     sourceName: '',
-    quality: 'unknown',
+    quality: meta?.quality || 'unknown',
     filename: base,
     folder: folderType,
     mtime,
@@ -245,6 +271,22 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
     nativeIds: undefined,
   }, folderType)
   return id
+}
+
+/**
+ * 计算下载落盘后登记缓存条目时使用的媒体元数据：
+ * 优先复用备份行中已存的元数据（本系统上传过的文件可完整还原歌手/专辑/封面等）；
+ * 备份行无元数据（远端原生文件）时退化为从文件名解析。
+ */
+function buildDownloadMeta(user: string, folderType: 'cache' | 'music', localPath: string): DownloadMeta {
+  const row = getBackupByLocalPath(user, folderType, localPath)
+  if (row && (row.source || row.singer || row.album || row.songmid)) {
+    return {
+      name: row.name, singer: row.singer, album: row.album, img: row.img,
+      source: row.source, songmid: row.songmid, quality: row.quality,
+    }
+  }
+  return parseFilenameMeta(localPath)
 }
 
 // ---------- 上传（含附件）----------
@@ -322,7 +364,10 @@ async function downloadOne(row: any, cl: OpenListClient, mode: SyncMode): Promis
     let size = 0
     try { size = fs.statSync(row.local_path).size } catch { /* ignore */ }
     if (isAud) {
-      const id = registerDownloadedCache(row.user, row.folder_type, row.local_path)
+      const id = registerDownloadedCache(row.user, row.folder_type, row.local_path, {
+        name: row.name, singer: row.singer, album: row.album, img: row.img,
+        source: row.source, songmid: row.songmid, quality: row.quality,
+      })
       setBackupStatus(row.id, 'verified', { size, remotePath: row.remote_path })
     } else {
       setBackupStatus(row.id, 'completed', { size, remotePath: row.remote_path })
@@ -443,7 +488,7 @@ export function onFileCached(
   user: string,
   folderType: 'cache' | 'music',
   localPath: string,
-  meta: { source?: string; songmid?: string; quality?: string } = {},
+  meta: { source?: string; songmid?: string; quality?: string; name?: string; singer?: string; album?: string; img?: string } = {},
 ): void {
   const cfg = getConfig()
   if (!cfg.enable) return
@@ -475,6 +520,10 @@ export function onFileCached(
     source: meta.source || null,
     songmid: meta.songmid || null,
     quality: meta.quality || null,
+    name: meta.name || null,
+    singer: meta.singer || null,
+    album: meta.album || null,
+    img: meta.img || null,
     mode,
     status: 'pending',
   })
@@ -649,7 +698,7 @@ async function downloadDirection(
           fs.mkdirSync(path.dirname(localTarget), { recursive: true })
           await cl.download(rf.path, localTarget)
           if (isAud) {
-            const id = registerDownloadedCache(entry.user, folderType, localTarget)
+            const id = registerDownloadedCache(entry.user, folderType, localTarget, buildDownloadMeta(entry.user, folderType, localTarget))
             upsertBackupFile({
               user: entry.user, folderType, localPath: localTarget, remotePath: rf.path,
               songmid: id, mode, status: 'verified', size: rf.size,
@@ -662,7 +711,7 @@ async function downloadDirection(
     fs.mkdirSync(path.dirname(localTarget), { recursive: true })
     await cl.download(rf.path, localTarget)
     if (isAud) {
-      const id = registerDownloadedCache(entry.user, folderType, localTarget)
+      const id = registerDownloadedCache(entry.user, folderType, localTarget, buildDownloadMeta(entry.user, folderType, localTarget))
       upsertBackupFile({
         user: entry.user, folderType, localPath: localTarget, remotePath: rf.path,
         songmid: id, mode, status: 'verified', size: rf.size,

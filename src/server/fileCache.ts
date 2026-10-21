@@ -2283,6 +2283,10 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         source: metadata.source,
                         songmid: id,
                         quality: actualQuality,
+                        name: metadata.name,
+                        singer: metadata.singer,
+                        album: metadata.album,
+                        img: metadata.img,
                     })
                 } catch (e) {
                     console.warn('[openlist-backup] 落盘钩子异常:', e)
@@ -2564,6 +2568,10 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                                 source: metadata.source,
                                 songmid: id,
                                 quality: actualQuality,
+                                name: metadata.name,
+                                singer: metadata.singer,
+                                album: metadata.album,
+                                img: metadata.img,
                             })
                         } catch (e) {
                             console.warn('[openlist-backup] 落盘钩子异常:', e)
