@@ -2708,7 +2708,10 @@ class App {
             const standaloneFields = document.getElementById('subsonic-standalone-fields');
             const portErrEl = document.getElementById('subsonic-port-error');
             if (standaloneToggle && standaloneFields) {
-                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
+                // subsonic.standalone 为独立开关；旧配置无此键时按默认值(关闭)处理
+                const enabled = config['subsonic.standalone'] !== undefined
+                    ? !!config['subsonic.standalone']
+                    : false;
                 standaloneToggle.checked = enabled;
                 standaloneFields.classList.toggle('hidden', !enabled);
                 standaloneToggle.onchange = () => {
@@ -2717,9 +2720,8 @@ class App {
                     const portInput = form.elements['subsonic.port'];
                     if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
                         portInput.value = 4050;
-                    } else if (!on) {
-                        portInput.value = 0;
                     }
+                    // 关闭开关不再清零端口：端口值保留，重新开启无需重填
                     if (portErrEl && !on) {
                         portErrEl.style.display = 'none';
                     }
@@ -3188,6 +3190,33 @@ class App {
         }
     }
 
+    toggleHelp(el) {
+        const text = el.getAttribute('data-help') || ''
+        const existing = document.querySelector('.help-pop')
+        if (existing) {
+            if (existing._owner === el) { existing.remove(); return }
+            existing.remove()
+        }
+        if (!text) return
+        const pop = document.createElement('div')
+        pop.className = 'help-pop'
+        pop._owner = el
+        pop.textContent = text
+        document.body.appendChild(pop)
+        const r = el.getBoundingClientRect()
+        pop.style.top = (window.scrollY + r.bottom + 6) + 'px'
+        pop.style.left = (window.scrollX + r.left) + 'px'
+        const pr = pop.getBoundingClientRect()
+        if (pr.right > window.innerWidth - 8) pop.style.left = (window.scrollX + r.left - pr.width + r.width) + 'px'
+        if (pr.bottom > window.innerHeight - 8) pop.style.top = (window.scrollY + r.top - pr.height - 6) + 'px'
+        setTimeout(() => {
+            const onDocClick = (e) => {
+                if (!pop.contains(e.target) && e.target !== el) { pop.remove(); document.removeEventListener('click', onDocClick) }
+            }
+            document.addEventListener('click', onDocClick)
+        }, 0)
+    }
+
     async saveConfig(silent = false) {
         if (!this.configLoaded) return;
         const form = document.getElementById('config-form');
@@ -3269,6 +3298,8 @@ class App {
             'admin.path': adminPath,
             'player.path': playerPath,
             'subsonic.enable': formData.get('subsonic.enable') === 'on',
+            'subsonic.standalone': document.getElementById('subsonic-standalone-toggle')?.checked
+                ?? false,
             'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
             'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
             'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
@@ -3304,7 +3335,7 @@ class App {
         // [需要重启] 以下配置仅在进程启动时由 server.ts 读取
         // （startSubsonicStandaloneServer / handleStartServer），保存后不会即时生效，必须重启服务。
         // 检测本次保存是否实际修改了它们，若是则提示用户重启。
-        const restartRequiredKeys = ['subsonic.enable', 'subsonic.port'];
+        const restartRequiredKeys = ['subsonic.enable', 'subsonic.standalone', 'subsonic.port'];
         const prevConfig = this.loadedConfig || {};
         const changedRestartKeys = restartRequiredKeys.filter(k => {
             if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);

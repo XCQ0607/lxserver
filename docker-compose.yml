@@ -7,6 +7,7 @@ services:
     restart: always
     ports:
       - "9527:9527"
+      - "4050:4050"
     volumes:
       # 数据持久化
       - ./data:/server/data

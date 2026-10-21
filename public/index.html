@@ -1365,7 +1365,15 @@
                             </div>
                         </div>
 
-                        <!-- Subsonic 协议配置卡片 -->
+                        <style>
+.help-icon{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:.35rem;border-radius:50%;cursor:pointer;user-select:none;background:var(--accent,#3b82f6);color:#fff;font-size:10px;font-weight:700;line-height:1;vertical-align:middle;}
+.help-icon:hover{opacity:.85;}
+.help-pop{position:absolute;z-index:9999;max-width:320px;width:max-content;background:#20242e;color:#e5e7eb;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:.55rem .7rem;font-size:.8rem;line-height:1.55;box-shadow:0 8px 24px rgba(0,0,0,.4);white-space:normal;}
+.config-toggle-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0 1.5rem;}
+.config-toggle-grid .config-toggle-row{margin-top:0 !important;}
+@media (max-width:760px){.config-toggle-grid{grid-template-columns:1fr;}}
+</style>
+<!-- Subsonic 协议配置卡片 -->
                         <div class="config-card glass">
                             <div class="config-card-header">
                                 <div class="config-card-icon"
@@ -1377,43 +1385,39 @@
                                     </svg>
                                 </div>
                                 <div>
-                                    <h3 class="config-card-title">Subsonic 协议配置</h3>
-                                    <p class="config-card-desc">启用后支持第三方 Subsonic 客户端（如 PlaySub, Symfonium）</p>
+                                    <h3 class="config-card-title">Subsonic 协议配置 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="启用后支持第三方 Subsonic 客户端（如 PlaySub, Symfonium）">?</span></h3>
                                 </div>
                             </div>
                             <div class="config-card-body">
+                                <div class="config-toggle-grid">
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 Subsonic 服务</span>
-                                        <span class="config-toggle-desc">允许 Subsonic 客户端连接并同步歌单</span>
+                                        <span class="config-toggle-label">启用 Subsonic 服务 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="允许 Subsonic 客户端连接并同步歌单">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.enable" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
-                                <div class="config-toggle-row" style="margin-top: 12px;">
+                                <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">Subsonic 调试日志模式</span>
-                                        <span class="config-toggle-desc">开启后将在服务器控制台中实时打印所有客户端发起的 Subsonic
-                                            请求与缺失接口提示</span>
+                                        <span class="config-toggle-label">Subsonic 调试日志模式 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后将在服务器控制台中实时打印所有客户端发起的 Subsonic 请求与缺失接口提示">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.enableDebug" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
                                 </div>
+                                </div>
                                 <div class="config-field">
                                     <label class="config-label">Subsonic 访问路径</label>
                                     <input type="text" name="subsonic.path" class="form-input config-input"
                                         placeholder="/rest" />
-                                    <small class="config-hint">Subsonic API 默认路径为 /rest。修改后需在客户端同步更新 URL</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="Subsonic API 默认路径为 /rest。修改后需在客户端同步更新 URL">?</span>
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 Subsonic 独立监听端口</span>
-                                        <span class="config-toggle-desc">与主端口同时生效。主端口用于网页端与管理后台，此端口仅暴露纯净 Subsonic
-                                            API（严格鉴权且非 API 请求返回空 404），适合反代、公网穿透或防火墙单独放行</span>
+                                        <span class="config-toggle-label">启用 Subsonic 独立监听端口 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="与主端口同时生效。主端口用于网页端与管理后台，此端口仅暴露纯净 Subsonic API（严格鉴权且非 API 请求返回空 404），适合反代、公网穿透或防火墙单独放行。注意：关闭后需重启服务，已在监听的端口才会停止。">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" id="subsonic-standalone-toggle" />
@@ -1425,9 +1429,8 @@
                                     <div class="config-field">
                                         <label class="config-label">Subsonic 独立监听端口</label>
                                         <input type="number" name="subsonic.port" class="form-input config-input"
-                                            min="0" max="65535" placeholder="0-65535" />
-                                        <small class="config-hint">开启后两端口均可访问 Subsonic；此独立端口对爬虫与探测完全静默，关闭请设为 0
-                                            或关闭上方开关</small>
+                                            min="1" max="65535" placeholder="4050" />
+                                        <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后两端口均可访问 Subsonic；此独立端口对爬虫与探测完全静默。关闭只需关闭上方开关，端口值会保留，重新开启无需重填">?</span>
                                         <small id="subsonic-port-error" class="config-hint"
                                             style="color: #ef4444; display: none; margin-top: 6px; font-weight: 500;">
                                             ⚠️ 端口配置未成功（端口已被占用），请更换端口后保存并重启服务器。
@@ -1437,8 +1440,7 @@
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 Subsonic 公开排行榜歌单</span>
-                                        <span class="config-toggle-desc">将在线排行榜（如飙升榜、热歌榜、新歌榜等）映射为 Subsonic 只读虚拟歌单</span>
+                                        <span class="config-toggle-label">启用 Subsonic 公开排行榜歌单 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="将在线排行榜（如飙升榜、热歌榜、新歌榜等）映射为 Subsonic 只读虚拟歌单">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.publicLeaderboards" />
@@ -1518,8 +1520,7 @@
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启全网在线搜索</span>
-                                        <span class="config-toggle-desc">允许 Subsonic 客户端在搜索歌曲时检索全网音乐 API</span>
+                                        <span class="config-toggle-label">开启全网在线搜索 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="允许 Subsonic 客户端在搜索歌曲时检索全网音乐 API">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.onlineSearch" />
@@ -1569,12 +1570,12 @@
                                             咪咕音乐 (mg)
                                         </span>
                                     </div>
-                                    <small class="config-hint">点击标签快速启用/停用对应平台搜索</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="点击标签快速启用/停用对应平台搜索">?</span>
                                 </div>
+                                <div class="config-toggle-grid">
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启歌词翻译支持</span>
-                                        <span class="config-toggle-desc">允许在 Subsonic 歌词响应中包含翻译文本（原文在上，翻译在下）</span>
+                                        <span class="config-toggle-label">开启歌词翻译支持 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="允许在 Subsonic 歌词响应中包含翻译文本（原文在上，翻译在下）">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.lyricTranslation" />
@@ -1583,9 +1584,7 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">播放时触发服务器缓存</span>
-                                        <span class="config-toggle-desc">通过 Subsonic
-                                            播放的曲目在后台自动落盘到该用户缓存目录，已缓存自动跳过（注意可能产生较大流量）</span>
+                                        <span class="config-toggle-label">播放时触发服务器缓存 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="通过 Subsonic 播放的曲目在后台自动落盘到该用户缓存目录，已缓存自动跳过（注意可能产生较大流量）">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.cacheOnPlay" />
@@ -1594,14 +1593,13 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">服务器存在缓存优先播放</span>
-                                        <span class="config-toggle-desc">通过 Subsonic
-                                            播放曲目时，若服务器已存在该歌曲缓存或下载文件，直接通过本地传输，避免请求源站</span>
+                                        <span class="config-toggle-label">服务器存在缓存优先播放 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="通过 Subsonic 播放曲目时，若服务器已存在该歌曲缓存或下载文件，直接通过本地传输，避免请求源站">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.playCacheFirst" checked />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
+                                </div>
                                 </div>
                                 <div class="config-divider"></div>
                                 <div class="config-hint"
@@ -1622,7 +1620,7 @@
                                         <option value="tx">仅 TX</option>
                                         <option value="wy">仅 WY</option>
                                     </select>
-                                    <small class="config-hint">设置歌手详情、头像及简介的获取来源优先级</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="设置歌手详情、头像及简介的获取来源优先级">?</span>
                                 </div>
 
                                 <!-- 不喜欢 / 评分联动 -->
@@ -1640,12 +1638,12 @@
                                         <option value="4">4（≤4 星视为不喜欢）</option>
                                         <option value="5">5（所有已评分歌曲视为不喜欢）</option>
                                     </select>
-                                    <small class="config-hint">Subsonic 客户端打低星时写回原生 dislike 规则的阈值；0 关闭整条联动</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="Subsonic 客户端打低星时写回原生 dislike 规则的阈值；0 关闭整条联动">?</span>
                                 </div>
+                                <div class="config-toggle-grid">
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">在列表中隐藏 dislike 歌曲</span>
-                                        <span class="config-toggle-desc">命中不喜欢规则的歌曲从专辑/歌单/搜索等列表中剔除；关闭则仅以评分体现</span>
+                                        <span class="config-toggle-label">在列表中隐藏 dislike 歌曲 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="命中不喜欢规则的歌曲从专辑/歌单/搜索等列表中剔除；关闭则仅以评分体现">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.hideDisliked" />
@@ -1654,8 +1652,7 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">dislike 跨平台同名命中</span>
-                                        <span class="config-toggle-desc">开启后同名不同歌手/专辑也会被一并屏蔽（有误伤风险）</span>
+                                        <span class="config-toggle-label">dislike 跨平台同名命中 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后同名不同歌手/专辑也会被一并屏蔽（有误伤风险）">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.dislikeCrossSource" />
@@ -1664,13 +1661,13 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">推荐类接口排除 dislike</span>
-                                        <span class="config-toggle-desc">每日推荐/随机/相似歌曲中排除 dislike 命中歌曲（与隐藏列表独立）</span>
+                                        <span class="config-toggle-label">推荐类接口排除 dislike <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="每日推荐/随机/相似歌曲中排除 dislike 命中歌曲（与隐藏列表独立）">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.dislikeNoRecommend" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
+                                </div>
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">多歌手匹配模式（合唱 / 专辑共用）</label>
@@ -1679,12 +1676,12 @@
                                         <option value="all">all（全部歌手命中才屏蔽）</option>
                                         <option value="primary">primary（仅看第一位歌手）</option>
                                     </select>
-                                    <small class="config-hint">歌曲与专辑维度多歌手时，dislike 规则命中的判定方式（合唱歌曲与专辑歌手集合统一按此处理）</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="歌曲与专辑维度多歌手时，dislike 规则命中的判定方式（合唱歌曲与专辑歌手集合统一按此处理）">?</span>
                                 </div>
+                                <div class="config-toggle-grid">
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">歌名去版本后缀归一化</span>
-                                        <span class="config-toggle-desc">「晴天 (Live)」也能命中「晴天」规则（代价：少数仅差后缀的不同歌曲会误并）</span>
+                                        <span class="config-toggle-label">歌名去版本后缀归一化 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="「晴天 (Live)」也能命中「晴天」规则（代价：少数仅差后缀的不同歌曲会误并）">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.dislikeNormalizeName" />
@@ -1693,8 +1690,7 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">要求歌手同时匹配</span>
-                                        <span class="config-toggle-desc">歌曲/专辑级别都要求歌手匹配，避免不同歌手同名歌曲被一起屏蔽</span>
+                                        <span class="config-toggle-label">要求歌手同时匹配 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="歌曲/专辑级别都要求歌手匹配，避免不同歌手同名歌曲被一起屏蔽">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.dislikeRequireSinger" />
@@ -1703,9 +1699,7 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">评星 → 不喜欢 自动联动</span>
-                                        <span class="config-toggle-desc">Subsonic 客户端打低星时写回原生 dislike
-                                            规则；关闭则评分仅记录、不触碰不喜欢</span>
+                                        <span class="config-toggle-label">评星 → 不喜欢 自动联动 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="Subsonic 客户端打低星时写回原生 dislike 规则；关闭则评分仅记录、不触碰不喜欢">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.linkRatingToDislike" />
@@ -1714,14 +1708,13 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">不喜欢 → 评星 自动联动</span>
-                                        <span class="config-toggle-desc">网页端/Subsonic
-                                            点「不喜欢」回写客户端评分（低星）；关闭则不喜欢仅写入规则、不回写评星</span>
+                                        <span class="config-toggle-label">不喜欢 → 评星 自动联动 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="网页端/Subsonic 点「不喜欢」回写客户端评分（低星）；关闭则不喜欢仅写入规则、不回写评星">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.linkDislikeToRating" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
+                                </div>
                                 </div>
                                 <div class="config-divider"></div>
                                 <div style="font-weight:600;margin:14px 0 10px;color:var(--text-primary);">音质 / 源优选
@@ -1729,8 +1722,7 @@
 
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">音质优选总开关</span>
-                                        <span class="config-toggle-desc">按优先级主动选最优可用音质；关闭则 stream 仅单次解析</span>
+                                        <span class="config-toggle-label">音质优选总开关 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="按优先级主动选最优可用音质；关闭则 stream 仅单次解析">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.quality.enabled" />
@@ -1741,7 +1733,7 @@
                                     <label class="config-label">音质优先级（高→低）</label>
                                     <input type="hidden" name="subsonic.quality.priority" value="flac,320k,128k" />
                                     <div class="tag-sortable-group" id="tag-group-quality-priority"></div>
-                                    <small class="config-hint">拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（再次点击即可重新启用）</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（再次点击即可重新启用）">?</span>
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">客户端 maxBitrate 上界模式</label>
@@ -1749,18 +1741,18 @@
                                         <option value="soft">soft（上限内取不到再突破上限选更高优先级）</option>
                                         <option value="hard">hard（仅选 ≤ 上限的最高优先级）</option>
                                     </select>
-                                    <small class="config-hint">客户端声明最大码率时的取舍策略</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="客户端声明最大码率时的取舍策略">?</span>
                                 </div>
                                 <div class="config-field">
                                     <label class="config-label">跨平台源优选顺序</label>
                                     <input type="hidden" name="subsonic.source.priority" value="kw,tx,wy,mg,kg" />
                                     <div class="tag-sortable-group" id="tag-group-source-priority"></div>
-                                    <small class="config-hint">拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（客户端所选源始终最优先）</small>
+                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（客户端所选源始终最优先）">?</span>
                                 </div>
+                                <div class="config-toggle-grid">
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">允许跨平台优选</span>
-                                        <span class="config-toggle-desc">按歌名+歌手在其它平台搜索替身</span>
+                                        <span class="config-toggle-label">允许跨平台优选 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="按歌名+歌手在其它平台搜索替身">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.source.crossPlatform" />
@@ -1769,13 +1761,13 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">同源切换其它自定义源</span>
-                                        <span class="config-toggle-desc">callUserApiGetMusicUrl 内部循环同平台候选脚本</span>
+                                        <span class="config-toggle-label">同源切换其它自定义源 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="callUserApiGetMusicUrl 内部循环同平台候选脚本">?</span></span>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.source.autoSwitchCustom" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
+                                </div>
                                 </div>
                             </div>
                         </div>
