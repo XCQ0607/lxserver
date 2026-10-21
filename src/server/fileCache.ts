@@ -2276,6 +2276,19 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
             await ensureCachedLyrics(songInfo, actualQuality, username, true, finalPath, 'music', shouldCacheLyric, shouldEmbedLyric)
             alignOrphanLyric(username, id, actualQuality, 'music')
 
+            // [OpenList 备份] 缓存复制到下载目录后触发备份（按 per-user 配置判定是否上传）
+            if ((globalThis as any).lx?.config?.['openlist.enable']) {
+                try {
+                    openlistBackupOnFileCached(normalizedUsername, 'music', finalPath, {
+                        source: metadata.source,
+                        songmid: id,
+                        quality: actualQuality,
+                    })
+                } catch (e) {
+                    console.warn('[openlist-backup] 落盘钩子异常:', e)
+                }
+            }
+
             // 音频/歌词/封面都已迁到下载目录，删除缓存副本，避免双份占盘且播放继续命中缓存
             try {
                 removeCacheFile(result.filename, normalizedUsername, 'cache')
