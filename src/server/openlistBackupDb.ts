@@ -205,7 +205,7 @@ export function upsertBackupFile(input: UpsertBackupInput): BackupFileRow {
       source = excluded.source,
       songmid = excluded.songmid,
       quality = excluded.quality,
-      mode = excluded.mode,
+      -- 备份策略(mode)仅在建表时写入，冲突时保留原值，避免后续同步/全局开关变化静默覆盖用户设定的备份策略
       status = excluded.status,
       updated_at = excluded.updated_at,
       deleted_at = NULL`)
