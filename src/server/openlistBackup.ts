@@ -698,10 +698,11 @@ async function downloadDirection(
           fs.mkdirSync(path.dirname(localTarget), { recursive: true })
           await cl.download(rf.path, localTarget)
           if (isAud) {
-            const id = registerDownloadedCache(entry.user, folderType, localTarget, buildDownloadMeta(entry.user, folderType, localTarget))
+            const meta = buildDownloadMeta(entry.user, folderType, localTarget)
+            const id = registerDownloadedCache(entry.user, folderType, localTarget, meta)
             upsertBackupFile({
               user: entry.user, folderType, localPath: localTarget, remotePath: rf.path,
-              songmid: id, mode, status: 'verified', size: rf.size,
+              songmid: id, name: meta.name, mode, status: 'verified', size: rf.size,
             })
           }
         }
@@ -711,10 +712,11 @@ async function downloadDirection(
     fs.mkdirSync(path.dirname(localTarget), { recursive: true })
     await cl.download(rf.path, localTarget)
     if (isAud) {
-      const id = registerDownloadedCache(entry.user, folderType, localTarget, buildDownloadMeta(entry.user, folderType, localTarget))
+      const meta = buildDownloadMeta(entry.user, folderType, localTarget)
+      const id = registerDownloadedCache(entry.user, folderType, localTarget, meta)
       upsertBackupFile({
         user: entry.user, folderType, localPath: localTarget, remotePath: rf.path,
-        songmid: id, mode, status: 'verified', size: rf.size,
+        songmid: id, name: meta.name, mode, status: 'verified', size: rf.size,
       })
       summary.downloaded++
     }
