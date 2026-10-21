@@ -21,7 +21,8 @@ FROM base AS final
 WORKDIR /server
 
 RUN apk add --update --no-cache nodejs \
-  && (apk add --no-cache chromaprint || echo "chromaprint apk not found, will use bundled binary")
+  && (apk add --no-cache chromaprint || echo "chromaprint apk not found, will use bundled binary") \
+  && node -e "const [a,b]=process.versions.node.split('.').map(Number); if(a<22||(a===22&&b<5)){console.error('Node.js >= 22.5 required (openlist backup uses node:sqlite), current '+process.versions.node);process.exit(1)}"
 
 COPY --from=builder ./source-code/build-output ./
 

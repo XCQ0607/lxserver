@@ -54,6 +54,18 @@ const config: LX.Config = {
   'webdav.excludeMusic': false, // 是否排除音乐下载目录 (data/<user>/music) 的同步与备份
 
 
+  // OpenList 音频备份配置
+  'openlist.enable': false,
+  'openlist.endpoint': '',
+  'openlist.username': '',
+  'openlist.password': '',
+  'openlist.token': '',
+  'openlist.root': '/lx_music', // OpenList 内备份根目录（不含域名；可为实例挂载名或自建目录，如 /tyCloud/lx_music）
+  'openlist.keepLocalAfterUpload': true, // 上传完成后保留本地文件
+  'openlist.verifyInterval': 5, // 验证轮询间隔（分钟）
+  'openlist.includeNonAudio': false, // 是否一并备份下载/缓存目录中的图片等非音频文件
+  'openlist.userBackups': '[]', // JSON 数组：[{user,enabled,backupDownload,backupCache,mode?}]（目录路径由后端自动拼接，无需填写）
+
   // 本地配置备份（config.js 每日一份本地副本）
   'configBackup.enable': true, // 是否启用本地配置备份
   'configBackup.retentionDays': 7, // 本地备份保留天数

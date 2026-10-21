@@ -166,6 +166,10 @@ class App {
             e.preventDefault();
             this.saveConfig();
         });
+        document.getElementById('subsonic-form')?.addEventListener('submit', (e) => {
+            e.preventDefault();
+            this.saveSubsonicConfig();
+        });
         document.getElementById('reload-config-btn')?.addEventListener('click', async () => {
             await this.saveConfig(true);
             this.loadConfig();
@@ -494,6 +498,8 @@ class App {
             config: '系统配置',
             logs: '系统日志',
             webdav: 'WebDAV同步',
+            openlist: 'OpenList 配置',
+            subsonic: 'Subsonic 配置',
             files: '文件管理',
             snapshots: '快照管理',
             about: '关于'
@@ -528,6 +534,12 @@ class App {
                 } catch (e) {
                     console.error('Failed to check webdav status:', e);
                 }
+                break;
+            case 'openlist':
+                this.loadOpenlistConfig();
+                break;
+            case 'subsonic':
+                this.loadSubsonicConfig();
                 break;
             case 'backups':
             case 'snapshots':
@@ -2614,9 +2626,7 @@ class App {
             if (form.elements['system.allowUnsafeVM']) {
                 form.elements['system.allowUnsafeVM'].checked = config['system.allowUnsafeVM'] === true;
             }
-            if (form.elements['singer.sourcePriority']) {
-                form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
-            }
+
             form.elements['admin.password'].value = config['admin.password'] || '';
 
             // Web播放器配置
@@ -2689,143 +2699,6 @@ class App {
             // [新增] 同时更新侧边栏链接
             const navPlayerLink = document.getElementById('nav-player-link');
             if (navPlayerLink) navPlayerLink.href = (config['player.path'] === '' ? '/' : (config['player.path'] ?? '/'));
-
-            // Subsonic 配置
-            if (form.elements['subsonic.enable']) {
-                form.elements['subsonic.enable'].checked = config['subsonic.enable'] === true;
-            }
-            if (form.elements['subsonic.path']) {
-                form.elements['subsonic.path'].value = config['subsonic.path'] || '/rest';
-            }
-            if (form.elements['subsonic.enableDebug']) {
-                form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
-            }
-            if (form.elements['subsonic.port']) {
-                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
-            }
-            // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
-            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
-            const standaloneFields = document.getElementById('subsonic-standalone-fields');
-            const portErrEl = document.getElementById('subsonic-port-error');
-            if (standaloneToggle && standaloneFields) {
-                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
-                standaloneToggle.checked = enabled;
-                standaloneFields.classList.toggle('hidden', !enabled);
-                standaloneToggle.onchange = () => {
-                    const on = standaloneToggle.checked;
-                    standaloneFields.classList.toggle('hidden', !on);
-                    const portInput = form.elements['subsonic.port'];
-                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
-                        portInput.value = 4050;
-                    } else if (!on) {
-                        portInput.value = 0;
-                    }
-                    if (portErrEl && !on) {
-                        portErrEl.style.display = 'none';
-                    }
-                };
-            }
-            if (portErrEl) {
-                const currentPort = parseInt(config['subsonic.port']) || 0;
-                if (config.subsonicPortConflict && config.subsonicPortConflict.port === currentPort && currentPort > 0) {
-                    portErrEl.textContent = `⚠️ 独立端口 ${currentPort} 启动失败（${config.subsonicPortConflict.error || '端口已被占用'}），配置未生效，请更换端口后保存并重启服务器。`;
-                    portErrEl.style.display = 'block';
-                } else {
-                    portErrEl.style.display = 'none';
-                }
-            }
-            if (form.elements['subsonic.onlineSearch']) {
-                form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
-            }
-            if (form.elements['subsonic.onlineSearchMode']) {
-                form.elements['subsonic.onlineSearchMode'].value = config['subsonic.onlineSearchMode'] || 'fallback';
-            }
-            if (form.elements['subsonic.onlineSearchSources']) {
-                const searchSources = config['subsonic.onlineSearchSources'] || 'wy,tx,kw,kg,mg';
-                form.elements['subsonic.onlineSearchSources'].value = searchSources;
-                this.updateSearchSourcesTagUI(searchSources);
-            }
-            if (form.elements['subsonic.publicLeaderboards']) {
-                form.elements['subsonic.publicLeaderboards'].checked = config['subsonic.publicLeaderboards'] === true;
-            }
-            if (form.elements['subsonic.leaderboardSource']) {
-                const lbSource = config['subsonic.leaderboardSource'] || 'tx';
-                form.elements['subsonic.leaderboardSource'].value = lbSource;
-                this.updateLeaderboardSourceTagUI(lbSource);
-            }
-            if (form.elements['subsonic.sharedListMode']) {
-                const mode = config['subsonic.sharedListMode'] || 'leaderboard';
-                form.elements['subsonic.sharedListMode'].value = mode;
-                this.updateTagGroupActive('tag-group-shared-mode', mode);
-            }
-            if (form.elements['subsonic.sharedListSort']) {
-                const sort = config['subsonic.sharedListSort'] || 'hot';
-                form.elements['subsonic.sharedListSort'].value = sort;
-                this.updateTagGroupActive('tag-group-shared-sort', sort);
-            }
-            this.toggleSubsonicLeaderboardVisibility();
-            if (form.elements['subsonic.lyricTranslation']) {
-                form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
-            }
-            if (form.elements['subsonic.cacheOnPlay']) {
-                form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
-            }
-            if (form.elements['subsonic.playCacheFirst']) {
-                form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] !== false;
-            }
-
-            // 不喜欢 / 评分联动
-            if (form.elements['subsonic.dislikeRating'] !== undefined) {
-                form.elements['subsonic.dislikeRating'].value = String(config['subsonic.dislikeRating'] ?? 1);
-            }
-            if (form.elements['subsonic.hideDisliked']) {
-                form.elements['subsonic.hideDisliked'].checked = config['subsonic.hideDisliked'] !== false;
-            }
-            if (form.elements['subsonic.dislikeCrossSource']) {
-                form.elements['subsonic.dislikeCrossSource'].checked = config['subsonic.dislikeCrossSource'] === true;
-            }
-            if (form.elements['subsonic.dislikeNoRecommend']) {
-                form.elements['subsonic.dislikeNoRecommend'].checked = config['subsonic.dislikeNoRecommend'] !== false;
-            }
-            if (form.elements['subsonic.dislikeDuetMode']) {
-                form.elements['subsonic.dislikeDuetMode'].value = config['subsonic.dislikeDuetMode'] || 'any';
-            }
-            if (form.elements['subsonic.dislikeNormalizeName']) {
-                form.elements['subsonic.dislikeNormalizeName'].checked = config['subsonic.dislikeNormalizeName'] !== false;
-            }
-            if (form.elements['subsonic.dislikeRequireSinger']) {
-                form.elements['subsonic.dislikeRequireSinger'].checked = config['subsonic.dislikeRequireSinger'] !== false;
-            }
-            if (form.elements['subsonic.linkRatingToDislike']) {
-                form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
-            }
-            if (form.elements['subsonic.linkDislikeToRating']) {
-                form.elements['subsonic.linkDislikeToRating'].checked = config['subsonic.linkDislikeToRating'] === true;
-            }
-
-            // 音质 / 源优选
-            if (form.elements['subsonic.quality.enabled']) {
-                form.elements['subsonic.quality.enabled'].checked = config['subsonic.quality.enabled'] !== false;
-            }
-            if (form.elements['subsonic.quality.priority']) {
-                const qVal = config['subsonic.quality.priority'] || 'flac,320k,128k';
-                form.elements['subsonic.quality.priority'].value = qVal;
-                this.updateQualityPriorityTagUI(qVal);
-            }
-            if (form.elements['subsonic.quality.clientCapMode']) {
-                form.elements['subsonic.quality.clientCapMode'].value = config['subsonic.quality.clientCapMode'] || 'soft';
-            }
-            if (form.elements['subsonic.source.priority']) {
-                const sVal = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
-                form.elements['subsonic.source.priority'].value = sVal;
-                this.updateSourcePriorityTagUI(sVal);
-            }
-            if (form.elements['subsonic.source.crossPlatform']) {
-                form.elements['subsonic.source.crossPlatform'].checked = config['subsonic.source.crossPlatform'] !== false;
-            }
-            if (form.elements['subsonic.source.autoSwitchCustom']) {
-                form.elements['subsonic.source.autoSwitchCustom'].checked = config['subsonic.source.autoSwitchCustom'] !== false;
-            }
 
             // 自定义歌曲目录配置
             if (form.elements['user.enableCustomMusicDir']) {
@@ -3172,6 +3045,482 @@ class App {
         this.renderSortableTagGroup('tag-group-source-priority', 'subsonic.source.priority', list, labelMap, allItems);
     }
 
+    // ===== OpenList 音频备份配置 =====
+    async loadOpenlistConfig() {
+        try {
+            const config = await this.request('/api/config')
+            const form = document.getElementById('openlist-form')
+            if (!form) return
+            form.elements['openlist.enable'].checked = config['openlist.enable'] === true
+            form.elements['openlist.endpoint'].value = config['openlist.endpoint'] || ''
+            form.elements['openlist.token'].value = config['openlist.token'] || ''
+            form.elements['openlist.root'].value = config['openlist.root'] || '/tyCloud'
+            form.elements['openlist.keepLocalAfterUpload'].checked = config['openlist.keepLocalAfterUpload'] !== false
+            form.elements['openlist.includeNonAudio'].checked = config['openlist.includeNonAudio'] === true
+            form.elements['openlist.verifyInterval'].value = config['openlist.verifyInterval'] || 5
+            this.toggleOpenlistVisibility()
+            form.elements['openlist.enable'].onchange = () => this.toggleOpenlistVisibility()
+
+            let users = []
+            try {
+                const ulist = await this.request('/api/users')
+                users = (ulist || []).map(u => u.name).filter(Boolean)
+            } catch (e) { console.warn('获取用户列表失败', e) }
+            this.renderOpenlistUserConfig(users, config['openlist.userBackups'])
+            this.loadOpenlistBackups()
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('加载 OpenList 配置失败: ' + (e && e.message || e))
+        }
+    }
+
+    async saveOpenlistConfig() {
+        const form = document.getElementById('openlist-form')
+        if (!form) return
+        const fd = new FormData(form)
+        const cfg = {
+            'openlist.enable': fd.get('openlist.enable') === 'on',
+            'openlist.endpoint': (fd.get('openlist.endpoint') || '').trim(),
+            'openlist.token': fd.get('openlist.token'),
+            'openlist.root': (fd.get('openlist.root') || '').trim() || '/tyCloud',
+            'openlist.keepLocalAfterUpload': fd.get('openlist.keepLocalAfterUpload') === 'on',
+            'openlist.includeNonAudio': fd.get('openlist.includeNonAudio') === 'on',
+            'openlist.verifyInterval': parseInt(fd.get('openlist.verifyInterval')) || 5,
+            'openlist.userBackups': this.collectOpenlistUserBackups(),
+        }
+        try {
+            await this.request('/api/config', { method: 'POST', body: JSON.stringify(cfg) })
+            if (window.showSuccess) window.showSuccess('OpenList 配置已保存')
+            else alert('OpenList 配置已保存')
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('保存失败: ' + (e && e.message || e))
+        }
+    }
+
+    toggleOpenlistVisibility() {
+        const form = document.getElementById('openlist-form')
+        const enabled = !!(form && form.elements['openlist.enable'] && form.elements['openlist.enable'].checked)
+        const opts = document.getElementById('openlist-options')
+        const hint = document.getElementById('openlist-disabled-hint')
+        if (opts) opts.style.display = enabled ? 'block' : 'none'
+        if (hint) hint.style.display = enabled ? 'none' : 'block'
+    }
+
+    renderOpenlistUserConfig(users, userBackupsRaw) {
+        let backups = []
+        try { backups = JSON.parse(userBackupsRaw || '[]') } catch {}
+        const selected = backups.map(b => b.user)
+        const labelMap = {}
+        users.forEach(u => { labelMap[u] = u })
+        this.renderSortableTagGroup('tag-group-openlist-users', 'openlist.userBackupUsers', selected, labelMap, users)
+        const container = document.getElementById('tag-group-openlist-users')
+        if (container) container.onclick = () => setTimeout(() => this.renderOpenlistUserDirs(backups), 0)
+        this.renderOpenlistUserDirs(backups)
+    }
+
+    renderOpenlistUserDirs(backups) {
+        const hidden = document.querySelector('input[name="openlist.userBackupUsers"]')
+        const selected = (hidden && hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [])
+        const dirsContainer = document.getElementById('openlist-user-dirs')
+        if (!dirsContainer) return
+        const map = {}
+        ;(backups || []).forEach(b => { map[b.user] = b })
+        const prev = {}
+        selected.forEach(u => {
+            const d = document.getElementById('openlist-dl-sw-' + u)
+            const c = document.getElementById('openlist-ca-sw-' + u)
+            const m = document.getElementById('openlist-mode-' + u)
+            prev[u] = { download: d ? d.checked : null, cache: c ? c.checked : null, mode: m ? m.value : '' }
+        })
+        const modeOptions = (sel) => ([
+            ['upload', '上传（保留本地）'],
+            ['upload-delete', '上传后删除本地'],
+            ['download', '下载（远端→本地）'],
+            ['sync', '双向同步'],
+        ]).map(([v, t]) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + t + '</option>').join('')
+        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：上传完成即删本地并清缓存索引；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：本地/云端任一侧新增或删除都会双向同步'
+        const toggleHtml = (id, checked) =>
+            '<label class="toggle-switch">' +
+            '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
+            '<span class="toggle-track"><span class="toggle-thumb"></span></span>' +
+            '</label>'
+        dirsContainer.innerHTML = selected.map(u => {
+            const tpl = map[u] || {}
+            const dlOn = (prev[u] && prev[u].download !== null) ? prev[u].download : (tpl.backupDownload !== false)
+            const caOn = (prev[u] && prev[u].cache !== null) ? prev[u].cache : (tpl.backupCache !== false)
+            const md = (prev[u] && prev[u].mode) ? prev[u].mode : (tpl.mode || 'upload')
+            return '<div class="config-field" style="border-left:3px solid var(--accent);padding-left:.75rem;margin-top:.5rem">' +
+                '<label class="config-label">用户 <b>' + u + '</b> 的同步配置</label>' +
+                '<div class="config-field-row">' +
+                '<div class="config-field"><label class="config-label">备份下载目录 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户音乐目录，无需填写路径">?</span></label>' + toggleHtml('openlist-dl-sw-' + u, dlOn) + '</div>' +
+                '<div class="config-field"><label class="config-label">备份缓存目录 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户缓存目录，无需填写路径">?</span></label>' + toggleHtml('openlist-ca-sw-' + u, caOn) + '</div>' +
+                '<div class="config-field"><label class="config-label">同步模式 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="' + modeHelp + '">?</span></label>' +
+                '<select id="openlist-mode-' + u + '" class="form-input config-input" title="' + modeHelp + '">' + modeOptions(md) + '</select></div>' +
+                '</div></div>'
+        }).join('')
+    }
+
+    collectOpenlistUserBackups() {
+        const hidden = document.querySelector('input[name="openlist.userBackupUsers"]')
+        const selected = (hidden && hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [])
+        return JSON.stringify(selected.map(u => {
+            const d = document.getElementById('openlist-dl-sw-' + u)
+            const c = document.getElementById('openlist-ca-sw-' + u)
+            const m = document.getElementById('openlist-mode-' + u)
+            return { user: u, enabled: true, backupDownload: d ? !!d.checked : true, backupCache: c ? !!c.checked : true, mode: (m ? m.value : 'upload') }
+        }))
+    }
+
+    async testOpenlistConnection() {
+        const form = document.getElementById('openlist-form')
+        if (!form) return
+        const fd = new FormData(form)
+        const payload = {
+            endpoint: (fd.get('openlist.endpoint') || '').trim(),
+            token: fd.get('openlist.token'),
+            root: (fd.get('openlist.root') || '').trim() || '/tyCloud',
+        }
+        if (!payload.endpoint) {
+            if (window.showError) window.showError('请先填写 OpenList 服务器地址')
+            return
+        }
+        try {
+            const r = await this.request('/api/openlist/test', { method: 'POST', body: JSON.stringify(payload) })
+            if (r && r.success && r.ok) {
+                if (window.showSuccess) window.showSuccess('OpenList 连接成功')
+                else alert('连接成功')
+            } else {
+                if (window.showError) window.showError('连接失败: ' + ((r && r.error) || '未知错误'))
+                else alert('连接失败: ' + ((r && r.error) || ''))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('测试连接出错: ' + (e && e.message || e))
+        }
+    }
+
+    async runOpenlistSync() {
+        try {
+            if (window.showInfo) window.showInfo('正在同步，请稍候…')
+            const r = await this.request('/api/openlist/sync', { method: 'POST', body: JSON.stringify({}) })
+            if (r && r.success) {
+                const s = r.summary || {}
+                const msg = '同步完成：上传 ' + (s.uploaded || 0) + '，下载 ' + (s.downloaded || 0) + '，删除 ' + (s.deleted || 0) +
+                    ((s.errors && s.errors.length) ? ('，错误 ' + s.errors.length + ' 项') : '')
+                if (window.showSuccess) window.showSuccess(msg)
+                else alert(msg)
+                if (s.errors && s.errors.length) console.warn('OpenList 同步错误', s.errors)
+                this.loadOpenlistBackups()
+            } else {
+                if (window.showError) window.showError('同步失败: ' + ((r && r.error) || ''))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('同步出错: ' + (e && e.message || e))
+        }
+    }
+
+    async loadOpenlistBackups(silent) {
+        const box = document.getElementById('openlist-backups-list')
+        if (!box) return
+        if (!silent) box.innerHTML = '<div class="config-hint">加载中…</div>'
+        try {
+            const r = await this.request('/api/openlist/backups')
+            let list = (r && r.list) || []
+            // 状态指标卡：基于全量列表统计各状态数量（deleted 不计入 list，通常为 0）
+            const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
+            const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
+            const statusOrder = ['pending', 'uploading', 'completed', 'verified', 'failed', 'deleted']
+            const statusCounts = {}
+            for (const s of statusOrder) statusCounts[s] = 0
+            for (const f of list) { if (f && f.status && statusCounts[f.status] !== undefined) statusCounts[f.status]++ }
+            const cardsBox = document.getElementById('openlist-status-cards')
+            if (cardsBox) {
+              const activeStatus = (document.getElementById('olb-filter-status') || {}).value || ''
+              cardsBox.innerHTML = statusOrder.map((st) => {
+                const n = statusCounts[st] || 0
+                const color = STATUS_COLOR[st] || '#64748b'
+                const label = STATUS_LABEL[st] || st
+                const activeStyle = activeStatus === st ? 'box-shadow:0 0 0 2px ' + color + ' inset;' : ''
+                return '<div class="olb-stat-card" data-status="' + st + '" title="点击按状态筛选" style="cursor:pointer;min-width:92px;padding:.5rem .7rem;border-radius:10px;background:var(--surface,#1e293b);border:1px solid var(--border,#334155);' + activeStyle + '" onclick="app.filterOpenlistByStatus(\'' + st + '\')">' +
+                  '<div style="font-size:1.35rem;font-weight:700;color:' + color + ';line-height:1.1;">' + n + '</div>' +
+                  '<div style="font-size:.75rem;color:var(--text-secondary,#94a3b8);margin-top:.15rem;">' + label + '</div>' +
+                  '</div>'
+              }).join('')
+            }
+            // 填充「用户」筛选（仅在首次/选项不足时）
+            const userSel = document.getElementById('olb-filter-user')
+            if (userSel && userSel.options.length <= 1) {
+                const users = [...new Set(list.map(f => f.user).filter(Boolean))].sort()
+                users.forEach(u => { const o = document.createElement('option'); o.value = u; o.textContent = u; userSel.appendChild(o) })
+            }
+            const fu = document.getElementById('olb-filter-user')
+            const ff = document.getElementById('olb-filter-folder')
+            const fs2 = document.getElementById('olb-filter-status')
+            const fn = document.getElementById('olb-filter-name')
+            const fp = document.getElementById('olb-filter-path')
+            const uv = fu ? fu.value : ''
+            const fv = ff ? ff.value : ''
+            const sv = fs2 ? fs2.value : ''
+            const qn = (fn && fn.value ? fn.value : '').trim().toLowerCase()
+            const qp = (fp && fp.value ? fp.value : '').trim().toLowerCase()
+            list = list.filter(f => {
+                if (uv && f.user !== uv) return false
+                if (fv && f.folder_type !== fv) return false
+                if (sv && f.status !== sv) return false
+                if (qn) {
+                    const hay = ((f.name || '') + ' ' + (f.local_path || '') + ' ' + (f.remote_path || '')).toLowerCase()
+                    if (!hay.includes(qn)) return false
+                }
+                if (qp) {
+                    const hay = ((f.local_path || '') + ' ' + (f.remote_path || '')).toLowerCase()
+                    if (!hay.includes(qp)) return false
+                }
+                return true
+            })
+            const pageSize = this._olbPageSize || 50
+            const total = list.length
+            const totalPages = Math.max(1, Math.ceil(total / pageSize))
+            this._olbTotalPages = totalPages
+            if (!this._olbPage || this._olbPage < 1) this._olbPage = 1
+            if (this._olbPage > totalPages) this._olbPage = totalPages
+            const start = (this._olbPage - 1) * pageSize
+            if (!total) {
+                box.innerHTML = '<div class="config-hint">暂无符合条件的备份记录</div>'
+                return
+            }
+            const statusMap = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
+            const badgeColor = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
+            const fmtName = (f) => {
+                const nm = (f.name || '').toString().trim()
+                const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
+                return base.replace(/</g, '&lt;')
+            }
+            const fmtSize = (n) => {
+                n = Number(n) || 0
+                if (n < 1024) return n + ' B'
+                if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+                return (n / 1024 / 1024).toFixed(1) + ' MB'
+            }
+            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            this._olbPageIds = list.slice(start, start + pageSize).map(f => f.id)
+            const rows = list.slice(start, start + pageSize).map(f => {
+                const d = new Date(f.updated_at || f.created_at || Date.now())
+                const color = badgeColor[f.status] || '#64748b'
+                const label = statusMap[f.status] || f.status || ''
+                const typeLabel = f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type || ''))
+                const canRetry = f.status !== 'verified' && f.status !== 'deleted'
+                const retryBtn = canRetry
+                    ? '<button type="button" class="btn-secondary" style="padding:.15rem .6rem;font-size:.72rem;" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
+                    : '<span style="color:var(--text-secondary);">—</span>'
+                const hasLocal = !!(this._olbLocalExists && this._olbLocalExists[f.id])
+                const localMark = hasLocal ? '<span style="color:#22c55e;">✓</span>' : '<span style="color:#ef4444;">✗</span>'
+                const pathStr = f.local_path || f.remote_path || ''
+                const errStr = f.error || ''
+                const errCell = errStr
+                    ? '<span style="color:#ef4444;font-size:.75rem;" title="' + esc(errStr) + '">' + esc(errStr.length > 60 ? errStr.slice(0, 60) + '…' : errStr) + '</span>'
+                    : '<span style="color:var(--text-secondary);">—</span>'
+                const sel = this._olbSelected || (this._olbSelected = new Set())
+                const checked = sel.has(f.id) ? 'checked' : ''
+                return '<tr style="border-bottom:1px solid var(--border);">' +
+                    '<td style="padding:.4rem .5rem;text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
+                    '<td style="padding:.4rem .5rem;">' + (f.user || '') + '</td>' +
+                    '<td style="padding:.4rem .5rem;white-space:nowrap;">' + typeLabel + '</td>' +
+                    '<td style="padding:.4rem .5rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
+                    '<td style="padding:.4rem .5rem;white-space:nowrap;"><span style="background:' + color + ';color:#fff;padding:2px 8px;border-radius:10px;font-size:.72rem;">' + label + '</span></td>' +
+                    '<td style="padding:.4rem .5rem;white-space:nowrap;">' + fmtSize(f.size) + '</td>' +
+                    '<td style="padding:.4rem .5rem;text-align:center;">' + localMark + '</td>' +
+                    '<td style="padding:.4rem .5rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + errCell + '</td>' +
+                    '<td style="padding:.4rem .5rem;white-space:nowrap;">' + d.toLocaleString() + '</td>' +
+                    '<td style="padding:.4rem .5rem;white-space:nowrap;">' + retryBtn + '</td>' +
+                    '<td style="padding:.4rem .5rem;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:.78rem;" title="' + esc(pathStr) + '">' + esc(pathStr) + '</td>' +
+                    '</tr>'
+            }).join('')
+            const pager = '<div class="olb-pager" style="display:flex;gap:.4rem;align-items:center;justify-content:flex-end;margin-top:.6rem;font-size:.82rem;color:var(--text-secondary);flex-wrap:wrap;">' +
+                '<button type="button" class="btn-secondary" style="padding:.25rem .6rem;font-size:.78rem;" onclick="app.gotoOpenlistPage(1)">« 首页</button>' +
+                '<button type="button" class="btn-secondary" style="padding:.25rem .6rem;font-size:.78rem;" onclick="app.gotoOpenlistPage(Math.max(1,(app._olbPage||1)-1))">上一页</button>' +
+                '<span>第 ' + this._olbPage + ' / ' + totalPages + ' 页（共 ' + total + ' 条）</span>' +
+                '<button type="button" class="btn-secondary" style="padding:.25rem .6rem;font-size:.78rem;" onclick="app.gotoOpenlistPage(Math.min(' + totalPages + ',(app._olbPage||1)+1))">下一页</button>' +
+                '<button type="button" class="btn-secondary" style="padding:.25rem .6rem;font-size:.78rem;" onclick="app.gotoOpenlistPage(' + totalPages + ')">末页 »</button>' +
+                '<select class="form-input config-input" style="width:auto;font-size:.78rem;" onchange="app.setOpenlistPageSize(this.value)">' +
+                '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50/页</option>' +
+                '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100/页</option>' +
+                '<option value="200"' + (pageSize === 200 ? ' selected' : '') + '>200/页</option>' +
+                '</select></div>'
+            box.innerHTML = '<div style="overflow:auto;max-height:460px;">' +
+                '<table style="width:100%;min-width:max-content;border-collapse:collapse;font-size:.85rem;">' +
+                '<thead><tr style="text-align:left;color:var(--text-secondary);border-bottom:1px solid var(--border);">' +
+                '<th style="padding:.4rem .5rem;text-align:center;width:1%;"><input type="checkbox" id="olb-selall" onchange="app.toggleOpenlistSelectAll(this)"></th>' +
+                '<th style="padding:.4rem .5rem;">用户</th><th style="padding:.4rem .5rem;">类型</th><th style="padding:.4rem .5rem;">文件</th>' +
+                '<th style="padding:.4rem .5rem;">状态</th><th style="padding:.4rem .5rem;">大小</th><th style="padding:.4rem .5rem;">本地</th>' +
+                '<th style="padding:.4rem .5rem;">异常原因</th><th style="padding:.4rem .5rem;">更新时间</th><th style="padding:.4rem .5rem;">操作</th>' +
+                '<th style="padding:.4rem .5rem;">路径</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pager
+            this.updateOlbSelCount()
+        } catch (e) {
+            console.error(e)
+            box.innerHTML = '<div class="config-hint" style="color:var(--danger);">加载失败: ' + (e && e.message || e) + '</div>'
+        }
+    }
+
+    async retryOpenlistBackup(id) {
+        try {
+            const r = await this.request('/api/openlist/retry', { method: 'POST', body: JSON.stringify({ id }) })
+            if (r && r.success) {
+                if (window.showInfo) window.showInfo('已提交重试')
+                this.loadOpenlistBackups(true)
+            } else if (window.showError) {
+                window.showError('重试失败: ' + ((r && (r.message || r.error)) || '未知错误'))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    toggleOpenlistSelect(el) {
+        const id = parseInt(el.dataset.id)
+        if (!this._olbSelected) this._olbSelected = new Set()
+        if (el.checked) this._olbSelected.add(id); else this._olbSelected.delete(id)
+        this.updateOlbSelCount()
+    }
+
+    toggleOpenlistSelectAll(el) {
+        if (!this._olbSelected) this._olbSelected = new Set()
+        const ids = this._olbPageIds || []
+        ids.forEach(id => { if (el.checked) this._olbSelected.add(id); else this._olbSelected.delete(id) })
+        document.querySelectorAll('.olb-sel').forEach(cb => {
+            const id = parseInt(cb.dataset.id)
+            cb.checked = this._olbSelected.has(id)
+        })
+        this.updateOlbSelCount()
+    }
+
+    updateOlbSelCount() {
+        const n = this._olbSelected ? this._olbSelected.size : 0
+        const span = document.getElementById('olb-selcount')
+        if (span) span.textContent = n ? ('已选 ' + n + ' 项') : ''
+        const btn = document.getElementById('olb-bulkdel')
+        if (btn) btn.disabled = n === 0
+    }
+
+    async deleteSelectedOpenlist() {
+        if (!this._olbSelected || !this._olbSelected.size) return
+        const ids = Array.from(this._olbSelected)
+        if (!confirm('确认删除选中的 ' + ids.length + ' 条备份记录？\n将软删除记录并级联删除绑定的附件记录与文件（缓存音频副本一并删除；音乐库文件仅删记录不删本地）。')) return
+        try {
+            const r = await this.request('/api/openlist/delete', { method: 'POST', body: JSON.stringify({ ids }) })
+            if (r && r.success) {
+                this._olbSelected.clear()
+                if (window.showInfo) window.showInfo('已删除 ' + (r.deleted || 0) + ' 条记录')
+                this.loadOpenlistBackups()
+            } else if (window.showError) {
+                window.showError('删除失败: ' + ((r && r.error) || '未知错误'))
+            }
+        } catch (e) {
+            if (window.showError) window.showError('删除失败: ' + (e && e.message || e))
+        }
+    }
+
+    async fetchLocalExists() {
+        const ids = this._olbPageIds || []
+        if (!ids.length) return
+        try {
+            const r = await this.request('/api/openlist/local-exists', { method: 'POST', body: JSON.stringify({ ids }) })
+            if (r && r.exists) {
+                this._olbLocalExists = r.exists
+                document.querySelectorAll('[data-localmark]').forEach((td) => {
+                    const id = parseInt(td.getAttribute('data-localmark'))
+                    const ok = !!r.exists[id]
+                    td.innerHTML = ok ? '<span style="color:#22c55e;">✓</span>' : '<span style="color:#ef4444;">✗</span>'
+                })
+            }
+        } catch (e) { /* ignore */ }
+    }
+
+    toggleHelp(el) {
+        const text = el.getAttribute('data-help') || ''
+        const existing = document.querySelector('.help-pop')
+        if (existing) {
+            if (existing._owner === el) { existing.remove(); return }
+            existing.remove()
+        }
+        if (!text) return
+        const pop = document.createElement('div')
+        pop.className = 'help-pop'
+        pop._owner = el
+        pop.textContent = text
+        document.body.appendChild(pop)
+        const r = el.getBoundingClientRect()
+        pop.style.top = (window.scrollY + r.bottom + 6) + 'px'
+        pop.style.left = (window.scrollX + r.left) + 'px'
+        const pr = pop.getBoundingClientRect()
+        if (pr.right > window.innerWidth - 8) pop.style.left = (window.scrollX + r.left - pr.width + r.width) + 'px'
+        if (pr.bottom > window.innerHeight - 8) pop.style.top = (window.scrollY + r.top - pr.height - 6) + 'px'
+        setTimeout(() => {
+            const onDocClick = (e) => {
+                if (!pop.contains(e.target) && e.target !== el) { pop.remove(); document.removeEventListener('click', onDocClick) }
+            }
+            document.addEventListener('click', onDocClick)
+        }, 0)
+    }
+
+    switchOpenlistTab(name) {
+        const map = {
+            config: ['tab-btn-openlist-config', 'openlist-pane-config'],
+            records: ['tab-btn-openlist-records', 'openlist-pane-records'],
+        }
+        for (const [btnId, paneId] of Object.values(map)) {
+            const b = document.getElementById(btnId); if (b) b.classList.remove('active')
+            const p = document.getElementById(paneId); if (p) p.classList.remove('active')
+        }
+        const [btnId, paneId] = map[name] || map.config
+        const b = document.getElementById(btnId); if (b) b.classList.add('active')
+        const p = document.getElementById(paneId); if (p) p.classList.add('active')
+        if (name === 'records') this.loadOpenlistBackups()
+    }
+
+    scheduleOpenlistReload() {
+        if (this._olbReloadTimer) clearTimeout(this._olbReloadTimer)
+        this._olbReloadTimer = setTimeout(() => { this._olbPage = 1; this.loadOpenlistBackups() }, 300)
+    }
+
+    clearOpenlistFilters() {
+        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
+            const el = document.getElementById(id); if (el) el.value = ''
+        })
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
+    applyOpenlistFilter() {
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
+    filterOpenlistByStatus(status) {
+        const el = document.getElementById('olb-filter-status')
+        if (!el) return
+        // 再次点击当前已选状态则取消筛选
+        el.value = (el.value === status) ? '' : status
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
+    gotoOpenlistPage(n) {
+        const tp = this._olbTotalPages || 1
+        n = Math.max(1, Math.min(tp, parseInt(n) || 1))
+        this._olbPage = n
+        this.loadOpenlistBackups(true)
+    }
+
+    setOpenlistPageSize(v) {
+        this._olbPageSize = parseInt(v) || 50
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
     togglePublicNonAdminAccessVisibility() {
         const favCb = document.querySelector('input[name="user.enablePublicFavorites"]');
         const childWrapper = document.getElementById('public-non-admin-access-wrapper');
@@ -3268,43 +3617,13 @@ class App {
             'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
             'player.path': playerPath,
-            'subsonic.enable': formData.get('subsonic.enable') === 'on',
-            'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
-            'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
-            'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
-            'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
-            'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
-            'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
-            'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
-            'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
-            'subsonic.sharedListMode': (formData.get('subsonic.sharedListMode') || '').trim() || 'leaderboard',
-            'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
-            'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
-            'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
-            'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
-            'subsonic.dislikeRating': Number(formData.get('subsonic.dislikeRating') || 1),
-            'subsonic.hideDisliked': formData.get('subsonic.hideDisliked') === 'on',
-            'subsonic.dislikeCrossSource': formData.get('subsonic.dislikeCrossSource') === 'on',
-            'subsonic.dislikeNoRecommend': formData.get('subsonic.dislikeNoRecommend') === 'on',
-            'subsonic.dislikeDuetMode': formData.get('subsonic.dislikeDuetMode') || 'any',
-            'subsonic.dislikeNormalizeName': formData.get('subsonic.dislikeNormalizeName') === 'on',
-            'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
-            'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
-            'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
-            'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
-            'subsonic.quality.priority': (formData.get('subsonic.quality.priority') || '').trim() || 'flac,320k,128k',
-            'subsonic.quality.clientCapMode': formData.get('subsonic.quality.clientCapMode') || 'soft',
-            'subsonic.source.priority': (formData.get('subsonic.source.priority') || '').trim() || 'kw,tx,wy,mg,kg',
-            'subsonic.source.crossPlatform': formData.get('subsonic.source.crossPlatform') === 'on',
-            'subsonic.source.autoSwitchCustom': formData.get('subsonic.source.autoSwitchCustom') === 'on',
-            'singer.sourcePriority': formData.get('singer.sourcePriority'),
             'system.allowUnsafeVM': formData.get('system.allowUnsafeVM') === 'on',
         };
 
         // [需要重启] 以下配置仅在进程启动时由 server.ts 读取
         // （startSubsonicStandaloneServer / handleStartServer），保存后不会即时生效，必须重启服务。
         // 检测本次保存是否实际修改了它们，若是则提示用户重启。
-        const restartRequiredKeys = ['subsonic.enable', 'subsonic.port'];
+        const restartRequiredKeys = []; // Subsonic 重启检测已移至 saveSubsonicConfig
         const prevConfig = this.loadedConfig || {};
         const changedRestartKeys = restartRequiredKeys.filter(k => {
             if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
@@ -3362,6 +3681,238 @@ class App {
             }
         } catch (err) {
             if (!silent) showError('配置保存失败: ' + err.message);
+            throw err;
+        }
+    }
+
+
+    async loadSubsonicConfig() {
+        const form = document.getElementById('subsonic-form');
+        if (!form) return;
+        try {
+            const config = await this.request('/api/config');
+            if (form.elements['singer.sourcePriority']) {
+                form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
+            }
+            // Subsonic 配置
+            if (form.elements['subsonic.enable']) {
+                form.elements['subsonic.enable'].checked = config['subsonic.enable'] === true;
+            }
+            if (form.elements['subsonic.path']) {
+                form.elements['subsonic.path'].value = config['subsonic.path'] || '/rest';
+            }
+            if (form.elements['subsonic.enableDebug']) {
+                form.elements['subsonic.enableDebug'].checked = config['subsonic.enableDebug'] === true;
+            }
+            if (form.elements['subsonic.port']) {
+                form.elements['subsonic.port'].value = config['subsonic.port'] || 0;
+            }
+            // Subsonic 独立端口开关：port>0 视为开启，切换端口输入框显隐
+            const standaloneToggle = document.getElementById('subsonic-standalone-toggle');
+            const standaloneFields = document.getElementById('subsonic-standalone-fields');
+            const portErrEl = document.getElementById('subsonic-port-error');
+            if (standaloneToggle && standaloneFields) {
+                const enabled = (parseInt(config['subsonic.port']) || 0) > 0;
+                standaloneToggle.checked = enabled;
+                standaloneFields.classList.toggle('hidden', !enabled);
+                standaloneToggle.onchange = () => {
+                    const on = standaloneToggle.checked;
+                    standaloneFields.classList.toggle('hidden', !on);
+                    const portInput = form.elements['subsonic.port'];
+                    if (on && (!portInput.value || parseInt(portInput.value) === 0)) {
+                        portInput.value = 9528;
+                    } else if (!on) {
+                        portInput.value = 0;
+                    }
+                    if (portErrEl && !on) {
+                        portErrEl.style.display = 'none';
+                    }
+                };
+            }
+            if (portErrEl) {
+                const currentPort = parseInt(config['subsonic.port']) || 0;
+                if (config.subsonicPortConflict && config.subsonicPortConflict.port === currentPort && currentPort > 0) {
+                    portErrEl.textContent = `⚠️ 独立端口 ${currentPort} 启动失败（${config.subsonicPortConflict.error || '端口已被占用'}），配置未生效，请更换端口后保存并重启服务器。`;
+                    portErrEl.style.display = 'block';
+                } else {
+                    portErrEl.style.display = 'none';
+                }
+            }
+            if (form.elements['subsonic.onlineSearch']) {
+                form.elements['subsonic.onlineSearch'].checked = config['subsonic.onlineSearch'] !== false;
+            }
+            if (form.elements['subsonic.onlineSearchMode']) {
+                form.elements['subsonic.onlineSearchMode'].value = config['subsonic.onlineSearchMode'] || 'fallback';
+            }
+            if (form.elements['subsonic.onlineSearchSources']) {
+                const searchSources = config['subsonic.onlineSearchSources'] || 'wy,tx,kw,kg,mg';
+                form.elements['subsonic.onlineSearchSources'].value = searchSources;
+                this.updateSearchSourcesTagUI(searchSources);
+            }
+            if (form.elements['subsonic.publicLeaderboards']) {
+                form.elements['subsonic.publicLeaderboards'].checked = config['subsonic.publicLeaderboards'] === true;
+            }
+            if (form.elements['subsonic.leaderboardSource']) {
+                const lbSource = config['subsonic.leaderboardSource'] || 'tx';
+                form.elements['subsonic.leaderboardSource'].value = lbSource;
+                this.updateLeaderboardSourceTagUI(lbSource);
+            }
+            if (form.elements['subsonic.sharedListMode']) {
+                const mode = config['subsonic.sharedListMode'] || 'leaderboard';
+                form.elements['subsonic.sharedListMode'].value = mode;
+                this.updateTagGroupActive('tag-group-shared-mode', mode);
+            }
+            if (form.elements['subsonic.sharedListSort']) {
+                const sort = config['subsonic.sharedListSort'] || 'hot';
+                form.elements['subsonic.sharedListSort'].value = sort;
+                this.updateTagGroupActive('tag-group-shared-sort', sort);
+            }
+            this.toggleSubsonicLeaderboardVisibility();
+            if (form.elements['subsonic.lyricTranslation']) {
+                form.elements['subsonic.lyricTranslation'].checked = config['subsonic.lyricTranslation'] !== false;
+            }
+            if (form.elements['subsonic.cacheOnPlay']) {
+                form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
+            }
+            if (form.elements['subsonic.playCacheFirst']) {
+                form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] !== false;
+            }
+
+            // 不喜欢 / 评分联动
+            if (form.elements['subsonic.dislikeRating'] !== undefined) {
+                form.elements['subsonic.dislikeRating'].value = String(config['subsonic.dislikeRating'] ?? 1);
+            }
+            if (form.elements['subsonic.hideDisliked']) {
+                form.elements['subsonic.hideDisliked'].checked = config['subsonic.hideDisliked'] !== false;
+            }
+            if (form.elements['subsonic.dislikeCrossSource']) {
+                form.elements['subsonic.dislikeCrossSource'].checked = config['subsonic.dislikeCrossSource'] === true;
+            }
+            if (form.elements['subsonic.dislikeNoRecommend']) {
+                form.elements['subsonic.dislikeNoRecommend'].checked = config['subsonic.dislikeNoRecommend'] !== false;
+            }
+            if (form.elements['subsonic.dislikeDuetMode']) {
+                form.elements['subsonic.dislikeDuetMode'].value = config['subsonic.dislikeDuetMode'] || 'any';
+            }
+            if (form.elements['subsonic.dislikeNormalizeName']) {
+                form.elements['subsonic.dislikeNormalizeName'].checked = config['subsonic.dislikeNormalizeName'] !== false;
+            }
+            if (form.elements['subsonic.dislikeRequireSinger']) {
+                form.elements['subsonic.dislikeRequireSinger'].checked = config['subsonic.dislikeRequireSinger'] !== false;
+            }
+            if (form.elements['subsonic.linkRatingToDislike']) {
+                form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
+            }
+            if (form.elements['subsonic.linkDislikeToRating']) {
+                form.elements['subsonic.linkDislikeToRating'].checked = config['subsonic.linkDislikeToRating'] === true;
+            }
+
+            // 音质 / 源优选
+            if (form.elements['subsonic.quality.enabled']) {
+                form.elements['subsonic.quality.enabled'].checked = config['subsonic.quality.enabled'] !== false;
+            }
+            if (form.elements['subsonic.quality.priority']) {
+                const qVal = config['subsonic.quality.priority'] || 'flac,320k,128k';
+                form.elements['subsonic.quality.priority'].value = qVal;
+                this.updateQualityPriorityTagUI(qVal);
+            }
+            if (form.elements['subsonic.quality.clientCapMode']) {
+                form.elements['subsonic.quality.clientCapMode'].value = config['subsonic.quality.clientCapMode'] || 'soft';
+            }
+            if (form.elements['subsonic.source.priority']) {
+                const sVal = config['subsonic.source.priority'] || 'kw,tx,wy,mg,kg';
+                form.elements['subsonic.source.priority'].value = sVal;
+                this.updateSourcePriorityTagUI(sVal);
+            }
+            if (form.elements['subsonic.source.crossPlatform']) {
+                form.elements['subsonic.source.crossPlatform'].checked = config['subsonic.source.crossPlatform'] !== false;
+            }
+            if (form.elements['subsonic.source.autoSwitchCustom']) {
+                form.elements['subsonic.source.autoSwitchCustom'].checked = config['subsonic.source.autoSwitchCustom'] !== false;
+            }
+
+        } catch (e) {
+            console.error('Failed to load subsonic config:', e);
+        }
+    }
+
+    async saveSubsonicConfig() {
+        const form = document.getElementById('subsonic-form');
+        if (!form) return;
+        const formData = new FormData(form);
+        const config = {
+            'subsonic.enable': formData.get('subsonic.enable') === 'on',
+            'subsonic.path': (formData.get('subsonic.path') || '').trim() || '/rest',
+            'subsonic.enableDebug': formData.get('subsonic.enableDebug') === 'on',
+            'subsonic.port': parseInt(formData.get('subsonic.port')) || 0,
+            'subsonic.onlineSearch': formData.get('subsonic.onlineSearch') === 'on',
+            'subsonic.onlineSearchMode': formData.get('subsonic.onlineSearchMode') || 'fallback',
+            'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
+            'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
+            'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
+            'subsonic.sharedListMode': (formData.get('subsonic.sharedListMode') || '').trim() || 'leaderboard',
+            'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
+            'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
+            'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
+            'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
+            'subsonic.dislikeRating': Number(formData.get('subsonic.dislikeRating') || 1),
+            'subsonic.hideDisliked': formData.get('subsonic.hideDisliked') === 'on',
+            'subsonic.dislikeCrossSource': formData.get('subsonic.dislikeCrossSource') === 'on',
+            'subsonic.dislikeNoRecommend': formData.get('subsonic.dislikeNoRecommend') === 'on',
+            'subsonic.dislikeDuetMode': formData.get('subsonic.dislikeDuetMode') || 'any',
+            'subsonic.dislikeNormalizeName': formData.get('subsonic.dislikeNormalizeName') === 'on',
+            'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
+            'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
+            'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
+            'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
+            'subsonic.quality.priority': (formData.get('subsonic.quality.priority') || '').trim() || 'flac,320k,128k',
+            'subsonic.quality.clientCapMode': formData.get('subsonic.quality.clientCapMode') || 'soft',
+            'subsonic.source.priority': (formData.get('subsonic.source.priority') || '').trim() || 'kw,tx,wy,mg,kg',
+            'subsonic.source.crossPlatform': formData.get('subsonic.source.crossPlatform') === 'on',
+            'subsonic.source.autoSwitchCustom': formData.get('subsonic.source.autoSwitchCustom') === 'on',
+            'singer.sourcePriority': formData.get('singer.sourcePriority'),
+        };
+        const restartRequiredKeys = ['subsonic.enable', 'subsonic.port'];
+        const prevConfig = this.loadedConfig || {};
+        const changedRestartKeys = restartRequiredKeys.filter(k => {
+            if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
+            return config[k] !== prevConfig[k];
+        });
+        const needRestart = changedRestartKeys.length > 0;
+        try {
+            const res = await this.request('/api/config', {
+                method: 'POST',
+                body: JSON.stringify(config)
+            });
+            this.loadedConfig = Object.assign({}, this.loadedConfig || {}, config);
+            if (res.warning) {
+                showInfo('Subsonic 配置保存成功！\n\n⚠️ 警告：' + res.warning);
+            } else {
+                showSuccess('Subsonic 配置保存成功！');
+            }
+            if (needRestart) {
+                const ok = await showSelect(
+                    '需要重启服务器',
+                    '你修改了以下「需重启才能生效」的配置：\n\n• ' + changedRestartKeys.join('\n• ') + '\n\n' +
+                    '当前修改已保存，但必须重启 lx-server 后才会生效（例如 Subsonic 独立端口）。\n是否立即重启服务器？',
+                    { danger: true, confirmText: '立即重启', cancelText: '稍后手动重启' }
+                );
+                if (ok) {
+                    try {
+                        const r = await this.request('/api/restart', { method: 'POST' });
+                        if (r.success) {
+                            showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
+                            setTimeout(() => window.location.reload(), 5000);
+                        } else {
+                            showError('重启失败: ' + (r.message || '未知错误'));
+                        }
+                    } catch (e) {
+                        showError('重启请求失败: ' + e.message);
+                    }
+                }
+            }
+        } catch (err) {
+            showError('Subsonic 配置保存失败: ' + err.message);
             throw err;
         }
     }

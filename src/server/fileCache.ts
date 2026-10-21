@@ -11,6 +11,8 @@ const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { buildLyrics, parseLyrics } from '../utils/lrcTool'
 import { formatPlayTime } from '../utils/common'
 import { getUserSpace } from '../user'
+import { onFileCached as openlistBackupOnFileCached } from './openlistBackup'
+import { softDeleteLocalFileByPath, getActiveBackupLocalPaths } from './openlistBackupDb'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
@@ -325,6 +327,19 @@ class CacheIndexManager {
 }
 
 export const indexManager = new CacheIndexManager()
+
+/**
+ * OpenList 同步/下载回填缓存索引的对外封装。
+ * 供 openlistBackup 在「下载/双向同步」把远端文件落到本地后登记为缓存条目，
+ * 以及在「删除本地文件」时注销缓存条目，使应用能正确识别本地文件是否存在。
+ */
+export function registerOpenListCacheFile(username: string, item: any, folder: 'cache' | 'music'): void {
+  indexManager.update(username, item, folder)
+}
+
+export function unregisterOpenListCacheFile(username: string, songId: string, folder: 'cache' | 'music', quality?: string): void {
+  indexManager.remove(username, songId, folder, quality)
+}
 
 const COVER_CHECK_VERSION = 4
 
@@ -2529,6 +2544,19 @@ export const downloadAndCache = async (songInfo: any, url: string, quality?: str
                         nativeIds: extractNativeIds(songInfo)
                     }, folderType)
 
+                    // [OpenList 备份] 音频落盘后触发备份（按 per-user 配置判定是否上传）
+                    if ((globalThis as any).lx?.config?.['openlist.enable']) {
+                        try {
+                            openlistBackupOnFileCached(normalizedUsername, folderType, finalPath, {
+                                source: metadata.source,
+                                songmid: id,
+                                quality: actualQuality,
+                            })
+                        } catch (e) {
+                            console.warn('[openlist-backup] 落盘钩子异常:', e)
+                        }
+                    }
+
                     let tagger: any
                     let metadataWritable = false
                     try {
@@ -3004,7 +3032,9 @@ export const clearAllCache = (username?: string) => {
         for (const file of files) {
             try {
                 const stats = fs.statSync(path.join(dir, file))
-                fs.unlinkSync(path.join(dir, file))
+                const fp = path.join(dir, file)
+                fs.unlinkSync(fp)
+                softDeleteLocalFileByPath(fp)
                 deletedCount++; freedSize += stats.size
             } catch (e) { }
         }
@@ -3169,11 +3199,18 @@ export const checkAndCleanupCache = async (username?: string) => {
         }
     }
     allFiles.sort((a, b) => a.mtime - b.mtime)
+    // 跳过「仍有活跃备份记录」的文件，避免本地缓存被清理后 OpenList 上传因源文件不存在而失败
+    let activeBackupPaths: Set<string> | null = null
+    try { activeBackupPaths = getActiveBackupLocalPaths() } catch { activeBackupPaths = null }
     let currentSize = totalSize
     const targetSize = limitBytes * 0.95
     let deletedCount = 0
     for (const file of allFiles) {
         if (currentSize <= targetSize) break
+        if (activeBackupPaths && activeBackupPaths.has(file.path)) {
+            if (global.lx?.config?.['debug.enabled']) console.log(`[文件缓存] 跳过清理（仍有活跃备份记录）: ${file.path}`)
+            continue
+        }
         try { fs.unlinkSync(file.path); currentSize -= file.size; deletedCount++ } catch (e) { }
     }
     console.log(`[文件缓存] 用户 ${normalizedUsername} 缓存空间清理完成，已删除 ${deletedCount} 个过期文件`)

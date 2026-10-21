@@ -22,7 +22,7 @@
     "prepare": "husky || true"
   },
   "engines": {
-    "node": ">= 20",
+    "node": ">=22.5.0",
     "npm": ">= 8.5.2"
   },
   "repository": {
