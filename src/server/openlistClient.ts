@@ -87,12 +87,12 @@ export class OpenListClient {
     return `${this.root}/${rel}`.replace(/\/+/g, '/')
   }
 
-  async listDir(p: string): Promise<any> {
+  async listDir(p: string, page = 1): Promise<any> {
     await this.ensureToken()
     const resp = await fetch(`${this.endpoint}/api/fs/list`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeader() },
-      body: JSON.stringify({ path: p, password: '', page: 1, per_page: 100 }),
+      body: JSON.stringify({ path: p, password: '', page, per_page: 100 }),
       signal: AbortSignal.timeout(META_TIMEOUT_MS),
     })
     const data: any = await resp.json().catch(() => ({}))
@@ -216,14 +216,20 @@ export class OpenListClient {
    */
   async listFilesRecursive(remotePath: string, depth = 0, maxDepth = 10): Promise<Array<{ path: string; name: string; size: number; modified: string; isDir: boolean }>> {
     if (depth > maxDepth) return []
-    const data: any = await this.listDir(remotePath)
-    const content: any[] = data?.content || []
+    const perPage = 100
     const out: Array<{ path: string; name: string; size: number; modified: string; isDir: boolean }> = []
-    for (const item of content) {
-      const full = item.path || `${remotePath}/${item.name}`
-      const isDir = !!item.is_dir
-      out.push({ path: full, name: item.name, size: Number(item.size || 0), modified: item.modified || '', isDir })
-      if (isDir) out.push(...(await this.listFilesRecursive(full, depth + 1, maxDepth)))
+    let page = 1
+    while (true) {
+      const data: any = await this.listDir(remotePath, page)
+      const content: any[] = data?.content || []
+      for (const item of content) {
+        const full = item.path || `${remotePath}/${item.name}`
+        const isDir = !!item.is_dir
+        out.push({ path: full, name: item.name, size: Number(item.size || 0), modified: item.modified || '', isDir })
+        if (isDir) out.push(...(await this.listFilesRecursive(full, depth + 1, maxDepth)))
+      }
+      if (content.length < perPage) break
+      page++
     }
     return out
   }

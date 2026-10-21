@@ -3292,10 +3292,11 @@ class App {
             }
             const statusMap = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
             const badgeColor = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
+            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             const fmtName = (f) => {
                 const nm = (f.name || '').toString().trim()
                 const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
-                return base.replace(/</g, '&lt;')
+                return esc(base)
             }
             const fmtSize = (n) => {
                 n = Number(n) || 0
@@ -3303,7 +3304,6 @@ class App {
                 if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
                 return (n / 1024 / 1024).toFixed(1) + ' MB'
             }
-            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             this._olbPageIds = list.slice(start, start + pageSize).map(f => f.id)
             const rows = list.slice(start, start + pageSize).map(f => {
                 const d = new Date(f.updated_at || f.created_at || Date.now())
@@ -3325,7 +3325,7 @@ class App {
                 const checked = sel.has(f.id) ? 'checked' : ''
                 return '<tr style="border-bottom:1px solid var(--border);">' +
                     '<td style="padding:.4rem .5rem;text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
-                    '<td style="padding:.4rem .5rem;">' + (f.user || '') + '</td>' +
+                    '<td style="padding:.4rem .5rem;">' + esc(f.user || '') + '</td>' +
                     '<td style="padding:.4rem .5rem;white-space:nowrap;">' + typeLabel + '</td>' +
                     '<td style="padding:.4rem .5rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
                     '<td style="padding:.4rem .5rem;white-space:nowrap;"><span style="background:' + color + ';color:#fff;padding:2px 8px;border-radius:10px;font-size:.72rem;">' + label + '</span></td>' +
@@ -3360,7 +3360,7 @@ class App {
             this.updateOlbSelCount()
         } catch (e) {
             console.error(e)
-            box.innerHTML = '<div class="config-hint" style="color:var(--danger);">加载失败: ' + (e && e.message || e) + '</div>'
+            box.innerHTML = '<div class="config-hint" style="color:var(--danger);">加载失败: ' + esc(e && e.message || e) + '</div>'
         }
     }
 

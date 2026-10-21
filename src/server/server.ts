@@ -39,6 +39,10 @@ import { OpenListClient } from './openlistClient'
 async function validateOpenListConfig(newConfig: any): Promise<void> {
   const c: any = global.lx.config
   const enable = newConfig['openlist.enable'] !== undefined ? !!newConfig['openlist.enable'] : !!c['openlist.enable']
+  // 仅当 OpenList 相关配置发生变化时才做联网强校验；否则即使 OpenList 临时不可达，也不应阻塞保存不相关的设置
+  const openlistKeys = ['openlist.enable', 'openlist.endpoint', 'openlist.username', 'openlist.password', 'openlist.token', 'openlist.root', 'openlist.keepLocalAfterUpload', 'openlist.includeNonAudio', 'openlist.verifyInterval', 'openlist.syncInterval', 'openlist.userBackups']
+  const openlistChanged = openlistKeys.some((k) => newConfig[k] !== undefined && newConfig[k] !== c[k])
+  if (!openlistChanged) return
   if (!enable) return
   const endpoint = newConfig['openlist.endpoint'] !== undefined ? newConfig['openlist.endpoint'] : (c['openlist.endpoint'] || '')
   const username = newConfig['openlist.username'] !== undefined ? newConfig['openlist.username'] : (c['openlist.username'] || '')

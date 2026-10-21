@@ -402,6 +402,7 @@ function queueAttachmentsForFile(
 ): void {
   if (!cfg.includeNonAudio) return
   const audioDir = path.dirname(audioLocalPath)
+  const audioBase = path.basename(audioLocalPath, path.extname(audioLocalPath))
   let entries: fs.Dirent[]
   try {
     entries = fs.readdirSync(audioDir, { withFileTypes: true })
@@ -413,6 +414,8 @@ function queueAttachmentsForFile(
     const ext = (path.extname(e.name).split('.').pop() || '').toLowerCase()
     if (!NON_AUDIO_EXT.includes(ext)) continue
     if (e.name === path.basename(audioLocalPath)) continue
+    // 仅关联与音频同 basename 的附件（如 song.lrc / song.jpg），避免把同目录其它歌曲的歌词/封面误挂到当前音频下
+    if (path.basename(e.name, path.extname(e.name)) !== audioBase) continue
     const full = path.join(audioDir, e.name)
     const rel = path.relative(dir, full).replace(/\\/g, '/')
     const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${rel}`)
@@ -491,11 +494,15 @@ export async function verifyPending(): Promise<void> {
     const cl = getClient()
     if (!cl) return
     const cfg = getConfig()
-    const rows = [...listBackupByStatus('completed'), ...listBackupByStatus('uploading')]
+    const rows = listBackupByStatus('completed')
     for (const row of rows) {
       try {
         const info = await cl.getFileInfo(row.remote_path)
-        if (info && info.size != null) {
+        // 仅校验 completed 行；uploading 行交给下方的卡死回收处理，避免上传未完成即被判定 verified 并误删本地文件
+        let localSize: number | null = null
+        try { if (row.local_path && fs.existsSync(row.local_path)) localSize = fs.statSync(row.local_path).size } catch { /* ignore */ }
+        const sizeOk = info && info.size > 0 && (localSize == null || info.size === localSize)
+        if (sizeOk) {
           setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified) })
           const mode = effectiveModeFromRow(row, cfg)
           if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
@@ -592,7 +599,7 @@ function walkLocal(dir: string, out: string[] = []): string[] {
   return out
 }
 
-function walkLocalAll(dir: string, map: Map<string, string> = new Map()): Map<string, string> {
+function walkLocalAll(dir: string, map: Map<string, string> = new Map(), root: string = dir): Map<string, string> {
   let entries: fs.Dirent[]
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true })
@@ -601,8 +608,8 @@ function walkLocalAll(dir: string, map: Map<string, string> = new Map()): Map<st
   }
   for (const e of entries) {
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) walkLocalAll(p, map)
-    else map.set(path.relative(dir, p).replace(/\\/g, '/'), p)
+    if (e.isDirectory()) walkLocalAll(p, map, root)
+    else map.set(path.relative(root, p).replace(/\\/g, '/'), p)
   }
   return map
 }
@@ -833,10 +840,15 @@ export async function retryBackup(id: number): Promise<{ ok: boolean; message?: 
       // 校验远端是否已存在（中间态可能实际已上传成功）
       let remoteInfo: any = null
       try { remoteInfo = await cl.getFileInfo(row.remote_path) } catch { remoteInfo = null }
-      if (remoteInfo && remoteInfo.size != null) {
+      if (remoteInfo && remoteInfo.size > 0) {
         setBackupStatus(id, 'verified', { size: remoteInfo.size, remotePath: row.remote_path, remoteMtime: parseMod(remoteInfo.modified) })
-        if (mode === 'upload-delete') {
-          try { fs.unlinkSync(row.local_path); removeLocalCache(row); softDeleteLocalFile(row.user, row.local_path) } catch { /* 忽略 */ }
+        if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
+          let localSize: number | null = null
+          try { localSize = fs.statSync(row.local_path).size } catch { /* ignore */ }
+          // 仅当本地文件缺失或大小与远端一致时才删除，避免误删未完成/旧的本地副本
+          if (localSize == null || localSize === remoteInfo.size) {
+            try { fs.unlinkSync(row.local_path); removeLocalCache(row); softDeleteLocalFile(row.user, row.local_path) } catch { /* 忽略 */ }
+          }
         }
         return { ok: true, message: '远端文件已存在，已标记为完成' }
       }
@@ -911,8 +923,11 @@ export async function deleteOpenlistBackups(ids: number[]): Promise<{
     // 主文件本地：仅 cache 类型物理删除本地临时副本（music 为用户实际文件，仅软删记录）
     if (row.folder_type === 'cache' && row.local_path && fs.existsSync(row.local_path) && countLocalPathRefs(row.local_path, id, -1) === 0) {
       try { fs.unlinkSync(row.local_path); softDeleteLocalFile(row.user, row.local_path) } catch { /* ignore */ }
+      removeLocalCache(row)
+    } else if (row.folder_type === 'music') {
+      // music 本地文件保留为用户实际资产；仅当本地确已不存在时才补注销缓存索引，避免误删仍在磁盘文件的缓存元数据
+      if (row.local_path && !fs.existsSync(row.local_path)) removeLocalCache(row)
     }
-    removeLocalCache(row)
     deleted++
   }
   if (remoteFailed.length) {
