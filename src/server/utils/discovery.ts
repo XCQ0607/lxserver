@@ -47,7 +47,17 @@ export const fetchGenres = async () => {
         }
 
         // [修复] 上游 categoryName 含 HTML 数字实体（如 R&#38;B），直接回给客户端会显示成乱码
-        const decodeEntities = (s: string) => String(s).replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)))
+        // 用 fromCodePoint 支持完整 Unicode（含超出 BMP 的表情等），并对非法码点保留原始实体文本
+        const decodeEntities = (s: string) =>
+          String(s).replace(/&#(\d+);/g, (_, n) => {
+            const cp = Number(n)
+            if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) return `&#${n};`
+            try {
+              return String.fromCodePoint(cp)
+            } catch {
+              return `&#${n};`
+            }
+          })
 
         return allItems.map((item: any) => ({
             value: decodeEntities(item.categoryName),
