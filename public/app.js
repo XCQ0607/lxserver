@@ -104,7 +104,8 @@ class App {
         document.getElementById('refresh-users-btn')?.addEventListener('click', async () => {
             try {
                 // 在重载前先保存配置
-                await this.saveConfig(true);
+                const restarting = await this.saveConfig(true);
+                if (restarting) return;
                 await this.request('/api/admin/reload', { method: 'POST' });
                 this.loadUsers();
                 this.loadDashboard();
@@ -167,7 +168,8 @@ class App {
             this.saveConfig();
         });
         document.getElementById('reload-config-btn')?.addEventListener('click', async () => {
-            await this.saveConfig(true);
+            const restarting = await this.saveConfig(true);
+            if (restarting) return;
             this.loadConfig();
         });
         document.querySelector('input[name="user.enablePublicFavorites"]')?.addEventListener('change', () => {
@@ -3389,6 +3391,7 @@ class App {
                         if (r.success) {
                             showSuccess('服务器正在重启，新配置（如 Subsonic 独立端口）将在重启后生效。\n\n页面将在 5 秒后自动刷新。');
                             setTimeout(() => window.location.reload(), 5000);
+                            return true;
                         } else {
                             showError('重启失败: ' + (r.message || '未知错误'));
                         }
