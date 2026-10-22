@@ -66,6 +66,10 @@ const loadNames = new Set([
 const SUBSONIC_PREFIX = (k) => k.startsWith('subsonic.') || k === 'singer.sourcePriority';
 const loadKeys = [...loadNames].filter(SUBSONIC_PREFIX).sort();
 
+// 这些键不呈现为 form.elements 项，而是由独立 DOM 控件(经 getElementById 取值的开关)提供，
+// 因此不存在 name="..." 属性；其 DOM 存在性由场景3(ID 校验)保证。
+const NON_FORM_KEYS = new Set(['subsonic.standalone']);
+
 // save 写入的字段: 'subsonic.xxx': 或 'singer.sourcePriority':
 const saveKeys = [...collect(/'(subsonic\.[^']+|singer\.sourcePriority)'\s*:/g, save)].sort();
 
@@ -88,7 +92,7 @@ test('场景1: 导航入口与视图/表单结构存在', () => {
 
 test('场景2: load 引用的所有字段在 subsonic-form 中真实存在', () => {
   assert.ok(loadKeys.length > 0, '未提取到任何 subsonic 加载字段');
-  const missing = loadKeys.filter((k) => !formNames.has(k));
+  const missing = loadKeys.filter((k) => !formNames.has(k) && !NON_FORM_KEYS.has(k));
   assert.deepEqual(missing, [], `subsonic-form 缺少 load 引用的字段: ${missing.join(', ')}`);
 });
 
