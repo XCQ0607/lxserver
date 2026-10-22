@@ -3243,6 +3243,9 @@ class App {
         if (!form) return;
         try {
             const config = await this.request('/api/config');
+            // 保存 Subsonic 专用基准配置，供 saveSubsonicConfig 对比「需重启」字段是否变更。
+            // 不能复用 loadedConfig：它会被主表单 saveConfig 覆盖为不含 subsonic.* 的载荷。
+            this.loadedSubsonicConfig = config;
             if (form.elements['singer.sourcePriority']) {
                 form.elements['singer.sourcePriority'].value = config['singer.sourcePriority'] || 'tx,wy';
             }
@@ -3433,7 +3436,7 @@ class App {
             'singer.sourcePriority': formData.get('singer.sourcePriority'),
         };
         const restartRequiredKeys = ['subsonic.enable', 'subsonic.standalone', 'subsonic.port'];
-        const prevConfig = this.loadedConfig || {};
+        const prevConfig = this.loadedSubsonicConfig || {};
         const changedRestartKeys = restartRequiredKeys.filter(k => {
             if (k === 'subsonic.port') return Number(config[k]) !== Number(prevConfig[k]);
             return config[k] !== prevConfig[k];
@@ -3444,7 +3447,7 @@ class App {
                 method: 'POST',
                 body: JSON.stringify(config)
             });
-            this.loadedConfig = Object.assign({}, this.loadedConfig || {}, config);
+            this.loadedSubsonicConfig = Object.assign({}, this.loadedSubsonicConfig || {}, config);
             if (res.warning) {
                 showInfo('Subsonic 配置保存成功！\n\n⚠️ 警告：' + res.warning);
             } else {
