@@ -1162,7 +1162,7 @@ class SubsonicHandler {
 
                 case 'stream':
                 case 'download':
-                    return this.handleStream(req, res, username, params, format)
+                    return this.handleStream(req, res, username, params, format, method)
 
                 case 'getCoverArt':
                     return this.handleGetCoverArt(req, res, username, params, format)
@@ -5591,6 +5591,7 @@ class SubsonicHandler {
         username: string,
         params: URLSearchParams,
         format: string,
+        method: string = 'stream',
     ) {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
@@ -5743,6 +5744,13 @@ class SubsonicHandler {
                         return serveCacheFile(req, res, c.filename, username)
                     }
                 }
+                // [修复] 任意音质兜底：下载缓存的高音质(如 flac)也能被播放复用，
+                // 避免"下载已落盘但播放因 exactQuality+码率上限而读不到、仍回源"的观感
+                const anyQ = checkCache({ source, songmid, id }, username, false)
+                if (anyQ.exists && anyQ.filename) {
+                    subsonicLog.debug(`[Subsonic] Stream hit local cache (any-quality fallback) for ${id} (${anyQ.quality}): ${anyQ.filename} (${anyQ.folder})`)
+                    return serveCacheFile(req, res, anyQ.filename, username)
+                }
             }
 
             // [修复] 像 star 一样：先用 findMusicById 查本地/缓存，查不到再在线回源补全真实元数据
@@ -5875,9 +5883,13 @@ class SubsonicHandler {
                     } catch { /* URL 解析失败则跳过 */ }
                 }
 
-                // [新增] 播放时触发服务器缓存保存：受 subsonic.cacheOnPlay 开关控制
-                // 后台落盘到该用户缓存目录；已在播放的上一首若未下载完成，在切换新歌曲时自动 abort 中断，避免连切刷歌堆积带宽
-                if (global.lx.config['subsonic.cacheOnPlay'] && username) {
+                // [修复] 播放/下载时触发服务器缓存保存：受 subsonic.cacheOnPlay 开关控制；
+                // 下载(download)无论 cacheOnPlay 是否开启都强制落盘，确保"下载即缓存、可被后续播放复用"
+                // 后台落盘到该用户缓存目录；已在播放/下载的上一首若未下载完成，在切换新歌曲时自动 abort 中断，避免连切刷歌堆积带宽
+                if ((global.lx.config['subsonic.cacheOnPlay'] && username) || method === 'download') {
+                    if (global.lx.config['subsonic.enableDebug']) {
+                        subsonicLog.debug(`[Subsonic] ${method} cache write triggered: user=${username} quality=${result.quality} (cacheOnPlay=${global.lx.config['subsonic.cacheOnPlay']})`)
+                    }
                     const songKey = `${source}_${songmid}_${result.quality}`
                     const previous = this.subsonicActiveTasks.get(username)
                     if (previous && previous.songKey !== songKey) {
