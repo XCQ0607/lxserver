@@ -493,7 +493,8 @@ body {
     margin: 1rem;
     display: flex;
     flex-direction: column;
-    gap: 2rem;
+    gap: 1rem;
+    /* [修复] 原 2rem 间距在菜单项较多时白白占用约 32px 纵向空间，导致列表更容易溢出 */
     position: sticky;
     top: 1rem;
     height: calc(100vh - 2rem);
@@ -524,15 +525,28 @@ body {
     gap: 0.5rem;
     overflow-y: auto;
     min-height: 0;
-    /* Hide scrollbar for Chrome, Safari and Opera */
-    -ms-overflow-style: none;
-    /* IE and Edge */
-    scrollbar-width: none;
-    /* Firefox */
+    padding-right: 4px;
+    /* [修复] 菜单项多达 10 条时常溢出，此前滚动条被隐藏导致用户以为「菜单变少」。
+       改为细滚动条：既保留视觉简洁，又让溢出可被发现、可滚动。 */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
 
 .sidebar-nav::-webkit-scrollbar {
-    display: none;
+    width: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.2);
+    border-radius: 3px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.35);
 }
 
 .nav-item {
@@ -563,6 +577,18 @@ body {
     background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
     color: white;
     box-shadow: var(--shadow-md);
+}
+
+/* [修复] 视口较矮时（笔记本常见 700~800px）侧栏进一步收紧，避免底部菜单被挤出可视区 */
+@media (max-height: 900px) {
+    .sidebar {
+        padding: 1.25rem 1rem;
+        gap: 0.75rem;
+    }
+
+    .nav-item {
+        padding: 0.625rem 1rem;
+    }
 }
 
 .sidebar-divider {
