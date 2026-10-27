@@ -1376,44 +1376,7 @@
 
                 <!-- Local Music View -->
                 <div id="view-localmusic"
-                    class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 hidden opacity-0 transition-all duration-300 overflow-hidden">
-
-                    <!-- 自定义目录：侧边目录分类面板 (仅电脑版 + 自定义模式 + 主侧边栏折叠时显示，可再次折叠为窄条) -->
-                    <aside id="cd-dir-side-panel" class="hidden" aria-label="目录分类">
-                        <!-- 展开态 -->
-                        <div class="cd-side-full">
-                            <div class="cd-side-head">
-                                <div class="cd-side-title">
-                                    <span class="cd-side-title-icon"><i class="fas fa-folder-tree"></i></span>
-                                    <span>目录分类</span>
-                                    <span id="cd-side-badge" class="cd-side-badge">全部</span>
-                                </div>
-                                <button type="button" class="cd-side-icon-btn" title="折叠目录面板"
-                                    onclick="window.CustomDirManager.toggleSidePanel(false)">
-                                    <i class="fas fa-angles-left"></i>
-                                </button>
-                            </div>
-                            <div class="cd-side-tools">
-                                <button type="button" class="cd-side-tool" title="展开全部目录"
-                                    onclick="window.CustomDirManager.sideExpandAll(true)"><i class="fas fa-square-plus"></i></button>
-                                <button type="button" class="cd-side-tool" title="折叠全部目录"
-                                    onclick="window.CustomDirManager.sideExpandAll(false)"><i class="fas fa-square-minus"></i></button>
-                                <button type="button" class="cd-multi-switch" title="开启后点击即多选（等同按住 Ctrl）"
-                                    onclick="window.CustomDirManager.toggleMultiMode()">
-                                    <span class="cd-multi-track"><span class="cd-multi-knob"></span></span>
-                                    <span>多选</span>
-                                </button>
-                            </div>
-                            <div id="cd-side-tree" class="cd-side-tree custom-scrollbar"></div>
-                        </div>
-                        <!-- 收起态窄条 -->
-                        <button type="button" class="cd-side-rail" title="展开目录面板"
-                            onclick="window.CustomDirManager.toggleSidePanel(true)">
-                            <i class="fas fa-folder-tree"></i>
-                            <span class="cd-side-rail-text">目录分类</span>
-                            <i class="fas fa-angles-right cd-side-rail-arrow"></i>
-                        </button>
-                    </aside>
+                    class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-52 md:pb-36 hidden opacity-0 transition-all duration-300 overflow-hidden">
 
                     <!-- Settings and Filters Area -->
                     <div
@@ -1788,21 +1751,46 @@
                         </div>
                     </div>
 
+                    <!-- Body: sidebar + (header+list+pagination) -->
+                    <div class="flex-1 flex gap-2 min-h-0">
+
+                    <!-- Directory Sidebar (custom dir mode, desktop) -->
+                    <aside id="cd-sidebar"
+                        class="hidden xl:flex xl:flex-col w-56 shrink-0 border t-border-main t-bg-panel rounded-xl overflow-hidden">
+                        <div
+                            class="flex items-center gap-2 px-3 py-2 border-b t-border-main t-bg-main shrink-0">
+                            <i class="fas fa-folder-tree text-amber-500 text-xs"></i>
+                            <span class="text-xs font-bold t-text-main">目录分类</span>
+                            <button onclick="window.CustomDirManager.collapseSidebarDir()"
+                                class="ml-auto text-[10px] t-text-muted hover:text-emerald-500" title="收起侧栏">
+                                <i class="fas fa-angles-left"></i>
+                            </button>
+                        </div>
+                        <div id="cd-sidebar-tree" class="flex-1 overflow-y-auto custom-scrollbar p-1.5"></div>
+                    </aside>
+
+                    <!-- Collapsed sidebar handle -->
+                    <button id="cd-sidebar-expand-btn" onclick="window.CustomDirManager.expandSidebarDir()"
+                        class="hidden xl:flex w-8 shrink-0 items-start justify-center pt-3 border t-border-main t-bg-panel rounded-xl t-text-muted hover:text-emerald-500 transition-colors"
+                        title="展开目录分类" style="display:none;">
+                        <i class="fas fa-angles-right text-xs"></i>
+                    </button>
+
+                    <div class="flex-1 flex flex-col min-w-0">
+
                     <!-- Header Row -->
                     <div
                         class="grid grid-cols-12 gap-2 md:gap-4 p-4 border t-border-main t-bg-main text-gray-500 text-[10px] sm:text-xs font-bold uppercase tracking-wider shrink-0 mt-2 rounded-t-xl">
                         <div class="col-span-1 text-center font-mono flex items-center justify-center">
-                            <span>#</span>
-                        </div>
-                        <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-1.5 md:gap-2 min-w-0">
-                            <span class="flex-shrink-0">歌曲</span>
-                            <div class="flex items-center gap-1 flex-shrink-0">
+                            <div class="flex items-center gap-1">
+                                <span>#</span>
                                 <button onclick="window.LocalMusicManager.toggleBatchMode()"
                                     class="text-[10px] text-emerald-600 hover:text-emerald-700" title="批量操作">
                                     <i class="fas fa-tasks"></i>
                                 </button>
                             </div>
                         </div>
+                        <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4">歌曲</div>
                         <div class="hidden sm:block sm:col-span-4 md:col-span-3 lg:col-span-2">歌手</div>
                         <div class="hidden lg:block lg:col-span-2">专辑</div>
                         <div class="hidden md:block md:col-span-2 lg:col-span-1">来源/信息</div>
@@ -1837,6 +1825,10 @@
                             <span class="hidden md:inline">末页</span><i class="fas fa-angles-right md:ml-1"></i>
                         </button>
                     </div>
+
+                    </div><!-- /inner column -->
+                    </div><!-- /body split -->
+
                 </div>
 
                 <!-- Settings View -->
