@@ -473,14 +473,13 @@ docker compose logs --tail=100
 | `SUBSONIC_PLAY_CACHE_FIRST`                | `subsonic.playCacheFirst`                  | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输(默认关闭,避免服务器自担出向流量) | `false`            |
 | `SUBSONIC_QUALITY_ENABLED`                 | `subsonic.quality.enabled`                 | Subsonic 是否开启音质优选                                                                          | `true`             |
 | `SUBSONIC_QUALITY_PRIORITY`                | `subsonic.quality.priority`                | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                                                | `flac,320k,128k`   |
+| `SUBSONIC_SOURCE_PRIORITY`                 | `subsonic.source.priority`                 | 跨平台优选顺序                                                                                     | `kw,tx,wy,mg,kg`   |
+| `SUBSONIC_SOURCE_CROSS_PLATFORM`           | `subsonic.source.crossPlatform`            | 跨平台查找候选                                                                                     | `true`             |
+| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM`        | `subsonic.source.autoSwitchCustom`         | 同平台解析失败时是否尝试其他自定义源脚本                                                           | `true`             |
 | `ARTIST_MAX_FETCH_PAGES`                   | `artist.maxFetchPages`                     | 歌手歌曲最大抓取页数                                                                               | `20`               |
 | `CACHE_NAMING_PATTERN` | `cache.namingPattern` | `simple`、`standard`、`singer_name_quality_album`、`singer_name`、`name_singer` | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM`                   | `system.allowUnsafeVM`                     | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                                                  | `false`            |
 | `LX_USER_<用户名>`                         | `users` 数组                               | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)                                           | -                    |
-
-| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | 跨平台优选顺序 | `kw,tx,wy,mg,kg` |
-| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | 跨平台查找候选 | `true` |
-| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | 同平台解析失败时是否尝试其他自定义源脚本 | `true` |
 
 布尔值不区分大小写，开启可用 `true/1/yes/y/on`，关闭可用 `false/0/no/n/off`。
 

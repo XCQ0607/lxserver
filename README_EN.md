@@ -426,13 +426,13 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback (default off, to avoid server egress) | `false` |
 | `SUBSONIC_QUALITY_ENABLED` | `subsonic.quality.enabled` | Enable Subsonic audio quality selection | `true` |
 | `SUBSONIC_QUALITY_PRIORITY` | `subsonic.quality.priority` | Subsonic audio quality priority order (e.g. `flac,320k,128k`) | `flac,320k,128k` |
+| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | Cross-platform candidate priority | `kw,tx,wy,mg,kg` |
+| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | Allow cross-platform candidate lookup | `true` |
+| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | Try other custom scripts on the same platform | `true` |
 | `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |
 | `CACHE_NAMING_PATTERN` | `cache.namingPattern` | simple, standard, singer_name_quality_album, singer_name, name_singer | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
 | `LX_USER_<username>` | `users` | Create account using a password string | — |
-| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | Cross-platform candidate priority | `kw,tx,wy,mg,kg` |
-| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | Allow cross-platform candidate lookup | `true` |
-| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | Try other custom scripts on the same platform | `true` |
 
 Boolean values are case-insensitive: `true/1/yes/y/on` and `false/0/no/n/off`.
 
