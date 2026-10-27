@@ -12540,6 +12540,7 @@ async function handleLocalLogin() {
             if (pass) {
                 localStorage.setItem('lx_sync_pass', pass);
             }
+            if (passInput) passInput.value = '';
 
             // [新增] 成功登录后立即更新顶部栏 UI
             if (typeof updateUserUI === 'function') updateUserUI();

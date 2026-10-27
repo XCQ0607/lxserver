@@ -360,13 +360,12 @@
                     <!-- Search Input Area -->
                     <div id="music-search-toolbar" class="flex flex-col md:flex-row gap-2 md:gap-4 mb-2">
                         <!-- Search Input -->
-                        <div class="flex-1 relative rounded-xl" id="search-input-wrapper">
+                        <form role="search" onsubmit="event.preventDefault(); doSearch();" class="flex-1 relative rounded-xl" id="search-input-wrapper" autocomplete="off">
                             <i class="fas fa-search absolute left-4 top-3.5 t-text-muted pointer-events-none"></i>
-                            <input type="text" id="search-input" name="lx_music_search_query"
+                            <input type="search" id="search-input" name="lx_music_search_query"
                                 class="w-full pl-10 pr-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm text-sm md:text-base"
                                 placeholder="搜索歌曲、歌手..." onkeypress="handleSearchKeyPress(event)"
-                                autocomplete="one-time-code" readonly onfocus="this.removeAttribute('readonly');"
-                                spellcheck="false">
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             <!-- 搜索波浪流光动效条（搜索中从头到尾波动） -->
                             <div id="search-progress-wave" class="search-wave-bar"></div>
                             <!-- Search Suggestions Dropdown -->
@@ -376,7 +375,7 @@
                                     <!-- Suggestions appear here -->
                                 </div>
                             </div>
-                        </div>
+                        </form>
 
                         <!-- Source Selector & Manage Button -->
                         <div class="flex items-center gap-2 justify-end">
@@ -539,14 +538,15 @@
                             class="hidden p-3 t-bg-main border-b t-border-main animate-fade-in">
                             <div class="flex items-center gap-2 sm:gap-3">
                                 <!-- Search Input -->
-                                <div class="relative flex-1 min-w-[24px]">
-                                    <input type="text" id="gl-local-search-input"
+                                <form role="search" onsubmit="event.preventDefault();" class="relative flex-1 min-w-[24px]" autocomplete="off">
+                                    <input type="search" id="gl-local-search-input"
                                         class="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main transition-all"
                                         placeholder="搜索当前页结果 (歌曲、歌手)..." oninput="window.ListSearch.handleSearch()"
-                                        onkeydown="window.ListSearch.handleKeydown(event)">
+                                        onkeydown="window.ListSearch.handleKeydown(event)"
+                                        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                     <i
                                         class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                </div>
+                                </form>
 
                                 <div id="gl-local-search-nav"
                                     class="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 opacity-0 pointer-events-none transition-opacity">
@@ -619,7 +619,8 @@
                                     class="flex items-center gap-1.5 bg-gray-500/5 px-2 py-0.5 rounded-lg border t-border-main">
                                     <input id="jump-page-input" type="number" min="1"
                                         class="w-10 h-6 text-xs text-center bg-transparent focus:outline-none t-text-main"
-                                        placeholder="页" onkeydown="if(event.key==='Enter') jumpToPage()">
+                                        placeholder="页" onkeydown="if(event.key==='Enter') jumpToPage()"
+                                        autocomplete="off">
                                     <span class="w-[1px] h-3 bg-gray-300 dark:bg-gray-700"></span>
                                     <button onclick="jumpToPage()"
                                         class="text-[10px] font-bold text-emerald-600 hover:text-emerald-500 transition-colors">
@@ -652,19 +653,20 @@
                     <div id="songlist-toolbar" class="flex flex-col md:flex-row gap-3 mb-4 md:mb-6">
                         <!-- Search & Categories -->
                         <div class="flex flex-[2] gap-2 items-center">
-                            <div class="relative flex-1 group">
+                            <form role="search" onsubmit="event.preventDefault(); window.SongListManager.search();" class="relative flex-1 group" autocomplete="off">
                                 <i
                                     class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 t-text-muted group-focus-within:text-emerald-500 transition-colors"></i>
-                                <input type="text" id="songlist-search-input"
+                                <input type="search" id="songlist-search-input"
                                     class="w-full pl-10 pr-12 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm text-sm md:text-base"
-                                    placeholder="搜索歌单..." onkeypress="handleSongListSearchKeyPress(event)">
+                                    placeholder="搜索歌单..." onkeypress="handleSongListSearchKeyPress(event)"
+                                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                 <div id="songlist-search-progress-wave" class="search-wave-bar pointer-events-none" aria-hidden="true"></div>
-                                <button onclick="window.SongListManager.search()"
+                                <button type="submit"
                                     class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"
                                     title="开始搜索">
                                     <i class="fas fa-arrow-right text-xs"></i>
                                 </button>
-                            </div>
+                            </form>
                             <button onclick="toggleTagSelector()" id="tag-selector-btn"
                                 class="px-4 py-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-main flex items-center gap-2 shadow-sm transition-all whitespace-nowrap text-sm md:text-base">
                                 <span id="current-tag-name">全部分类</span>
@@ -1058,14 +1060,15 @@
                                     class="hidden p-3 t-bg-main border-b t-border-main animate-fade-in">
                                     <div class="flex items-center gap-2 sm:gap-3">
                                         <!-- Search Input -->
-                                        <div class="relative flex-1 min-w-[24px]">
-                                            <input type="text" id="sl-local-search-input"
+                                        <form role="search" onsubmit="event.preventDefault();" class="relative flex-1 min-w-[24px]" autocomplete="off">
+                                            <input type="search" id="sl-local-search-input"
                                                 class="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main transition-all"
                                                 placeholder="搜索歌曲名、歌手..." oninput="window.ListSearch.handleSearch()"
-                                                onkeydown="window.ListSearch.handleKeydown(event)">
+                                                onkeydown="window.ListSearch.handleKeydown(event)"
+                                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                             <i
                                                 class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                        </div>
+                                        </form>
 
                                         <div id="sl-local-search-nav"
                                             class="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 opacity-0 pointer-events-none transition-opacity">
@@ -1226,14 +1229,15 @@
                                 class="hidden p-3 t-bg-main border-b t-border-main animate-fade-in flex-shrink-0">
                                 <div class="flex items-center gap-2 sm:gap-3">
                                     <!-- Search Input -->
-                                    <div class="relative flex-1 min-w-[24px]">
-                                        <input type="text" id="lb-local-search-input"
+                                    <form role="search" onsubmit="event.preventDefault();" class="relative flex-1 min-w-[24px]" autocomplete="off">
+                                        <input type="search" id="lb-local-search-input"
                                             class="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main transition-all"
                                             placeholder="搜索歌曲名、歌手..." oninput="window.ListSearch.handleSearch()"
-                                            onkeydown="window.ListSearch.handleKeydown(event)">
+                                            onkeydown="window.ListSearch.handleKeydown(event)"
+                                            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                         <i
                                             class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                    </div>
+                                    </form>
 
                                     <div id="lb-local-search-nav"
                                         class="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 opacity-0 pointer-events-none transition-opacity">
@@ -2114,7 +2118,7 @@
                                     <!-- 自定义代理URL输入框 (动态显示) -->
                                     <div id="custom-proxy-url-row" class="hidden">
                                         <input type="url" id="custom-proxy-url-input"
-                                            placeholder="https://proxy.example.com/{url}"
+                                            placeholder="https://proxy.example.com/{url}" autocomplete="off"
                                             class="w-full px-3 py-2 border t-border-main rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-bg-main t-text-main"
                                             onchange="updateSetting('customProxyUrl', this.value.trim())"
                                             oninput="updateSetting('customProxyUrl', this.value.trim())">
@@ -2161,25 +2165,25 @@
                                 </div>
 
                                 <!-- Local Mode Form -->
-                                <div id="sync-form-local" class="space-y-4">
-                                    <input type="text" id="sync-local-user" placeholder="用户名"
+                                <form id="sync-form-local" class="space-y-4" onsubmit="event.preventDefault(); handleLocalLogin();" autocomplete="on">
+                                    <input type="text" id="sync-local-user" name="username" placeholder="用户名" autocomplete="username"
                                         class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm">
-                                    <input type="password" id="sync-local-pass" placeholder="密码"
+                                    <input type="password" id="sync-local-pass" name="password" placeholder="密码" autocomplete="current-password"
                                         class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm">
-                                    <button onclick="handleLocalLogin()"
+                                    <button type="submit"
                                         class="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg transition-colors shadow-md">登录并同步</button>
-                                </div>
+                                </form>
 
                                 <!-- Remote Mode Form (Hidden) -->
-                                <div id="sync-form-remote" class="space-y-4 hidden">
+                                <form id="sync-form-remote" class="space-y-4 hidden" onsubmit="event.preventDefault();" autocomplete="off">
                                     <p class="text-xs text-gray-500">请输入 LX Music 桌面端或移动端的连接信息</p>
 
                                     <!-- Step 1: URL -->
                                     <div id="sync-remote-step1">
                                         <label class="block text-xs font-bold t-text-muted mb-1">链接</label>
-                                        <input type="text" id="sync-remote-url" placeholder="ws://192.168.x.x:xxx"
+                                        <input type="text" id="sync-remote-url" placeholder="ws://192.168.x.x:xxx" autocomplete="off"
                                             class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm mb-2">
-                                        <button onclick="handleRemoteStep1()"
+                                        <button type="button" onclick="handleRemoteStep1()"
                                             class="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg transition-colors shadow-md">
                                             下一步
                                         </button>
@@ -2188,20 +2192,20 @@
                                     <!-- Step 2: Code (Hidden) -->
                                     <div id="sync-remote-step2" class="hidden">
                                         <label class="block text-xs font-bold t-text-muted mb-1">连接码</label>
-                                        <input type="text" id="sync-remote-code" placeholder="输入连接码"
+                                        <input type="text" id="sync-remote-code" placeholder="输入连接码" autocomplete="off"
                                             class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm mb-2">
                                         <div class="flex gap-2">
-                                            <button onclick="handleRemoteBack()"
+                                            <button type="button" onclick="handleRemoteBack()"
                                                 class="flex-1 py-2 bg-gray-200 hover:bg-gray-300 t-text-muted font-bold rounded-lg transition-colors">
                                                 上一步
                                             </button>
-                                            <button onclick="handleRemoteConnect()"
+                                            <button type="button" onclick="handleRemoteConnect()"
                                                 class="flex-[2] py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition-colors shadow-md">
                                                 连接
                                             </button>
                                         </div>
                                     </div>
-                                </div>
+                                </form>
 
                                 <div id="sync-status" class="mt-3 text-sm text-gray-500 flex items-center gap-2">
                                     <i class="fas fa-circle text-[8px] text-gray-300"></i> 状态: 未连接
@@ -4419,7 +4423,7 @@
                         <option value="kw">酷我音乐</option>
                         <option value="mg">咪咕音乐</option>
                     </select>
-                    <input type="text" id="external-list-input" placeholder="输入歌单链接或歌单 ID"
+                    <input type="text" id="external-list-input" placeholder="输入歌单链接或歌单 ID" autocomplete="off"
                         class="flex-1 p-3 border t-border-main rounded-xl t-bg-main text-sm focus:ring-2 focus:ring-emerald-400 focus:outline-none">
                 </div>
 
@@ -4468,7 +4472,7 @@
                 </button>
             </div>
             <div class="p-6 space-y-4">
-                <input type="text" id="qq-input-field" placeholder="请输入 QQ 号"
+                <input type="text" id="qq-input-field" placeholder="请输入 QQ 号" autocomplete="off"
                     class="w-full p-3 border t-border-main rounded-xl t-bg-main text-sm focus:ring-2 focus:ring-emerald-400 focus:outline-none">
                 <button onclick="window.SongListManager.handleQQSubmit()"
                     class="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95">
@@ -4548,29 +4552,29 @@
                 </div>
             </div>
 
-            <div id="sync-connect-form">
+            <form id="sync-connect-form" onsubmit="event.preventDefault(); handleRemoteConnect('modal');" autocomplete="off">
                 <div class="mb-4">
                     <label class="block t-text-main text-sm font-bold mb-2">服务地址</label>
-                    <input type="text" id="sync-url" placeholder="ws://your-server:9527"
+                    <input type="text" id="sync-url" placeholder="ws://your-server:9527" autocomplete="off"
                         class="shadow appearance-none border rounded w-full py-2 px-3 t-text-main leading-tight focus:outline-none focus:shadow-outline">
                 </div>
                 <div class="mb-4">
                     <label class="block t-text-main text-sm font-bold mb-2">连接码 (Connection Code)</label>
-                    <input type="password" id="sync-code" placeholder="输入连接码"
+                    <input type="password" id="sync-code" placeholder="输入连接码" autocomplete="new-password" data-lpignore="true" data-1p-ignore
                         class="shadow appearance-none border rounded w-full py-2 px-3 t-text-main leading-tight focus:outline-none focus:shadow-outline">
                 </div>
                 <div id="sync-modal-status" class="mb-4 text-xs text-gray-500"></div>
                 <div class="flex justify-between">
-                    <button onclick="closeSyncModal()"
+                    <button type="button" onclick="closeSyncModal()"
                         class="bg-gray-300 hover:bg-gray-400 t-text-main font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         取消
                     </button>
-                    <button onclick="handleRemoteConnect('modal')"
+                    <button type="submit"
                         class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         连接 (Connect)
                     </button>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -4761,7 +4765,7 @@
 
             <!-- Footer for New Folder -->
             <div class="p-4 border-t t-border-main bg-gray-50/50 dark:bg-gray-800/30 flex gap-2">
-                <input type="text" id="new-subfolder-input" placeholder="新文件夹名称..."
+                <input type="text" id="new-subfolder-input" placeholder="新文件夹名称..." autocomplete="off"
                     class="flex-1 bg-white dark:bg-gray-900 border t-border-main rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <button onclick="window.LocalMusicManager.createSubFolder()"
                     class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-sm transition-all whitespace-nowrap">
@@ -5669,7 +5673,7 @@
                         <label
                             class="block text-[11px] uppercase tracking-[0.1em] font-bold t-text-muted mb-2 ml-1 opacity-80">Token
                             名称 (识别用)</label>
-                        <input type="text" id="new-token-name" placeholder="如：Python 脚本、工作电脑"
+                        <input type="text" id="new-token-name" placeholder="如：Python 脚本、工作电脑" autocomplete="off"
                             class="w-full px-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/50 t-text-main transition-all placeholder:opacity-30">
                     </div>
                     <div class="space-y-3">
@@ -5771,20 +5775,20 @@
                         <i class="fas fa-times t-text-muted"></i>
                     </button>
                 </div>
-                <div id="remote-overwrite-step1" class="space-y-4">
+                <form id="remote-overwrite-step1" class="space-y-4" onsubmit="event.preventDefault(); handleRemoteOverwriteConnect();" autocomplete="off">
                     <p class="text-xs t-text-muted leading-relaxed">连接 LX Music 远程服务器，连接成功后可选择数据同步方向。</p>
                     <div>
                         <label
                             class="block text-[11px] uppercase tracking-[0.1em] font-bold t-text-muted mb-2 ml-1 opacity-80">服务器地址
                             (WS/HTTP)</label>
-                        <input type="text" id="remote-overwrite-url" placeholder="ws://192.168.1.1:9527"
+                        <input type="text" id="remote-overwrite-url" placeholder="ws://192.168.1.1:9527" autocomplete="off"
                             class="w-full px-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/50 t-text-main transition-all placeholder:opacity-30">
                     </div>
                     <div>
                         <label
                             class="block text-[11px] uppercase tracking-[0.1em] font-bold t-text-muted mb-2 ml-1 opacity-80">连接码
                             (Code)</label>
-                        <input type="password" id="remote-overwrite-code" placeholder="输入连接码"
+                        <input type="password" id="remote-overwrite-code" placeholder="输入连接码" autocomplete="new-password" data-lpignore="true" data-1p-ignore
                             class="w-full px-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/50 t-text-main transition-all placeholder:opacity-30">
                     </div>
                     <div class="flex items-center justify-between px-1">
@@ -5803,11 +5807,11 @@
                         </div>
                     </div>
                     <div id="remote-overwrite-status" class="text-xs text-center min-h-[1.5rem] t-text-muted"></div>
-                    <button onclick="handleRemoteOverwriteConnect()"
+                    <button type="submit"
                         class="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-[0.98]">
                         连接远程服务器
                     </button>
-                </div>
+                </form>
                 <div id="remote-overwrite-mode-selection" class="hidden space-y-3">
                     <p class="text-xs t-text-muted mb-1 text-center font-medium">连接成功！请选择同步方向：</p>
                     <div class="grid grid-cols-2 gap-2">
@@ -5878,12 +5882,13 @@
                 <div class="flex flex-col gap-3">
                     <!-- 第一行：输入与来源 -->
                     <div class="flex gap-2">
-                        <div class="relative flex-1">
+                        <form role="search" onsubmit="event.preventDefault(); LocalMusicManager.doManualSearch();" class="relative flex-1" autocomplete="off">
                             <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 t-text-muted text-sm"></i>
-                            <input type="text" id="manual-index-search-input" placeholder="输入歌曲名、歌手、专辑搜索..."
+                            <input type="search" id="manual-index-search-input" placeholder="输入歌曲名、歌手、专辑搜索..."
                                 class="w-full pl-11 pr-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main t-bg-main"
-                                onkeyup="if(event.key==='Enter') LocalMusicManager.doManualSearch()">
-                        </div>
+                                onkeyup="if(event.key==='Enter') LocalMusicManager.doManualSearch()"
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                        </form>
                         <select id="manual-index-source-select" class="lm-select !w-24 md:!w-32 !py-2">
                             <option value="tx" selected>腾讯音乐</option>
                             <option value="wy">网易音乐</option>

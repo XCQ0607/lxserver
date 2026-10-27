@@ -589,7 +589,7 @@
                                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                                 </svg>
                                 <input type="text" id="user-search-input" placeholder="输入用户名搜索..."
-                                    oninput="app.filterUsers()">
+                                    oninput="app.filterUsers()" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                             </div>
                         </div>
                         <div class="header-side-actions">
@@ -704,7 +704,7 @@
 
                 <!-- 系统配置视图 -->
                 <div id="view-config" class="view">
-                    <form id="config-form" class="config-panels-layout">
+                    <form id="config-form" class="config-panels-layout" autocomplete="off">
 
                         <!-- 基本配置卡片 -->
                         <div class="config-card glass">
@@ -893,7 +893,7 @@
                                 <div class="config-field">
                                     <label class="config-label">管理员密码</label>
                                     <input type="password" name="admin.password" class="form-input config-input"
-                                        placeholder="用于登录控制台和播放器管理员" />
+                                        placeholder="用于登录控制台和播放器管理员" autocomplete="new-password" />
                                 </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
@@ -909,7 +909,7 @@
                                 <div class="config-field">
                                     <label class="config-label">Web 播放器访问密码</label>
                                     <input type="password" name="player.password" class="form-input config-input"
-                                        placeholder="播放器专属密码" />
+                                        placeholder="播放器专属密码" autocomplete="new-password" />
                                 </div>
                             </div>
                         </div>
@@ -1012,7 +1012,7 @@
                                         <div class="config-field">
                                             <label class="config-label">密码</label>
                                             <input type="password" name="webdav.password"
-                                                class="form-input config-input" />
+                                                class="form-input config-input" autocomplete="new-password" />
                                         </div>
                                     </div>
                                     <div class="config-field-row">
@@ -2378,7 +2378,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label>新密码</label>
-                    <input type="text" id="edit-password-input" class="form-input" placeholder="请输入新密码">
+                    <input type="password" id="edit-password-input" class="form-input" placeholder="请输入新密码" autocomplete="new-password">
                 </div>
             </div>
             <div class="modal-footer">
@@ -2396,7 +2396,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label>用户名</label>
-                    <input type="text" id="rename-user-input" class="form-input" placeholder="请输入用户名">
+                    <input type="text" id="rename-user-input" class="form-input" placeholder="请输入用户名" autocomplete="off">
                 </div>
                 <div class="config-toggle-row"
                     style="margin-top: 15px; padding: 10px 0; border-top: 1px solid rgba(255, 255, 255, 0.1); border-bottom: 1px solid rgba(255, 255, 255, 0.1);">
