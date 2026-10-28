@@ -76,7 +76,7 @@
     "@types/unzipper": "^0.10.11",
     "@types/ws": "8.18.2",
     "changelog-parser": "^4.1.0",
-    "electron": "^43.7.5",
+    "electron": "^45.0.0",
     "electron-builder": "^26.15.3",
     "esbuild": "^0.28.2",
     "husky": "^9.1.7",
