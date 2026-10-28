@@ -1,9 +1,11 @@
 import http from 'http'
+import { Readable } from 'stream'
 import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
-import { downloadAndCache, checkCache, serveCacheFile } from '@/server/music/fileCache'
+import { downloadAndCache, checkCache, serveCacheFile, getFileName } from '@/server/music/fileCache'
+import { resolveOpenlistCacheDirectUrl } from '@/server/openlistBackup'
 import {
     getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
     resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
@@ -6240,6 +6242,42 @@ class SubsonicHandler {
             if (!musicInfo) {
                 musicInfo = { source, songmid, id, meta: { songId: songmid } }
             }
+
+            // OpenList 命中后交付：本地缓存未命中但 OpenList 已有该文件时，
+            // 按「交付方式」配置决定：direct=302 直链（客户端直连，省服务器出向流量）；proxy=服务端代理转发（兼容不支持跳转的客户端）。
+            // 仅在「缓存优先 + 优先使用 OpenList」同时开启时生效。
+            if (method === 'stream' || method === 'download') {
+              const openlistBase = getFileName(musicInfo, quality, false, username)
+              const directUrl = await resolveOpenlistCacheDirectUrl(username, 'cache', openlistBase)
+              if (directUrl) {
+                const delivery = (global.lx.config['subsonic.openlistDelivery'] as string) || 'direct'
+                if (delivery === 'proxy') {
+                  try {
+                    const fwd: Record<string, string> = {}
+                    if (req.headers.range) fwd['Range'] = String(req.headers.range)
+                    const upstream = await fetch(directUrl, { headers: fwd, redirect: 'follow' })
+                    const outHeaders: Record<string, any> = { 'Accept-Ranges': 'bytes' }
+                    const ct = upstream.headers.get('content-type'); if (ct) outHeaders['Content-Type'] = ct
+                    const cl = upstream.headers.get('content-length'); if (cl) outHeaders['Content-Length'] = cl
+                    const cr = upstream.headers.get('content-range'); if (cr) outHeaders['Content-Range'] = cr
+                    res.writeHead(upstream.status, outHeaders)
+                    if (upstream.body) Readable.fromWeb(upstream.body as any).pipe(res)
+                    else res.end(Buffer.from(await upstream.arrayBuffer()))
+                    subsonicLog.debug(`[Subsonic] ${method} proxied OpenList for ${id} (status ${upstream.status})`)
+                    return
+                  } catch (e: any) {
+                    subsonicLog.warn(`[Subsonic] ${method} proxy OpenList failed for ${id}:`, e?.message || e)
+                    // 失败则继续走原回源逻辑
+                  }
+                } else {
+                  subsonicLog.debug(`[Subsonic] ${method} hit OpenList direct link for ${id}: ${directUrl.slice(0, 80)}`)
+                  res.writeHead(302, { Location: directUrl })
+                  res.end()
+                  return
+                }
+              }
+            }
+
             // [诊断] 打印回源结果与客户端的歌曲元数据参数，便于排查 kw 等源仍为 Unknown 的问题
             if (global.lx.config['subsonic.enableDebug']) {
                 subsonicLog.debug(`[Subsonic] stream resolve ${id}: name=${musicInfo.name || '(空)'} singer=${musicInfo.singer || '(空)'} album=${musicInfo.meta?.albumName || '(空)'}`)

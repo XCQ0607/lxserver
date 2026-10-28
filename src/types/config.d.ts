@@ -455,6 +455,10 @@ declare namespace LX {
      * 开启后,若服务器该用户目录下已存在此歌曲的缓存或下载文件,直接传输本地流,避免向源站请求在线直链;默认关闭以免服务器自担出向流量
      */
     'subsonic.playCacheFirst'?: boolean
+    /** 在「缓存优先」开启的前提下，是否优先使用 OpenList 备份：缓存未命中时若 OpenList 已有该文件，则把网盘/外网直链直接给客户端(省服务器出向流量)。默认 false */
+    'subsonic.playCacheFirstUseOpenlist'?: boolean
+    /** OpenList 命中后的交付方式：'direct'=给直链(302 跳转，客户端直连网盘/OpenList，省服务器流量)；'proxy'=服务端代理转发(兼容不支持跳转的客户端)。默认 'direct' */
+    'subsonic.openlistDelivery'?: 'direct' | 'proxy'
 
     /**
      * Subsonic 服务端转码总开关 (默认 false)。开启后,当音源无客户端请求音质(及更低音质)时,
@@ -522,5 +526,31 @@ declare namespace LX {
      * 是否允许运行 VM 模式自定义源脚本
      */
     'system.allowUnsafeVM'?: boolean
+
+    // ===== OpenList 备份/同步 =====
+    /** 是否启用 OpenList 备份/同步 */
+    'openlist.enable'?: boolean
+    /** OpenList 地址(如 http://127.0.0.1:5244) */
+    'openlist.endpoint'?: string
+    /** OpenList 管理员账号(用于 testConnection) */
+    'openlist.username'?: string
+    /** OpenList 密码 */
+    'openlist.password'?: string
+    /** OpenList 用户令牌(与账号密码二选一) */
+    'openlist.token'?: string
+    /** OpenList 中 lx-music 备份根目录 */
+    'openlist.root'?: string
+    /** 上传 OpenList 后是否保留本地文件 */
+    'openlist.keepLocalAfterUpload'?: boolean
+    /** 远端可用性校验周期(分钟) */
+    'openlist.verifyInterval'?: number
+    /** 双向同步周期(分钟) */
+    'openlist.syncInterval'?: number
+    /** 各用户备份目录配置(JSON 数组) */
+    'openlist.userBackups'?: string
+    /** 是否同步非音频文件(图片/封面等) */
+    'openlist.includeNonAudio'?: boolean
+    /** OpenList 外网可访问地址(默认同 openlist.endpoint)。用于把网盘/代理直链回传给客户端；填写时结尾可带或不带斜杠，后台规范化 */
+    'openlist.externalUrl'?: string
   }
 }

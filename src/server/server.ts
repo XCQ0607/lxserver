@@ -26,6 +26,41 @@ import formidable from 'formidable'
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
 import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
+import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups } from '@/server/openlistBackup'
+import { OpenListClient } from '@/server/openlistClient'
+
+async function validateOpenListConfig(newConfig: any): Promise<void> {
+  const c: any = global.lx.config
+  const enable = newConfig['openlist.enable'] !== undefined ? !!newConfig['openlist.enable'] : !!c['openlist.enable']
+  if (!enable) return
+  const endpoint = newConfig['openlist.endpoint'] !== undefined ? newConfig['openlist.endpoint'] : (c['openlist.endpoint'] || '')
+  const username = newConfig['openlist.username'] !== undefined ? newConfig['openlist.username'] : (c['openlist.username'] || '')
+  const password = newConfig['openlist.password'] !== undefined ? newConfig['openlist.password'] : (c['openlist.password'] || '')
+  const token = newConfig['openlist.token'] !== undefined ? newConfig['openlist.token'] : (c['openlist.token'] || '')
+  const root = newConfig['openlist.root'] !== undefined ? newConfig['openlist.root'] : (c['openlist.root'] || '/lx_music')
+  if (!endpoint) throw new Error('OpenList 地址(endpoint)不能为空')
+  const cl = new OpenListClient({ endpoint, username, password, token, root })
+  try {
+    await cl.testConnection()
+  } catch (e: any) {
+    throw new Error('OpenList 账号校验失败：' + (e?.message || e))
+  }
+  const rawUB = newConfig['openlist.userBackups'] !== undefined ? newConfig['openlist.userBackups'] : c['openlist.userBackups']
+  let ub: any[] = []
+  if (rawUB) {
+    try { ub = typeof rawUB === 'string' ? JSON.parse(rawUB) : rawUB } catch { ub = [] }
+  }
+  const users: any[] = c.users || []
+  for (const e of ub) {
+    if (!e || !e.enabled) continue
+    if (!users.find((u: any) => u.name === e.user)) throw new Error(`OpenList 同步配置中的用户「${e.user}」不存在`)
+    for (const d of [e.downloadDir, e.cacheDir]) {
+      if (!d) continue
+      if (!fs.existsSync(d) || !fs.statSync(d).isDirectory()) throw new Error(`OpenList 同步目录不存在或无权限：${d}`)
+      fs.accessSync(d, fs.constants.R_OK)
+    }
+  }
+}
 import * as customSourceHandlers from './sources/customSourceHandlers'
 import * as fileCache from './music/fileCache'
 import { withCacheBrowseLocation } from './music/cacheBrowseLocation'
@@ -7251,7 +7286,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
 
         if (req.method === 'POST') {
-          void readBody(req).then(body => {
+          void readBody(req).then(async (body) => {
             try {
               const newConfig = JSON.parse(body)
               if (newConfig.serverName !== undefined) global.lx.config.serverName = newConfig.serverName
@@ -7398,6 +7433,27 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
               }
 
+              // [OpenList 配置] 先实测校验可用性（强校验），再应用
+              try {
+                await validateOpenListConfig(newConfig)
+              } catch (ve: any) {
+                res.writeHead(422, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, error: 'OpenList 配置校验失败：' + (ve?.message || ve) }))
+                return
+              }
+              if (newConfig['openlist.enable'] !== undefined) global.lx.config['openlist.enable'] = newConfig['openlist.enable']
+              if (newConfig['openlist.endpoint'] !== undefined) global.lx.config['openlist.endpoint'] = newConfig['openlist.endpoint']
+              if (newConfig['openlist.username'] !== undefined) global.lx.config['openlist.username'] = newConfig['openlist.username']
+              if (newConfig['openlist.password'] !== undefined) global.lx.config['openlist.password'] = newConfig['openlist.password']
+              if (newConfig['openlist.token'] !== undefined) global.lx.config['openlist.token'] = newConfig['openlist.token']
+              if (newConfig['openlist.root'] !== undefined) global.lx.config['openlist.root'] = newConfig['openlist.root']
+              if (newConfig['openlist.keepLocalAfterUpload'] !== undefined) global.lx.config['openlist.keepLocalAfterUpload'] = newConfig['openlist.keepLocalAfterUpload']
+              if (newConfig['openlist.verifyInterval'] !== undefined) global.lx.config['openlist.verifyInterval'] = parseInt(newConfig['openlist.verifyInterval']) || 5
+              if (newConfig['openlist.syncInterval'] !== undefined) global.lx.config['openlist.syncInterval'] = parseInt(newConfig['openlist.syncInterval']) || 60
+              if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
+              if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
+              if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
+
               if (newConfig['snapshot.backupPath'] !== undefined) {
                 try {
                   global.lx.config['snapshot.backupPath'] = validateDirectoryPath(String(newConfig['snapshot.backupPath']), '歌单快照备份路径')
@@ -7459,6 +7515,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
+              if (newConfig['subsonic.playCacheFirstUseOpenlist'] !== undefined) global.lx.config['subsonic.playCacheFirstUseOpenlist'] = newConfig['subsonic.playCacheFirstUseOpenlist']
+              if (newConfig['subsonic.openlistDelivery'] !== undefined) global.lx.config['subsonic.openlistDelivery'] = newConfig['subsonic.openlistDelivery']
               if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
               if (newConfig['subsonic.quality.priority'] !== undefined) global.lx.config['subsonic.quality.priority'] = String(newConfig['subsonic.quality.priority'])
               if (newConfig['subsonic.source.priority'] !== undefined) global.lx.config['subsonic.source.priority'] = String(newConfig['subsonic.source.priority'])
@@ -7567,6 +7625,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
                 'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
                 'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],
+                'subsonic.playCacheFirstUseOpenlist': global.lx.config['subsonic.playCacheFirstUseOpenlist'] ?? false,
+                'subsonic.openlistDelivery': global.lx.config['subsonic.openlistDelivery'] || 'direct',
                 'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'],
                 'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'],
                 'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
@@ -7576,6 +7636,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'],
                 'configBackup.dir': global.lx.config['configBackup.dir'],
                 'snapshot.backupPath': global.lx.config['snapshot.backupPath'] || '',
+                'openlist.enable': global.lx.config['openlist.enable'] ?? false,
+                'openlist.endpoint': global.lx.config['openlist.endpoint'] || '',
+                'openlist.username': global.lx.config['openlist.username'] || '',
+                'openlist.password': global.lx.config['openlist.password'] || '',
+                'openlist.token': global.lx.config['openlist.token'] || '',
+                'openlist.root': global.lx.config['openlist.root'] || '/lx_music',
+                'openlist.keepLocalAfterUpload': global.lx.config['openlist.keepLocalAfterUpload'] !== false,
+                'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
+                'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 5,
+                'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
+                'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
+                'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],
@@ -7716,6 +7788,136 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       }
 
       // [配置备份管理 API] 下载指定备份文件
+      // [OpenList 同步 API] 连接测试（不保存配置，仅校验）
+      if (pathname === '/api/openlist/test' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const endpoint = cfg.endpoint || global.lx.config['openlist.endpoint'] || ''
+            const username = cfg.username ?? (global.lx.config['openlist.username'] || '')
+            const password = cfg.password ?? (global.lx.config['openlist.password'] || '')
+            const token = cfg.token ?? (global.lx.config['openlist.token'] || '')
+            const root = cfg.root || global.lx.config['openlist.root'] || '/lx_music'
+            if (!endpoint) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: 'OpenList 地址不能为空' }))
+              return
+            }
+            const cl = new OpenListClient({ endpoint, username, password, token, root })
+            await cl.testConnection()
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ok: true }))
+          } catch (e: any) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, ok: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 手动触发同步（upload/download/sync 全量）
+      if (pathname === '/api/openlist/sync' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const summary = await runSyncNow({ user: cfg.user, folder: cfg.folder })
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, summary }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 备份/同步状态列表
+      if (pathname === '/api/openlist/backups' && req.method === 'GET') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        try {
+          const list = listBackups()
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, list }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+        }
+        return
+      }
+
+      // [OpenList 同步 API] 单文件手动重试
+      if (pathname === '/api/openlist/retry' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const id = Number(cfg.id)
+            if (!id) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: '缺少 id' }))
+              return
+            }
+            const rb = await retryBackup(id)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: rb.ok, message: rb.message || '' }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 批量软删除备份记录（级联附件，deleted_at 软删除）
+      if (pathname === '/api/openlist/delete' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const ids = Array.isArray(cfg.ids) ? cfg.ids.map((x: any) => Number(x)).filter((x: number) => x > 0) : []
+            if (!ids.length) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: '缺少有效的 id 列表' }))
+              return
+            }
+            const r = await deleteOpenlistBackups(ids)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, deleted: r.deleted, remoteRemoved: r.remoteRemoved, remoteFailed: r.remoteFailed }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
       if (pathname === '/api/config/backups/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
         if (auth !== global.lx.config['admin.password']) {
@@ -8813,6 +9015,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
   host = `http://${ip.includes(':') ? `[${ip}]` : ip}:${port}`
   httpServer.listen(port, ip)
+  // 启动 OpenList 校验调度器（按 openlist.verifyInterval 周期校验远端可用性）
+  startVerifyScheduler()
 })
 
 // [Subsonic 独立端口] 在独立监听端口上只暴露 Subsonic API。

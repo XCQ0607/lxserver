@@ -111,6 +111,8 @@ const config: LX.Config = {
   'subsonic.lyricTranslation': true, // 是否在 Subsonic 歌词中包含翻译
   'subsonic.cacheOnPlay': false, // 是否在 Subsonic 播放时触发服务器缓存保存（落盘）
   'subsonic.playCacheFirst': false, // 是否在 Subsonic 播放时优先使用服务器已有的本地缓存/下载文件直接传输(默认关闭:避免服务器自担出向流量/代理字节)
+  'subsonic.playCacheFirstUseOpenlist': false, // 在「缓存优先」开启时，是否优先使用 OpenList 备份并以直链交付客户端
+  'subsonic.openlistDelivery': 'direct', // OpenList 命中后交付方式：direct=给直链(302)，proxy=服务端代理转发
   'subsonic.quality.enabled': true, // 音质优选总开关: 按优先级主动选最优可用音质(非失败降级); 关闭则 stream 仅单次解析
   'subsonic.quality.priority': 'flac,320k,128k', // 音质优先级(从高到低, 逗号分隔), 按此顺序主动优选
   'subsonic.source.priority': 'kw,tx,wy,mg,kg', // 跨平台优选顺序(逗号分隔, 客户端所选源始终优先)
@@ -123,6 +125,20 @@ const config: LX.Config = {
   'artist.maxFetchPages': 20, // 歌手歌曲最大抓取页数
   'cache.namingPattern': 'simple', // 缓存命名规则
   'system.allowUnsafeVM': false, // 是否允许运行 VM 模式自定义源脚本
+
+  // ===== OpenList 备份/同步 =====
+  'openlist.enable': false, // 是否启用 OpenList 备份/同步
+  'openlist.endpoint': '', // OpenList 地址(如 http://127.0.0.1:5244)
+  'openlist.username': '', // OpenList 管理员账号(用于 testConnection)
+  'openlist.password': '', // OpenList 密码
+  'openlist.token': '', // OpenList 用户令牌(与账号密码二选一)
+  'openlist.root': '/lx_music', // OpenList 中 lx-music 备份根目录
+  'openlist.keepLocalAfterUpload': true, // 上传 OpenList 后是否保留本地文件
+  'openlist.verifyInterval': 5, // 远端可用性校验周期(分钟)
+  'openlist.syncInterval': 60, // 双向同步周期(分钟)
+  'openlist.userBackups': '[]', // 各用户备份目录配置(JSON 数组)
+  'openlist.includeNonAudio': false, // 是否同步非音频文件(图片/封面等)
+  'openlist.externalUrl': '', // OpenList 外网地址(留空则同 openlist.endpoint)
 }
 
 export default config
