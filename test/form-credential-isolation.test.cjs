@@ -31,6 +31,12 @@ test('music player search inputs are enclosed in role="search" forms with autoco
     assert.ok(match, `Input ${id} must exist in public/music/index.html`)
     assert.match(match[0], /autocomplete="off"/, `${id} must have autocomplete="off"`)
   }
+
+  // Search inputs with onsubmit handlers must not duplicate search on Enter keypress
+  assert.doesNotMatch(html, /id="search-input"[^>]*onkeypress=/,
+    'search-input should not have redundant onkeypress handler')
+  assert.doesNotMatch(html, /id="songlist-search-input"[^>]*onkeypress=/,
+    'songlist-search-input should not have redundant onkeypress handler')
 })
 
 test('all password and connection code inputs in music web app are isolated in dedicated form elements', () => {
@@ -88,4 +94,45 @@ test('handleLocalLogin clears password from the DOM input after successful authe
   const appJs = readFileSync('public/music/app.js', 'utf8')
   assert.match(appJs, /if\s*\(passInput\)\s*passInput\.value\s*=\s*'';/,
     'handleLocalLogin must clear passInput.value in DOM after successful login')
+})
+
+test('ListSearch.handleKeydown ignores IME composition events and navigates on standard Enter', () => {
+  const vm = require('node:vm')
+  const code = readFileSync('public/music/js/library/list_search.js', 'utf8')
+  const context = { window: {} }
+  vm.createContext(context)
+  vm.runInContext(code, context)
+  const ListSearch = context.window.ListSearch
+
+  let navigated = 0
+  ListSearch.navigate = (step) => { navigated += step }
+
+  // 1. IME composing with Enter (e.g. typing pinyin/hiragana)
+  let prevented = false
+  ListSearch.handleKeydown({
+    key: 'Enter',
+    isComposing: true,
+    preventDefault: () => { prevented = true }
+  })
+  assert.equal(navigated, 0, 'should not navigate during isComposing')
+  assert.equal(prevented, false, 'should not preventDefault during isComposing')
+
+  // 2. IME keyCode 229 with Enter
+  ListSearch.handleKeydown({
+    key: 'Enter',
+    keyCode: 229,
+    preventDefault: () => { prevented = true }
+  })
+  assert.equal(navigated, 0, 'should not navigate when keyCode is 229')
+  assert.equal(prevented, false, 'should not preventDefault when keyCode is 229')
+
+  // 3. Normal Enter keydown
+  ListSearch.handleKeydown({
+    key: 'Enter',
+    isComposing: false,
+    keyCode: 13,
+    preventDefault: () => { prevented = true }
+  })
+  assert.equal(navigated, 1, 'should navigate on standard Enter')
+  assert.equal(prevented, true, 'should preventDefault on standard Enter')
 })
