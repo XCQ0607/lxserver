@@ -318,12 +318,27 @@ class LXStudioVUMeterAnimation {
         }
 
         // 3. ANSI C16.5 Standard VU Ballistics (~300 ms rise and fall integration with responsive attack)
-        const tauRise = 0.120; // 120ms: snappy transient punch
-        const tauFall = 0.280; // 280ms: organic mechanical decay
-        const alphaL = 1.0 - Math.exp(-dt / (targetNormL > this.needleNormL ? tauRise : tauFall));
-        const alphaR = 1.0 - Math.exp(-dt / (targetNormR > this.needleNormR ? tauRise : tauFall));
-        this.needleNormL += alphaL * (targetNormL - this.needleNormL);
-        this.needleNormR += alphaR * (targetNormR - this.needleNormR);
+        // Moving-coil movement modelled as a damped spring (slight overshoot like a real VU movement),
+        // with hard mechanical stops at both ends of travel.
+        const omega = 21.0;
+        const zeta = 0.78;
+        this.velL = this.velL || 0;
+        this.velR = this.velR || 0;
+        const steps = Math.max(1, Math.ceil(dt / 0.008));
+        const h = dt / steps;
+        for (let s = 0; s < steps; s++) {
+            this.velL += (omega * omega * (targetNormL - this.needleNormL) - 2 * zeta * omega * this.velL) * h;
+            this.velR += (omega * omega * (targetNormR - this.needleNormR) - 2 * zeta * omega * this.velR) * h;
+            this.needleNormL += this.velL * h;
+            this.needleNormR += this.velR * h;
+        }
+        const stop = (n, v) => {
+            if (n < 0) return [0, Math.abs(v) * 0.25];
+            if (n > 1.03) return [1.03, -Math.abs(v) * 0.3];
+            return [n, v];
+        };
+        [this.needleNormL, this.velL] = stop(this.needleNormL, this.velL);
+        [this.needleNormR, this.velR] = stop(this.needleNormR, this.velR);
 
         this.renderConsole(ctx, width, height, this.needleNormL, this.needleNormR, this.isCompact);
     }
@@ -454,6 +469,32 @@ class LXStudioVUMeterAnimation {
         return LX_VU_DIAL_DESIGNS[theme] || LX_VU_DIAL_DESIGNS['vintage-amber'];
     }
 
+    // Cached paper-grain pattern for printed dial cards (null when no offscreen canvas is available)
+    getGrain(ctx) {
+        if (this._grain !== undefined) return this._grain;
+        this._grain = null;
+        try {
+            if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof ctx.createPattern !== 'function') return null;
+            const c = document.createElement('canvas');
+            c.width = c.height = 64;
+            const g = c.getContext && c.getContext('2d');
+            if (!g || typeof g.createImageData !== 'function') return null;
+            const img = g.createImageData(64, 64);
+            let seed = 1337;
+            for (let i = 0; i < img.data.length; i += 4) {
+                seed = (seed * 1664525 + 1013904223) >>> 0;
+                const v = (seed >>> 24) & 0xff;
+                img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+                img.data[i + 3] = 255;
+            }
+            g.putImageData(img, 0, 0);
+            this._grain = ctx.createPattern(c, 'repeat') || null;
+        } catch (_) {
+            this._grain = null;
+        }
+        return this._grain;
+    }
+
     static registerDesign(id, design) {
         if (id && design) LX_VU_DIAL_DESIGNS[id] = design;
     }
@@ -551,6 +592,38 @@ class LXStudioVUMeterAnimation {
             ctx.fillStyle = gl;
             ctx.fillRect(x, y, w, h);
         }
+
+        // 1b. Printed-card realism: paper grain, aged edges and a recessed window
+        const grain = this.getGrain(ctx);
+        if (grain) {
+            ctx.save();
+            ctx.globalAlpha = isLight ? 0.10 : 0.07;
+            ctx.fillStyle = grain;
+            ctx.fillRect(x, y, w, h);
+            ctx.restore();
+        }
+        const warm = D.deco === 'vintage' || D.deco === 'champagne';
+        const age = ctx.createRadialGradient(x + w / 2, y + h * 0.5, Math.min(w, h) * 0.2, x + w / 2, y + h * 0.5, Math.max(w * 0.62, h * 1.1));
+        age.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        age.addColorStop(1, warm ? 'rgba(90, 50, 10, 0.28)' : (isLight ? 'rgba(0, 0, 0, 0.10)' : 'rgba(0, 0, 0, 0.30)'));
+        ctx.fillStyle = age;
+        ctx.fillRect(x, y, w, h);
+        const rec = Math.min(10 * scale, h * 0.2);
+        const recTop = ctx.createLinearGradient(x, y, x, y + rec);
+        recTop.addColorStop(0, 'rgba(0, 0, 0, 0.38)');
+        recTop.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = recTop;
+        ctx.fillRect(x, y, w, rec);
+        const recLeft = ctx.createLinearGradient(x, y, x + rec, y);
+        recLeft.addColorStop(0, 'rgba(0, 0, 0, 0.28)');
+        recLeft.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = recLeft;
+        ctx.fillRect(x, y, rec, h);
+        const recRight = ctx.createLinearGradient(x + w, y, x + w - rec * 0.6, y);
+        recRight.addColorStop(0, 'rgba(0, 0, 0, 0.14)');
+        recRight.addColorStop(1, 'rgba(0, 0, 0, 0)');
+        ctx.fillStyle = recRight;
+        ctx.fillRect(x + w - rec * 0.6, y, rec * 0.6, h);
 
         // 2. Profile-specific decorations
         this.drawDialDeco(ctx, D, P, { x, y, w, h, scale, t, isLight, isCompact, stereo, pivotX, pivotY, sx, ex, o });
@@ -794,10 +867,11 @@ class LXStudioVUMeterAnimation {
                 ctx.shadowColor = P.glow;
                 ctx.shadowBlur = (type === 'neon' ? 8 : 6) * scale;
             } else {
-                ctx.shadowColor = isLight ? 'rgba(0, 0, 0, 0.25)' : 'rgba(0, 0, 0, 0.50)';
-                ctx.shadowBlur = (compactLike ? 2.5 : 4.5) * scale;
-                ctx.shadowOffsetX = (stereo ? shadowSide * 0.8 : 1.0) * scale;
-                ctx.shadowOffsetY = 1.5 * scale;
+                // Pointer floats above the card: a crisp, offset cast shadow (lit from the upper left)
+                ctx.shadowColor = isLight ? 'rgba(30, 20, 10, 0.38)' : 'rgba(0, 0, 0, 0.60)';
+                ctx.shadowBlur = (compactLike ? 1.2 : 1.8) * scale;
+                ctx.shadowOffsetX = (stereo ? 1.6 + shadowSide * 0.6 : 2.2) * scale;
+                ctx.shadowOffsetY = (compactLike ? 1.8 : 2.6) * scale;
             }
 
             if (type === 'blade') {
@@ -958,13 +1032,32 @@ class LXStudioVUMeterAnimation {
             this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
             ctx.stroke();
         } else {
-            ctx.strokeStyle = P.rim;
-            ctx.lineWidth = 1.1 * scale;
-            this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
+            // Machined metal bezel: brushed gradient ring with inner shadow lip and a specular top edge
+            const warmMetal = D.deco === 'vintage' || D.deco === 'champagne';
+            const ringW = 3.2 * scale;
+            const mg = ctx.createLinearGradient(x, y - ringW, x, y + h + ringW);
+            if (warmMetal) {
+                mg.addColorStop(0, '#f4dfa4'); mg.addColorStop(0.25, '#b68a3a'); mg.addColorStop(0.55, '#6e4f17'); mg.addColorStop(0.8, '#c9a557'); mg.addColorStop(1, '#4a3410');
+            } else if (D.deco === 'mono') {
+                mg.addColorStop(0, '#f1f5f9'); mg.addColorStop(0.3, '#94a3b8'); mg.addColorStop(0.6, '#475569'); mg.addColorStop(1, '#1e293b');
+            } else {
+                mg.addColorStop(0, '#e2e8f0'); mg.addColorStop(0.3, '#7c8da3'); mg.addColorStop(0.6, '#3b4a5e'); mg.addColorStop(1, '#141c27');
+            }
+            ctx.strokeStyle = mg;
+            ctx.lineWidth = ringW;
+            this.roundRect(ctx, x - ringW / 2, y - ringW / 2, w + ringW, h + ringW, podR + ringW / 2);
             ctx.stroke();
-            ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.8)';
-            ctx.lineWidth = 0.8 * scale;
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+            ctx.lineWidth = 0.6 * scale;
+            this.roundRect(ctx, x - ringW, y - ringW, w + ringW * 2, h + ringW * 2, podR + ringW);
+            ctx.stroke();
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+            ctx.lineWidth = 1.0 * scale;
             this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
+            ctx.stroke();
+            ctx.strokeStyle = P.rim;
+            ctx.lineWidth = 0.6 * scale;
+            this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
             ctx.stroke();
         }
         ctx.restore();
