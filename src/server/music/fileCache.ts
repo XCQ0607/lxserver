@@ -2,8 +2,7 @@ import { resolveContainedPath } from '../auth/security'
 import { serveFile } from '../http/serveFile'
 import { getCacheBrowseLocation } from './cacheBrowseLocation'
 import { isRemasterStage, remasterStaging } from '../task/remasterStaging'
-import { onFileCached as openlistBackupOnFileCached, tryRestoreFromOpenlist } from '@/server/openlistBackup'
-import { softDeleteLocalFileByPath, getActiveBackupLocalPaths } from '@/server/openlistBackupDb'
+
 
 
 import fs from 'fs'
@@ -2215,6 +2214,16 @@ export const downloadAndCache = (...args: Parameters<typeof downloadAndCacheImpl
     const job = downloadAndCacheImpl(...args).finally(() => {
         if (downloadJobs.get(key)?.promise === job) downloadJobs.delete(key)
     })
+    // 文件成功落盘后，发一个与 openlist 无关的通用事件，供各模块（如 openlist 备份）订阅
+    job.then(() => {
+      const lx = (globalThis as any).lx
+      if (lx?.fileCachedListeners?.length) {
+        const info = { username, quality: quality || 'unknown', dir }
+        for (const fn of lx.fileCachedListeners) {
+          try { fn(info) } catch (e) { console.error('[fileCache] fileCached listener error:', e) }
+        }
+      }
+    }).catch(() => {})
     downloadJobs.set(key, { promise: job, signature })
     return job
 }
@@ -2344,11 +2353,14 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
 
     // Q1：缓存未命中时先查 OpenList 是否已有该文件的 verified 备份，有则直接取回，
     // 避免回源平台重复下载并重新上传（保留平台来源字段，仅用 origin 标记回写管道）。
-    // 该路径服务「原生客户端 / Web」等走 lx-server 自有接口的请求，与 Subsonic 协议开关解耦：
-    // 仅由 openlist 自身开关（enable + 用户备份配置）控制，不受 subsonic.playCacheFirst* 影响。
+    // 该路径对「原生客户端 / Web / Subsonic」等走 lx-server 的请求统一生效——
+    // 因为 OpenList 上传备份本身也是全局触发（见 downloadAndCacheImpl 的 fileCachedUploadListeners），
+    // 故「优先使用 OpenList 取回」不限定 Subsonic。是否启用由 openlist 自身开关（enable + 用户备份配置）决定，
+    // 并受 subsonic.playCacheFirst / subsonic.playCacheFirstUseOpenlist 控制（见 isOpenlistCacheFirstEnabled）。
     if (username) {
       const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
-      const restored = await tryRestoreFromOpenlist(username, targetFolder, dir, baseName, quality || 'unknown')
+      const restoreResolver = (globalThis as any).lx?.cacheRestoreResolver
+      const restored = restoreResolver ? await restoreResolver(username, targetFolder, dir, baseName, quality || 'unknown') : null
       if (restored) {
         cacheProgress.set(songKey, { progress: 100, status: 'finished', total: restored.size, received: restored.size })
         expireProgress(songKey)
@@ -2591,17 +2603,15 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
                         nativeIds: extractNativeIds(songInfo)
                     }, folderType)
 
-                    // [OpenList 备份] 音频落盘后触发备份（按 per-user 配置判定是否上传）
-                    if ((globalThis as any).lx?.config?.['openlist.enable']) {
-                        try {
-                            openlistBackupOnFileCached(normalizedUsername, folderType, finalPath, {
-                                source: metadata.source,
-                                songmid: id,
-                                quality: actualQuality,
-                                origin: 'platform',
-                            })
-                        } catch (e) {
-                            console.warn('[openlist-backup] 落盘钩子异常:', e)
+                    // [OpenList 备份] 音频落盘后，发中性事件由 openlist 模块订阅并判定是否上传
+                    const lxU = (globalThis as any).lx
+                    if (lxU?.fileCachedUploadListeners?.length) {
+                        for (const fn of lxU.fileCachedUploadListeners) {
+                            try {
+                                fn({ user: normalizedUsername, folderType, localPath: finalPath, meta: { source: metadata.source, songmid: id, quality: actualQuality, origin: 'platform' } })
+                            } catch (e) {
+                                console.warn('[fileCache] fileCachedUpload listener error:', e)
+                            }
                         }
                     }
 
@@ -3014,7 +3024,7 @@ export const clearAllCache = (username?: string) => {
                 const stats = fs.statSync(path.join(dir, file))
                 const fp = path.join(dir, file)
                 fs.unlinkSync(fp)
-                softDeleteLocalFileByPath(fp)
+                ;(globalThis as any).lx?.softDeleteLocalFileByPath?.(fp)
                 deletedCount++; freedSize += stats.size
             } catch (e) { }
         }
@@ -3182,7 +3192,7 @@ export const checkAndCleanupCache = async (username?: string) => {
     allFiles.sort((a, b) => a.mtime - b.mtime)
     // 跳过「仍有活跃备份记录」的文件，避免本地缓存被清理后 OpenList 上传因源文件不存在而失败
     let activeBackupPaths: Set<string> | null = null
-    try { activeBackupPaths = getActiveBackupLocalPaths() } catch { activeBackupPaths = null }
+    try { activeBackupPaths = (globalThis as any).lx?.getActiveBackupLocalPaths?.() ?? null } catch { activeBackupPaths = null }
     let currentSize = totalSize
     const targetSize = limitBytes * 0.95
     let deletedCount = 0

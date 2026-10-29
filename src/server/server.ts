@@ -26,7 +26,7 @@ import formidable from 'formidable'
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
 import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
-import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups } from '@/server/openlistBackup'
+import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook } from '@/server/openlistBackup'
 import { OpenListClient } from '@/server/openlistClient'
 
 async function validateOpenListConfig(newConfig: any): Promise<void> {
@@ -60,6 +60,17 @@ async function validateOpenListConfig(newConfig: any): Promise<void> {
       fs.accessSync(d, fs.constants.R_OK)
     }
   }
+}
+
+/** 配置保存/文件生成后，防抖触发一次 OpenList 同步（后台执行，不阻塞请求响应） */
+let pendingOpenlistSyncTimer: NodeJS.Timeout | null = null
+function scheduleOpenlistSync(): void {
+  if (pendingOpenlistSyncTimer) clearTimeout(pendingOpenlistSyncTimer)
+  pendingOpenlistSyncTimer = setTimeout(() => {
+    pendingOpenlistSyncTimer = null
+    if (!global.lx.config['openlist.enable']) return
+    void runSyncNow({}).catch(() => {})
+  }, 8000)
 }
 import * as customSourceHandlers from './sources/customSourceHandlers'
 import * as fileCache from './music/fileCache'
@@ -7274,6 +7285,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
             'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
             'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
+            'openlist.enable': global.lx.config['openlist.enable'] ?? false,
+            'openlist.endpoint': global.lx.config['openlist.endpoint'] || '',
+            'openlist.username': global.lx.config['openlist.username'] || '',
+            'openlist.password': global.lx.config['openlist.password'] || '',
+            'openlist.token': global.lx.config['openlist.token'] || '',
+            'openlist.root': global.lx.config['openlist.root'] || '/lx_music',
+            'openlist.keepLocalAfterUpload': global.lx.config['openlist.keepLocalAfterUpload'] !== false,
+            'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 5,
+            'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
+            'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
+            'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
+            'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
+            'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
             subsonicPortConflict: global.lx.subsonicPortConflict || null,
             configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
@@ -7433,13 +7457,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
               }
 
-              // [OpenList 配置] 先实测校验可用性（强校验），再应用
-              try {
-                await validateOpenListConfig(newConfig)
-              } catch (ve: any) {
-                res.writeHead(422, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify({ success: false, error: 'OpenList 配置校验失败：' + (ve?.message || ve) }))
-                return
+              // [OpenList 配置] 仅当本次提交含 openlist 字段时才做连通性校验；
+              // 校验失败不再阻断保存（配置照存），仅作为 warning 提示，避免 OpenList 临时不可达时所有配置都保存不了
+              const hasOpenlistChange = Object.keys(newConfig).some(k => k === 'openlist.enable' || k.startsWith('openlist.'))
+              if (hasOpenlistChange) {
+                try {
+                  await validateOpenListConfig(newConfig)
+                } catch (ve: any) {
+                  warning = (warning ? warning + '；' : '') + 'OpenList 配置校验未通过（已保存，但同步可能因不可达而失败）：' + (ve?.message || ve)
+                }
               }
               if (newConfig['openlist.enable'] !== undefined) global.lx.config['openlist.enable'] = newConfig['openlist.enable']
               if (newConfig['openlist.endpoint'] !== undefined) global.lx.config['openlist.endpoint'] = newConfig['openlist.endpoint']
@@ -7453,6 +7479,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
               if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
               if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
+              if (newConfig['openlist.backupSystemConfig'] !== undefined) global.lx.config['openlist.backupSystemConfig'] = newConfig['openlist.backupSystemConfig']
 
               if (newConfig['snapshot.backupPath'] !== undefined) {
                 try {
@@ -7648,6 +7675,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
                 'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
                 'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
+                'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
                 'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
                 'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
                 'cache.namingPattern': global.lx.config['cache.namingPattern'],
@@ -7674,6 +7702,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               // 触发一次 WebDAV 同步检查（如果已配置）
               if (global.lx.webdavSync && global.lx.webdavSync.isConfigured()) {
                 void global.lx.webdavSync.syncChangedFiles()
+              }
+
+              // 配置保存后：若启用 OpenList 同步，后台（防抖）触发一次同步
+              if (global.lx.config['openlist.enable']) {
+                scheduleOpenlistSync()
               }
 
               res.writeHead(200)
@@ -9126,6 +9159,10 @@ const startSubsonicStandaloneServer = () => {
 // }
 
 export const startServer = async (port: number, ip: string) => {
+  // 注册 OpenList 自动同步钩子（供配置保存 / 下载落盘等处调用）
+  ;(global.lx as any).scheduleOpenlistSync = scheduleOpenlistSync
+  // 订阅 fileCache 的通用「文件落盘」事件，落盘即触发防抖同步（与 fileCache 解耦）
+  registerFileCacheSyncHook()
   // Initialize file cache settings from global config
   if (global.lx.config) {
     if (global.lx.config.serverCacheLocation) fileCache.setCacheLocation(global.lx.config.serverCacheLocation)

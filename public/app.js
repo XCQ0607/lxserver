@@ -3626,6 +3626,7 @@ class App {
             form.elements['openlist.keepLocalAfterUpload'].checked = config['openlist.keepLocalAfterUpload'] !== false
             form.elements['openlist.externalUrl'].value = config['openlist.externalUrl'] || ''
             form.elements['openlist.includeNonAudio'].checked = config['openlist.includeNonAudio'] === true
+            form.elements['openlist.backupSystemConfig'].checked = config['openlist.backupSystemConfig'] === true
             form.elements['openlist.verifyInterval'].value = config['openlist.verifyInterval'] || 5
             this.toggleOpenlistVisibility()
             form.elements['openlist.enable'].onchange = () => this.toggleOpenlistVisibility()
@@ -3647,6 +3648,7 @@ class App {
         const form = document.getElementById('openlist-form')
         if (!form) return
         const fd = new FormData(form)
+        const userBackupsRaw = this.collectOpenlistUserBackups()
         const cfg = {
             'openlist.enable': fd.get('openlist.enable') === 'on',
             'openlist.endpoint': (fd.get('openlist.endpoint') || '').trim(),
@@ -3654,10 +3656,19 @@ class App {
             'openlist.root': (fd.get('openlist.root') || '').trim() || '/tyCloud',
             'openlist.keepLocalAfterUpload': fd.get('openlist.keepLocalAfterUpload') === 'on',
             'openlist.includeNonAudio': fd.get('openlist.includeNonAudio') === 'on',
+            'openlist.backupSystemConfig': fd.get('openlist.backupSystemConfig') === 'on',
             'openlist.externalUrl': (fd.get('openlist.externalUrl') || '').trim(),
             'openlist.verifyInterval': parseInt(fd.get('openlist.verifyInterval')) || 5,
-            'openlist.userBackups': this.collectOpenlistUserBackups(),
+            'openlist.userBackups': userBackupsRaw,
         }
+        // 若任一用户备份模式为「上传后删除」，自动开启 Subsonic「缓存优先时优先使用 OpenList」，
+        // 避免本地被删后下次播放回源重下，而是直接命中 OpenList 直链（需 Subsonic「缓存优先」也已开启）。
+        try {
+            const arr = JSON.parse(userBackupsRaw)
+            if (Array.isArray(arr) && arr.some(b => b && b.mode === 'upload-delete')) {
+                cfg['subsonic.playCacheFirstUseOpenlist'] = true
+            }
+        } catch {}
         try {
             await this.request('/api/config', { method: 'POST', body: JSON.stringify(cfg) })
             if (window.showSuccess) window.showSuccess('OpenList 配置已保存')
@@ -3700,8 +3711,9 @@ class App {
         selected.forEach(u => {
             const d = document.getElementById('openlist-dl-sw-' + u)
             const c = document.getElementById('openlist-ca-sw-' + u)
+            const s = document.getElementById('openlist-snap-sw-' + u)
             const m = document.getElementById('openlist-mode-' + u)
-            prev[u] = { download: d ? d.checked : null, cache: c ? c.checked : null, mode: m ? m.value : '' }
+            prev[u] = { download: d ? d.checked : null, cache: c ? c.checked : null, snapshot: s ? s.checked : null, mode: m ? m.value : '' }
         })
         const modeOptions = (sel) => ([
             ['upload', '上传（保留本地）'],
@@ -3719,16 +3731,28 @@ class App {
             const tpl = map[u] || {}
             const dlOn = (prev[u] && prev[u].download !== null) ? prev[u].download : (tpl.backupDownload !== false)
             const caOn = (prev[u] && prev[u].cache !== null) ? prev[u].cache : (tpl.backupCache !== false)
+            const snOn = (prev[u] && prev[u].snapshot !== null) ? prev[u].snapshot : (tpl.backupSnapshot !== false)
             const md = (prev[u] && prev[u].mode) ? prev[u].mode : (tpl.mode || 'upload')
             return '<div class="config-field" style="border-left:3px solid var(--accent);padding-left:.75rem;margin-top:.5rem">' +
                 '<label class="config-label">用户 <b>' + u + '</b> 的同步配置</label>' +
                 '<div class="config-field-row">' +
                 '<div class="config-field"><label class="config-label">备份下载目录 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户音乐目录，无需填写路径">?</span></label>' + toggleHtml('openlist-dl-sw-' + u, dlOn) + '</div>' +
                 '<div class="config-field"><label class="config-label">备份缓存目录 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户缓存目录，无需填写路径">?</span></label>' + toggleHtml('openlist-ca-sw-' + u, caOn) + '</div>' +
+                '<div class="config-field"><label class="config-label">备份歌单快照 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户 list/snapshot 目录（歌单快照），无需填写路径">?</span></label>' + toggleHtml('openlist-snap-sw-' + u, snOn) + '</div>' +
                 '<div class="config-field"><label class="config-label">同步模式 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="' + modeHelp + '">?</span></label>' +
-                '<select id="openlist-mode-' + u + '" class="form-input config-input" title="' + modeHelp + '">' + modeOptions(md) + '</select></div>' +
+                '<select id="openlist-mode-' + u + '" class="form-input config-input" title="' + modeHelp + '" onchange="app.onOpenlistModeChange(this)">' + modeOptions(md) + '</select></div>' +
                 '</div></div>'
         }).join('')
+    }
+
+    /** 用户在 OpenList 备份里把某用户模式改为「上传后删除本地」时给出强提示：
+     *  该模式会清除本地缓存索引，下次播放将无本地缓存；为保证直接命中 OpenList 直链（而非回源重下），
+     *  保存时会自动开启 Subsonic 的「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
+    onOpenlistModeChange(sel) {
+        if (!sel || sel.value !== 'upload-delete') return
+        if (window.showInfo) {
+            window.showInfo('已选择「上传后删除本地」：该模式会在上传完成后清除本地缓存索引，下次播放将无本地缓存。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（该自动开启仅在 Subsonic「服务器存在缓存优先播放」也已开启时生效）')
+        }
     }
 
     collectOpenlistUserBackups() {
@@ -3737,8 +3761,9 @@ class App {
         return JSON.stringify(selected.map(u => {
             const d = document.getElementById('openlist-dl-sw-' + u)
             const c = document.getElementById('openlist-ca-sw-' + u)
+            const s = document.getElementById('openlist-snap-sw-' + u)
             const m = document.getElementById('openlist-mode-' + u)
-            return { user: u, enabled: true, backupDownload: d ? !!d.checked : true, backupCache: c ? !!c.checked : true, mode: (m ? m.value : 'upload') }
+            return { user: u, enabled: true, backupDownload: d ? !!d.checked : true, backupCache: c ? !!c.checked : true, backupSnapshot: s ? !!s.checked : true, mode: (m ? m.value : 'upload') }
         }))
     }
 

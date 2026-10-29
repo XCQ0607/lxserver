@@ -552,5 +552,7 @@ declare namespace LX {
     'openlist.includeNonAudio'?: boolean
     /** OpenList 外网可访问地址(默认同 openlist.endpoint)。用于把网盘/代理直链回传给客户端；填写时结尾可带或不带斜杠，后台规范化 */
     'openlist.externalUrl'?: string
+    /** 是否把系统配置(config.js)同步备份到 OpenList（全局开关，开启后每次同步会上传 config.js 到 <root>/_system/config.js） */
+    'openlist.backupSystemConfig'?: boolean
   }
 }

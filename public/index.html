@@ -2382,7 +2382,7 @@
                                 <div class="config-card-body">
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">启用 OpenList 音频备份 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后按用户配置备份音频文件">?</span></span>
+                                            <span class="config-toggle-label">启用Openlist同步 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后按用户配置把音频/歌单/系统配置备份到 OpenList">?</span></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="openlist.enable" id="openlist-enable" />
@@ -2435,6 +2435,15 @@
                                                     <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                                 </label>
                                             </div>
+                                        </div>
+                                        <div class="config-toggle-row">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">同步系统配置到 OpenList <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，每次「立即同步」会把本服务的 config.js 备份上传到 OpenList（路径 &lt;root&gt;/_system/config.js），作为云端灾备">?</span></span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="openlist.backupSystemConfig" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
                                         </div>
                                         <div class="config-divider"></div>
                                         <div class="config-field">

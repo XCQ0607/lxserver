@@ -139,6 +139,7 @@ const config: LX.Config = {
   'openlist.userBackups': '[]', // 各用户备份目录配置(JSON 数组)
   'openlist.includeNonAudio': false, // 是否同步非音频文件(图片/封面等)
   'openlist.externalUrl': '', // OpenList 外网地址(留空则同 openlist.endpoint)
+  'openlist.backupSystemConfig': false, // 是否把系统配置(config.js)同步备份到 OpenList
 }
 
 export default config
