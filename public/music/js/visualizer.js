@@ -625,6 +625,8 @@ class LXStudioVUMeterAnimation {
         ctx.fillStyle = recRight;
         ctx.fillRect(x + w - rec * 0.6, y, rec * 0.6, h);
 
+        this.drawDialFace(ctx, D, P, { x, y, w, h, scale, isLight, compactLike, gsp: getScalePoint, majLen, gap: sz.gap * scale, fontPx: Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale)), baseY, pivotX, pivotY });
+
         // 2. Profile-specific decorations
         this.drawDialDeco(ctx, D, P, { x, y, w, h, scale, t, isLight, isCompact, stereo, pivotX, pivotY, sx, ex, o });
 
@@ -1059,6 +1061,243 @@ class LXStudioVUMeterAnimation {
             ctx.lineWidth = 0.6 * scale;
             this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
             ctx.stroke();
+        }
+        ctx.restore();
+    }
+
+    // Per-profile dial face layout: scale window, printed zones and panel structure (under scale and pointer)
+    drawDialFace(ctx, D, P, c) {
+        const { x, y, w, h, scale, isLight, compactLike, gsp, majLen, gap, fontPx, baseY, pivotX, pivotY } = c;
+        const outer = majLen + gap + fontPx * 0.75;
+        const inner = -(compactLike ? 3 : 5) * scale;
+        const small = Math.max(6, Math.round(7 * scale));
+        const dash = (a) => { if (typeof ctx.setLineDash === 'function') ctx.setLineDash(a); };
+        const band = (n0, n1, a, b, steps = 36) => {
+            ctx.beginPath();
+            for (let i = 0; i <= steps; i++) {
+                const p = gsp(n0 + (n1 - n0) * (i / steps), a);
+                if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
+            }
+            for (let i = steps; i >= 0; i--) {
+                const p = gsp(n0 + (n1 - n0) * (i / steps), b);
+                ctx.lineTo(p.bx, p.by);
+            }
+            ctx.closePath();
+        };
+        const lower = (n0, n1) => {
+            ctx.beginPath();
+            for (let i = 0; i <= 36; i++) {
+                const p = gsp(n0 + (n1 - n0) * (i / 36), inner);
+                if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
+            }
+            ctx.lineTo(x + w, y + h);
+            ctx.lineTo(x, y + h);
+            ctx.closePath();
+        };
+        ctx.save();
+        if (D.deco === 'vintage') {
+            // Cream scale window set into a darker lacquered housing, red zone printed as a tint
+            lower(-0.045, 1.045);
+            ctx.fillStyle = isLight ? 'rgba(90, 55, 15, 0.12)' : 'rgba(50, 28, 5, 0.28)';
+            ctx.fill();
+            band(-0.045, 1.045, inner, outer);
+            const wg = ctx.createLinearGradient(x, y, x, y + h);
+            wg.addColorStop(0, isLight ? 'rgba(255, 253, 242, 0.80)' : 'rgba(255, 249, 228, 0.62)');
+            wg.addColorStop(1, isLight ? 'rgba(255, 244, 214, 0.40)' : 'rgba(255, 232, 165, 0.28)');
+            ctx.fillStyle = wg;
+            ctx.fill();
+            band(VU_NORM_ZERO, 1.045, inner, outer, 12);
+            ctx.fillStyle = 'rgba(200, 30, 58, 0.11)';
+            ctx.fill();
+            ctx.strokeStyle = P.frame;
+            ctx.lineWidth = 1.0 * scale;
+            band(-0.045, 1.045, inner, outer);
+            ctx.stroke();
+            ctx.lineWidth = 0.5 * scale;
+            band(-0.03, 1.03, inner + 1.6 * scale, outer - 1.6 * scale);
+            ctx.stroke();
+            if (!compactLike) {
+                ctx.font = `700 ${small}px ${D.font.family}`;
+                ctx.fillStyle = P.muted;
+                ctx.textBaseline = 'middle';
+                ctx.letterSpacing = '2px';
+                ctx.textAlign = 'left';
+                ctx.fillText('LX AUDIO', x + 12 * scale, y + h - 9 * scale);
+                ctx.textAlign = 'right';
+                ctx.fillText('PRECISION METER', x + w - 12 * scale, y + h - 9 * scale);
+            }
+        } else if (D.deco === 'ocean') {
+            // Sonar chart: radial bearing lines and range rings swept from the pivot, calm surface band
+            const d0 = pivotY - baseY;
+            const half = Math.atan2(w * 0.55, d0);
+            const a0 = -Math.PI / 2 - half;
+            const a1 = -Math.PI / 2 + half;
+            const deep = ctx.createLinearGradient(x, y + h * 0.55, x, y + h);
+            deep.addColorStop(0, 'rgba(0, 40, 90, 0)');
+            deep.addColorStop(1, isLight ? 'rgba(3, 105, 161, 0.18)' : 'rgba(0, 20, 55, 0.40)');
+            ctx.fillStyle = deep;
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = P.wave;
+            ctx.lineWidth = 0.5 * scale;
+            ctx.globalAlpha = 0.55;
+            const rays = 16;
+            for (let i = 0; i <= rays; i++) {
+                const a = a0 + (a1 - a0) * (i / rays);
+                ctx.beginPath();
+                ctx.moveTo(pivotX + Math.cos(a) * (d0 - h * 0.35), pivotY + Math.sin(a) * (d0 - h * 0.35));
+                ctx.lineTo(pivotX + Math.cos(a) * (d0 + h * 0.75), pivotY + Math.sin(a) * (d0 + h * 0.75));
+                ctx.stroke();
+            }
+            for (let k = -1; k <= 3; k++) {
+                ctx.beginPath();
+                ctx.arc(pivotX, pivotY, d0 + k * h * 0.17, a0, a1);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = 1;
+            band(-0.03, 1.03, inner, outer);
+            const sg = ctx.createLinearGradient(x, y, x, y + h);
+            sg.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.50)' : 'rgba(255, 255, 255, 0.16)');
+            sg.addColorStop(1, isLight ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.04)');
+            ctx.fillStyle = sg;
+            ctx.fill();
+            ctx.strokeStyle = P.arc;
+            ctx.globalAlpha = 0.45;
+            ctx.lineWidth = 0.7 * scale;
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            if (!compactLike) {
+                ctx.font = `600 ${small}px ${D.font.family}`;
+                ctx.fillStyle = P.muted;
+                ctx.textBaseline = 'middle';
+                ctx.letterSpacing = '2px';
+                ctx.textAlign = 'left';
+                ctx.fillText('SONAR · LEVEL', x + 12 * scale, y + h - 9 * scale);
+                ctx.textAlign = 'right';
+                ctx.fillText('dB RE 0 VU', x + w - 12 * scale, y + h - 9 * scale);
+            }
+        } else if (D.deco === 'cyber') {
+            // Chamfered HUD panel with dashed scale lane, bottom ruler and data readouts
+            const b = 4 * scale;
+            const cc = 7 * scale;
+            ctx.beginPath();
+            ctx.moveTo(x + b + cc, y + b);
+            ctx.lineTo(x + w - b, y + b);
+            ctx.lineTo(x + w - b, y + h - b - cc);
+            ctx.lineTo(x + w - b - cc, y + h - b);
+            ctx.lineTo(x + b, y + h - b);
+            ctx.lineTo(x + b, y + b + cc);
+            ctx.closePath();
+            ctx.fillStyle = isLight ? 'rgba(15, 118, 110, 0.05)' : 'rgba(6, 182, 212, 0.05)';
+            ctx.fill();
+            ctx.strokeStyle = P.grid;
+            ctx.lineWidth = 0.8 * scale;
+            ctx.stroke();
+            band(-0.02, 1.02, inner, outer);
+            ctx.save();
+            ctx.globalAlpha = 0.55;
+            dash([2.5 * scale, 2.5 * scale]);
+            ctx.lineWidth = 0.6 * scale;
+            ctx.stroke();
+            ctx.restore();
+            const ry = y + h - b - 3.5 * scale;
+            const n = Math.max(8, Math.floor(w / (5 * scale)));
+            ctx.globalAlpha = 0.5;
+            ctx.lineWidth = 0.6 * scale;
+            ctx.beginPath();
+            for (let i = 0; i <= n; i++) {
+                const px = x + b + cc + (w - 2 * (b + cc)) * (i / n);
+                ctx.moveTo(px, ry);
+                ctx.lineTo(px, ry - (i % 5 === 0 ? 3.2 : 1.6) * scale);
+            }
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            if (!compactLike) {
+                ctx.font = `700 ${small}px ${D.font.family}`;
+                ctx.fillStyle = P.muted;
+                ctx.textBaseline = 'middle';
+                ctx.letterSpacing = '1px';
+                ctx.textAlign = 'right';
+                ctx.fillText('RMS 300ms', x + w - b - 6 * scale, y + b + 7 * scale);
+                ctx.textAlign = 'left';
+                ctx.fillText('ref -18 dBFS', x + b + 6 * scale, y + h - b - 12 * scale);
+            }
+        } else if (D.deco === 'champagne') {
+            // Arched cartouche with pearl-studded border above a pinstriped gold pedestal
+            lower(-0.05, 1.05);
+            const pg = ctx.createLinearGradient(x, y + h * 0.6, x, y + h);
+            pg.addColorStop(0, isLight ? 'rgba(150, 105, 20, 0.10)' : 'rgba(110, 70, 10, 0.18)');
+            pg.addColorStop(1, isLight ? 'rgba(120, 80, 10, 0.26)' : 'rgba(70, 40, 5, 0.42)');
+            ctx.fillStyle = pg;
+            ctx.fill();
+            ctx.save();
+            lower(-0.05, 1.05);
+            ctx.clip();
+            ctx.strokeStyle = P.frame;
+            ctx.globalAlpha = 0.18;
+            ctx.lineWidth = 0.5 * scale;
+            const step = Math.max(2.5, 3 * scale);
+            ctx.beginPath();
+            for (let px = x; px <= x + w; px += step) { ctx.moveTo(px, y); ctx.lineTo(px, y + h); }
+            ctx.stroke();
+            ctx.restore();
+            band(-0.05, 1.05, inner, outer);
+            const cg = ctx.createLinearGradient(x, y, x, y + h);
+            cg.addColorStop(0, isLight ? 'rgba(255, 255, 250, 0.75)' : 'rgba(255, 252, 236, 0.60)');
+            cg.addColorStop(1, isLight ? 'rgba(255, 248, 215, 0.35)' : 'rgba(255, 236, 170, 0.25)');
+            ctx.fillStyle = cg;
+            ctx.fill();
+            ctx.strokeStyle = P.frame;
+            ctx.lineWidth = 1.1 * scale;
+            ctx.stroke();
+            ctx.lineWidth = 0.5 * scale;
+            band(-0.035, 1.035, inner + 1.8 * scale, outer - 1.8 * scale);
+            ctx.stroke();
+            ctx.fillStyle = P.frame;
+            const pearls = compactLike ? 14 : 22;
+            for (let i = 0; i <= pearls; i++) {
+                const p = gsp(-0.035 + 1.07 * (i / pearls), outer);
+                ctx.beginPath();
+                ctx.arc(p.bx, p.by, (compactLike ? 0.6 : 0.85) * scale, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            if (!compactLike) {
+                ctx.font = `italic 700 ${small}px ${D.font.family}`;
+                ctx.fillStyle = P.muted;
+                ctx.textBaseline = 'middle';
+                ctx.letterSpacing = '3px';
+                ctx.textAlign = 'left';
+                ctx.fillText('LX AUDIO', x + 12 * scale, y + h - 9 * scale);
+                ctx.textAlign = 'right';
+                ctx.fillText('MASTER SERIES', x + w - 12 * scale, y + h - 9 * scale);
+            }
+        } else if (D.deco === 'mono') {
+            // Bauhaus layout: solid overload block, heavy top bar and a baseline rule
+            const zx = gsp(VU_NORM_ZERO).bx;
+            ctx.fillStyle = P.red;
+            ctx.globalAlpha = isLight ? 0.10 : 0.16;
+            ctx.fillRect(zx, y, x + w - zx, h);
+            ctx.globalAlpha = 0.5;
+            ctx.fillRect(zx, y, 0.8 * scale, h);
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = P.ink;
+            ctx.fillRect(x, y, w, (compactLike ? 1.8 : 3) * scale);
+            const by = y + h - (compactLike ? 4 : 8) * scale;
+            ctx.strokeStyle = P.rule;
+            ctx.lineWidth = 0.6 * scale;
+            ctx.beginPath();
+            ctx.moveTo(x + 8 * scale, by);
+            ctx.lineTo(x + w - 8 * scale, by);
+            ctx.stroke();
+            if (!compactLike) {
+                ctx.font = `600 ${small}px ${D.font.family}`;
+                ctx.fillStyle = P.muted;
+                ctx.textBaseline = 'bottom';
+                ctx.letterSpacing = '2px';
+                ctx.textAlign = 'left';
+                ctx.fillText('dB', x + 10 * scale, by - 2 * scale);
+                ctx.textAlign = 'right';
+                ctx.fillText('LX / 01', x + w - 10 * scale, by - 2 * scale);
+            }
         }
         ctx.restore();
     }
