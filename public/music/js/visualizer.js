@@ -23,7 +23,10 @@ class LXStudioVUMeterAnimation {
         this.isCompact = !!options.isCompact;
         this.needleNormL = 0.0;
         this.needleNormR = 0.0;
+        this.rollingPeakRMS = -8.0;
         this.lastTime = performance.now();
+        this.timeBufL = null;
+        this.timeBufR = null;
     }
 
     isLightMode() {
@@ -49,20 +52,21 @@ class LXStudioVUMeterAnimation {
     }
 
     vuToNorm(vu) {
-        if (vu <= -60) return 0.0;
-        if (vu >= 3) return 1.0;
+        if (vu <= -30) return 0.0;
+        if (vu >= 3.0) {
+            return Math.min(1.02, 1.0 + (vu - 3.0) * 0.01);
+        }
         const table = [
-            { vu: -60, norm: 0.00 },
-            { vu: -50, norm: 0.12 },
-            { vu: -40, norm: 0.24 },
-            { vu: -30, norm: 0.36 },
-            { vu: -20, norm: 0.48 },
-            { vu: -10, norm: 0.62 },
-            { vu:  -5, norm: 0.74 },
-            { vu:  -3, norm: 0.78 },
+            { vu: -30, norm: 0.00 },
+            { vu: -20, norm: 0.08 },
+            { vu: -15, norm: 0.18 },
+            { vu: -10, norm: 0.32 },
+            { vu:  -7, norm: 0.48 },
+            { vu:  -5, norm: 0.60 },
+            { vu:  -3, norm: 0.73 },
             { vu:  -1, norm: 0.82 },
-            { vu:   0, norm: 0.85 },
-            { vu:   1, norm: 0.90 },
+            { vu:   0, norm: 0.86 },
+            { vu:   1, norm: 0.91 },
             { vu:   2, norm: 0.95 },
             { vu:   3, norm: 1.00 }
         ];
@@ -72,7 +76,7 @@ class LXStudioVUMeterAnimation {
                 return table[i].norm + frac * (table[i + 1].norm - table[i].norm);
             }
         }
-        return 0.0;
+        return vu < -30 ? 0.0 : 1.0;
     }
 
     draw(data, ctx) {
@@ -86,7 +90,8 @@ class LXStudioVUMeterAnimation {
         this.lastTime = now;
 
         const audio = document.getElementById('audio-player');
-        const isPlaying = audio && !audio.paused && (audio.currentTime > 0 || audio.readyState > 1);
+        const isMutedOrZero = audio && (audio.muted || audio.volume === 0);
+        const isPlaying = audio && !audio.paused && !isMutedOrZero && (audio.currentTime > 0 || audio.readyState > 1);
 
         let targetNormL = 0.0;
         let targetNormR = 0.0;
@@ -122,23 +127,44 @@ class LXStudioVUMeterAnimation {
 
             // Fallback to frequency data if time domain is flat
             if (rmsL < 1e-4 && rmsR < 1e-4 && data && data.length > 0) {
-                let sumSq = 0;
+                let sumEnergy = 0;
+                let count = 0;
                 for (let i = 0; i < data.length; i++) {
-                    const v = data[i] / 255;
-                    sumSq += v * v;
+                    const byteVal = data[i];
+                    if (byteVal > 0) {
+                        const db = -100 + (byteVal / 255) * 70;
+                        const lin = Math.pow(10, db / 20);
+                        sumEnergy += lin * lin;
+                        count++;
+                    }
                 }
-                const rms = Math.sqrt(sumSq / data.length);
-                rmsL = rms;
-                rmsR = rms;
+                if (count > 0) {
+                    const rms = Math.sqrt(sumEnergy);
+                    rmsL = rms;
+                    rmsR = rms;
+                }
             }
 
-            // 2. Calibrated 0 VU = -18 dBFS Reference (When PCM is available)
+            // 2. Calibrated Master Reference with Dynamic Headroom Tracking
             if (rmsL > 1e-4 || rmsR > 1e-4) {
                 const dBFS_L = rmsL > 1e-5 ? 20 * Math.log10(rmsL) : -100;
                 const dBFS_R = rmsR > 1e-5 ? 20 * Math.log10(rmsR) : -100;
+                const maxDbfs = Math.max(dBFS_L, dBFS_R);
 
-                const vuL = dBFS_L - (-18);
-                const vuR = dBFS_R - (-18);
+                // Dynamically track the material's peak loudness (mastered music vs dialogue/video)
+                // so the VU needle always dances in its expressive sweet spot (-10 VU to 0 VU / +1 VU)
+                // without getting stuck at +3 max or pinned at 0.
+                if (maxDbfs > -45) {
+                    if (maxDbfs > this.rollingPeakRMS) {
+                        this.rollingPeakRMS += (maxDbfs - this.rollingPeakRMS) * Math.min(1.0, dt * 4.0);
+                    } else {
+                        this.rollingPeakRMS += (maxDbfs - this.rollingPeakRMS) * Math.min(1.0, dt * 0.25);
+                    }
+                }
+                const effectiveRef = Math.max(-18.0, Math.min(-5.5, this.rollingPeakRMS + 0.5));
+
+                const vuL = dBFS_L - effectiveRef;
+                const vuR = dBFS_R - effectiveRef;
 
                 targetNormL = this.vuToNorm(vuL);
                 targetNormR = this.vuToNorm(vuR);
@@ -149,23 +175,25 @@ class LXStudioVUMeterAnimation {
                 const vol = typeof audio.volume === 'number' ? audio.volume : 1.0;
                 // Typical musical rhythm harmonics (~126 BPM)
                 const beat1 = Math.pow(Math.max(0, Math.sin(t * Math.PI * 2.1)), 2.6);
-                const beat2 = Math.pow(Math.max(0, Math.sin((t + 0.22) * Math.PI * 1.05)), 2.0) * 0.65;
-                const swingL = Math.sin(t * 3.4) * 0.07 + Math.cos(t * 1.1) * 0.11;
-                const swingR = Math.cos(t * 3.4 + 0.4) * 0.07 + Math.sin(t * 1.1 + 0.45) * 0.11;
-                const microJitter = (Math.sin(t * 16.7) + Math.cos(t * 28.3)) * 0.03;
+                const beat2 = Math.pow(Math.max(0, Math.sin((t + 0.22) * Math.PI * 1.05)), 2.0) * 0.45;
+                const swingL = Math.sin(t * 3.4) * 0.05 + Math.cos(t * 1.1) * 0.07;
+                const swingR = Math.cos(t * 3.4 + 0.4) * 0.05 + Math.sin(t * 1.1 + 0.45) * 0.07;
+                const microJitter = (Math.sin(t * 16.7) + Math.cos(t * 28.3)) * 0.02;
 
-                // Base level around -10VU ~ -3VU, rhythmic punch up to 0VU / +1VU
-                const dynamicBase = 0.58 + beat1 * 0.25 + beat2 * 0.13;
-                targetNormL = Math.max(0.08, Math.min(0.96, (dynamicBase + swingL + microJitter) * (0.35 + 0.65 * vol)));
-                targetNormR = Math.max(0.08, Math.min(0.96, (dynamicBase + swingR - microJitter) * (0.35 + 0.65 * vol)));
+                // Base level around -10VU ~ -5VU (norm 0.35 ~ 0.55), rhythmic punch up to 0VU (norm 0.86)
+                const dynamicBase = 0.42 + beat1 * 0.35 + beat2 * 0.15;
+                targetNormL = Math.max(0.08, Math.min(0.92, (dynamicBase + swingL + microJitter) * (0.4 + 0.6 * vol)));
+                targetNormR = Math.max(0.08, Math.min(0.92, (dynamicBase + swingR - microJitter) * (0.4 + 0.6 * vol)));
             }
         }
 
-        // 3. ANSI C16.5 Standard VU Ballistics (~300 ms rise and fall integration)
-        const tau = 0.300;
-        const alpha = 1.0 - Math.exp(-dt / tau);
-        this.needleNormL += alpha * (targetNormL - this.needleNormL);
-        this.needleNormR += alpha * (targetNormR - this.needleNormR);
+        // 3. ANSI C16.5 Standard VU Ballistics (~300 ms rise and fall integration with responsive attack)
+        const tauRise = 0.120; // 120ms: snappy transient punch
+        const tauFall = 0.280; // 280ms: organic mechanical decay
+        const alphaL = 1.0 - Math.exp(-dt / (targetNormL > this.needleNormL ? tauRise : tauFall));
+        const alphaR = 1.0 - Math.exp(-dt / (targetNormR > this.needleNormR ? tauRise : tauFall));
+        this.needleNormL += alphaL * (targetNormL - this.needleNormL);
+        this.needleNormR += alphaR * (targetNormR - this.needleNormR);
 
         this.renderConsole(ctx, width, height, this.needleNormL, this.needleNormR, this.isCompact);
     }
@@ -785,7 +813,7 @@ class LXStudioVUMeterAnimation {
         ctx.fillStyle = isLight ? '#64748b' : 'rgba(148, 163, 184, 0.7)';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillText('0VU=-18dBFS', cx, isCompact ? (cy + 7.5 * scale) : (cy + 10 * scale));
+        ctx.fillText('0VU REF', cx, isCompact ? (cy + 7.5 * scale) : (cy + 10 * scale));
 
         if (!isCompact) {
             ctx.font = `600 ${Math.max(5.5, Math.round(6.5 * scale))}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
