@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OpenList / alist 存储客户端（音频备份专用）。
  * 契约已对真实实例(天翼云盘 tyCloud 挂载)实测确认：
  *  - 登录 POST /api/auth/login -> data.token

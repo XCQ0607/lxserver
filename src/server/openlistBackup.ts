@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OpenList 音频备份 / 同步管理器
  * 衔接：fileCache 落盘钩子 -> 按 per-user 配置判定是否上传 -> 上传(OpenListClient) -> 写入 SQLite。
  *

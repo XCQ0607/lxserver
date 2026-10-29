@@ -1,4 +1,4 @@
-﻿/**
+/**
  * OpenList 音频备份 - SQLite 元数据库
  * 记录每个待备份/已备份音频文件的本地路径、远端路径与上传状态。
  * 状态机：pending -> uploading -> completed -> verified（失败记 failed）。
