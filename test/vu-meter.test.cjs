@@ -53,13 +53,32 @@ test('vuToNorm accurately maps dial scale points to dial tick norms', () => {
   assert.equal(vu.vuToNorm(-30), 0.0)
   assert.ok(Math.abs(vu.vuToNorm(-20) - 0.08) < 1e-3, '-20 VU must map to norm 0.08')
   assert.ok(Math.abs(vu.vuToNorm(-10) - 0.32) < 1e-3, '-10 VU must map to norm 0.32')
-  assert.ok(Math.abs(vu.vuToNorm(-7) - 0.48) < 1e-3, '-7 VU must map to norm 0.48')
-  assert.ok(Math.abs(vu.vuToNorm(-5) - 0.60) < 1e-3, '-5 VU must map to norm 0.60')
-  assert.ok(Math.abs(vu.vuToNorm(-3) - 0.73) < 1e-3, '-3 VU must map to norm 0.73')
-  assert.ok(Math.abs(vu.vuToNorm(0) - 0.86) < 1e-3, '0 VU must map to norm 0.86')
-  assert.ok(Math.abs(vu.vuToNorm(1) - 0.91) < 1e-3, '+1 VU must map to norm 0.91')
-  assert.ok(Math.abs(vu.vuToNorm(2) - 0.95) < 1e-3, '+2 VU must map to norm 0.95')
+  assert.ok(Math.abs(vu.vuToNorm(-7) - 0.44) < 1e-3, '-7 VU must map to norm 0.44')
+  assert.ok(Math.abs(vu.vuToNorm(-5) - 0.54) < 1e-3, '-5 VU must map to norm 0.54')
+  assert.ok(Math.abs(vu.vuToNorm(-3) - 0.64) < 1e-3, '-3 VU must map to norm 0.64')
+  assert.ok(Math.abs(vu.vuToNorm(-1) - 0.74) < 1e-3, '-1 VU must map to norm 0.74')
+  assert.ok(Math.abs(vu.vuToNorm(0) - 0.80) < 1e-3, '0 VU must map to norm 0.80')
+  assert.ok(Math.abs(vu.vuToNorm(1) - 0.8666667) < 1e-3, '+1 VU must map to norm 0.8667')
+  assert.ok(Math.abs(vu.vuToNorm(2) - 0.9333333) < 1e-3, '+2 VU must map to norm 0.9333')
   assert.ok(Math.abs(vu.vuToNorm(3) - 1.00) < 1e-3, '+3 VU must map to norm 1.00')
+})
+
+test('VU dial profiles vary scale detail without changing calibration', () => {
+  const { LXStudioVUMeterAnimation } = createVisualizerEnvironment()
+  const vu = new LXStudioVUMeterAnimation()
+  const profiles = ['vintage-amber', 'ocean-blue', 'cyber-cyan', 'champagne-gold', 'studio-monochrome']
+  const detailed = vu.getScaleTicks('ocean-blue', false)
+  const essential = vu.getScaleTicks('cyber-cyan', false)
+
+  assert.ok(detailed.length > essential.length, 'precision profile should have more graduations than essential profile')
+  assert.equal(vu.getScaleTicks('vintage-amber', false).filter(tick => tick.label).length, 10)
+  assert.equal(vu.getScaleTicks('cyber-cyan', false).filter(tick => tick.label).length, 5)
+  assert.equal(new Set(profiles.map(profile => vu.getScaleTicks(profile, false).length)).size, profiles.length, 'each profile should have a distinct full-scale density')
+
+  for (const profile of profiles) {
+    const ticks = vu.getScaleTicks(profile, true)
+    assert.ok(ticks.some(tick => tick.label === '0' && Math.abs(tick.norm - vu.vuToNorm(0)) < 1e-6), `${profile} should align its zero tick to the calibration`)
+  }
 })
 
 test('VU meter at 100% player volume oscillates and does not stay pinned at max level (1.0)', () => {
