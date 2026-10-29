@@ -17,6 +17,136 @@
  * calibrated 0 VU = -18 dBFS ANSI C16.5 300ms ballistics, dedicated digital clip indicators,
  * and WCAG-compliant legible typography with zero channel/needle collisions.
  */
+/**
+ * Per-profile dial & pointer designs.
+ * Every colour profile (vuMeterTheme) owns a complete design: dial geometry,
+ * scale style, tick style, typography, decorations, pointer shape and pivot cap.
+ * Add a new profile with LXStudioVUMeterAnimation.registerDesign(id, design).
+ * The measurement scale (norm positions of every tick) is shared by all designs.
+ */
+const VU_NORM_ZERO = 0.86;
+const VU_TICKS_COMPACT = [
+    { label: '-20', norm: 0.08, major: true },
+    { norm: 0.20, type: 'min' },
+    { label: '-10', norm: 0.32, major: true },
+    { norm: 0.46, type: 'med' },
+    { label: '-5', norm: 0.60, major: true },
+    { norm: 0.73, type: 'med' },
+    { label: '0', norm: 0.86, major: true, isRed: true },
+    { norm: 0.93, type: 'min', isRed: true },
+    { label: '+3', norm: 1.00, major: true, isRed: true }
+];
+const VU_TICKS_FULL = [
+    { label: '-20', norm: 0.08, major: true },
+    { norm: 0.16, type: 'min' },
+    { norm: 0.24, type: 'min' },
+    { label: '-10', norm: 0.32, major: true },
+    { norm: 0.40, type: 'min' },
+    { label: '-7', norm: 0.48, major: false, type: 'med' },
+    { label: '-5', norm: 0.60, major: true },
+    { norm: 0.67, type: 'min' },
+    { label: '-3', norm: 0.73, major: false, type: 'med' },
+    { norm: 0.80, type: 'min' },
+    { label: '0', norm: 0.86, major: true, isRed: true },
+    { label: '+1', norm: 0.91, major: false, type: 'med', isRed: true },
+    { label: '+2', norm: 0.95, major: false, type: 'min', isRed: true },
+    { label: '+3', norm: 1.00, major: true, isRed: true }
+];
+
+const LX_VU_DIAL_DESIGNS = {
+    // Classic broadcast meter: warm lamp-lit plate, serif numerals, double scale rail,
+    // tapered black blade with a red painted tip, brass corner screws, domed pivot hub.
+    'vintage-amber': {
+        name: 'Vintage Amber',
+        geom: { span: 0.07, baseY: { c: 0.66, f: 0.61 }, sag: { c: 0.07, f: 0.08 }, curve: 2, pivot: { c: 1.95, f: 2.25 } },
+        font: { family: 'Georgia, "Times New Roman", serif', weight: '700', style: 'normal', scale: 1.0 },
+        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', tagAlign: 'center', mark: 'VU', markStyle: 'italic',
+        face: {
+            kind: 'radial', cy: 0.45,
+            light: [[0, '#fffdfa'], [0.40, '#fef8ea'], [0.80, '#fdecc4'], [1, '#fbd38d']],
+            dark: [[0, '#ffe8a3'], [0.35, '#f6c343'], [0.75, '#d99b1a'], [1, '#9c6600']],
+            vig: { light: ['rgba(180, 120, 20, 0.08)', 'rgba(160, 100, 10, 0.16)'], dark: ['rgba(80, 40, 10, 0.25)', 'rgba(60, 30, 5, 0.38)'], clear: 'rgba(80, 40, 10, 0)' }
+        },
+        arc: 'double', tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
+        needle: { type: 'blade', reach: 1.2, width: 1 }, cap: 'screw', peak: null, sheen: false, deco: 'vintage',
+        light: { ink: '#2b2118', muted: 'rgba(60, 45, 25, 0.7)', arc: '#3a2d1e', red: '#c81e3a', needle: '#16120d', tip: '#c81e3a', glow: 'rgba(255, 200, 90, 0.5)', frame: 'rgba(90, 60, 20, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
+        dark: { ink: '#2b2118', muted: 'rgba(60, 45, 25, 0.7)', arc: '#3a2d1e', red: '#c81e3a', needle: '#16120d', tip: '#c81e3a', glow: 'rgba(255, 200, 90, 0.5)', frame: 'rgba(90, 60, 20, 0.45)', rim: '#bfa15f' }
+    },
+    // Marine instrument: deep smiling ellipse-like arc, translucent water band,
+    // round dot ticks, drifting wave lines and a luminous pointer ending in a glowing bead.
+    'ocean-blue': {
+        name: 'Ocean Blue',
+        geom: { span: 0.055, baseY: { c: 0.60, f: 0.57 }, sag: { c: 0.12, f: 0.14 }, curve: 1.6, pivot: { c: 1.75, f: 2.0 } },
+        font: { family: '"Avenir Next", "Inter", "Segoe UI", Roboto, sans-serif', weight: '600', style: 'normal', scale: 1.0 },
+        tag: ch => 'CH · ' + ch, tagAlign: 'center', mark: 'VU', markStyle: 'normal',
+        face: {
+            kind: 'radial', cy: 0.40,
+            light: [[0, '#f8fafc'], [0.45, '#e0f2fe'], [0.85, '#bae6fd'], [1, '#7dd3fc']],
+            dark: [[0, '#42d2ff'], [0.35, '#12a4df'], [0.75, '#0369a1'], [1, '#073b64']],
+            vig: { light: ['rgba(3, 105, 161, 0.08)', 'rgba(2, 132, 199, 0.15)'], dark: ['rgba(0, 30, 65, 0.30)', 'rgba(0, 20, 50, 0.45)'], clear: 'rgba(0, 30, 65, 0)' }
+        },
+        arc: 'band', arcBand: 3.6, tick: { style: 'dots', len: 1, lwMajor: 1.5, lwMinor: 0.8 },
+        needle: { type: 'lumen', reach: 1.0, width: 1 }, cap: 'jewel', peak: null, sheen: true, deco: 'ocean',
+        light: { ink: '#0c4a6e', muted: 'rgba(12, 74, 110, 0.65)', arc: '#0369a1', red: '#e11d48', needle: '#075985', tip: '#0ea5e9', glow: 'rgba(14, 165, 233, 0.55)', wave: 'rgba(3, 105, 161, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
+        dark: { ink: '#f0f9ff', muted: 'rgba(224, 242, 254, 0.75)', arc: 'rgba(240, 249, 255, 0.9)', red: '#ff7a93', needle: '#f0f9ff', tip: '#ffffff', glow: 'rgba(186, 230, 253, 0.95)', wave: 'rgba(255, 255, 255, 0.45)', rim: '#0e5c8f' }
+    },
+    // HUD / sci-fi readout: flat wide arc, segmented bar-graph rail that lights with the level,
+    // monospace type, corner brackets, scan line and a neon hairline pointer with a diamond head.
+    'cyber-cyan': {
+        name: 'Cyber Cyan',
+        geom: { span: 0.045, baseY: { c: 0.68, f: 0.64 }, sag: { c: 0.05, f: 0.06 }, curve: 4, pivot: { c: 2.2, f: 2.6 } },
+        font: { family: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', weight: '700', style: 'normal', scale: 0.95 },
+        tag: ch => 'CH_' + ch, tagAlign: 'left', mark: 'VU/dB', markStyle: 'normal',
+        face: {
+            kind: 'linear',
+            light: [[0, '#ffffff'], [0.60, '#f0fdfa'], [1, '#ccfbf1']],
+            dark: [[0, '#0c1015'], [0.5, '#070a0e'], [1, '#030508']],
+            glow: { color: '6, 182, 212', a0: 0.14, a1: 0.03 }
+        },
+        arc: 'segments', tick: { style: 'bar', len: 0.85, lwMajor: 1.8, lwMinor: 0.9 },
+        needle: { type: 'neon', reach: 1.0, width: 1 }, cap: 'ring', peak: 'segment', sheen: false, deco: 'cyber',
+        light: { ink: '#115e59', muted: 'rgba(17, 94, 89, 0.65)', arc: '#0f766e', red: '#e11d48', needle: '#0f766e', tip: '#06b6d4', glow: 'rgba(6, 182, 212, 0.5)', grid: 'rgba(15, 118, 110, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
+        dark: { ink: '#22d3ee', muted: 'rgba(34, 211, 238, 0.6)', arc: 'rgba(34, 211, 238, 0.9)', red: '#ff2d6f', needle: '#7df9ff', tip: '#00f5ff', glow: '#00f5ff', grid: 'rgba(34, 211, 238, 0.5)', rim: '#1e3040' }
+    },
+    // Art-deco luxury: sunburst rays radiating from the pivot, double gold frame with corner lozenges,
+    // fine wedge ticks capped with pearls, radial serif numerals and a spear pointer with a lozenge.
+    'champagne-gold': {
+        name: 'Champagne Gold',
+        geom: { span: 0.09, baseY: { c: 0.64, f: 0.60 }, sag: { c: 0.10, f: 0.11 }, curve: 2.6, pivot: { c: 1.9, f: 2.2 } },
+        font: { family: '"Didot", "Bodoni 72", "Playfair Display", Georgia, serif', weight: '700', style: 'normal', scale: 1.0 },
+        tag: ch => '— ' + ch + ' —', tagAlign: 'center', mark: 'VU', markStyle: 'italic', rotateLabels: true,
+        face: {
+            kind: 'radial', cy: 0.45,
+            light: [[0, '#ffffff'], [0.40, '#fefce8'], [0.80, '#fef08a'], [1, '#fde047']],
+            dark: [[0, '#fff4cc'], [0.35, '#fae39b'], [0.70, '#dfba63'], [1, '#9b7625']],
+            vig: { light: ['rgba(113, 63, 18, 0.06)', 'rgba(113, 63, 18, 0.14)'], dark: ['rgba(60, 45, 20, 0.25)', 'rgba(50, 35, 10, 0.38)'], clear: 'rgba(60, 45, 20, 0)' }
+        },
+        arc: 'double', arcInset: 2.4, tick: { style: 'wedge', len: 1, lwMajor: 1.6, lwMinor: 0.9 },
+        needle: { type: 'deco', reach: 1.0, width: 1 }, cap: 'rosette', peak: null, sheen: true, deco: 'champagne',
+        light: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#b8860b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 230, 150, 0.22)', frame: '#9c7a2a', rim: 'rgba(180, 140, 60, 0.6)' },
+        dark: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#b8860b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 255, 255, 0.16)', frame: '#8a6a1f', rim: '#dab978' }
+    },
+    // Bauhaus mastering meter: no scale rail, left-aligned channel letter, hairline rule,
+    // oversize watermark letter, long thin ticks and a spear-tipped hairline pointer with peak marker.
+    'studio-monochrome': {
+        name: 'Studio Monochrome',
+        geom: { span: 0.10, baseY: { c: 0.67, f: 0.63 }, sag: { c: 0.035, f: 0.04 }, curve: 2, pivot: { c: 2.1, f: 2.4 } },
+        font: { family: '"Helvetica Neue", "Inter", Arial, sans-serif', weight: '600', style: 'normal', scale: 1.05 },
+        tag: ch => ch, tagAlign: 'left', mark: 'VU', markStyle: 'normal',
+        face: {
+            kind: 'radial', cy: 0.38,
+            light: [[0, '#ffffff'], [0.65, '#f8fafc'], [1, '#edf2f7']],
+            dark: [[0, '#191b22'], [0.60, '#101217'], [1, '#08090d']],
+            vig: { light: ['rgba(0, 0, 0, 0.03)', 'rgba(0, 0, 0, 0.08)'], dark: ['rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.50)'], clear: 'rgba(0, 0, 0, 0)' }
+        },
+        arc: 'none', tick: { style: 'bar', len: 1.15, lwMajor: 1.1, lwMinor: 0.7 },
+        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', peak: 'tick', sheen: false, deco: 'mono',
+        light: { ink: '#0f172a', muted: 'rgba(15, 23, 42, 0.55)', arc: '#334155', red: '#f43f5e', needle: '#0f172a', tip: '#f43f5e', rule: 'rgba(15, 23, 42, 0.25)', rim: 'rgba(148, 163, 184, 0.55)' },
+        dark: { ink: '#f8fafc', muted: 'rgba(226, 232, 240, 0.6)', arc: 'rgba(241, 245, 249, 0.85)', red: '#f43f5e', needle: '#e2e8f0', tip: '#f43f5e', rule: 'rgba(226, 232, 240, 0.25)', rim: '#334155' }
+    }
+};
+
+
 class LXStudioVUMeterAnimation {
     constructor(options = {}) {
         this.options = options;
@@ -320,404 +450,653 @@ class LXStudioVUMeterAnimation {
         ctx.restore();
     }
 
+    getDesign(theme) {
+        return LX_VU_DIAL_DESIGNS[theme] || LX_VU_DIAL_DESIGNS['vintage-amber'];
+    }
+
+    static registerDesign(id, design) {
+        if (id && design) LX_VU_DIAL_DESIGNS[id] = design;
+    }
+
+    // Single-channel pod (desktop / detail view)
     drawMeterPod(ctx, x, y, w, h, level, scale, channelTitle, isCompact, theme, isLight) {
-        ctx.save();
-        const podR = (isCompact ? 8 : 8) * scale;
+        this.drawDialPod(ctx, x, y, w, h, {
+            needles: [{ level, key: channelTitle }],
+            scale, isCompact, theme, isLight, title: channelTitle, stereo: false
+        });
+    }
 
-        // 1. 视窗边界裁剪与防溢出
-        ctx.save();
-        this.roundRect(ctx, x, y, w, h, podR);
-        ctx.clip();
+    // Mobile single dial with coaxial L/R needles
+    drawSingleStereoPod(ctx, x, y, w, h, levelL, levelR, scale, theme, isLight) {
+        this.drawDialPod(ctx, x, y, w, h, {
+            needles: [{ level: levelL, key: 'L', channel: 'L' }, { level: levelR, key: 'R', channel: 'R' }],
+            scale, isCompact: true, theme, isLight, title: '', stereo: true
+        });
+    }
 
-        // 2. 现代专业母带表盘表面 (Ultra-Clean Audiophile Plate)
-        if (theme === 'vintage-amber') {
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.65, h * 1.1));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#fffdfa');
-                bgGrad.addColorStop(0.40, '#fef8ea');
-                bgGrad.addColorStop(0.80, '#fdecc4');
-                bgGrad.addColorStop(1, '#fbd38d');
-            } else {
-                bgGrad.addColorStop(0, '#ffe8a3');
-                bgGrad.addColorStop(0.35, '#f6c343');
-                bgGrad.addColorStop(0.75, '#d99b1a');
-                bgGrad.addColorStop(1, '#9c6600');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
+    // Shared dial renderer: geometry, scale, ticks, pointer and decorations all come from the profile's design
+    drawDialPod(ctx, x, y, w, h, o) {
+        const D = this.getDesign(o.theme);
+        const P = o.isLight ? D.light : D.dark;
+        const { scale, isCompact, isLight, stereo } = o;
+        const compactLike = isCompact || stereo;
+        const k = compactLike ? 'c' : 'f';
+        const G = D.geom;
+        const podR = 8 * scale;
+        const nowMs = performance.now();
+        const t = nowMs / 1000;
+        const sz = stereo ? { maj: 5.5, med: 3.8, min: 2.2, font: 9.2, gap: 4.5, cap: 3.6, tag: 8.5, mark: 10 }
+            : isCompact ? { maj: 6, med: 4, min: 2.5, font: 9.8, gap: 5, cap: 3, tag: 8.5, mark: 10.5 }
+                : { maj: 11, med: 7, min: 4.5, font: 13, gap: 8, cap: 5, tag: 11, mark: 18.5 };
+        const tl = D.tick.len;
+        const majLen = sz.maj * scale * tl;
+        const medLen = sz.med * scale * tl;
+        const minLen = sz.min * scale * tl;
+        const fam = D.font.family;
 
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(180, 120, 20, 0.08)' : 'rgba(80, 40, 10, 0.25)');
-            vigGrad.addColorStop(0.3, 'rgba(80, 40, 10, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(80, 40, 10, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(160, 100, 10, 0.16)' : 'rgba(60, 30, 5, 0.38)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-
-        } else if (theme === 'ocean-blue') {
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.40, 12 * scale, x + w / 2, y + h * 0.40, Math.max(w * 0.65, h * 1.1));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#f8fafc');
-                bgGrad.addColorStop(0.45, '#e0f2fe');
-                bgGrad.addColorStop(0.85, '#bae6fd');
-                bgGrad.addColorStop(1, '#7dd3fc');
-            } else {
-                bgGrad.addColorStop(0, '#42d2ff');
-                bgGrad.addColorStop(0.35, '#12a4df');
-                bgGrad.addColorStop(0.75, '#0369a1');
-                bgGrad.addColorStop(1, '#073b64');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(3, 105, 161, 0.08)' : 'rgba(0, 30, 65, 0.30)');
-            vigGrad.addColorStop(0.3, 'rgba(0, 30, 65, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(0, 30, 65, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(2, 132, 199, 0.15)' : 'rgba(0, 20, 50, 0.45)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-
-        } else if (theme === 'cyber-cyan') {
-            // 现代极客赛博：深邃纯净黑白，绝不艳俗糊绿！
-            if (isLight) {
-                const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-                bgGrad.addColorStop(0, '#ffffff');
-                bgGrad.addColorStop(0.60, '#f0fdfa');
-                bgGrad.addColorStop(1, '#ccfbf1');
-                ctx.fillStyle = bgGrad;
-                ctx.fillRect(x, y, w, h);
-            } else {
-                const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-                bgGrad.addColorStop(0, '#0c1015');
-                bgGrad.addColorStop(0.5, '#070a0e');
-                bgGrad.addColorStop(1, '#030508');
-                ctx.fillStyle = bgGrad;
-                ctx.fillRect(x, y, w, h);
-
-                const glow = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 10 * scale, x + w / 2, y + h * 0.5, w * 0.65);
-                glow.addColorStop(0, 'rgba(6, 182, 212, 0.14)');
-                glow.addColorStop(0.6, 'rgba(6, 182, 212, 0.03)');
-                glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-                ctx.fillStyle = glow;
-                ctx.fillRect(x, y, w, h);
-            }
-
-        } else if (theme === 'champagne-gold') {
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.65, h * 1.1));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#ffffff');
-                bgGrad.addColorStop(0.40, '#fefce8');
-                bgGrad.addColorStop(0.80, '#fef08a');
-                bgGrad.addColorStop(1, '#fde047');
-            } else {
-                bgGrad.addColorStop(0, '#fff4cc');
-                bgGrad.addColorStop(0.35, '#fae39b');
-                bgGrad.addColorStop(0.70, '#dfba63');
-                bgGrad.addColorStop(1, '#9b7625');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(113, 63, 18, 0.06)' : 'rgba(60, 45, 20, 0.25)');
-            vigGrad.addColorStop(0.3, 'rgba(60, 45, 20, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(60, 45, 20, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(113, 63, 18, 0.14)' : 'rgba(50, 35, 10, 0.38)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-
-        } else if (theme === 'studio-monochrome') {
-            // 现代包豪斯极简母带黑白
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.38, 12 * scale, x + w / 2, y + h * 0.38, Math.max(w * 0.65, h * 1.1));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#ffffff');
-                bgGrad.addColorStop(0.65, '#f8fafc');
-                bgGrad.addColorStop(1, '#edf2f7');
-            } else {
-                bgGrad.addColorStop(0, '#191b22');
-                bgGrad.addColorStop(0.60, '#101217');
-                bgGrad.addColorStop(1, '#08090d');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(0, 0, 0, 0.03)' : 'rgba(0, 0, 0, 0.35)');
-            vigGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(0, 0, 0, 0.50)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-        }
-
-        // 3. 几何浅弧线参数
-        const spanMarginX = w * 0.075;
-        const scaleStartX = x + spanMarginX;
-        const scaleEndX = x + w - spanMarginX;
-        const scaleW = scaleEndX - scaleStartX;
-
-        const baseCenterY = isCompact ? (y + h * 0.65) : (y + h * 0.60);
-        const arcSag = isCompact ? (h * 0.065) : (h * 0.075);
-
+        // Scale geometry (arc shape differs per design)
+        const spanX = w * G.span;
+        const sx = x + spanX;
+        const ex = x + w - spanX;
+        const sw = ex - sx;
+        const baseY = y + h * G.baseY[k];
+        const sag = h * G.sag[k];
         const pivotX = x + w / 2;
-        const pivotDepth = isCompact ? (h * 1.95) : (h * 2.25);
-        const pivotY = y + pivotDepth;
-
-        const getScalePoint = (norm) => {
-            const bx = scaleStartX + norm * scaleW;
-            const u = (norm - 0.5) * 2;
-            const by = baseCenterY + (u * u) * arcSag;
-
+        const pivotY = y + h * G.pivot[k];
+        const getScalePoint = (norm, off = 0) => {
+            const bx = sx + norm * sw;
+            const u = Math.abs((norm - 0.5) * 2);
+            const by = baseY + Math.pow(u, G.curve) * sag;
             const dx = bx - pivotX;
             const dy = by - pivotY;
             const dist = Math.sqrt(dx * dx + dy * dy);
             const ux = dx / dist;
             const uy = dy / dist;
-
-            return { bx, by, ux, uy };
+            return { bx: bx + ux * off, by: by + uy * off, ux, uy };
         };
 
-        // 配色定义
-        const isDarkText = theme === 'vintage-amber' || theme === 'champagne-gold' || (isLight && (theme === 'ocean-blue' || theme === 'cyber-cyan' || theme === 'studio-monochrome'));
-        const textMain = isDarkText ? '#1e293b' : (theme === 'studio-monochrome' ? '#f8fafc' : (theme === 'cyber-cyan' ? '#22d3ee' : '#f1f5f9'));
-        const textMuted = isDarkText ? 'rgba(51, 65, 85, 0.65)' : (theme === 'studio-monochrome' ? 'rgba(226, 232, 240, 0.65)' : 'rgba(34, 211, 238, 0.65)');
-        const redColor = '#f43f5e'; // 现代活力珊瑚红
-        const arcColor = isDarkText ? '#334155' : (theme === 'studio-monochrome' ? 'rgba(241, 245, 249, 0.85)' : (theme === 'cyber-cyan' ? 'rgba(34, 211, 238, 0.85)' : '#94a3b8'));
-
-        // 4. 现代极简通道徽标 (Top Channel Pill Badge)
         ctx.save();
-        const tagText = channelTitle === 'L' ? 'CH · L' : 'CH · R';
-        const tagFontSize = Math.max(7.5, Math.round((isCompact ? 8.5 : 11.0) * scale));
-        ctx.font = `700 ${tagFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif`;
-        const tagY = y + (isCompact ? 4.5 : 7.5) * scale;
-        
-        ctx.fillStyle = textMuted;
-        ctx.textAlign = 'center';
+        ctx.save();
+        this.roundRect(ctx, x, y, w, h, podR);
+        ctx.clip();
+
+        // 1. Dial face
+        const stops = isLight ? D.face.light : D.face.dark;
+        let faceFill;
+        if (D.face.kind === 'radial') {
+            const cy = y + h * D.face.cy;
+            faceFill = ctx.createRadialGradient(x + w / 2, cy, 12 * scale, x + w / 2, cy, Math.max(w * 0.65, h * 1.1));
+        } else {
+            faceFill = ctx.createLinearGradient(x, y, x, y + h);
+        }
+        stops.forEach(s => faceFill.addColorStop(s[0], s[1]));
+        ctx.fillStyle = faceFill;
+        ctx.fillRect(x, y, w, h);
+
+        if (D.face.vig) {
+            const v = isLight ? D.face.vig.light : D.face.vig.dark;
+            const vg = ctx.createLinearGradient(x, y, x, y + h);
+            vg.addColorStop(0, v[0]);
+            vg.addColorStop(0.3, D.face.vig.clear);
+            vg.addColorStop(0.7, D.face.vig.clear);
+            vg.addColorStop(1, v[1]);
+            ctx.fillStyle = vg;
+            ctx.fillRect(x, y, w, h);
+        }
+        if (D.face.glow && !isLight) {
+            const gl = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 10 * scale, x + w / 2, y + h * 0.5, w * 0.65);
+            gl.addColorStop(0, `rgba(${D.face.glow.color}, ${D.face.glow.a0})`);
+            gl.addColorStop(0.6, `rgba(${D.face.glow.color}, ${D.face.glow.a1})`);
+            gl.addColorStop(1, 'rgba(0, 0, 0, 0)');
+            ctx.fillStyle = gl;
+            ctx.fillRect(x, y, w, h);
+        }
+
+        // 2. Profile-specific decorations
+        this.drawDialDeco(ctx, D, P, { x, y, w, h, scale, t, isLight, isCompact, stereo, pivotX, pivotY, sx, ex, o });
+
+        // 3. Channel tag / stereo legend
+        ctx.save();
+        const tagSize = Math.max(7.5, Math.round(sz.tag * scale * D.font.scale));
+        const tagY = y + (stereo ? 4.5 : (isCompact ? 4.5 : 7.5)) * scale;
+        ctx.font = `700 ${tagSize}px ${fam}`;
+        ctx.fillStyle = P.muted;
         ctx.textBaseline = 'top';
         ctx.letterSpacing = '1px';
-        ctx.fillText(tagText, x + w / 2, tagY);
+        if (stereo) {
+            ctx.textAlign = 'center';
+            ctx.fillText('DUAL VU · STEREO', x + w / 2, tagY);
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.arc(sx, tagY + 4 * scale, 2 * scale, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = P.muted;
+            ctx.fillText('L', sx + 5 * scale, tagY);
+            ctx.textAlign = 'right';
+            ctx.fillText('R', ex - 5 * scale, tagY);
+            ctx.fillStyle = P.red;
+            ctx.beginPath();
+            ctx.arc(ex, tagY + 4 * scale, 2 * scale, 0, Math.PI * 2);
+            ctx.fill();
+        } else if (D.tagAlign === 'left') {
+            ctx.textAlign = 'left';
+            ctx.fillText(D.tag(o.title), sx, tagY);
+        } else {
+            ctx.textAlign = 'center';
+            ctx.fillText(D.tag(o.title), x + w / 2, tagY);
+        }
         ctx.restore();
 
-        // 5. 现代双段能量弧带 (Ambient Glow Track Ribbon)
-        const normZero = 0.86;
-        const majorTickLen = isCompact ? (6.0 * scale) : (11.0 * scale);
-        const medTickLen = isCompact ? (4.0 * scale) : (7.0 * scale);
-        const minorTickLen = isCompact ? (2.5 * scale) : (4.5 * scale);
-
-        // 主安全区间浅光轨
-        ctx.beginPath();
-        for (let i = 0; i <= 40; i++) {
-            const n = (i / 40) * normZero;
-            const p = getScalePoint(n);
-            if (i === 0) ctx.moveTo(p.bx, p.by);
-            else ctx.lineTo(p.bx, p.by);
-        }
-        ctx.strokeStyle = arcColor;
-        ctx.lineWidth = (isCompact ? 1.0 : 1.4) * scale;
-        ctx.stroke();
-
-        // 0dB 过载红区能量条
-        ctx.beginPath();
-        for (let i = 0; i <= 15; i++) {
-            const n = normZero + (i / 15) * (1.0 - normZero);
-            const p = getScalePoint(n);
-            if (i === 0) ctx.moveTo(p.bx, p.by);
-            else ctx.lineTo(p.bx, p.by);
-        }
-        ctx.strokeStyle = redColor;
-        ctx.lineWidth = (isCompact ? 1.6 : 2.2) * scale;
-        ctx.stroke();
-
-        // 6. 现代专业母带级 dB 刻度 (等宽工整，高清晰度)
-        const masterTicks = isCompact ? [
-            { label: '-20', norm: 0.08, major: true },
-            { norm: 0.20, type: 'min' },
-            { label: '-10', norm: 0.32, major: true },
-            { norm: 0.46, type: 'med' },
-            { label: '-5',  norm: 0.60, major: true },
-            { norm: 0.73, type: 'med' },
-            { label: '0',   norm: 0.86, major: true, isRed: true },
-            { norm: 0.93, type: 'min', isRed: true },
-            { label: '+3',  norm: 1.00, major: true, isRed: true }
-        ] : [
-            { label: '-20', norm: 0.08, major: true },
-            { norm: 0.16, type: 'min' },
-            { norm: 0.24, type: 'min' },
-            { label: '-10', norm: 0.32, major: true },
-            { norm: 0.40, type: 'min' },
-            { label: '-7',  norm: 0.48, major: false, type: 'med' },
-            { label: '-5',  norm: 0.60, major: true },
-            { norm: 0.67, type: 'min' },
-            { label: '-3',  norm: 0.73, major: false, type: 'med' },
-            { norm: 0.80, type: 'min' },
-            { label: '0',   norm: 0.86, major: true, isRed: true },
-            { label: '+1',  norm: 0.91, major: false, type: 'med', isRed: true },
-            { label: '+2',  norm: 0.95, major: false, type: 'min', isRed: true },
-            { label: '+3',  norm: 1.00, major: true, isRed: true }
-        ];
-
-        // 绘制刻度线
-        masterTicks.forEach(t => {
-            const p = getScalePoint(t.norm);
-            const len = t.major ? majorTickLen : (t.type === 'med' ? medTickLen : minorTickLen);
-            ctx.strokeStyle = t.isRed ? redColor : arcColor;
-            ctx.lineWidth = (t.major ? (t.isRed ? 1.6 : 1.2) : 0.8) * scale;
+        // 4. Scale rail
+        const normZero = VU_NORM_ZERO;
+        const maxLevel = Math.max(0, ...o.needles.map(n => Math.min(1, n.level || 0)));
+        const strokeRail = (n0, n1, off, color, lw, steps) => {
             ctx.beginPath();
-            ctx.moveTo(p.bx, p.by);
-            ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
+            for (let i = 0; i <= steps; i++) {
+                const p = getScalePoint(n0 + (n1 - n0) * (i / steps), off);
+                if (i === 0) ctx.moveTo(p.bx, p.by);
+                else ctx.lineTo(p.bx, p.by);
+            }
+            ctx.strokeStyle = color;
+            ctx.lineWidth = lw;
             ctx.stroke();
+        };
+        const railW = (compactLike ? 1.0 : 1.4) * scale;
+        const redW = (compactLike ? 1.6 : 2.2) * scale;
+        const peaks = this.peaks || (this.peaks = {});
+        const peakInfo = o.needles.map(n => {
+            const key = (stereo ? 'S' : 'P') + n.key + (compactLike ? 'c' : 'f');
+            const pk = peaks[key] || (peaks[key] = { v: 0, t: nowMs, last: nowMs });
+            const norm = Math.max(0, Math.min(1, n.level || 0));
+            const dt = Math.min(0.1, (nowMs - pk.last) / 1000);
+            pk.last = nowMs;
+            if (norm >= pk.v) { pk.v = norm; pk.t = nowMs; }
+            else if (nowMs - pk.t > 700) pk.v = Math.max(norm, pk.v - dt * 0.5);
+            return pk.v;
         });
 
-        // 绘制主刻度文字 (字号加大，粗体 700，高清晰度)
-        const fontSize = Math.max(8.5, Math.round((isCompact ? 9.8 : 13.0) * scale));
-        ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif`;
+        if (D.arc === 'double') {
+            const off = (D.arcInset || 2.0) * scale;
+            strokeRail(0, normZero, 0, P.arc, railW, 40);
+            strokeRail(0, normZero, -off, P.arc, railW * 0.55, 40);
+            strokeRail(normZero, 1, 0, P.red, redW, 15);
+            strokeRail(normZero, 1, -off, P.red, railW * 0.55, 15);
+        } else if (D.arc === 'band') {
+            const bw = D.arcBand * scale;
+            const band = (n0, n1, color, alpha, steps) => {
+                ctx.beginPath();
+                for (let i = 0; i <= steps; i++) {
+                    const p = getScalePoint(n0 + (n1 - n0) * (i / steps), 0);
+                    if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
+                }
+                for (let i = steps; i >= 0; i--) {
+                    const p = getScalePoint(n0 + (n1 - n0) * (i / steps), -bw);
+                    ctx.lineTo(p.bx, p.by);
+                }
+                ctx.closePath();
+                ctx.globalAlpha = alpha;
+                ctx.fillStyle = color;
+                ctx.fill();
+                ctx.globalAlpha = 1;
+            };
+            band(0, normZero, P.arc, isLight ? 0.22 : 0.20, 40);
+            band(normZero, 1, P.red, 0.5, 15);
+            strokeRail(0, normZero, 0, P.arc, railW * 0.8, 40);
+            strokeRail(normZero, 1, 0, P.red, redW * 0.8, 15);
+        } else if (D.arc === 'segments') {
+            const N = compactLike ? 24 : 32;
+            const segW = (compactLike ? 1.9 : 2.6) * scale;
+            const peakSeg = Math.min(N - 1, Math.floor(Math.max(...peakInfo) * N));
+            ctx.lineCap = 'butt';
+            for (let i = 0; i < N; i++) {
+                const c = (i + 0.5) / N;
+                const lit = c <= maxLevel + 0.5 / N;
+                const hot = c > normZero;
+                ctx.save();
+                if (lit || i === peakSeg) {
+                    ctx.globalAlpha = 1;
+                    if (!isLight) { ctx.shadowColor = hot ? P.red : P.glow; ctx.shadowBlur = 4 * scale; }
+                } else {
+                    ctx.globalAlpha = 0.2;
+                }
+                const col = (i === peakSeg && maxLevel < c) ? P.needle : (hot ? P.red : P.tip);
+                strokeRail(i / N + 0.004, (i + 0.66) / N, 0, col, segW, 3);
+                ctx.restore();
+            }
+        } else if (D.arc === 'none') {
+            strokeRail(normZero, 1, 0, P.red, redW, 15);
+        }
+
+        // 5. Ticks
+        const ticks = compactLike ? VU_TICKS_COMPACT : VU_TICKS_FULL;
+        ticks.forEach(tk => {
+            const p = getScalePoint(tk.norm);
+            const len = tk.major ? majLen : (tk.type === 'med' ? medLen : minLen);
+            const col = tk.isRed ? P.red : P.arc;
+            const lw = (tk.major ? (tk.isRed ? D.tick.lwMajor * 1.15 : D.tick.lwMajor) : D.tick.lwMinor) * scale;
+            ctx.fillStyle = col;
+            ctx.strokeStyle = col;
+            if (D.tick.style === 'dots') {
+                const r = (tk.major ? 1.5 : 0.85) * scale * (compactLike ? 0.85 : 1);
+                const d = tk.major ? len : len * 0.6;
+                ctx.beginPath();
+                ctx.arc(p.bx + p.ux * d, p.by + p.uy * d, r, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (D.tick.style === 'wedge') {
+                const hw = lw * (tk.major ? 0.9 : 0.6);
+                ctx.beginPath();
+                ctx.moveTo(p.bx - p.uy * hw, p.by + p.ux * hw);
+                ctx.lineTo(p.bx + p.uy * hw, p.by - p.ux * hw);
+                ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
+                ctx.closePath();
+                ctx.fill();
+                if (tk.major) {
+                    ctx.beginPath();
+                    ctx.arc(p.bx + p.ux * (len + 1.6 * scale), p.by + p.uy * (len + 1.6 * scale), 0.9 * scale, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            } else {
+                ctx.lineWidth = lw;
+                ctx.beginPath();
+                ctx.moveTo(p.bx, p.by);
+                ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
+                ctx.stroke();
+            }
+        });
+
+        // 6. Scale labels
+        const fontSize = Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale));
+        ctx.font = `${D.font.style === 'italic' ? 'italic ' : ''}${D.font.weight} ${fontSize}px ${fam}`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        const labelGap = (isCompact ? 5.0 : 8.0) * scale;
-
-        masterTicks.forEach(t => {
-            if (!t.label) return;
-            const p = getScalePoint(t.norm);
-            const lx = p.bx + p.ux * (majorTickLen + labelGap);
-            const ly = p.by + p.uy * (majorTickLen + labelGap);
-            ctx.fillStyle = t.isRed ? redColor : textMain;
-            ctx.fillText(t.label, lx, ly);
+        const labelGap = sz.gap * scale + (D.tick.style === 'wedge' ? 2 * scale : 0);
+        ticks.forEach(tk => {
+            if (!tk.label) return;
+            const p = getScalePoint(tk.norm);
+            const lx = p.bx + p.ux * (majLen + labelGap);
+            const ly = p.by + p.uy * (majLen + labelGap);
+            ctx.fillStyle = tk.isRed ? P.red : P.ink;
+            if (D.rotateLabels) {
+                ctx.save();
+                ctx.translate(lx, ly);
+                ctx.rotate(Math.atan2(p.uy, p.ux) + Math.PI / 2);
+                ctx.fillText(tk.label, 0, 0);
+                ctx.restore();
+            } else {
+                ctx.fillText(tk.label, lx, ly);
+            }
         });
 
-        // 7. 优雅中心 VU 徽标 (字号加大)
+        // 7. Centre mark
         ctx.save();
-        const vuY = baseCenterY + (isCompact ? 10.5 : 18.5) * scale;
-        const vuFontSize = Math.max(8.0, Math.round((isCompact ? 9.2 : 13.0) * scale));
-        ctx.font = `800 ${vuFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.fillStyle = textMuted;
+        const markSize = Math.max(7.5, Math.round((compactLike ? 9.2 : 13.0) * scale * D.font.scale));
+        ctx.font = `${D.markStyle === 'italic' ? 'italic ' : ''}800 ${markSize}px ${fam}`;
+        ctx.fillStyle = P.muted;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.letterSpacing = '2px';
-        ctx.fillText('VU', x + w / 2, vuY);
+        ctx.fillText(D.mark, x + w / 2, baseY + sz.mark * scale);
         ctx.restore();
 
-        // 8. 现代高精度光纤碳针与珊瑚红荧光针尖 (Fiber-Optic Needle with Coral Tip)
-        const norm = Math.max(0, Math.min(1.0, level));
-        const targetPoint = getScalePoint(norm);
-
-        const ndx = targetPoint.bx - pivotX;
-        const ndy = targetPoint.by - pivotY;
-        const nDist = Math.sqrt(ndx * ndx + ndy * ndy);
-        const nux = ndx / nDist;
-        const nuy = ndy / nDist;
-
-        const needleTipX = targetPoint.bx + nux * (majorTickLen + 1.2 * scale);
-        const needleTipY = targetPoint.by + nuy * (majorTickLen + 1.2 * scale);
-
-        const needleBaseY = y + h + 2 * scale;
-        const tBase = (needleBaseY - pivotY) / nuy;
-        const needleBaseX = pivotX + tBase * nux;
-
-        const npX = -nuy;
-        const npY = nux;
-
-        const baseW = (isCompact ? 0.9 : 1.3) * scale;
-        const tipW = (isCompact ? 0.25 : 0.35) * scale;
-
-        // 悬浮立体柔和阴影
-        ctx.save();
-        ctx.shadowColor = isLight ? 'rgba(0, 0, 0, 0.25)' : 'rgba(0, 0, 0, 0.50)';
-        ctx.shadowBlur = (isCompact ? 2.5 : 4.5) * scale;
-        ctx.shadowOffsetX = 1.0 * scale;
-        ctx.shadowOffsetY = 1.5 * scale;
-
-        // 碳素针体 (Bottom 65%)
-        const midRatio = 0.65;
-        const needleMidX = needleBaseX + (needleTipX - needleBaseX) * midRatio;
-        const needleMidY = needleBaseY + (needleTipY - needleBaseY) * midRatio;
-        const midW = baseW + (tipW - baseW) * midRatio;
-
-        ctx.beginPath();
-        ctx.moveTo(needleBaseX - npX * baseW, needleBaseY - npY * baseW);
-        ctx.lineTo(needleBaseX + npX * baseW, needleBaseY + npY * baseW);
-        ctx.lineTo(needleMidX + npX * midW, needleMidY + npY * midW);
-        ctx.lineTo(needleMidX - npX * midW, needleMidY - npY * midW);
-        ctx.closePath();
-        ctx.fillStyle = isLight ? '#0f172a' : (theme === 'studio-monochrome' ? '#cbd5e1' : '#111318');
-        ctx.fill();
-
-        // 现代珊瑚红荧光针尖 (Top 35%)
-        ctx.beginPath();
-        ctx.moveTo(needleMidX - npX * midW, needleMidY - npY * midW);
-        ctx.lineTo(needleMidX + npX * midW, needleMidY + npY * midW);
-        ctx.lineTo(needleTipX + npX * tipW, needleTipY + npY * tipW);
-        ctx.lineTo(needleTipX - npX * tipW, needleTipY - npY * tipW);
-        ctx.closePath();
-        ctx.fillStyle = theme === 'cyber-cyan' && !isLight ? '#00f5ff' : redColor;
-        ctx.fill();
-        ctx.restore();
-
-        // 9. 精工双环金属轴心螺帽 (Machined Pivot Cap)
-        ctx.save();
-        const capR = (isCompact ? 3.0 : 5.0) * scale;
-        const capGrad = ctx.createRadialGradient(needleBaseX - 0.5, needleBaseY - 0.5, 0.5, needleBaseX, needleBaseY, capR);
-        if (isLight) {
-            capGrad.addColorStop(0, '#ffffff');
-            capGrad.addColorStop(0.5, '#cbd5e1');
-            capGrad.addColorStop(1, '#64748b');
-        } else {
-            capGrad.addColorStop(0, '#64748b');
-            capGrad.addColorStop(0.6, '#334155');
-            capGrad.addColorStop(1, '#0f172a');
+        // 8. Peak-hold markers (designs that opt in)
+        if (D.peak === 'tick') {
+            o.needles.forEach((n, i) => {
+                const norm = Math.max(0, Math.min(1, n.level || 0));
+                if (peakInfo[i] <= norm + 0.02) return;
+                const p = getScalePoint(Math.min(1, peakInfo[i]));
+                ctx.strokeStyle = P.tip;
+                ctx.lineWidth = 1.8 * scale;
+                ctx.beginPath();
+                ctx.moveTo(p.bx - p.ux * 1.5 * scale, p.by - p.uy * 1.5 * scale);
+                ctx.lineTo(p.bx + p.ux * (majLen + 2 * scale), p.by + p.uy * (majLen + 2 * scale));
+                ctx.stroke();
+            });
         }
-        ctx.fillStyle = capGrad;
-        ctx.beginPath();
-        if (typeof ctx.arc === 'function') {
-            ctx.arc(needleBaseX, needleBaseY, capR, 0, Math.PI * 2);
+
+        // 9. Pointers
+        const baseNY = y + h + 2 * scale;
+        const drawNeedle = (norm, tipColor, shadowSide) => {
+            const tp = getScalePoint(norm);
+            const dx = tp.bx - pivotX;
+            const dy = tp.by - pivotY;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            const nux = dx / dist;
+            const nuy = dy / dist;
+            const npX = -nuy;
+            const npY = nux;
+            const reach = majLen + 1.2 * scale * D.needle.reach;
+            const tx = tp.bx + nux * reach;
+            const ty = tp.by + nuy * reach;
+            const tB = (baseNY - pivotY) / nuy;
+            const bx = pivotX + tB * nux;
+            const by = baseNY;
+            const pt = (r) => ({ x: bx + (tx - bx) * r, y: by + (ty - by) * r });
+            const poly = (r0, w0, r1, w1, fill) => {
+                const a = pt(r0);
+                const b = pt(r1);
+                ctx.beginPath();
+                ctx.moveTo(a.x - npX * w0, a.y - npY * w0);
+                ctx.lineTo(a.x + npX * w0, a.y + npY * w0);
+                ctx.lineTo(b.x + npX * w1, b.y + npY * w1);
+                ctx.lineTo(b.x - npX * w1, b.y - npY * w1);
+                ctx.closePath();
+                ctx.fillStyle = fill;
+                ctx.fill();
+            };
+            const bw = (compactLike ? 0.9 : 1.3) * scale * D.needle.width;
+            const tw = (compactLike ? 0.25 : 0.35) * scale;
+            const wAt = (r, b0, t0) => b0 + (t0 - b0) * r;
+            const type = D.needle.type;
+
+            ctx.save();
+            if (type === 'lumen' || type === 'neon') {
+                ctx.shadowColor = P.glow;
+                ctx.shadowBlur = (type === 'neon' ? 8 : 6) * scale;
+            } else {
+                ctx.shadowColor = isLight ? 'rgba(0, 0, 0, 0.25)' : 'rgba(0, 0, 0, 0.50)';
+                ctx.shadowBlur = (compactLike ? 2.5 : 4.5) * scale;
+                ctx.shadowOffsetX = (stereo ? shadowSide * 0.8 : 1.0) * scale;
+                ctx.shadowOffsetY = 1.5 * scale;
+            }
+
+            if (type === 'blade') {
+                const b0 = bw * 1.15;
+                poly(0, b0, 0.68, wAt(0.68, b0, tw), P.needle);
+                poly(0.68, wAt(0.68, b0, tw), 1, tw, tipColor);
+            } else if (type === 'lumen') {
+                const a = pt(0);
+                const b = pt(0.94);
+                ctx.lineCap = 'round';
+                ctx.strokeStyle = P.needle;
+                ctx.lineWidth = (compactLike ? 1.3 : 1.9) * scale;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(14,116,144,0.55)';
+                ctx.lineWidth = 0.5 * scale;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+                ctx.shadowColor = P.glow;
+                ctx.shadowBlur = 7 * scale;
+                ctx.fillStyle = tipColor;
+                ctx.beginPath();
+                ctx.arc(b.x, b.y, (compactLike ? 1.9 : 2.8) * scale, 0, Math.PI * 2);
+                ctx.fill();
+            } else if (type === 'neon') {
+                const a = pt(0);
+                const b = pt(0.92);
+                ctx.lineCap = 'butt';
+                ctx.strokeStyle = P.needle;
+                ctx.lineWidth = (compactLike ? 0.9 : 1.2) * scale;
+                ctx.beginPath();
+                ctx.moveTo(a.x, a.y);
+                ctx.lineTo(b.x, b.y);
+                ctx.stroke();
+                const dz = (compactLike ? 2.4 : 3.4) * scale;
+                const c = pt(0.96);
+                ctx.fillStyle = tipColor;
+                ctx.beginPath();
+                ctx.moveTo(c.x + nux * dz, c.y + nuy * dz);
+                ctx.lineTo(c.x + npX * dz * 0.55, c.y + npY * dz * 0.55);
+                ctx.lineTo(c.x - nux * dz, c.y - nuy * dz);
+                ctx.lineTo(c.x - npX * dz * 0.55, c.y - npY * dz * 0.55);
+                ctx.closePath();
+                ctx.fill();
+            } else if (type === 'deco') {
+                const b0 = bw * 1.5;
+                poly(0, b0, 0.8, b0 * 0.32, P.needle);
+                poly(0.8, b0 * 0.32, 1, tw * 0.6, P.needle);
+                const c = pt(0.8);
+                const L = (compactLike ? 3.0 : 4.4) * scale;
+                const W = (compactLike ? 1.5 : 2.1) * scale;
+                ctx.beginPath();
+                ctx.moveTo(c.x + nux * L, c.y + nuy * L);
+                ctx.lineTo(c.x + npX * W, c.y + npY * W);
+                ctx.lineTo(c.x - nux * L, c.y - nuy * L);
+                ctx.lineTo(c.x - npX * W, c.y - npY * W);
+                ctx.closePath();
+                ctx.fillStyle = tipColor;
+                ctx.fill();
+                ctx.strokeStyle = P.edge;
+                ctx.lineWidth = 0.6 * scale;
+                ctx.stroke();
+            } else {
+                const hw = (compactLike ? 0.5 : 0.7) * scale;
+                poly(0, hw, 0.78, hw * 0.75, P.needle);
+                poly(0.78, (compactLike ? 1.0 : 1.4) * scale, 1, tw * 0.7, tipColor);
+            }
+            ctx.restore();
+            return { bx, by };
+        };
+
+        let lastBase = { bx: pivotX, by: baseNY };
+        o.needles.forEach((n) => {
+            const norm = Math.max(0, Math.min(1.0, n.level || 0));
+            const color = stereo ? (n.channel === 'L' ? '#10b981' : P.red) : P.tip;
+            lastBase = drawNeedle(norm, color, n.channel === 'L' ? -1 : 1);
+        });
+
+        // 10. Pivot cap
+        const capX = stereo ? pivotX : lastBase.bx;
+        const capY = baseNY;
+        const capR = sz.cap * scale;
+        ctx.save();
+        const disc = (r) => { ctx.beginPath(); ctx.arc(capX, capY, r, 0, Math.PI * 2); };
+        if (D.cap === 'screw' || D.cap === 'rosette' || D.cap === 'jewel') {
+            const cg = ctx.createRadialGradient(capX - 0.5, capY - 0.5, 0.5, capX, capY, capR);
+            if (D.cap === 'rosette') {
+                cg.addColorStop(0, '#fff3c4'); cg.addColorStop(0.5, '#d4a93c'); cg.addColorStop(1, '#6b4a0c');
+            } else if (D.cap === 'jewel') {
+                cg.addColorStop(0, '#e0f7ff'); cg.addColorStop(0.45, isLight ? '#38bdf8' : '#7dd3fc'); cg.addColorStop(1, '#075985');
+            } else if (isLight) {
+                cg.addColorStop(0, '#ffffff'); cg.addColorStop(0.5, '#cbd5e1'); cg.addColorStop(1, '#64748b');
+            } else {
+                cg.addColorStop(0, '#d9c28a'); cg.addColorStop(0.55, '#8a6b2c'); cg.addColorStop(1, '#3b2a0c');
+            }
+            ctx.fillStyle = cg;
+            disc(capR);
+            ctx.fill();
+            if (D.cap === 'screw') {
+                ctx.strokeStyle = 'rgba(30, 20, 5, 0.6)';
+                ctx.lineWidth = 0.7 * scale;
+                ctx.beginPath();
+                ctx.moveTo(capX - capR * 0.6, capY);
+                ctx.lineTo(capX + capR * 0.6, capY);
+                ctx.stroke();
+            } else if (D.cap === 'rosette') {
+                ctx.strokeStyle = P.edge;
+                ctx.lineWidth = 0.6 * scale;
+                disc(capR);
+                ctx.stroke();
+                ctx.fillStyle = P.edge;
+                disc(capR * 0.3);
+                ctx.fill();
+            }
+        } else if (D.cap === 'ring') {
+            ctx.shadowColor = P.glow;
+            ctx.shadowBlur = isLight ? 0 : 5 * scale;
+            ctx.strokeStyle = P.needle;
+            ctx.lineWidth = 1.1 * scale;
+            disc(capR);
+            ctx.stroke();
+            ctx.fillStyle = P.tip;
+            disc(capR * 0.35);
+            ctx.fill();
         } else {
-            this.roundRect(ctx, needleBaseX - capR, needleBaseY - capR, capR * 2, capR * 2, capR);
+            ctx.fillStyle = P.needle;
+            disc(capR * 0.8);
+            ctx.fill();
         }
-        ctx.fill();
         ctx.restore();
 
-        // 10. 防眩光蓝宝石双曲面玻璃反光
-        const glassGrad = ctx.createLinearGradient(x, y, x, y + h * 0.45);
-        glassGrad.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.08)');
-        glassGrad.addColorStop(0.5, isLight ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.02)');
-        glassGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = glassGrad;
+        // 11. Glass reflection
+        const glass = ctx.createLinearGradient(x, y, x, y + h * 0.45);
+        glass.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.08)');
+        glass.addColorStop(0.5, isLight ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.02)');
+        glass.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = glass;
         ctx.fillRect(x, y, w, h * 0.45);
+        if (D.sheen) {
+            const sg = ctx.createLinearGradient(x, y, x + w, y + h);
+            sg.addColorStop(0.28, 'rgba(255, 255, 255, 0)');
+            sg.addColorStop(0.42, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.10)');
+            sg.addColorStop(0.55, 'rgba(255, 255, 255, 0)');
+            ctx.fillStyle = sg;
+            ctx.fillRect(x, y, w, h);
+        }
+        ctx.restore(); // end clip
 
-        ctx.restore(); // 解除裁剪
-
-        // 11. 现代细致拉丝视窗内嵌倒角框
-        if (isCompact) {
-            // 紧凑模式：单条柔和描边，降低视觉重量
+        // 12. Bezel
+        if (isCompact || stereo) {
             ctx.strokeStyle = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.08)';
             ctx.lineWidth = 1;
             this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
             ctx.stroke();
-        } else if (isLight) {
-            ctx.strokeStyle = 'rgba(148, 163, 184, 0.55)';
-            ctx.lineWidth = 1.0 * scale;
-            this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
-            ctx.stroke();
-
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-            ctx.lineWidth = 0.8 * scale;
-            this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
-            ctx.stroke();
         } else {
-            const rimColor = theme === 'vintage-amber' ? '#bfa15f' : (theme === 'champagne-gold' ? '#dab978' : (theme === 'cyber-cyan' ? '#1e3040' : '#334155'));
-            ctx.strokeStyle = rimColor;
-            ctx.lineWidth = 1.2 * scale;
+            ctx.strokeStyle = P.rim;
+            ctx.lineWidth = 1.1 * scale;
             this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
             ctx.stroke();
-
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.9)' : 'rgba(0, 0, 0, 0.8)';
             ctx.lineWidth = 0.8 * scale;
             this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
             ctx.stroke();
         }
-
         ctx.restore();
     }
+
+    // Decorative layer unique to each profile (drawn on the face, under scale and pointer)
+    drawDialDeco(ctx, D, P, c) {
+        const { x, y, w, h, scale, t, isLight } = c;
+        ctx.save();
+        if (D.deco === 'vintage') {
+            const g = ctx.createRadialGradient(x + w / 2, y + h * 0.35, 4 * scale, x + w / 2, y + h * 0.35, w * 0.5);
+            g.addColorStop(0, P.glow);
+            g.addColorStop(1, 'rgba(255, 200, 90, 0)');
+            ctx.globalAlpha = isLight ? 0.35 : 0.55;
+            ctx.fillStyle = g;
+            ctx.fillRect(x, y, w, h);
+            ctx.globalAlpha = 1;
+            const inset = 2.5 * scale;
+            ctx.strokeStyle = P.frame;
+            ctx.lineWidth = 0.9 * scale;
+            this.roundRect(ctx, x + inset, y + inset, w - inset * 2, h - inset * 2, 5 * scale);
+            ctx.stroke();
+            const r = 1.4 * scale;
+            [[x + 6 * scale, y + 6 * scale], [x + w - 6 * scale, y + 6 * scale], [x + 6 * scale, y + h - 6 * scale], [x + w - 6 * scale, y + h - 6 * scale]].forEach(([px, py]) => {
+                ctx.fillStyle = '#b08d57';
+                ctx.beginPath();
+                ctx.arc(px, py, r, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = 'rgba(40, 25, 5, 0.7)';
+                ctx.lineWidth = 0.5 * scale;
+                ctx.beginPath();
+                ctx.moveTo(px - r * 0.7, py - r * 0.7);
+                ctx.lineTo(px + r * 0.7, py + r * 0.7);
+                ctx.stroke();
+            });
+        } else if (D.deco === 'ocean') {
+            ctx.strokeStyle = P.wave;
+            ctx.lineWidth = 0.8 * scale;
+            const amp = 1.6 * scale;
+            const wl = w / 5;
+            for (let i = 0; i < 3; i++) {
+                const wy = y + h * (0.80 + i * 0.07);
+                ctx.beginPath();
+                for (let px = 0; px <= w; px += Math.max(2, w / 48)) {
+                    const yy = wy + Math.sin((px / wl) * Math.PI * 2 + t * (0.5 + i * 0.15) + i) * amp;
+                    if (px === 0) ctx.moveTo(x + px, yy); else ctx.lineTo(x + px, yy);
+                }
+                ctx.stroke();
+            }
+        } else if (D.deco === 'cyber') {
+            const b = 3 * scale;
+            const L = 7 * scale;
+            ctx.strokeStyle = P.grid;
+            ctx.lineWidth = 1 * scale;
+            [[x + b, y + b, 1, 1], [x + w - b, y + b, -1, 1], [x + b, y + h - b, 1, -1], [x + w - b, y + h - b, -1, -1]].forEach(([px, py, sx2, sy2]) => {
+                ctx.beginPath();
+                ctx.moveTo(px + sx2 * L, py);
+                ctx.lineTo(px, py);
+                ctx.lineTo(px, py + sy2 * L);
+                ctx.stroke();
+            });
+            ctx.globalAlpha = 0.25;
+            ctx.lineWidth = 0.5 * scale;
+            for (let i = 1; i < 4; i++) {
+                const gy = y + h * (0.74 + i * 0.06);
+                ctx.beginPath();
+                ctx.moveTo(x + b, gy);
+                ctx.lineTo(x + w - b, gy);
+                ctx.stroke();
+            }
+            ctx.globalAlpha = isLight ? 0.18 : 0.22;
+            const scanX = x + ((t * 0.12) % 1) * w;
+            const sg = ctx.createLinearGradient(scanX - 14 * scale, 0, scanX + 2 * scale, 0);
+            sg.addColorStop(0, 'rgba(0, 245, 255, 0)');
+            sg.addColorStop(1, P.glow);
+            ctx.fillStyle = sg;
+            ctx.fillRect(scanX - 14 * scale, y, 16 * scale, h);
+        } else if (D.deco === 'champagne') {
+            const R = (c.pivotY - y) + h;
+            const half = Math.atan2(w * 0.6, c.pivotY - y);
+            const n = 18;
+            const step = (half * 2) / n;
+            ctx.fillStyle = P.ray;
+            for (let i = 0; i < n; i += 2) {
+                const a0 = -Math.PI / 2 - half + i * step;
+                const a1 = a0 + step;
+                ctx.beginPath();
+                ctx.moveTo(c.pivotX, c.pivotY);
+                ctx.lineTo(c.pivotX + R * Math.cos(a0), c.pivotY + R * Math.sin(a0));
+                ctx.lineTo(c.pivotX + R * Math.cos(a1), c.pivotY + R * Math.sin(a1));
+                ctx.closePath();
+                ctx.fill();
+            }
+            ctx.strokeStyle = P.frame;
+            ctx.lineWidth = 0.9 * scale;
+            this.roundRect(ctx, x + 2.2 * scale, y + 2.2 * scale, w - 4.4 * scale, h - 4.4 * scale, 5 * scale);
+            ctx.stroke();
+            ctx.lineWidth = 0.5 * scale;
+            this.roundRect(ctx, x + 4.2 * scale, y + 4.2 * scale, w - 8.4 * scale, h - 8.4 * scale, 4 * scale);
+            ctx.stroke();
+            const d = 2.6 * scale;
+            ctx.fillStyle = P.frame;
+            [[x + 8 * scale, y + 8 * scale], [x + w - 8 * scale, y + 8 * scale], [x + 8 * scale, y + h - 8 * scale], [x + w - 8 * scale, y + h - 8 * scale]].forEach(([px, py]) => {
+                ctx.beginPath();
+                ctx.moveTo(px, py - d);
+                ctx.lineTo(px + d, py);
+                ctx.lineTo(px, py + d);
+                ctx.lineTo(px - d, py);
+                ctx.closePath();
+                ctx.fill();
+            });
+        } else if (D.deco === 'mono') {
+            if (!c.stereo) {
+                ctx.globalAlpha = isLight ? 0.06 : 0.07;
+                ctx.fillStyle = P.ink;
+                ctx.font = `800 ${Math.round(h * 0.7)}px ${D.font.family}`;
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(c.o.title, x + w - 6 * scale, y + h * 0.5);
+                ctx.globalAlpha = 1;
+            }
+            const ry = y + (c.isCompact || c.stereo ? 15 : 24) * scale;
+            ctx.strokeStyle = P.rule;
+            ctx.lineWidth = 0.6 * scale;
+            ctx.beginPath();
+            ctx.moveTo(c.sx, ry);
+            ctx.lineTo(c.ex, ry);
+            ctx.stroke();
+        }
+        ctx.restore();
+    }
+
 
     drawCenterConsole(ctx, x, y, w, h, scale, isCompact, theme, isLight, levelL, levelR) {
         if (isCompact) {
@@ -869,386 +1248,6 @@ class LXStudioVUMeterAnimation {
         ctx.restore();
     }
 
-    // 手机移动端自适应：单表盘·同轴双指针 (Dual-Needle Studio Mastering Pod)
-    drawSingleStereoPod(ctx, x, y, w, h, levelL, levelR, scale, theme, isLight) {
-        ctx.save();
-        const podR = 8 * scale;
-
-        // 1. 视窗边界裁剪与防溢出
-        ctx.save();
-        this.roundRect(ctx, x, y, w, h, podR);
-        ctx.clip();
-
-        // 2. 专业母带表盘底色表面 (依主题定制)
-        if (theme === 'vintage-amber') {
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.6, h * 1.2));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#fffdfa');
-                bgGrad.addColorStop(0.40, '#fef8ea');
-                bgGrad.addColorStop(0.80, '#fdecc4');
-                bgGrad.addColorStop(1, '#fbd38d');
-            } else {
-                bgGrad.addColorStop(0, '#ffe8a3');
-                bgGrad.addColorStop(0.35, '#f6c343');
-                bgGrad.addColorStop(0.75, '#d99b1a');
-                bgGrad.addColorStop(1, '#9c6600');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(180, 120, 20, 0.08)' : 'rgba(80, 40, 10, 0.25)');
-            vigGrad.addColorStop(0.3, 'rgba(80, 40, 10, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(80, 40, 10, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(160, 100, 10, 0.16)' : 'rgba(60, 30, 5, 0.38)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-        } else if (theme === 'ocean-blue') {
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.40, 12 * scale, x + w / 2, y + h * 0.40, Math.max(w * 0.6, h * 1.2));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#f8fafc');
-                bgGrad.addColorStop(0.45, '#e0f2fe');
-                bgGrad.addColorStop(0.85, '#bae6fd');
-                bgGrad.addColorStop(1, '#7dd3fc');
-            } else {
-                bgGrad.addColorStop(0, '#42d2ff');
-                bgGrad.addColorStop(0.35, '#12a4df');
-                bgGrad.addColorStop(0.75, '#0369a1');
-                bgGrad.addColorStop(1, '#073b64');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(3, 105, 161, 0.08)' : 'rgba(0, 30, 65, 0.30)');
-            vigGrad.addColorStop(0.3, 'rgba(0, 30, 65, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(0, 30, 65, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(2, 132, 199, 0.15)' : 'rgba(0, 20, 50, 0.45)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-        } else if (theme === 'cyber-cyan') {
-            if (isLight) {
-                const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-                bgGrad.addColorStop(0, '#ffffff');
-                bgGrad.addColorStop(0.60, '#f0fdfa');
-                bgGrad.addColorStop(1, '#ccfbf1');
-                ctx.fillStyle = bgGrad;
-                ctx.fillRect(x, y, w, h);
-            } else {
-                const bgGrad = ctx.createLinearGradient(x, y, x, y + h);
-                bgGrad.addColorStop(0, '#0c1015');
-                bgGrad.addColorStop(0.5, '#070a0e');
-                bgGrad.addColorStop(1, '#030508');
-                ctx.fillStyle = bgGrad;
-                ctx.fillRect(x, y, w, h);
-
-                const glow = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 10 * scale, x + w / 2, y + h * 0.5, w * 0.5);
-                glow.addColorStop(0, 'rgba(6, 182, 212, 0.14)');
-                glow.addColorStop(0.6, 'rgba(6, 182, 212, 0.03)');
-                glow.addColorStop(1, 'rgba(0, 0, 0, 0)');
-                ctx.fillStyle = glow;
-                ctx.fillRect(x, y, w, h);
-            }
-        } else if (theme === 'champagne-gold') {
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.45, 12 * scale, x + w / 2, y + h * 0.45, Math.max(w * 0.6, h * 1.2));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#ffffff');
-                bgGrad.addColorStop(0.40, '#fefce8');
-                bgGrad.addColorStop(0.80, '#fef08a');
-                bgGrad.addColorStop(1, '#fde047');
-            } else {
-                bgGrad.addColorStop(0, '#fff4cc');
-                bgGrad.addColorStop(0.35, '#fae39b');
-                bgGrad.addColorStop(0.70, '#dfba63');
-                bgGrad.addColorStop(1, '#9b7625');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(113, 63, 18, 0.06)' : 'rgba(60, 45, 20, 0.25)');
-            vigGrad.addColorStop(0.3, 'rgba(60, 45, 20, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(60, 45, 20, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(113, 63, 18, 0.14)' : 'rgba(50, 35, 10, 0.38)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-        } else {
-            // studio-monochrome
-            const bgGrad = ctx.createRadialGradient(x + w / 2, y + h * 0.38, 12 * scale, x + w / 2, y + h * 0.38, Math.max(w * 0.6, h * 1.2));
-            if (isLight) {
-                bgGrad.addColorStop(0, '#ffffff');
-                bgGrad.addColorStop(0.65, '#f8fafc');
-                bgGrad.addColorStop(1, '#edf2f7');
-            } else {
-                bgGrad.addColorStop(0, '#191b22');
-                bgGrad.addColorStop(0.60, '#101217');
-                bgGrad.addColorStop(1, '#08090d');
-            }
-            ctx.fillStyle = bgGrad;
-            ctx.fillRect(x, y, w, h);
-
-            const vigGrad = ctx.createLinearGradient(x, y, x, y + h);
-            vigGrad.addColorStop(0, isLight ? 'rgba(0, 0, 0, 0.03)' : 'rgba(0, 0, 0, 0.35)');
-            vigGrad.addColorStop(0.3, 'rgba(0, 0, 0, 0)');
-            vigGrad.addColorStop(0.7, 'rgba(0, 0, 0, 0)');
-            vigGrad.addColorStop(1, isLight ? 'rgba(0, 0, 0, 0.08)' : 'rgba(0, 0, 0, 0.50)');
-            ctx.fillStyle = vigGrad;
-            ctx.fillRect(x, y, w, h);
-        }
-
-        // 3. 几何浅弧线参数 (宽幅单表盘，平缓舒展大气)
-        const spanMarginX = w * 0.08;
-        const scaleStartX = x + spanMarginX;
-        const scaleEndX = x + w - spanMarginX;
-        const scaleW = scaleEndX - scaleStartX;
-
-        const baseCenterY = y + h * 0.66;
-        const arcSag = h * 0.07;
-
-        const pivotX = x + w / 2;
-        const pivotDepth = h * 2.1;
-        const pivotY = y + pivotDepth;
-
-        const getScalePoint = (norm) => {
-            const bx = scaleStartX + norm * scaleW;
-            const u = (norm - 0.5) * 2;
-            const by = baseCenterY + (u * u) * arcSag;
-
-            const dx = bx - pivotX;
-            const dy = by - pivotY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const ux = dx / dist;
-            const uy = dy / dist;
-
-            return { bx, by, ux, uy };
-        };
-
-        // 配色定义
-        const isDarkText = theme === 'vintage-amber' || theme === 'champagne-gold' || (isLight && (theme === 'ocean-blue' || theme === 'cyber-cyan' || theme === 'studio-monochrome'));
-        const textMain = isDarkText ? '#1e293b' : (theme === 'studio-monochrome' ? '#f8fafc' : (theme === 'cyber-cyan' ? '#22d3ee' : '#f1f5f9'));
-        const textMuted = isDarkText ? 'rgba(51, 65, 85, 0.65)' : (theme === 'studio-monochrome' ? 'rgba(226, 232, 240, 0.65)' : 'rgba(34, 211, 238, 0.65)');
-        const redColor = '#f43f5e'; // 活力珊瑚红（R通道与过载红区）
-        const greenColor = '#10b981'; // 经典翠绿（L通道）
-        const arcColor = isDarkText ? '#334155' : (theme === 'studio-monochrome' ? 'rgba(241, 245, 249, 0.85)' : (theme === 'cyber-cyan' ? 'rgba(34, 211, 238, 0.85)' : '#94a3b8'));
-
-        // 4. 顶部立体声声道指示与指示图例
-        // 左边：● L (绿点)；中间：DUAL VU · STEREO；右边：● R (红点)
-        ctx.save();
-        const topY = y + 4.5 * scale;
-        const tagFontSize = Math.max(7.5, Math.round(8.5 * scale));
-        ctx.font = `700 ${tagFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.textBaseline = 'top';
-
-        // 中间徽标
-        ctx.fillStyle = textMuted;
-        ctx.textAlign = 'center';
-        ctx.letterSpacing = '1px';
-        ctx.fillText('DUAL VU · STEREO', x + w / 2, topY);
-
-        // 左通道指示 (绿点 + L)
-        ctx.textAlign = 'left';
-        ctx.fillStyle = greenColor;
-        ctx.beginPath();
-        ctx.arc(scaleStartX, topY + 4 * scale, 2 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = textMuted;
-        ctx.fillText('L', scaleStartX + 5 * scale, topY);
-
-        // 右通道指示 (红点 + R)
-        ctx.textAlign = 'right';
-        ctx.fillText('R', scaleEndX - 5 * scale, topY);
-        ctx.fillStyle = redColor;
-        ctx.beginPath();
-        ctx.arc(scaleEndX, topY + 4 * scale, 2 * scale, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-
-        // 5. 现代双段能量弧带
-        const normZero = 0.86;
-        const majorTickLen = 5.5 * scale;
-        const medTickLen = 3.8 * scale;
-        const minorTickLen = 2.2 * scale;
-
-        ctx.beginPath();
-        for (let i = 0; i <= 50; i++) {
-            const n = (i / 50) * normZero;
-            const p = getScalePoint(n);
-            if (i === 0) ctx.moveTo(p.bx, p.by);
-            else ctx.lineTo(p.bx, p.by);
-        }
-        ctx.strokeStyle = arcColor;
-        ctx.lineWidth = 1.0 * scale;
-        ctx.stroke();
-
-        ctx.beginPath();
-        for (let i = 0; i <= 20; i++) {
-            const n = normZero + (i / 20) * (1.0 - normZero);
-            const p = getScalePoint(n);
-            if (i === 0) ctx.moveTo(p.bx, p.by);
-            else ctx.lineTo(p.bx, p.by);
-        }
-        ctx.strokeStyle = redColor;
-        ctx.lineWidth = 1.5 * scale;
-        ctx.stroke();
-
-        // 6. 宽幅工整刻度
-        const ticks = [
-            { label: '-20', norm: 0.08, major: true },
-            { norm: 0.20, type: 'min' },
-            { label: '-10', norm: 0.32, major: true },
-            { norm: 0.46, type: 'med' },
-            { label: '-5',  norm: 0.60, major: true },
-            { norm: 0.73, type: 'med' },
-            { label: '0',   norm: 0.86, major: true, isRed: true },
-            { norm: 0.93, type: 'min', isRed: true },
-            { label: '+3',  norm: 1.00, major: true, isRed: true }
-        ];
-
-        ticks.forEach(t => {
-            const p = getScalePoint(t.norm);
-            const len = t.major ? majorTickLen : (t.type === 'med' ? medTickLen : minorTickLen);
-            ctx.strokeStyle = t.isRed ? redColor : arcColor;
-            ctx.lineWidth = (t.major ? (t.isRed ? 1.5 : 1.1) : 0.8) * scale;
-            ctx.beginPath();
-            ctx.moveTo(p.bx, p.by);
-            ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
-            ctx.stroke();
-        });
-
-        // 刻度文字
-        const fontSize = Math.max(8.0, Math.round(9.2 * scale));
-        ctx.font = `700 ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const labelGap = 4.5 * scale;
-
-        ticks.forEach(t => {
-            if (!t.label) return;
-            const p = getScalePoint(t.norm);
-            const lx = p.bx + p.ux * (majorTickLen + labelGap);
-            const ly = p.by + p.uy * (majorTickLen + labelGap);
-            ctx.fillStyle = t.isRed ? redColor : textMain;
-            ctx.fillText(t.label, lx, ly);
-        });
-
-        // 7. 优雅中心 VU 徽标
-        ctx.save();
-        const vuY = baseCenterY + 10.0 * scale;
-        const vuFontSize = Math.max(7.5, Math.round(8.5 * scale));
-        ctx.font = `800 ${vuFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.fillStyle = textMuted;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.letterSpacing = '2px';
-        ctx.fillText('VU', x + w / 2, vuY);
-        ctx.restore();
-
-        // 8. 同轴双指针 (Coaxial Dual-Needle)
-        const needleBaseY = y + h + 2 * scale;
-        const baseW = 0.85 * scale;
-        const tipW = 0.25 * scale;
-
-        const drawNeedle = (levelVal, tipColor, isLeftChannel) => {
-            const norm = Math.max(0, Math.min(1.0, levelVal));
-            const targetPoint = getScalePoint(norm);
-
-            const ndx = targetPoint.bx - pivotX;
-            const ndy = targetPoint.by - pivotY;
-            const nDist = Math.sqrt(ndx * ndx + ndy * ndy);
-            const nux = ndx / nDist;
-            const nuy = ndy / nDist;
-
-            const needleTipX = targetPoint.bx + nux * (majorTickLen + 1.0 * scale);
-            const needleTipY = targetPoint.by + nuy * (majorTickLen + 1.0 * scale);
-
-            const tBase = (needleBaseY - pivotY) / nuy;
-            const needleBaseX = pivotX + tBase * nux;
-
-            const npX = -nuy;
-            const npY = nux;
-
-            // 柔和投影
-            ctx.save();
-            ctx.shadowColor = isLight ? 'rgba(0, 0, 0, 0.20)' : 'rgba(0, 0, 0, 0.45)';
-            ctx.shadowBlur = 2.5 * scale;
-            ctx.shadowOffsetX = (isLeftChannel ? -0.8 : 0.8) * scale;
-            ctx.shadowOffsetY = 1.2 * scale;
-
-            // 碳素深色针体 (底部 65%)
-            const midRatio = 0.65;
-            const needleMidX = needleBaseX + (needleTipX - needleBaseX) * midRatio;
-            const needleMidY = needleBaseY + (needleTipY - needleBaseY) * midRatio;
-            const midW = baseW + (tipW - baseW) * midRatio;
-
-            ctx.beginPath();
-            ctx.moveTo(needleBaseX - npX * baseW, needleBaseY - npY * baseW);
-            ctx.lineTo(needleBaseX + npX * baseW, needleBaseY + npY * baseW);
-            ctx.lineTo(needleMidX + npX * midW, needleMidY + npY * midW);
-            ctx.lineTo(needleMidX - npX * midW, needleMidY - npY * midW);
-            ctx.closePath();
-            ctx.fillStyle = isLight ? '#0f172a' : (theme === 'studio-monochrome' ? '#cbd5e1' : '#111318');
-            ctx.fill();
-
-            // 荧光双色针尖 (顶部 35%)
-            ctx.beginPath();
-            ctx.moveTo(needleMidX - npX * midW, needleMidY - npY * midW);
-            ctx.lineTo(needleMidX + npX * midW, needleMidY + npY * midW);
-            ctx.lineTo(needleTipX + npX * tipW, needleTipY + npY * tipW);
-            ctx.lineTo(needleTipX - npX * tipW, needleTipY - npY * tipW);
-            ctx.closePath();
-            ctx.fillStyle = tipColor;
-            ctx.fill();
-            ctx.restore();
-        };
-
-        // 绘制 L 通道指针（翠绿/主题色针尖）
-        const tipLColor = theme === 'cyber-cyan' && !isLight ? '#00f5ff' : greenColor;
-        drawNeedle(levelL, tipLColor, true);
-
-        // 绘制 R 通道指针（珊瑚红针尖）
-        drawNeedle(levelR, redColor, false);
-
-        // 9. 精工同轴金属旋钮轴帽 (Machined Dual-Coaxial Pivot Cap)
-        ctx.save();
-        const capR = 3.6 * scale;
-        const capGrad = ctx.createRadialGradient(pivotX - 0.5, needleBaseY - 0.5, 0.5, pivotX, needleBaseY, capR);
-        if (isLight) {
-            capGrad.addColorStop(0, '#ffffff');
-            capGrad.addColorStop(0.5, '#cbd5e1');
-            capGrad.addColorStop(1, '#64748b');
-        } else {
-            capGrad.addColorStop(0, '#64748b');
-            capGrad.addColorStop(0.6, '#334155');
-            capGrad.addColorStop(1, '#0f172a');
-        }
-        ctx.fillStyle = capGrad;
-        ctx.beginPath();
-        if (typeof ctx.arc === 'function') {
-            ctx.arc(pivotX, needleBaseY, capR, 0, Math.PI * 2);
-        } else {
-            this.roundRect(ctx, pivotX - capR, needleBaseY - capR, capR * 2, capR * 2, capR);
-        }
-        ctx.fill();
-        ctx.restore();
-
-        // 10. 防眩光蓝宝石双曲面玻璃反光
-        const glassGrad = ctx.createLinearGradient(x, y, x, y + h * 0.45);
-        glassGrad.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.08)');
-        glassGrad.addColorStop(0.5, isLight ? 'rgba(255, 255, 255, 0.06)' : 'rgba(255, 255, 255, 0.02)');
-        glassGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = glassGrad;
-        ctx.fillRect(x, y, w, h * 0.45);
-
-        ctx.restore(); // 解除裁剪
-
-        // 11. 视窗内嵌倒角框
-        ctx.strokeStyle = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.08)';
-        ctx.lineWidth = 1;
-        this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
-        ctx.stroke();
-
-        ctx.restore();
-    }
 }
 
 class LXStudioBarsAnimation {
