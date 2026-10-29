@@ -68,12 +68,12 @@ const LX_VU_DIAL_DESIGNS = {
             vig: { light: ['rgba(180, 120, 20, 0.08)', 'rgba(160, 100, 10, 0.16)'], dark: ['rgba(80, 40, 10, 0.25)', 'rgba(60, 30, 5, 0.38)'], clear: 'rgba(80, 40, 10, 0)' }
         },
         arc: 'double', tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
-        needle: { type: 'blade', reach: 1.2, width: 1 }, cap: 'screw', peak: null, sheen: false, deco: 'vintage',
+        needle: { type: 'blade', reach: 1.2, width: 1 }, cap: 'screw', peak: null, sheen: false, deco: 'vintage', lamp: ['255, 186, 96', 1],
         light: { ink: '#2b2118', muted: 'rgba(60, 45, 25, 0.7)', arc: '#3a2d1e', red: '#c81e3a', needle: '#16120d', tip: '#c81e3a', glow: 'rgba(255, 200, 90, 0.5)', frame: 'rgba(90, 60, 20, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
         dark: { ink: '#2b2118', muted: 'rgba(60, 45, 25, 0.7)', arc: '#3a2d1e', red: '#c81e3a', needle: '#16120d', tip: '#c81e3a', glow: 'rgba(255, 200, 90, 0.5)', frame: 'rgba(90, 60, 20, 0.45)', rim: '#bfa15f' }
     },
-    // Marine instrument: deep smiling ellipse-like arc, translucent water band,
-    // round dot ticks, drifting wave lines and a luminous pointer ending in a glowing bead.
+    // Blue-lit hi-fi power meter: deep arc on a backlit blue card, translucent scale band,
+    // fine bar ticks and a slim pale blade pointer over a jewel hub.
     'ocean-blue': {
         name: 'Ocean Blue',
         geom: { span: 0.055, baseY: { c: 0.60, f: 0.57 }, sag: { c: 0.12, f: 0.14 }, curve: 1.6, pivot: { c: 1.75, f: 2.0 } },
@@ -85,31 +85,31 @@ const LX_VU_DIAL_DESIGNS = {
             dark: [[0, '#42d2ff'], [0.35, '#12a4df'], [0.75, '#0369a1'], [1, '#073b64']],
             vig: { light: ['rgba(3, 105, 161, 0.08)', 'rgba(2, 132, 199, 0.15)'], dark: ['rgba(0, 30, 65, 0.30)', 'rgba(0, 20, 50, 0.45)'], clear: 'rgba(0, 30, 65, 0)' }
         },
-        arc: 'band', arcBand: 3.6, tick: { style: 'dots', len: 1, lwMajor: 1.5, lwMinor: 0.8 },
-        needle: { type: 'lumen', reach: 1.0, width: 1 }, cap: 'jewel', peak: null, sheen: true, deco: 'ocean',
+        arc: 'band', arcBand: 3.6, tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
+        needle: { type: 'blade', reach: 1.0, width: 0.85 }, cap: 'jewel', peak: null, sheen: true, deco: 'ocean', lamp: ['160, 220, 255', 0.8],
         light: { ink: '#0c4a6e', muted: 'rgba(12, 74, 110, 0.65)', arc: '#0369a1', red: '#e11d48', needle: '#075985', tip: '#0ea5e9', glow: 'rgba(14, 165, 233, 0.55)', wave: 'rgba(3, 105, 161, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
         dark: { ink: '#f0f9ff', muted: 'rgba(224, 242, 254, 0.75)', arc: 'rgba(240, 249, 255, 0.9)', red: '#ff7a93', needle: '#f0f9ff', tip: '#ffffff', glow: 'rgba(186, 230, 253, 0.95)', wave: 'rgba(255, 255, 255, 0.45)', rim: '#0e5c8f' }
     },
-    // HUD / sci-fi readout: flat wide arc, segmented bar-graph rail that lights with the level,
-    // monospace type, corner brackets, scan line and a neon hairline pointer with a diamond head.
+    // Modern reference meter: flat wide arc on a black card with cyan-lit printing,
+    // geometric sans type, translucent scale band and a hairline pointer.
     'cyber-cyan': {
         name: 'Cyber Cyan',
         geom: { span: 0.045, baseY: { c: 0.68, f: 0.64 }, sag: { c: 0.05, f: 0.06 }, curve: 4, pivot: { c: 2.2, f: 2.6 } },
-        font: { family: 'ui-monospace, "SF Mono", Menlo, Consolas, monospace', weight: '700', style: 'normal', scale: 0.95 },
-        tag: ch => 'CH_' + ch, tagAlign: 'left', mark: 'VU/dB', markStyle: 'normal',
+        font: { family: '"Futura", "Century Gothic", "Avenir Next", "Segoe UI", sans-serif', weight: '500', style: 'normal', scale: 1.0 },
+        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', tagAlign: 'center', mark: 'VU', markStyle: 'normal',
         face: {
             kind: 'linear',
             light: [[0, '#ffffff'], [0.60, '#f0fdfa'], [1, '#ccfbf1']],
             dark: [[0, '#0c1015'], [0.5, '#070a0e'], [1, '#030508']],
             glow: { color: '6, 182, 212', a0: 0.14, a1: 0.03 }
         },
-        arc: 'segments', tick: { style: 'bar', len: 0.85, lwMajor: 1.8, lwMinor: 0.9 },
-        needle: { type: 'neon', reach: 1.0, width: 1 }, cap: 'ring', peak: 'segment', sheen: false, deco: 'cyber',
+        arc: 'band', arcBand: 2.4, tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
+        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'ring', peak: null, sheen: true, deco: 'cyber', lamp: ['80, 230, 255', 0.6],
         light: { ink: '#115e59', muted: 'rgba(17, 94, 89, 0.65)', arc: '#0f766e', red: '#e11d48', needle: '#0f766e', tip: '#06b6d4', glow: 'rgba(6, 182, 212, 0.5)', grid: 'rgba(15, 118, 110, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
         dark: { ink: '#22d3ee', muted: 'rgba(34, 211, 238, 0.6)', arc: 'rgba(34, 211, 238, 0.9)', red: '#ff2d6f', needle: '#7df9ff', tip: '#00f5ff', glow: '#00f5ff', grid: 'rgba(34, 211, 238, 0.5)', rim: '#1e3040' }
     },
-    // Art-deco luxury: sunburst rays radiating from the pivot, double gold frame with corner lozenges,
-    // fine wedge ticks capped with pearls, radial serif numerals and a spear pointer with a lozenge.
+    // Champagne-faced luxury meter: soft sunburst, double gold frame with corner lozenges,
+    // wedge ticks capped with pearls, radial serif numerals and a slim black blade with red tip.
     'champagne-gold': {
         name: 'Champagne Gold',
         geom: { span: 0.09, baseY: { c: 0.64, f: 0.60 }, sag: { c: 0.10, f: 0.11 }, curve: 2.6, pivot: { c: 1.9, f: 2.2 } },
@@ -122,12 +122,12 @@ const LX_VU_DIAL_DESIGNS = {
             vig: { light: ['rgba(113, 63, 18, 0.06)', 'rgba(113, 63, 18, 0.14)'], dark: ['rgba(60, 45, 20, 0.25)', 'rgba(50, 35, 10, 0.38)'], clear: 'rgba(60, 45, 20, 0)' }
         },
         arc: 'double', arcInset: 2.4, tick: { style: 'wedge', len: 1, lwMajor: 1.6, lwMinor: 0.9 },
-        needle: { type: 'deco', reach: 1.0, width: 1 }, cap: 'rosette', peak: null, sheen: true, deco: 'champagne',
-        light: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#b8860b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 230, 150, 0.22)', frame: '#9c7a2a', rim: 'rgba(180, 140, 60, 0.6)' },
-        dark: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#b8860b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 255, 255, 0.16)', frame: '#8a6a1f', rim: '#dab978' }
+        needle: { type: 'blade', reach: 1.0, width: 0.9 }, cap: 'rosette', peak: null, sheen: true, deco: 'champagne', lamp: ['255, 228, 170', 0.9],
+        light: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#a61b1b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 230, 150, 0.22)', frame: '#9c7a2a', rim: 'rgba(180, 140, 60, 0.6)' },
+        dark: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#a61b1b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 255, 255, 0.16)', frame: '#8a6a1f', rim: '#dab978' }
     },
-    // Bauhaus mastering meter: no scale rail, left-aligned channel letter, hairline rule,
-    // oversize watermark letter, long thin ticks and a spear-tipped hairline pointer with peak marker.
+    // Studio monitor meter: crisp white card, fine double rail, left-aligned channel letter,
+    // hairline rule, long thin ticks and a spear-tipped hairline pointer.
     'studio-monochrome': {
         name: 'Studio Monochrome',
         geom: { span: 0.10, baseY: { c: 0.67, f: 0.63 }, sag: { c: 0.035, f: 0.04 }, curve: 2, pivot: { c: 2.1, f: 2.4 } },
@@ -139,8 +139,8 @@ const LX_VU_DIAL_DESIGNS = {
             dark: [[0, '#191b22'], [0.60, '#101217'], [1, '#08090d']],
             vig: { light: ['rgba(0, 0, 0, 0.03)', 'rgba(0, 0, 0, 0.08)'], dark: ['rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.50)'], clear: 'rgba(0, 0, 0, 0)' }
         },
-        arc: 'none', tick: { style: 'bar', len: 1.15, lwMajor: 1.1, lwMinor: 0.7 },
-        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', peak: 'tick', sheen: false, deco: 'mono',
+        arc: 'double', arcInset: 1.6, tick: { style: 'bar', len: 1.15, lwMajor: 1.1, lwMinor: 0.7 },
+        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', peak: null, sheen: false, deco: 'mono', lamp: ['235, 240, 255', 0.3],
         light: { ink: '#0f172a', muted: 'rgba(15, 23, 42, 0.55)', arc: '#334155', red: '#f43f5e', needle: '#0f172a', tip: '#f43f5e', rule: 'rgba(15, 23, 42, 0.25)', rim: 'rgba(148, 163, 184, 0.55)' },
         dark: { ink: '#f8fafc', muted: 'rgba(226, 232, 240, 0.6)', arc: 'rgba(241, 245, 249, 0.85)', red: '#f43f5e', needle: '#e2e8f0', tip: '#f43f5e', rule: 'rgba(226, 232, 240, 0.25)', rim: '#334155' }
     }
@@ -318,10 +318,10 @@ class LXStudioVUMeterAnimation {
         }
 
         // 3. ANSI C16.5 Standard VU Ballistics (~300 ms rise and fall integration with responsive attack)
-        // Moving-coil movement modelled as a damped spring (slight overshoot like a real VU movement),
-        // with hard mechanical stops at both ends of travel.
-        const omega = 21.0;
-        const zeta = 0.78;
+        // Moving-coil movement modelled as a critically damped spring (~300 ms to settle, no overshoot),
+        // with padded mechanical stops at both ends of travel.
+        const omega = 20.0;
+        const zeta = 1.0;
         this.velL = this.velL || 0;
         this.velR = this.velR || 0;
         const steps = Math.max(1, Math.ceil(dt / 0.008));
@@ -333,8 +333,8 @@ class LXStudioVUMeterAnimation {
             this.needleNormR += this.velR * h;
         }
         const stop = (n, v) => {
-            if (n < 0) return [0, Math.abs(v) * 0.25];
-            if (n > 1.03) return [1.03, -Math.abs(v) * 0.3];
+            if (n < 0) return [0, 0];
+            if (n > 1.03) return [1.03, 0];
             return [n, v];
         };
         [this.needleNormL, this.velL] = stop(this.needleNormL, this.velL);
@@ -624,6 +624,22 @@ class LXStudioVUMeterAnimation {
         recRight.addColorStop(1, 'rgba(0, 0, 0, 0)');
         ctx.fillStyle = recRight;
         ctx.fillRect(x + w - rec * 0.6, y, rec * 0.6, h);
+
+        // 1c. Lamp behind the translucent dial card
+        if (D.lamp) {
+            ctx.save();
+            const lx = x + w / 2;
+            const ly = y + h * 1.02;
+            const gain = D.lamp[1];
+            const lg = ctx.createRadialGradient(lx, ly, 2 * scale, lx, ly, Math.max(w * 0.6, h * 1.05));
+            lg.addColorStop(0, `rgba(${D.lamp[0]}, ${(isLight ? 0.30 : 0.55) * gain})`);
+            lg.addColorStop(0.45, `rgba(${D.lamp[0]}, ${(isLight ? 0.10 : 0.18) * gain})`);
+            lg.addColorStop(1, `rgba(${D.lamp[0]}, 0)`);
+            if (!isLight) ctx.globalCompositeOperation = 'screen';
+            ctx.fillStyle = lg;
+            ctx.fillRect(x, y, w, h);
+            ctx.restore();
+        }
 
         this.drawDialFace(ctx, D, P, { x, y, w, h, scale, isLight, compactLike, gsp: getScalePoint, majLen, gap: sz.gap * scale, fontPx: Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale)), baseY, pivotX, pivotY });
 
@@ -1010,6 +1026,50 @@ class LXStudioVUMeterAnimation {
         }
         ctx.restore();
 
+        // 10b. Lacquered movement shroud: hides the pivot like a real meter and carries the badge
+        if (!compactLike) {
+            const shTop = y + h * 0.84;
+            const shEdge = y + h * 0.94;
+            const warmShroud = D.deco === 'vintage' || D.deco === 'champagne';
+            const curve = (first) => {
+                for (let i = 0; i <= 24; i++) {
+                    const u = i / 24;
+                    const v = 2 * u - 1;
+                    const px = x + w * u;
+                    const py = shTop + (shEdge - shTop) * v * v;
+                    if (i === 0 && first) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+                }
+            };
+            ctx.save();
+            ctx.beginPath();
+            ctx.moveTo(x, y + h + 1);
+            curve(false);
+            ctx.lineTo(x + w, y + h + 1);
+            ctx.closePath();
+            const shg = ctx.createLinearGradient(x, shTop, x, y + h);
+            shg.addColorStop(0, warmShroud ? '#3a2a18' : '#2a2f38');
+            shg.addColorStop(0.35, warmShroud ? '#1c140b' : '#14171c');
+            shg.addColorStop(1, '#050505');
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+            ctx.shadowBlur = 3 * scale;
+            ctx.shadowOffsetY = -1 * scale;
+            ctx.fillStyle = shg;
+            ctx.fill();
+            ctx.shadowColor = 'transparent';
+            ctx.beginPath();
+            curve(true);
+            ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+            ctx.lineWidth = 0.7 * scale;
+            ctx.stroke();
+            ctx.font = `600 ${Math.max(6, Math.round(7.5 * scale))}px ${fam}`;
+            ctx.fillStyle = warmShroud ? 'rgba(230, 200, 140, 0.75)' : 'rgba(220, 226, 235, 0.65)';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.letterSpacing = '3px';
+            ctx.fillText('LX AUDIO', x + w / 2, (shTop + y + h) / 2 + 1 * scale);
+            ctx.restore();
+        }
+
         // 11. Glass reflection
         const glass = ctx.createLinearGradient(x, y, x, y + h * 0.45);
         glass.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.08)');
@@ -1025,6 +1085,24 @@ class LXStudioVUMeterAnimation {
             ctx.fillStyle = sg;
             ctx.fillRect(x, y, w, h);
         }
+        // Curved crystal reflection across the upper glass
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + w, y);
+        ctx.lineTo(x + w, y + h * 0.22);
+        for (let i = 1; i <= 24; i++) {
+            const u = 1 - i / 24;
+            const v = 2 * u - 1;
+            ctx.lineTo(x + w * u, y + h * (0.36 - 0.14 * v * v));
+        }
+        ctx.closePath();
+        const cr = ctx.createLinearGradient(x, y, x, y + h * 0.36);
+        cr.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.09)');
+        cr.addColorStop(1, 'rgba(255, 255, 255, 0)');
+        ctx.fillStyle = cr;
+        ctx.fill();
+        ctx.restore();
         ctx.restore(); // end clip
 
         // 12. Bezel
@@ -1126,101 +1204,26 @@ class LXStudioVUMeterAnimation {
                 ctx.textAlign = 'right';
                 ctx.fillText('PRECISION METER', x + w - 12 * scale, y + h - 9 * scale);
             }
-        } else if (D.deco === 'ocean') {
-            // Sonar chart: radial bearing lines and range rings swept from the pivot, calm surface band
-            const d0 = pivotY - baseY;
-            const half = Math.atan2(w * 0.55, d0);
-            const a0 = -Math.PI / 2 - half;
-            const a1 = -Math.PI / 2 + half;
-            const deep = ctx.createLinearGradient(x, y + h * 0.55, x, y + h);
-            deep.addColorStop(0, 'rgba(0, 40, 90, 0)');
-            deep.addColorStop(1, isLight ? 'rgba(3, 105, 161, 0.18)' : 'rgba(0, 20, 55, 0.40)');
-            ctx.fillStyle = deep;
-            ctx.fillRect(x, y, w, h);
-            ctx.strokeStyle = P.wave;
-            ctx.lineWidth = 0.5 * scale;
-            ctx.globalAlpha = 0.55;
-            const rays = 16;
-            for (let i = 0; i <= rays; i++) {
-                const a = a0 + (a1 - a0) * (i / rays);
-                ctx.beginPath();
-                ctx.moveTo(pivotX + Math.cos(a) * (d0 - h * 0.35), pivotY + Math.sin(a) * (d0 - h * 0.35));
-                ctx.lineTo(pivotX + Math.cos(a) * (d0 + h * 0.75), pivotY + Math.sin(a) * (d0 + h * 0.75));
-                ctx.stroke();
-            }
-            for (let k = -1; k <= 3; k++) {
-                ctx.beginPath();
-                ctx.arc(pivotX, pivotY, d0 + k * h * 0.17, a0, a1);
-                ctx.stroke();
-            }
-            ctx.globalAlpha = 1;
-            band(-0.03, 1.03, inner, outer);
+        } else if (D.deco === 'ocean' || D.deco === 'cyber') {
+            // Backlit translucent scale window with a fine double rule and printed red zone
+            band(-0.035, 1.035, inner, outer);
             const sg = ctx.createLinearGradient(x, y, x, y + h);
-            sg.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.50)' : 'rgba(255, 255, 255, 0.16)');
-            sg.addColorStop(1, isLight ? 'rgba(255, 255, 255, 0.15)' : 'rgba(255, 255, 255, 0.04)');
+            sg.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.10)');
+            sg.addColorStop(1, isLight ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.02)');
             ctx.fillStyle = sg;
             ctx.fill();
             ctx.strokeStyle = P.arc;
-            ctx.globalAlpha = 0.45;
-            ctx.lineWidth = 0.7 * scale;
-            ctx.stroke();
-            ctx.globalAlpha = 1;
-            if (!compactLike) {
-                ctx.font = `600 ${small}px ${D.font.family}`;
-                ctx.fillStyle = P.muted;
-                ctx.textBaseline = 'middle';
-                ctx.letterSpacing = '2px';
-                ctx.textAlign = 'left';
-                ctx.fillText('SONAR · LEVEL', x + 12 * scale, y + h - 9 * scale);
-                ctx.textAlign = 'right';
-                ctx.fillText('dB RE 0 VU', x + w - 12 * scale, y + h - 9 * scale);
-            }
-        } else if (D.deco === 'cyber') {
-            // Chamfered HUD panel with dashed scale lane, bottom ruler and data readouts
-            const b = 4 * scale;
-            const cc = 7 * scale;
-            ctx.beginPath();
-            ctx.moveTo(x + b + cc, y + b);
-            ctx.lineTo(x + w - b, y + b);
-            ctx.lineTo(x + w - b, y + h - b - cc);
-            ctx.lineTo(x + w - b - cc, y + h - b);
-            ctx.lineTo(x + b, y + h - b);
-            ctx.lineTo(x + b, y + b + cc);
-            ctx.closePath();
-            ctx.fillStyle = isLight ? 'rgba(15, 118, 110, 0.05)' : 'rgba(6, 182, 212, 0.05)';
-            ctx.fill();
-            ctx.strokeStyle = P.grid;
+            ctx.globalAlpha = 0.5;
             ctx.lineWidth = 0.8 * scale;
             ctx.stroke();
-            band(-0.02, 1.02, inner, outer);
-            ctx.save();
-            ctx.globalAlpha = 0.55;
-            dash([2.5 * scale, 2.5 * scale]);
-            ctx.lineWidth = 0.6 * scale;
+            ctx.lineWidth = 0.45 * scale;
+            band(-0.02, 1.02, inner + 1.6 * scale, outer - 1.6 * scale);
             ctx.stroke();
-            ctx.restore();
-            const ry = y + h - b - 3.5 * scale;
-            const n = Math.max(8, Math.floor(w / (5 * scale)));
-            ctx.globalAlpha = 0.5;
-            ctx.lineWidth = 0.6 * scale;
-            ctx.beginPath();
-            for (let i = 0; i <= n; i++) {
-                const px = x + b + cc + (w - 2 * (b + cc)) * (i / n);
-                ctx.moveTo(px, ry);
-                ctx.lineTo(px, ry - (i % 5 === 0 ? 3.2 : 1.6) * scale);
-            }
-            ctx.stroke();
+            ctx.globalAlpha = 0.12;
+            band(VU_NORM_ZERO, 1.035, inner, outer, 12);
+            ctx.fillStyle = P.red;
+            ctx.fill();
             ctx.globalAlpha = 1;
-            if (!compactLike) {
-                ctx.font = `700 ${small}px ${D.font.family}`;
-                ctx.fillStyle = P.muted;
-                ctx.textBaseline = 'middle';
-                ctx.letterSpacing = '1px';
-                ctx.textAlign = 'right';
-                ctx.fillText('RMS 300ms', x + w - b - 6 * scale, y + b + 7 * scale);
-                ctx.textAlign = 'left';
-                ctx.fillText('ref -18 dBFS', x + b + 6 * scale, y + h - b - 12 * scale);
-            }
         } else if (D.deco === 'champagne') {
             // Arched cartouche with pearl-studded border above a pinstriped gold pedestal
             lower(-0.05, 1.05);
@@ -1272,12 +1275,10 @@ class LXStudioVUMeterAnimation {
             }
         } else if (D.deco === 'mono') {
             // Bauhaus layout: solid overload block, heavy top bar and a baseline rule
-            const zx = gsp(VU_NORM_ZERO).bx;
+            band(VU_NORM_ZERO, 1.03, inner, outer, 12);
             ctx.fillStyle = P.red;
             ctx.globalAlpha = isLight ? 0.10 : 0.16;
-            ctx.fillRect(zx, y, x + w - zx, h);
-            ctx.globalAlpha = 0.5;
-            ctx.fillRect(zx, y, 0.8 * scale, h);
+            ctx.fill();
             ctx.globalAlpha = 1;
             ctx.fillStyle = P.ink;
             ctx.fillRect(x, y, w, (compactLike ? 1.8 : 3) * scale);
@@ -1332,48 +1333,6 @@ class LXStudioVUMeterAnimation {
                 ctx.lineTo(px + r * 0.7, py + r * 0.7);
                 ctx.stroke();
             });
-        } else if (D.deco === 'ocean') {
-            ctx.strokeStyle = P.wave;
-            ctx.lineWidth = 0.8 * scale;
-            const amp = 1.6 * scale;
-            const wl = w / 5;
-            for (let i = 0; i < 3; i++) {
-                const wy = y + h * (0.80 + i * 0.07);
-                ctx.beginPath();
-                for (let px = 0; px <= w; px += Math.max(2, w / 48)) {
-                    const yy = wy + Math.sin((px / wl) * Math.PI * 2 + t * (0.5 + i * 0.15) + i) * amp;
-                    if (px === 0) ctx.moveTo(x + px, yy); else ctx.lineTo(x + px, yy);
-                }
-                ctx.stroke();
-            }
-        } else if (D.deco === 'cyber') {
-            const b = 3 * scale;
-            const L = 7 * scale;
-            ctx.strokeStyle = P.grid;
-            ctx.lineWidth = 1 * scale;
-            [[x + b, y + b, 1, 1], [x + w - b, y + b, -1, 1], [x + b, y + h - b, 1, -1], [x + w - b, y + h - b, -1, -1]].forEach(([px, py, sx2, sy2]) => {
-                ctx.beginPath();
-                ctx.moveTo(px + sx2 * L, py);
-                ctx.lineTo(px, py);
-                ctx.lineTo(px, py + sy2 * L);
-                ctx.stroke();
-            });
-            ctx.globalAlpha = 0.25;
-            ctx.lineWidth = 0.5 * scale;
-            for (let i = 1; i < 4; i++) {
-                const gy = y + h * (0.74 + i * 0.06);
-                ctx.beginPath();
-                ctx.moveTo(x + b, gy);
-                ctx.lineTo(x + w - b, gy);
-                ctx.stroke();
-            }
-            ctx.globalAlpha = isLight ? 0.18 : 0.22;
-            const scanX = x + ((t * 0.12) % 1) * w;
-            const sg = ctx.createLinearGradient(scanX - 14 * scale, 0, scanX + 2 * scale, 0);
-            sg.addColorStop(0, 'rgba(0, 245, 255, 0)');
-            sg.addColorStop(1, P.glow);
-            ctx.fillStyle = sg;
-            ctx.fillRect(scanX - 14 * scale, y, 16 * scale, h);
         } else if (D.deco === 'champagne') {
             const R = (c.pivotY - y) + h;
             const half = Math.atan2(w * 0.6, c.pivotY - y);
@@ -1409,15 +1368,6 @@ class LXStudioVUMeterAnimation {
                 ctx.fill();
             });
         } else if (D.deco === 'mono') {
-            if (!c.stereo) {
-                ctx.globalAlpha = isLight ? 0.06 : 0.07;
-                ctx.fillStyle = P.ink;
-                ctx.font = `800 ${Math.round(h * 0.7)}px ${D.font.family}`;
-                ctx.textAlign = 'right';
-                ctx.textBaseline = 'middle';
-                ctx.fillText(c.o.title, x + w - 6 * scale, y + h * 0.5);
-                ctx.globalAlpha = 1;
-            }
             const ry = y + (c.isCompact || c.stereo ? 15 : 24) * scale;
             ctx.strokeStyle = P.rule;
             ctx.lineWidth = 0.6 * scale;
