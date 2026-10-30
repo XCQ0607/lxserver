@@ -8,6 +8,7 @@ window.soundEffects = (function () {
     let convolverNode, convolverMainGain, convolverSendGain;
     let pitchShifterNode, pitchFactorParam;
     let pannerNode;
+    let bypassGain, effectsGain;
     let pannerInfo = { enable: false, speed: 25, distance: 5, rad: 0, interval: null };
 
     const freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -44,6 +45,7 @@ window.soundEffects = (function () {
     ];
 
     let settings = {
+        enabled: true,
         eq: Array(10).fill(0),
         pitch: 1.0,
         panner: { enable: false, speed: 25, distance: 5 },
@@ -56,6 +58,7 @@ window.soundEffects = (function () {
     let mobileEffectsEnabled = false;
 
     function hasActiveEffects() {
+        if (settings.enabled === false) return false;
         const isEqActive = settings.eq && settings.eq.some(val => val !== 0);
         const isPitchActive = settings.pitch !== 1.0;
         const isReverbActive = settings.reverb && settings.reverb.id && settings.reverb.id !== 'none';
@@ -165,7 +168,14 @@ window.soundEffects = (function () {
 
         // Mixer -> [Pitch inserted later] -> Panner -> Analyser -> Destination
         mixerNode.connect(pannerNode);
-        pannerNode.connect(analyser);
+        effectsGain = audioContext.createGain();
+        bypassGain = audioContext.createGain();
+        effectsGain.gain.value = settings.enabled === false ? 0 : 1;
+        bypassGain.gain.value = settings.enabled === false ? 1 : 0;
+        pannerNode.connect(effectsGain);
+        effectsGain.connect(analyser);
+        mediaSource.connect(bypassGain);
+        bypassGain.connect(analyser);
         analyser.connect(audioContext.destination);
 
         // Store gains for control
@@ -280,6 +290,7 @@ window.soundEffects = (function () {
     }
 
     function saveSettings() {
+        renderStatus();
         const payload = {
             settings: settings,
             customPresets: customPresets
@@ -359,9 +370,18 @@ window.soundEffects = (function () {
         if (settings.pitch !== 1.0) connectPitchShifter();
         else disconnectPitchShifter();
         applyPitch();
+        applyMaster();
+    }
+
+    function applyMaster() {
+        if (!effectsGain || !bypassGain) return;
+        const on = settings.enabled !== false;
+        effectsGain.gain.setTargetAtTime(on ? 1 : 0, audioContext.currentTime, 0.02);
+        bypassGain.gain.setTargetAtTime(on ? 0 : 1, audioContext.currentTime, 0.02);
     }
 
     let reverbRequest = 0;
+    const impulseBuffers = new Map();
     function updateReverb() {
         if (!canProcessLocally() || !convolverNode || !audioContext) return;
         const request = ++reverbRequest;
@@ -373,9 +393,17 @@ window.soundEffects = (function () {
             if (dryGainNode) dryGainNode.gain.value = 1.0;
             if (wetGainNode) wetGainNode.gain.value = 0;
         } else {
-            fetch(`/music/assets/medias/filters/${rev.source}`)
-                .then(r => r.arrayBuffer())
-                .then(data => audioContext.decodeAudioData(data))
+            if (!impulseBuffers.has(rev.source)) {
+                const pending = fetch(`/music/assets/medias/filters/${rev.source.replace(/\.wav$/, '.ir')}`)
+                    .then(r => {
+                        if (!r.ok) throw new Error(`Impulse response HTTP ${r.status}`);
+                        return r.arrayBuffer();
+                    })
+                    .then(data => audioContext.decodeAudioData(data))
+                    .catch(error => { impulseBuffers.delete(rev.source); throw error; });
+                impulseBuffers.set(rev.source, pending);
+            }
+            impulseBuffers.get(rev.source)
                 .then(buffer => {
                     if (!canProcessLocally() || !convolverNode || request !== reverbRequest || settings.reverb.id !== rev.id) return;
                     convolverNode.buffer = buffer;
@@ -394,7 +422,7 @@ window.soundEffects = (function () {
             pannerInfo.interval = null;
         }
 
-        if (p.enable) {
+        if (p.enable && settings.enabled !== false) {
             pannerNode.panningModel = 'HRTF';
             const speed = Math.max(1, Math.min(50, Number(p.speed) || 25));
             const radius = Math.max(0.1, Math.min(3, (Number(p.distance) || 5) * 0.1));
@@ -469,11 +497,30 @@ window.soundEffects = (function () {
         if (label) label.innerText = settings.pitch.toFixed(2) + 'x';
     }
 
+    function renderStatus() {
+        const enabled = settings.enabled !== false;
+        const toggle = document.getElementById('sound-effects-enable');
+        if (toggle) toggle.checked = enabled;
+        const title = document.getElementById('sound-effects-state');
+        if (title) title.textContent = enabled ? '音效已开启' : '音效已暂停';
+        const summary = document.getElementById('sound-effects-summary');
+        const changes = [];
+        const bands = settings.eq.filter(v => v !== 0).length;
+        if (bands) changes.push(`均衡器 ${bands} 段`);
+        if (settings.reverb.id !== 'none') changes.push(reverbOptions.find(r => r.id === settings.reverb.id)?.name || '混响');
+        if (settings.pitch !== 1) changes.push(`音调 ${settings.pitch.toFixed(2)}×`);
+        if (settings.panner.enable) changes.push('3D 环绕');
+        if (summary) summary.textContent = (enabled ? '' : '设置已保留 · ') + (changes.join(' · ') || '原始音色，尚未调整');
+    }
+
     function renderUI() {
+        renderStatus();
         const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
         const status = document.getElementById('sound-effects-status');
         if (status) status.textContent = remote
             ? 'AirPlay / 投放正在播放：音效仅保存，不改变接收设备的声音。'
+            : settings.enabled === false
+                ? '正在播放原始音色，重新开启即可恢复以上设置。'
             : isGraphBuilt
                 ? (isMobileDevice() ? '本机音效已开启。使用 AirPlay 前请恢复原生播放。' : '本机音效已开启。')
                 : isMobileDevice()
@@ -624,6 +671,17 @@ window.soundEffects = (function () {
 
     const manager = {
         init,
+        setEnabled: function (enabled) {
+            if (!isGraphBuilt) loadSettings();
+            settings.enabled = !!enabled;
+            saveSettings();
+            if (enabled) ensureLocalGraph();
+            if (canProcessLocally() && isGraphBuilt) {
+                applyMaster();
+                updatePanner();
+            }
+            renderUI();
+        },
         toggle: function () {
             const modal = document.getElementById('sound-effects-modal');
             if (modal.classList.contains('hidden')) {
@@ -733,6 +791,12 @@ window.soundEffects = (function () {
             if (label) label.innerText = '1.00x';
             const slider = document.getElementById('pitch-slider');
             if (slider) slider.value = 1.0;
+        },
+        resetPanner: function () {
+            settings.panner = { enable: false, speed: 25, distance: 5 };
+            saveSettings();
+            if (isGraphBuilt) updatePanner();
+            renderUI();
         },
         setPanner: function (key, val) {
             if (!isGraphBuilt) loadSettings();
