@@ -5532,7 +5532,14 @@
 
             <!-- Body -->
             <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
-                <div class="mb-6 space-y-2 text-xs t-text-muted">
+                <div class="effects-status-bar">
+                    <div class="effects-status-heading">
+                        <div><strong id="sound-effects-state">音效已开启</strong><p id="sound-effects-summary"></p></div>
+                        <label class="effects-switch" aria-label="整体音效开关">
+                            <input id="sound-effects-enable" type="checkbox" role="switch" checked onchange="window.soundEffects.setEnabled(this.checked)">
+                            <span></span>
+                        </label>
+                    </div>
                     <p id="sound-effects-status" role="status"></p>
                     <button id="sound-effects-native" hidden type="button"
                         class="px-3 py-2 rounded-lg t-bg-track t-text-main"
@@ -5594,11 +5601,11 @@
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">3D 立体环绕 (需使用耳机)
                                 </h4>
-                                <label
-                                    class="flex items-center gap-2 cursor-pointer group text-[11px] font-bold t-text-muted">
-                                    <input type="checkbox" id="panner-enable" class="w-3.5 h-3.5 accent-emerald-500">
-                                    启用
-                                </label>
+                                <div class="effects-section-actions"><button type="button" onclick="window.soundEffects.resetPanner()"
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold">恢复默认</button>
+                                <label class="effects-switch" aria-label="启用 3D 环绕">
+                                    <input type="checkbox" role="switch" id="panner-enable"><span></span>
+                                </label></div>
                             </div>
                             <div class="grid grid-cols-2 gap-8 px-2">
                                 <div class="space-y-2">

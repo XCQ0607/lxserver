@@ -1097,14 +1097,13 @@ const isPathInside = (child: string, parent: string): boolean => {
   return resolvedChild.startsWith(withSep)
 }
 
-const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: string) => {
+const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: string, contentType = getMime(filePath)) => {
   // Prevent path traversal: ensure the resolved file path stays within staticPath
   if (!isPathInside(filePath, global.lx.staticPath)) {
     res.writeHead(403)
     res.end('Forbidden')
     return
   }
-  const contentType = getMime(filePath)
 
   try {
     const stats = fs.statSync(filePath)
@@ -1328,6 +1327,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
       }
 
+      // DSP impulse data is fetched by JavaScript, not offered as downloadable audio.
+      const impulse = /^music\/assets\/medias\/filters\/([a-z0-9_-]+)\.ir$/.exec(targetPath)
+      if (impulse) {
+        res.setHeader('X-Content-Type-Options', 'nosniff')
+        serveStatic(req, res, path.join(global.lx.staticPath, 'music/assets/medias/filters', `${impulse[1]}.wav`), 'application/octet-stream')
+        return
+      }
       const filePath = path.join(global.lx.staticPath, targetPath)
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         serveStatic(req, res, filePath)

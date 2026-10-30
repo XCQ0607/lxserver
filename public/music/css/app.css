@@ -2138,3 +2138,56 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 #view-player-detail .lyric-line.has-words.active .extended { color: var(--player-lyric, #b8c4d4); }
 #view-player-detail .lyric-line.scroll-target { color: var(--player-active, #34d399); }
 #view-player-detail #detail-visualizer { opacity: 0.12; }
+
+/* Compact sound controls; scoped to the existing dialog. */
+.effects-status-bar { position: sticky; top: -20px; z-index: 12; margin: -20px -24px 24px; padding: 18px 24px; background: var(--bg-panel); border-bottom: 1px solid var(--border-main); }
+.effects-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.effects-status-heading strong { font-size: 14px; font-weight: 600; }
+.effects-status-heading p { margin-top: 5px; color: var(--text-muted); font-size: 12px; line-height: 1.6; }
+.effects-status-bar #sound-effects-status { margin-top: 8px; color: var(--text-dim); font-size: 11px; }
+.effects-section-actions { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.effects-switch { position: relative; display: inline-flex; width: 38px; height: 22px; flex: 0 0 38px; cursor: pointer; }
+.effects-switch input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.effects-switch > span { width: 100%; border-radius: 20px; background: var(--text-dim); pointer-events: none; transition: background .18s; }
+.effects-switch > span::after { content: ''; display: block; width: 16px; height: 16px; margin: 3px; border-radius: 50%; background: white; transition: transform .18s; }
+.effects-switch input:checked + span { background: var(--c-500, #10b981); }
+.effects-switch input:checked + span::after { transform: translateX(16px); }
+.effects-switch:has(input:focus-visible) { outline: 2px solid var(--c-500, #10b981); outline-offset: 3px; border-radius: 20px; }
+#sound-effects-content { max-width: 1040px; border-radius: 20px; color: var(--text-main); }
+#sound-effects-content > :first-child { padding: 20px 24px; }
+#sound-effects-content > :first-child .bg-emerald-500 { background: var(--bg-item-hover); color: var(--text-main); }
+#sound-effects-content > :first-child i { color: inherit; }
+#sound-effects-content > .overflow-y-auto { padding: 20px 24px 24px; }
+#sound-effects-content h4 { color: var(--text-main); font-size: 13px; font-weight: 600; letter-spacing: 0; }
+#sound-effects-status { font-size: 12px; line-height: 1.6; }
+#sound-effects-content .md\:divide-x { gap: 24px; }
+#sound-effects-content .md\:divide-x > div { padding: 0; border: 0; min-width: 0; }
+#sound-effects-content section { padding: 18px; background: var(--bg-main); border: 1px solid var(--border-main); border-radius: 12px; }
+#sound-effects-content .space-y-8 > :not([hidden]) ~ :not([hidden]) { margin-top: 16px; }
+#sound-effects-content .h-px { display: none; }
+#sound-effects-content .sticky { position: static; background: transparent; padding-bottom: 16px; }
+#sound-effects-content button { box-shadow: none; color: inherit; }
+#sound-effects-content button:focus-visible,
+#sound-effects-content label:focus-within { outline: 2px solid var(--c-500, #10b981); outline-offset: 3px; }
+#sound-effects-content button[onclick*="reset"] { padding: 5px 9px; border-radius: 6px; white-space: nowrap; font-weight: 500; }
+#sound-effects-content input[type="range"] { min-width: 0; height: 4px; accent-color: var(--c-500, #10b981); }
+#sound-effects-content input[type="checkbox"] { accent-color: var(--c-500, #10b981); }
+#sound-effects-content #reverb-list { gap: 6px; }
+#reverb-list > label { min-width: 0; padding: 7px 10px; border: 1px solid var(--border-main); border-radius: 7px; font-weight: 500; }
+#reverb-list > label { position: relative; }
+#reverb-list > label > div { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+#reverb-list > label:has(input:checked) { color: var(--c-500, #10b981); border-color: currentColor; }
+#eq-sliders-container { min-height: 0; margin-bottom: 24px; }
+#eq-sliders-container > div { gap: 22px 16px; padding: 0; }
+#eq-sliders-container > div > div { gap: 10px; min-width: 0; }
+#eq-presets button { border-radius: 7px; font-weight: 500; }
+@media (max-width: 767px) {
+    .effects-status-bar { top: -16px; margin: -16px -16px 18px; padding: 16px; }
+    #sound-effects-modal { padding: 10px; }
+    #sound-effects-content { max-height: 92dvh; border-radius: 16px; }
+    #sound-effects-content > :first-child, #sound-effects-content > .overflow-y-auto { padding: 16px; }
+    #sound-effects-content section { padding: 14px; }
+    #sound-effects-content section > .grid { gap: 16px; padding: 0; }
+    #sound-effects-content section > .flex:first-child { flex-wrap: wrap; gap: 10px; }
+    #sound-effects-content h4 { flex: 1 1 50%; }
+}
