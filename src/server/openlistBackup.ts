@@ -682,7 +682,7 @@ export async function verifyPending(): Promise<void> {
           // 仅当远端大小与本地文件一致时才确认上传成功，避免仅凭路径存在误判
           let sizeMatch = true
           if (row.local_path && fs.existsSync(row.local_path)) {
-            try { sizeMatch = fs.statSync(row.local_path).size === info.size } catch { sizeMatch = false }
+            try { sizeMatch = Number(fs.statSync(row.local_path).size) === Number(info.size) } catch { sizeMatch = false }
           }
           if (!sizeMatch) continue
           setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified) })

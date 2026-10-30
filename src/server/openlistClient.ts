@@ -21,7 +21,7 @@ export interface OpenListClientConfig {
 }
 
 export interface OpenListFileInfo {
-  size: number
+  size?: number
   rawUrl?: string
   openlistUrl?: string
   name?: string
@@ -90,15 +90,30 @@ export class OpenListClient {
 
   async listDir(p: string, signal?: AbortSignal): Promise<any> {
     await this.ensureToken(signal)
-    const resp = await fetch(`${this.endpoint}/api/fs/list`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...this.authHeader() },
-      body: JSON.stringify({ path: p, password: '', page: 1, per_page: 100 }),
-      signal: signal ?? AbortSignal.timeout(META_TIMEOUT_MS),
-    })
-    const data: any = await resp.json().catch(() => ({}))
-    if (data?.code !== 200) throw new Error('OpenList 列目录失败：' + (data?.message || resp.status))
-    return data.data || {}
+    const all: any[] = []
+    let page = 1
+    const perPage = 100
+    let last: any = {}
+    let total = 0
+    // 按 total 分页累积所有条目，避免单页(默认 100)截断导致 listFilesRecursive 漏文件
+    do {
+      const resp = await fetch(`${this.endpoint}/api/fs/list`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...this.authHeader() },
+        body: JSON.stringify({ path: p, password: '', page, per_page: perPage }),
+        signal: signal ?? AbortSignal.timeout(META_TIMEOUT_MS),
+      })
+      const data: any = await resp.json().catch(() => ({}))
+      if (data?.code !== 200) throw new Error('OpenList 列目录失败：' + (data?.message || resp.status))
+      const d = data.data || {}
+      const items: any[] = d.content || []
+      all.push(...items)
+      last = d
+      total = Number(d.total ?? all.length)
+      if (!items.length) break
+      page++
+    } while (all.length < total)
+    return { ...last, content: all, total: all.length }
   }
 
   async mkdir(dir: string): Promise<void> {
@@ -121,7 +136,7 @@ export class OpenListClient {
       try {
         const info = await this.getFileInfo(remotePath)
         // 同时校验远端大小与本地预期大小，避免仅凭路径存在就认定上传完成
-        if (info && info.size != null && (expectedSize == null || info.size === expectedSize)) return info
+        if (info && info.size != null && (expectedSize == null || Number(info.size) === Number(expectedSize))) return info
       } catch { /* 尚未就绪，继续轮询 */ }
       await new Promise((r) => setTimeout(r, 1000))
     }
@@ -174,7 +189,7 @@ export class OpenListClient {
     if (data?.code !== 200) throw new Error('OpenList 获取文件信息失败：' + (data?.message || resp.status))
     const d = data.data || {}
     return {
-      size: Number(d.size ?? 0),
+      size: d.size != null ? Number(d.size) : undefined,
       rawUrl: d.raw_url || undefined,
       openlistUrl: `${this.endpoint}/d/${encodePath(remotePath.replace(/^\/+/, ''))}`,
       name: d.name,
