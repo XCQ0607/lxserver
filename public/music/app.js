@@ -8600,8 +8600,15 @@ let isMuted = false;
 // 初始化音量
 audio.volume = currentVolume;
 updateVolumeUI();
+let volumeFollowsRemote = false;
 audio.addEventListener('volumechange', () => {
-    if (!audio.isRemote) return;
+    // Ignore ordinary native volume events (including crossfade automation).
+    if (audio.isRemote) volumeFollowsRemote = true;
+    else if (volumeFollowsRemote) {
+        volumeFollowsRemote = false;
+        try { localStorage.setItem('lx_volume', audio.volume.toString()); } catch (_) { }
+    }
+    else return;
     currentVolume = audio.volume;
     isMuted = audio.muted;
     updateVolumeUI();
