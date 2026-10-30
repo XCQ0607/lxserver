@@ -291,7 +291,9 @@ class LXStudioVUMeterAnimation {
                         this.rollingPeakRMS += (maxDbfs - this.rollingPeakRMS) * Math.min(1.0, dt * 0.25);
                     }
                 }
-                const effectiveRef = Math.max(-18.0, Math.min(-5.5, this.rollingPeakRMS + 0.5));
+                // PCM RMS can approach 0 dBFS for heavily limited material. Let the
+                // shared stereo reference follow it instead of pinning both needles.
+                const effectiveRef = Math.max(-18.0, Math.min(0.5, this.rollingPeakRMS + 0.5));
 
                 const vuL = dBFS_L - effectiveRef;
                 const vuR = dBFS_R - effectiveRef;
