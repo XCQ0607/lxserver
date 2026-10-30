@@ -1300,14 +1300,14 @@ class App {
 
         modalTitle.textContent = '添加用户';
         modalBody.innerHTML = `
-            <form id="add-user-form">
+            <form id="add-user-form" autocomplete="off">
                 <div class="form-group">
                     <label>用户名</label>
-                    <input type="text" name="name" class="form-input" required />
+                    <input type="text" name="name" class="form-input" autocomplete="off" required />
                 </div>
                 <div class="form-group">
                     <label>密码</label>
-                    <input type="password" name="password" class="form-input" required />
+                    <input type="password" name="password" class="form-input" autocomplete="new-password" required />
                 </div>
                 <div class="form-actions">
                     <button type="submit" class="btn-primary">添加</button>
