@@ -576,6 +576,10 @@ npm run docs:build --prefix docs
 
 ## 🤝 贡献与致谢
 
+想一起维护服务端、播放器、Subsonic、测试或文档，可以看看 [贡献者招募](RECRUITING.md)。不要求长期投入，从一个小问题开始也可以。
+
+日常开发基于 `dev`，普通 PR 提交到 `dev`；正式发布时再由维护者合入 `main`。参与前请阅读 [贡献指南](CONTRIBUTING.md)、[维护与发布约定](GOVERNANCE.md) 和 [行为准则](CODE_OF_CONDUCT.md)。
+
 - 修改自 [lyswhut/lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server)。
 - Web 播放器逻辑参考 [lx-music-desktop](https://github.com/lyswhut/lx-music-desktop)。
 
