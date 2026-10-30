@@ -22,44 +22,74 @@
  * Every colour profile (vuMeterTheme) owns a complete design: dial geometry,
  * scale style, tick style, typography, decorations, pointer shape and pivot cap.
  * Add a new profile with LXStudioVUMeterAnimation.registerDesign(id, design).
- * The measurement scale (norm positions of every tick) is shared by all designs.
+ * The calibration is shared by all designs; each profile selects its own scale density.
  */
-const VU_NORM_ZERO = 0.86;
-const VU_TICKS_COMPACT = [
-    { label: '-20', norm: 0.08, major: true },
-    { norm: 0.20, type: 'min' },
-    { label: '-10', norm: 0.32, major: true },
-    { norm: 0.46, type: 'med' },
-    { label: '-5', norm: 0.60, major: true },
-    { norm: 0.73, type: 'med' },
-    { label: '0', norm: 0.86, major: true, isRed: true },
-    { norm: 0.93, type: 'min', isRed: true },
-    { label: '+3', norm: 1.00, major: true, isRed: true }
+const VU_NORM_ZERO = 0.8;
+const VU_SCALE_ANCHORS = [
+    { vu: -30, norm: 0.00 },
+    { vu: -20, norm: 0.08 },
+    { vu: -15, norm: 0.20 },
+    { vu: -10, norm: 0.32 },
+    { vu:  -7, norm: 0.44 },
+    { vu:  -5, norm: 0.54 },
+    { vu:  -3, norm: 0.64 },
+    { vu:  -1, norm: 0.74 },
+    { vu:   0, norm: 0.80 },
+    { vu:   1, norm: 0.8666667 },
+    { vu:   2, norm: 0.9333333 },
+    { vu:   3, norm: 1.00 }
 ];
-const VU_TICKS_FULL = [
-    { label: '-20', norm: 0.08, major: true },
-    { norm: 0.16, type: 'min' },
-    { norm: 0.24, type: 'min' },
-    { label: '-10', norm: 0.32, major: true },
-    { norm: 0.40, type: 'min' },
-    { label: '-7', norm: 0.48, major: false, type: 'med' },
-    { label: '-5', norm: 0.60, major: true },
-    { norm: 0.67, type: 'min' },
-    { label: '-3', norm: 0.73, major: false, type: 'med' },
-    { norm: 0.80, type: 'min' },
-    { label: '0', norm: 0.86, major: true, isRed: true },
-    { label: '+1', norm: 0.91, major: false, type: 'med', isRed: true },
-    { label: '+2', norm: 0.95, major: false, type: 'min', isRed: true },
-    { label: '+3', norm: 1.00, major: true, isRed: true }
-];
+const mapVuToNorm = vu => {
+    if (vu <= -30) return 0;
+    if (vu >= 3) return Math.min(1.02, 1 + (vu - 3) * 0.01);
+    for (let i = 0; i < VU_SCALE_ANCHORS.length - 1; i++) {
+        const lower = VU_SCALE_ANCHORS[i];
+        const upper = VU_SCALE_ANCHORS[i + 1];
+        if (vu >= lower.vu && vu <= upper.vu) {
+            const fraction = (vu - lower.vu) / (upper.vu - lower.vu);
+            return lower.norm + fraction * (upper.norm - lower.norm);
+        }
+    }
+    return 0;
+};
+const makeVuTicks = points => points.map(([vu, label, major]) => ({
+    label,
+    norm: mapVuToNorm(vu),
+    major: !!major,
+    type: major || label ? 'med' : 'min',
+    isRed: vu >= 0
+}));
+const VU_TICK_PROFILES = {
+    essential: {
+        compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-5, '-5', true], [0, '0', true], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-5, '-5', true], [-3], [0, '0', true], [1], [2], [3, '+3', true]])
+    },
+    broadcast: {
+        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [0, '0', true], [1], [2], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-18], [-15, '-15', true], [-12], [-10, '-10', true], [-8], [-7, '-7'], [-6], [-5, '-5', true], [-4], [-3, '-3'], [-2], [-1], [0, '0', true], [1, '+1'], [2, '+2'], [3, '+3', true]])
+    },
+    precision: {
+        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [0, '0', true], [1], [2], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-18, '-18'], [-15, '-15', true], [-12, '-12'], [-10, '-10', true], [-8, '-8'], [-7], [-6, '-6'], [-5, '-5', true], [-4, '-4'], [-3, '-3'], [-2, '-2'], [-1], [0, '0', true], [0.5], [1, '+1'], [1.5], [2, '+2'], [2.5], [3, '+3', true]])
+    },
+    atelier: {
+        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-5, '-5', true], [-3], [0, '0', true], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-15, '-15'], [-12], [-10, '-10', true], [-8], [-5, '-5', true], [-3, '-3'], [-1], [0, '0', true], [1, '+1'], [2], [3, '+3', true]])
+    },
+    studio: {
+        compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-5, '-5', true], [0, '0', true], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [-1], [0, '0', true], [1], [2], [3, '+3', true]])
+    }
+};
 
 const LX_VU_DIAL_DESIGNS = {
     // Classic broadcast meter: warm lamp-lit plate, serif numerals, double scale rail,
     // tapered black blade with a red painted tip, brass corner screws, domed pivot hub.
     'vintage-amber': {
         name: 'Vintage Amber',
+        scaleProfile: 'broadcast',
         geom: { span: 0.07, baseY: { c: 0.66, f: 0.61 }, sag: { c: 0.07, f: 0.08 }, curve: 2, pivot: { c: 1.95, f: 2.25 } },
-        font: { family: 'Georgia, "Times New Roman", serif', weight: '700', style: 'normal', scale: 1.0 },
+        font: { family: 'Georgia, "Times New Roman", serif', weight: '500', style: 'normal', scale: 1.0 },
         tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', tagAlign: 'center', mark: 'VU', markStyle: 'italic',
         face: {
             kind: 'radial', cy: 0.45,
@@ -76,6 +106,7 @@ const LX_VU_DIAL_DESIGNS = {
     // fine bar ticks and a slim pale blade pointer over a jewel hub.
     'ocean-blue': {
         name: 'Ocean Blue',
+        scaleProfile: 'precision',
         geom: { span: 0.055, baseY: { c: 0.60, f: 0.57 }, sag: { c: 0.12, f: 0.14 }, curve: 1.6, pivot: { c: 1.75, f: 2.0 } },
         font: { family: '"Avenir Next", "Inter", "Segoe UI", Roboto, sans-serif', weight: '600', style: 'normal', scale: 1.0 },
         tag: ch => 'CH · ' + ch, tagAlign: 'center', mark: 'VU', markStyle: 'normal',
@@ -94,6 +125,7 @@ const LX_VU_DIAL_DESIGNS = {
     // geometric sans type, translucent scale band and a hairline pointer.
     'cyber-cyan': {
         name: 'Cyber Cyan',
+        scaleProfile: 'essential',
         geom: { span: 0.045, baseY: { c: 0.68, f: 0.64 }, sag: { c: 0.05, f: 0.06 }, curve: 4, pivot: { c: 2.2, f: 2.6 } },
         font: { family: '"Futura", "Century Gothic", "Avenir Next", "Segoe UI", sans-serif', weight: '500', style: 'normal', scale: 1.0 },
         tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', tagAlign: 'center', mark: 'VU', markStyle: 'normal',
@@ -112,6 +144,7 @@ const LX_VU_DIAL_DESIGNS = {
     // wedge ticks capped with pearls, radial serif numerals and a slim black blade with red tip.
     'champagne-gold': {
         name: 'Champagne Gold',
+        scaleProfile: 'atelier',
         geom: { span: 0.09, baseY: { c: 0.64, f: 0.60 }, sag: { c: 0.10, f: 0.11 }, curve: 2.6, pivot: { c: 1.9, f: 2.2 } },
         font: { family: '"Didot", "Bodoni 72", "Playfair Display", Georgia, serif', weight: '700', style: 'normal', scale: 1.0 },
         tag: ch => '— ' + ch + ' —', tagAlign: 'center', mark: 'VU', markStyle: 'italic', rotateLabels: true,
@@ -130,6 +163,7 @@ const LX_VU_DIAL_DESIGNS = {
     // hairline rule, long thin ticks and a spear-tipped hairline pointer.
     'studio-monochrome': {
         name: 'Studio Monochrome',
+        scaleProfile: 'studio',
         geom: { span: 0.10, baseY: { c: 0.67, f: 0.63 }, sag: { c: 0.035, f: 0.04 }, curve: 2, pivot: { c: 2.1, f: 2.4 } },
         font: { family: '"Helvetica Neue", "Inter", Arial, sans-serif', weight: '600', style: 'normal', scale: 1.05 },
         tag: ch => ch, tagAlign: 'left', mark: 'VU', markStyle: 'normal',
@@ -182,31 +216,13 @@ class LXStudioVUMeterAnimation {
     }
 
     vuToNorm(vu) {
-        if (vu <= -30) return 0.0;
-        if (vu >= 3.0) {
-            return Math.min(1.02, 1.0 + (vu - 3.0) * 0.01);
-        }
-        const table = [
-            { vu: -30, norm: 0.00 },
-            { vu: -20, norm: 0.08 },
-            { vu: -15, norm: 0.18 },
-            { vu: -10, norm: 0.32 },
-            { vu:  -7, norm: 0.48 },
-            { vu:  -5, norm: 0.60 },
-            { vu:  -3, norm: 0.73 },
-            { vu:  -1, norm: 0.82 },
-            { vu:   0, norm: 0.86 },
-            { vu:   1, norm: 0.91 },
-            { vu:   2, norm: 0.95 },
-            { vu:   3, norm: 1.00 }
-        ];
-        for (let i = 0; i < table.length - 1; i++) {
-            if (vu >= table[i].vu && vu <= table[i + 1].vu) {
-                const frac = (vu - table[i].vu) / (table[i + 1].vu - table[i].vu);
-                return table[i].norm + frac * (table[i + 1].norm - table[i].norm);
-            }
-        }
-        return vu < -30 ? 0.0 : 1.0;
+        return mapVuToNorm(vu);
+    }
+
+    getScaleTicks(theme, compactLike) {
+        const profile = this.getDesign(theme).scaleProfile || 'broadcast';
+        const ticks = VU_TICK_PROFILES[profile] || VU_TICK_PROFILES.broadcast;
+        return compactLike ? ticks.compact : ticks.full;
     }
 
     draw(data, ctx) {
@@ -312,18 +328,17 @@ class LXStudioVUMeterAnimation {
                 const swingR = Math.cos(t * 3.4 + 0.4) * 0.05 + Math.sin(t * 1.1 + 0.45) * 0.07;
                 const microJitter = (Math.sin(t * 16.7) + Math.cos(t * 28.3)) * 0.02;
 
-                // Base level around -10VU ~ -5VU (norm 0.35 ~ 0.55), rhythmic punch up to 0VU (norm 0.86)
+                // Base level around -10 VU to -5 VU, with rhythmic peaks near 0 VU.
                 const dynamicBase = 0.42 + beat1 * 0.35 + beat2 * 0.15;
                 targetNormL = Math.max(0.08, Math.min(0.92, (dynamicBase + swingL + microJitter) * (0.4 + 0.6 * vol)));
                 targetNormR = Math.max(0.08, Math.min(0.92, (dynamicBase + swingR - microJitter) * (0.4 + 0.6 * vol)));
             }
         }
 
-        // 3. ANSI C16.5 Standard VU Ballistics (~300 ms rise and fall integration with responsive attack)
-        // Moving-coil movement modelled as a critically damped spring (~300 ms to settle, no overshoot),
-        // with padded mechanical stops at both ends of travel.
-        const omega = 20.0;
-        const zeta = 1.0;
+        // 3. ANSI C16.5-style VU ballistics with a small, time-based moving-coil overshoot.
+        // The damped spring keeps the response smooth while retaining a little mechanical character.
+        const omega = 17.5;
+        const zeta = 0.82;
         this.velL = this.velL || 0;
         this.velR = this.velR || 0;
         const steps = Math.max(1, Math.ceil(dt / 0.008));
@@ -538,7 +553,9 @@ class LXStudioVUMeterAnimation {
         const fam = D.font.family;
 
         // Scale geometry (arc shape differs per design)
-        const spanX = w * G.span;
+        const fontPx = Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale));
+        const labelInset = majLen + sz.gap * scale + fontPx * 1.1 + 2 * scale;
+        const spanX = Math.max(w * G.span, labelInset);
         const sx = x + spanX;
         const ex = x + w - spanX;
         const sw = ex - sx;
@@ -643,7 +660,7 @@ class LXStudioVUMeterAnimation {
             ctx.restore();
         }
 
-        this.drawDialFace(ctx, D, P, { x, y, w, h, scale, isLight, compactLike, gsp: getScalePoint, majLen, gap: sz.gap * scale, fontPx: Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale)), baseY, pivotX, pivotY });
+        this.drawDialFace(ctx, D, P, { x, y, w, h, scale, isLight, compactLike, gsp: getScalePoint, majLen, gap: sz.gap * scale, fontPx, baseY, pivotX, pivotY });
 
         // 2. Profile-specific decorations
         this.drawDialDeco(ctx, D, P, { x, y, w, h, scale, t, isLight, isCompact, stereo, pivotX, pivotY, sx, ex, o });
@@ -762,7 +779,7 @@ class LXStudioVUMeterAnimation {
         }
 
         // 5. Ticks
-        const ticks = compactLike ? VU_TICKS_COMPACT : VU_TICKS_FULL;
+        const ticks = this.getScaleTicks(o.theme, compactLike);
         ticks.forEach(tk => {
             const p = getScalePoint(tk.norm);
             const len = tk.major ? majLen : (tk.type === 'med' ? medLen : minLen);
@@ -896,8 +913,9 @@ class LXStudioVUMeterAnimation {
 
             if (type === 'blade') {
                 const b0 = bw * 1.15;
-                poly(0, b0, 0.68, wAt(0.68, b0, tw), P.needle);
-                poly(0.68, wAt(0.68, b0, tw), 1, tw, tipColor);
+                const tipStart = 0.88;
+                poly(0, b0, tipStart, wAt(tipStart, b0, tw), P.needle);
+                poly(tipStart, wAt(tipStart, b0, tw), 1, tw, tipColor);
             } else if (type === 'lumen') {
                 const a = pt(0);
                 const b = pt(0.94);
