@@ -163,12 +163,16 @@ function parseMod(e?: string): number | null {
 }
 
 let client: OpenListClient | null = null
+let clientSig = ''
 let verifyTimer: ReturnType<typeof setInterval> | null = null
 let verifyRunning = false
 
 function getClient(): OpenListClient | null {
   const cfg = getConfig()
-  if (!cfg.enable || !cfg.endpoint) return null
+  if (!cfg.enable || !cfg.endpoint) { client = null; clientSig = ''; return null }
+  // 按配置签名缓存客户端：签名未变时复用，变化时才重建
+  const sig = [cfg.endpoint, cfg.username, cfg.password, cfg.token, cfg.root].join('|')
+  if (client && clientSig === sig) return client
   client = new OpenListClient({
     endpoint: cfg.endpoint,
     username: cfg.username,
@@ -176,6 +180,7 @@ function getClient(): OpenListClient | null {
     token: cfg.token,
     root: cfg.root,
   })
+  clientSig = sig
   return client
 }
 
@@ -241,7 +246,9 @@ function removeLocalCache(row: { user: string; folder_type: string; songmid: str
 function registerDownloadedCache(user: string, folderType: 'cache' | 'music', localPath: string): string {
   const base = path.basename(localPath)
   const ext = path.extname(base)
-  const id = base.slice(0, Math.max(0, base.length - ext.length))
+  const row = getBackupByLocalPath(user, folderType, localPath)
+  // 优先使用上传记录里的规范化歌曲 ID，避免以文件名生成的缓存键无法匹配
+  const id = (row && row.songmid) ? row.songmid : base.slice(0, Math.max(0, base.length - ext.length))
   let size = 0
   let mtime = Date.now()
   try {
@@ -249,7 +256,6 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
     size = st.size
     mtime = st.mtimeMs
   } catch { /* ignore */ }
-  const row = getBackupByLocalPath(user, folderType, localPath)
   registerOpenListCacheFile(normalizeUser(user), {
     id,
     songmid: id,
@@ -673,6 +679,12 @@ export async function verifyPending(): Promise<void> {
       try {
         const info = await cl.getFileInfo(row.remote_path)
         if (info && info.size != null) {
+          // 仅当远端大小与本地文件一致时才确认上传成功，避免仅凭路径存在误判
+          let sizeMatch = true
+          if (row.local_path && fs.existsSync(row.local_path)) {
+            try { sizeMatch = fs.statSync(row.local_path).size === info.size } catch { sizeMatch = false }
+          }
+          if (!sizeMatch) continue
           setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified) })
           const mode = effectiveModeFromRow(row, cfg)
           if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
@@ -900,22 +912,31 @@ async function deletionDetection(
   for (const row of rows) {
     if (row.status !== 'verified' && row.status !== 'completed') continue
     const localExists = !!row.local_path && fs.existsSync(row.local_path)
-    let remoteExists = false
+    // 明确区分远端状态：exists / missing / error，避免 getFileInfo 异常被当作「远端已删」而误删
+    let remoteStatus: 'exists' | 'missing' | 'error' = 'error'
     try {
       const info = await cl.getFileInfo(row.remote_path)
-      remoteExists = !!(info && info.size != null)
+      remoteStatus = (info && info.size != null) ? 'exists' : 'missing'
     } catch {
-      remoteExists = false
+      remoteStatus = 'error'
     }
-    if (!localExists && remoteExists) {
-      // 本地已删 -> 删远端 + 注销缓存
-      try { await cl.remove(row.remote_path) } catch { /* ignore */ }
-      deleteAttachmentsForParent(row.id)
-      removeLocalCache(row)
-      setBackupStatus(row.id, 'deleted')
-      summary.deleted++
-    } else if (localExists && !remoteExists) {
-      // 远端已删 -> 删本地 + 注销缓存 + 软删本地文件登记
+    if (remoteStatus === 'error') continue  // 远端状态未知，跳过，避免误删
+    if (!localExists && remoteStatus === 'exists') {
+      // 本地已删 -> 仅当用户确实删除（本地登记已软删/不在活跃列表）时才删远端，避免缓存清理误删远端
+      const activePaths = getActiveBackupLocalPaths()
+      const activeSet = activePaths instanceof Set ? activePaths : new Set(activePaths as any)
+      if (!activeSet.has(row.local_path)) {
+        try { await cl.remove(row.remote_path) } catch { /* ignore */ }
+        deleteAttachmentsForParent(row.id)
+        removeLocalCache(row)
+        setBackupStatus(row.id, 'deleted')
+        summary.deleted++
+      } else {
+        // 仅本地缓存清理（物理文件缺失但登记仍活跃），保留远端，仅清理本地缓存登记
+        removeLocalCache(row)
+      }
+    } else if (localExists && remoteStatus === 'missing') {
+      // 远端确实不存在 -> 删本地 + 注销缓存 + 软删本地文件登记
       try { if (row.local_path) { fs.unlinkSync(row.local_path); softDeleteLocalFile(row.user, row.local_path) } } catch { /* ignore */ }
       removeLocalCache(row)
       setBackupStatus(row.id, 'deleted')

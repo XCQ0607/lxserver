@@ -69,7 +69,9 @@ function scheduleOpenlistSync(): void {
   pendingOpenlistSyncTimer = setTimeout(() => {
     pendingOpenlistSyncTimer = null
     if (!global.lx.config['openlist.enable']) return
-    void runSyncNow({}).catch(() => {})
+    void runSyncNow({}).catch((e: any) => {
+      console.warn('[OpenList] 自动同步失败:', e?.message || e)
+    })
   }, 8000)
 }
 import * as customSourceHandlers from './sources/customSourceHandlers'

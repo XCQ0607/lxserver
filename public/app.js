@@ -2879,7 +2879,7 @@ class App {
         });
     }
 
-    renderSortableTagGroup(containerId, hiddenInputName, orderList, labelMap, allItems) {
+    renderSortableTagGroup(containerId, hiddenInputName, orderList, labelMap, allItems, allowEmpty = false) {
         const container = document.getElementById(containerId);
         const hiddenInput = document.querySelector(`input[name="${hiddenInputName}"]`);
         if (!container) return;
@@ -2976,9 +2976,9 @@ class App {
                     }
                 } else {
                     // 从启用 -> 禁用：直接移到最后变灰
-                    // 至少保留一项可用
+                    // 至少保留一项可用（allowEmpty 时允许全部移除，例如 OpenList 用户备份可清空）
                     const remainingActive = container.querySelectorAll('.tag-sortable-item:not(.disabled)');
-                    if (remainingActive.length <= 1) {
+                    if (!allowEmpty && remainingActive.length <= 1) {
                         if (typeof this?.showToast === 'function') {
                             this.showToast('至少需要保留一个可用项', 'warning');
                         }
@@ -3632,10 +3632,15 @@ class App {
             form.elements['openlist.enable'].onchange = () => this.toggleOpenlistVisibility()
 
             let users = []
+            this._olbUsersLoaded = true
             try {
                 const ulist = await this.request('/api/users')
                 users = (ulist || []).map(u => u.name).filter(Boolean)
-            } catch (e) { console.warn('获取用户列表失败', e) }
+            } catch (e) {
+                this._olbUsersLoaded = false
+                console.warn('获取用户列表失败', e)
+                if (window.showError) window.showError('获取用户列表失败，OpenList 用户备份配置可能不准确：' + (e && e.message || e))
+            }
             this.renderOpenlistUserConfig(users, config['openlist.userBackups'])
             this.loadOpenlistBackups()
         } catch (e) {
@@ -3659,16 +3664,19 @@ class App {
             'openlist.backupSystemConfig': fd.get('openlist.backupSystemConfig') === 'on',
             'openlist.externalUrl': (fd.get('openlist.externalUrl') || '').trim(),
             'openlist.verifyInterval': parseInt(fd.get('openlist.verifyInterval')) || 5,
-            'openlist.userBackups': userBackupsRaw,
+            // 仅当用户列表成功加载后才提交备份配置，避免失败时以空选择覆盖已保存规则
+            'openlist.userBackups': this._olbUsersLoaded ? userBackupsRaw : undefined,
         }
-        // 若任一用户备份模式为「上传后删除」，自动开启 Subsonic「缓存优先时优先使用 OpenList」，
+        // 仅当用户列表成功加载时，才根据「上传后删除」模式自动开启 Subsonic「缓存优先时优先使用 OpenList」，
         // 避免本地被删后下次播放回源重下，而是直接命中 OpenList 直链（需 Subsonic「缓存优先」也已开启）。
-        try {
-            const arr = JSON.parse(userBackupsRaw)
-            if (Array.isArray(arr) && arr.some(b => b && b.mode === 'upload-delete')) {
-                cfg['subsonic.playCacheFirstUseOpenlist'] = true
-            }
-        } catch {}
+        if (this._olbUsersLoaded) {
+            try {
+                const arr = JSON.parse(userBackupsRaw)
+                if (Array.isArray(arr) && arr.some(b => b && b.mode === 'upload-delete')) {
+                    cfg['subsonic.playCacheFirstUseOpenlist'] = true
+                }
+            } catch {}
+        }
         try {
             await this.request('/api/config', { method: 'POST', body: JSON.stringify(cfg) })
             if (window.showSuccess) window.showSuccess('OpenList 配置已保存')
@@ -3694,7 +3702,7 @@ class App {
         const selected = backups.map(b => b.user)
         const labelMap = {}
         users.forEach(u => { labelMap[u] = u })
-        this.renderSortableTagGroup('tag-group-openlist-users', 'openlist.userBackupUsers', selected, labelMap, users)
+        this.renderSortableTagGroup('tag-group-openlist-users', 'openlist.userBackupUsers', selected, labelMap, users, true)
         const container = document.getElementById('tag-group-openlist-users')
         if (container) container.onclick = () => setTimeout(() => this.renderOpenlistUserDirs(backups), 0)
         this.renderOpenlistUserDirs(backups)
@@ -3727,6 +3735,7 @@ class App {
             '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
             '<span class="toggle-track"><span class="toggle-thumb"></span></span>' +
             '</label>'
+        const escU = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
         dirsContainer.innerHTML = selected.map(u => {
             const tpl = map[u] || {}
             const dlOn = (prev[u] && prev[u].download !== null) ? prev[u].download : (tpl.backupDownload !== false)
@@ -3734,7 +3743,7 @@ class App {
             const snOn = (prev[u] && prev[u].snapshot !== null) ? prev[u].snapshot : (tpl.backupSnapshot !== false)
             const md = (prev[u] && prev[u].mode) ? prev[u].mode : (tpl.mode || 'upload')
             return '<div class="config-field" style="border-left:3px solid var(--accent);padding-left:.75rem;margin-top:.5rem">' +
-                '<label class="config-label">用户 <b>' + u + '</b> 的同步配置</label>' +
+                '<label class="config-label">用户 <b>' + escU(u) + '</b> 的同步配置</label>' +
                 '<div class="config-field-row">' +
                 '<div class="config-field"><label class="config-label">备份下载目录 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户音乐目录，无需填写路径">?</span></label>' + toggleHtml('openlist-dl-sw-' + u, dlOn) + '</div>' +
                 '<div class="config-field"><label class="config-label">备份缓存目录 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户缓存目录，无需填写路径">?</span></label>' + toggleHtml('openlist-ca-sw-' + u, caOn) + '</div>' +
@@ -3887,10 +3896,11 @@ class App {
             }
             const statusMap = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
             const badgeColor = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
+            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             const fmtName = (f) => {
                 const nm = (f.name || '').toString().trim()
                 const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
-                return base.replace(/</g, '&lt;')
+                return esc(base)
             }
             const fmtSize = (n) => {
                 n = Number(n) || 0
@@ -3898,7 +3908,6 @@ class App {
                 if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
                 return (n / 1024 / 1024).toFixed(1) + ' MB'
             }
-            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             this._olbPageIds = list.slice(start, start + pageSize).map(f => f.id)
             const rows = list.slice(start, start + pageSize).map(f => {
                 const d = new Date(f.updated_at || f.created_at || Date.now())
@@ -3909,7 +3918,7 @@ class App {
                 const retryBtn = canRetry
                     ? '<button type="button" class="btn-secondary" style="padding:.15rem .6rem;font-size:.72rem;" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
                     : '<span style="color:var(--text-secondary);">—</span>'
-                const hasLocal = !!(this._olbLocalExists && this._olbLocalExists[f.id])
+                const hasLocal = !!f.local_exists
                 const localMark = hasLocal ? '<span style="color:#22c55e;">✓</span>' : '<span style="color:#ef4444;">✗</span>'
                 const pathStr = f.local_path || f.remote_path || ''
                 const errStr = f.error || ''
@@ -3920,7 +3929,7 @@ class App {
                 const checked = sel.has(f.id) ? 'checked' : ''
                 return '<tr style="border-bottom:1px solid var(--border);">' +
                     '<td style="padding:.4rem .5rem;text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
-                    '<td style="padding:.4rem .5rem;">' + (f.user || '') + '</td>' +
+                    '<td style="padding:.4rem .5rem;">' + esc(f.user || '') + '</td>' +
                     '<td style="padding:.4rem .5rem;white-space:nowrap;">' + typeLabel + '</td>' +
                     '<td style="padding:.4rem .5rem;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
                     '<td style="padding:.4rem .5rem;white-space:nowrap;"><span style="background:' + color + ';color:#fff;padding:2px 8px;border-radius:10px;font-size:.72rem;">' + label + '</span></td>' +

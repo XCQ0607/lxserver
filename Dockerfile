@@ -21,7 +21,7 @@ RUN apk add --update --no-cache chromaprint \
   || echo "chromaprint apk not found, will use bundled binary"
 
 # OpenList 备份依赖 node:sqlite（Node >= 22.13），构建期强校验，避免运行时才报错
-RUN node -e "process.exit((process.versions.node.split('.')[0]|0)*1000+(process.versions.node.split('.')[1]|0) >= 2213 ? 0 : 1)" \
+RUN node -e "const v=process.versions.node.split('.').map(Number); process.exit((v[0]>22||(v[0]===22&&v[1]>=13))?0:1)" \
   || { echo 'node >= 22.13 required for OpenList backup (node:sqlite)'; exit 1; }
 
 COPY --from=deps /deps/node_modules ./node_modules

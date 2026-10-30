@@ -10,6 +10,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { Readable } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 
 export interface OpenListClientConfig {
   endpoint: string
@@ -60,14 +61,14 @@ export class OpenListClient {
     this.root = (cfg.root || '/').replace(/\/+$/, '') || '/'
   }
 
-  private async ensureToken(): Promise<string> {
+  private async ensureToken(signal?: AbortSignal): Promise<string> {
     if (this.directToken) return this.directToken
     if (this.token) return this.token
     const resp = await fetch(`${this.endpoint}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: this.username, password: this.password }),
-      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+      signal: signal ?? AbortSignal.timeout(META_TIMEOUT_MS),
     })
     const data: any = await resp.json().catch(() => ({}))
     if (data?.code !== 200 || !data?.data?.token) {
@@ -87,13 +88,13 @@ export class OpenListClient {
     return `${this.root}/${rel}`.replace(/\/+/g, '/')
   }
 
-  async listDir(p: string): Promise<any> {
-    await this.ensureToken()
+  async listDir(p: string, signal?: AbortSignal): Promise<any> {
+    await this.ensureToken(signal)
     const resp = await fetch(`${this.endpoint}/api/fs/list`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeader() },
       body: JSON.stringify({ path: p, password: '', page: 1, per_page: 100 }),
-      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+      signal: signal ?? AbortSignal.timeout(META_TIMEOUT_MS),
     })
     const data: any = await resp.json().catch(() => ({}))
     if (data?.code !== 200) throw new Error('OpenList 列目录失败：' + (data?.message || resp.status))
@@ -114,12 +115,13 @@ export class OpenListClient {
     }
   }
 
-  private async pollFileInfo(remotePath: string, timeoutMs = 30_000): Promise<OpenListFileInfo | null> {
+  private async pollFileInfo(remotePath: string, timeoutMs = 30_000, expectedSize?: number): Promise<OpenListFileInfo | null> {
     const start = Date.now()
     while (Date.now() - start < timeoutMs) {
       try {
         const info = await this.getFileInfo(remotePath)
-        if (info && info.size != null) return info
+        // 同时校验远端大小与本地预期大小，避免仅凭路径存在就认定上传完成
+        if (info && info.size != null && (expectedSize == null || info.size === expectedSize)) return info
       } catch { /* 尚未就绪，继续轮询 */ }
       await new Promise((r) => setTimeout(r, 1000))
     }
@@ -133,6 +135,7 @@ export class OpenListClient {
   async upload(localPath: string, remotePath: string, signal?: AbortSignal): Promise<OpenListFileInfo> {
     await this.ensureToken()
     const buf = await fs.promises.readFile(localPath)
+    const expectedSize = buf.length
     const headers: Record<string, string> = {
       ...this.authHeader(),
       'Content-Type': 'application/octet-stream',
@@ -152,7 +155,7 @@ export class OpenListClient {
     const text = await resp.text()
     let data: any = {}
     try { data = JSON.parse(text) } catch { /* 非 JSON 响应 */ }
-    const info = await this.pollFileInfo(remotePath)
+    const info = await this.pollFileInfo(remotePath, TRANSFER_TIMEOUT_MS, expectedSize)
     if (info && info.size != null) {
       return { ...info, name: info.name || path.basename(remotePath) }
     }
@@ -202,8 +205,8 @@ export class OpenListClient {
     const timer = setTimeout(() => ctrl.abort(), timeoutMs)
     try {
       this.token = null
-      await this.ensureToken()
-      await this.listDir(this.root)
+      await this.ensureToken(ctrl.signal)
+      await this.listDir(this.root, ctrl.signal)
       return true
     } finally {
       clearTimeout(timer)
@@ -236,15 +239,16 @@ export class OpenListClient {
     const info = await this.getFileInfo(remotePath)
     const url = info.rawUrl
     if (!url) throw new Error('OpenList 无法获取下载直链：' + remotePath)
-    const resp = await fetch(url, { signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
-    if (!resp.ok) throw new Error('OpenList 下载失败：' + resp.status)
-    await new Promise<void>((resolve, reject) => {
-      const ws = fs.createWriteStream(localPath)
-      const rs = Readable.fromWeb(resp.body as any)
-      rs.on('error', reject)
-      ws.on('error', reject)
-      ws.on('finish', () => resolve())
-      rs.pipe(ws)
-    })
+    // 先写入临时文件，全部落盘成功后再 rename，避免半截文件覆盖/残留
+    const tmpPath = localPath + '.oltmp'
+    try {
+      const resp = await fetch(url, { signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
+      if (!resp.ok) throw new Error('OpenList 下载失败：' + resp.status)
+      await pipeline(Readable.fromWeb(resp.body as any), fs.createWriteStream(tmpPath))
+      await fs.promises.rename(tmpPath, localPath)
+    } catch (e) {
+      await fs.promises.rm(tmpPath, { force: true }).catch(() => {})
+      throw e
+    }
   }
 }

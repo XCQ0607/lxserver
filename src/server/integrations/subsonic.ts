@@ -1,5 +1,6 @@
 import http from 'http'
 import { Readable } from 'stream'
+import { pipeline } from 'stream/promises'
 import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
@@ -6255,14 +6256,29 @@ class SubsonicHandler {
                   try {
                     const fwd: Record<string, string> = {}
                     if (req.headers.range) fwd['Range'] = String(req.headers.range)
-                    const upstream = await fetch(directUrl, { headers: fwd, redirect: 'follow' })
+                    // 30s 超时避免上游挂起；非成功状态（含非 206）进入回退
+                    const upstream = await fetch(directUrl, { headers: fwd, redirect: 'follow', signal: AbortSignal.timeout(30000) })
+                    if (!upstream.ok) throw new Error('OpenList 上游返回 ' + upstream.status)
                     const outHeaders: Record<string, any> = { 'Accept-Ranges': 'bytes' }
                     const ct = upstream.headers.get('content-type'); if (ct) outHeaders['Content-Type'] = ct
                     const cl = upstream.headers.get('content-length'); if (cl) outHeaders['Content-Length'] = cl
                     const cr = upstream.headers.get('content-range'); if (cr) outHeaders['Content-Range'] = cr
                     res.writeHead(upstream.status, outHeaders)
-                    if (upstream.body) Readable.fromWeb(upstream.body as any).pipe(res)
-                    else res.end(Buffer.from(await upstream.arrayBuffer()))
+                    if (upstream.body) {
+                      const rs = Readable.fromWeb(upstream.body as any)
+                      // 客户端断开或流出错时及时中止上游请求，避免悬挂
+                      const onClose = () => rs.destroy()
+                      res.on('close', onClose)
+                      try {
+                        await pipeline(rs, res)
+                      } catch (se: any) {
+                        subsonicLog.warn(`[Subsonic] ${method} proxy OpenList stream error for ${id}:`, se?.message || se)
+                      } finally {
+                        res.off('close', onClose)
+                      }
+                    } else {
+                      res.end(Buffer.from(await upstream.arrayBuffer()))
+                    }
                     subsonicLog.debug(`[Subsonic] ${method} proxied OpenList for ${id} (status ${upstream.status})`)
                     return
                   } catch (e: any) {

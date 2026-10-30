@@ -135,6 +135,7 @@ export function getBackupDb(): DatabaseSync {
     status TEXT NOT NULL DEFAULT 'pending',
     error TEXT,
     updated_at INTEGER NOT NULL,
+    deleted_at INTEGER,
     UNIQUE(user, folder_type, local_path)
   )`)
   // 老库兼容：补齐附件唯一约束（已存在重复行则忽略，手动 upsert 仍能去重）
