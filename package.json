@@ -77,7 +77,7 @@
     "@types/ws": "8.18.2",
     "changelog-parser": "^4.1.0",
     "electron": "^43.7.5",
-    "electron-builder": "^26.15.3",
+    "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
     "husky": "^9.1.7",
     "nodemon": "^3.1.14",
