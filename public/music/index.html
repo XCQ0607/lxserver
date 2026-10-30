@@ -5531,43 +5531,60 @@
             </div>
 
             <!-- Body -->
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-5">
                 <div class="effects-status-bar">
                     <div class="effects-status-heading">
-                        <div><strong id="sound-effects-state">音效已开启</strong><p id="sound-effects-summary"></p></div>
-                        <label class="effects-switch" aria-label="整体音效开关">
-                            <input id="sound-effects-enable" type="checkbox" role="switch" checked onchange="window.soundEffects.setEnabled(this.checked)">
-                            <span></span>
-                        </label>
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <strong id="sound-effects-state" class="text-sm font-bold t-text-main">音效已开启</strong>
+                                <span id="sound-effects-status" role="status" class="text-xs t-text-dim"></span>
+                            </div>
+                            <p id="sound-effects-summary" class="hidden"></p>
+                            <!-- Active Effect Tags List -->
+                            <div id="sound-effects-tags" class="effects-tags-wrapper mt-2 flex flex-wrap items-center gap-1.5">
+                                <!-- Injected by JS -->
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2.5 shrink-0 ml-2">
+                            <span class="text-xs font-medium t-text-muted hidden sm:inline" id="sound-effects-switch-label">音效总开关</span>
+                            <label class="effects-switch" aria-label="整体音效总开关" title="开启/暂停全部音效">
+                                <input id="sound-effects-enable" type="checkbox" role="switch" checked onchange="window.soundEffects.setEnabled(this.checked)">
+                                <span></span>
+                            </label>
+                        </div>
                     </div>
-                    <p id="sound-effects-status" role="status"></p>
                     <button id="sound-effects-native" hidden type="button"
-                        class="px-3 py-2 rounded-lg t-bg-track t-text-main"
+                        class="mt-2 px-3 py-1.5 text-xs rounded-lg t-bg-track t-text-main hover:t-bg-item-hover transition-colors"
                         onclick="window.soundEffects.restoreNativePlayback()">刷新并恢复原生播放 / AirPlay</button>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 md:divide-x t-border-main">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 md:divide-x t-border-main">
 
                     <!-- Left Column -->
-                    <div class="space-y-8 pr-0 md:pr-6">
+                    <div class="space-y-3.5 pr-0 md:pr-4">
                         <!-- Environment Reverb -->
-                        <section class="space-y-4">
-                            <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">环境混响音效</h4>
-                            <div id="reverb-list" class="flex flex-wrap gap-x-4 gap-y-3">
+                        <section class="space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">环境混响音效</h4>
+                                <button onclick="window.soundEffects && window.soundEffects.resetReverb()"
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">关闭混响</button>
+                            </div>
+                            <div id="reverb-list" class="flex flex-wrap gap-1">
                                 <!-- Radio options -->
                             </div>
-                            <div class="space-y-5 pt-2">
-                                <div class="space-y-2">
+                            <!-- Side-by-side DRY / WET Sliders for compact vertical layout -->
+                            <div class="grid grid-cols-2 gap-3 pt-1.5 border-t t-border-main/60">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[11px] font-bold t-text-muted">
-                                        <span>原始音量增益 (DRY)</span>
-                                        <span id="reverb-main-gain-val" class="font-mono">100%</span>
+                                        <span>原声音量 (DRY)</span>
+                                        <span id="reverb-main-gain-val" class="font-mono text-emerald-500">100%</span>
                                     </div>
                                     <input type="range" id="reverb-main-gain" min="0" max="300" value="100"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
                                 </div>
-                                <div class="space-y-2">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[11px] font-bold t-text-muted">
-                                        <span>环境音效增益 (WET)</span>
-                                        <span id="reverb-send-gain-val" class="font-mono">80%</span>
+                                        <span>空间混响 (WET)</span>
+                                        <span id="reverb-send-gain-val" class="font-mono text-emerald-500">80%</span>
                                     </div>
                                     <input type="range" id="reverb-send-gain" min="0" max="300" value="80"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
@@ -5578,16 +5595,16 @@
                         <div class="h-px bg-t-border-main"></div>
 
                         <!-- Pitch Shift -->
-                        <section class="space-y-4">
+                        <section class="space-y-2">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">
                                     音调升降调节
                                 </h4>
                                 <button onclick="window.soundEffects && window.soundEffects.resetPitch()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置</button>
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置原调</button>
                             </div>
-                            <div class="flex items-center gap-4 px-2">
-                                <span class="w-10 text-center text-xs font-mono font-bold t-text-main"
+                            <div class="flex items-center gap-3 px-1">
+                                <span class="w-12 text-center text-xs font-mono font-bold text-emerald-500 bg-emerald-500/10 py-0.5 rounded border border-emerald-500/20"
                                     id="pitch-val">1.00x</span>
                                 <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.01" value="1.0"
                                     class="flex-1 h-1.5 rounded-full lc-range-input cursor-pointer">
@@ -5597,29 +5614,31 @@
                         <div class="h-px bg-t-border-main"></div>
 
                         <!-- 3D Panner -->
-                        <section class="space-y-4">
+                        <section class="space-y-2">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">3D 立体环绕 (需使用耳机)
                                 </h4>
-                                <div class="effects-section-actions"><button type="button" onclick="window.soundEffects.resetPanner()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold">恢复默认</button>
-                                <label class="effects-switch" aria-label="启用 3D 环绕">
-                                    <input type="checkbox" role="switch" id="panner-enable"><span></span>
-                                </label></div>
+                                <div class="effects-section-actions">
+                                    <button type="button" onclick="window.soundEffects && window.soundEffects.resetPanner()"
+                                        class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold">恢复默认</button>
+                                    <label class="effects-switch" aria-label="启用 3D 环绕">
+                                        <input type="checkbox" role="switch" id="panner-enable"><span></span>
+                                    </label>
+                                </div>
                             </div>
-                            <div class="grid grid-cols-2 gap-8 px-2">
-                                <div class="space-y-2">
+                            <div class="grid grid-cols-2 gap-4 px-1">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[10px] font-bold t-text-muted">
-                                        <span>环绕速度（越大越快）</span>
-                                        <span id="panner-speed-val" class="font-mono">25</span>
+                                        <span>环绕速度</span>
+                                        <span id="panner-speed-val" class="font-mono text-emerald-500">25</span>
                                     </div>
                                     <input type="range" id="panner-speed" min="1" max="50" value="25"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
                                 </div>
-                                <div class="space-y-2">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[10px] font-bold t-text-muted">
-                                        <span>声音距离（远处自然衰减）</span>
-                                        <span id="panner-distance-val" class="font-mono">5</span>
+                                        <span>声音距离</span>
+                                        <span id="panner-distance-val" class="font-mono text-emerald-500">5</span>
                                     </div>
                                     <input type="range" id="panner-distance" min="1" max="30" value="5"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
@@ -5629,26 +5648,25 @@
                     </div>
 
                     <!-- Right Column -->
-                    <div class="pl-0 md:pl-8">
-                        <div class="sticky top-0 t-bg-panel z-10 space-y-4 pb-4">
+                    <div class="pl-0 md:pl-4 space-y-3.5">
+                        <section class="space-y-2.5">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">均衡器调节</h4>
                                 <button onclick="window.soundEffects && window.soundEffects.resetEQ()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置</button>
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置 0dB</button>
                             </div>
-                        </div>
-
-                        <!-- EQ Sliders Grid -->
-                        <div id="eq-sliders-container" class="min-h-[300px]">
-                            <!-- Injected by JS: 2 columns of horizontal sliders -->
-                        </div>
-
-                        <div class="h-px bg-t-border-main my-8"></div>
+                            <!-- EQ Sliders Grid -->
+                            <div id="eq-sliders-container" class="min-h-0">
+                                <!-- Injected by JS: 2 columns of horizontal sliders -->
+                            </div>
+                        </section>
 
                         <!-- Presets -->
-                        <section class="space-y-4">
-                            <p class="text-[10px] font-black t-text-muted uppercase tracking-widest">快速预设</p>
-                            <div id="eq-presets" class="flex flex-wrap gap-2">
+                        <section class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">快速预设</h4>
+                            </div>
+                            <div id="eq-presets" class="flex flex-wrap gap-1.5">
                                 <!-- Injected by JS -->
                             </div>
                         </section>

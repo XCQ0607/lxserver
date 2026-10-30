@@ -189,7 +189,7 @@ window.soundEffects = (function () {
         isGraphBuilt = true;
 
         if (audioContext.state === 'suspended') {
-            audioContext.resume().catch(() => {});
+            audioContext.resume().catch(() => { });
         }
 
         // 3. Load Settings
@@ -503,14 +503,91 @@ window.soundEffects = (function () {
         if (toggle) toggle.checked = enabled;
         const title = document.getElementById('sound-effects-state');
         if (title) title.textContent = enabled ? '音效已开启' : '音效已暂停';
-        const summary = document.getElementById('sound-effects-summary');
-        const changes = [];
-        const bands = settings.eq.filter(v => v !== 0).length;
-        if (bands) changes.push(`均衡器 ${bands} 段`);
-        if (settings.reverb.id !== 'none') changes.push(reverbOptions.find(r => r.id === settings.reverb.id)?.name || '混响');
-        if (settings.pitch !== 1) changes.push(`音调 ${settings.pitch.toFixed(2)}×`);
-        if (settings.panner.enable) changes.push('3D 环绕');
-        if (summary) summary.textContent = (enabled ? '' : '设置已保留 · ') + (changes.join(' · ') || '原始音色，尚未调整');
+        const switchLabel = document.getElementById('sound-effects-switch-label');
+        if (switchLabel) switchLabel.textContent = enabled ? '音效开' : '音效关';
+
+        const tagsContainer = document.getElementById('sound-effects-tags');
+        if (tagsContainer) {
+            const tags = [];
+            const pausedClass = enabled ? '' : ' is-paused';
+
+            // 1. Reverb Tag
+            if (settings.reverb && settings.reverb.id && settings.reverb.id !== 'none') {
+                const revName = reverbOptions.find(r => r.id === settings.reverb.id)?.name || '混响';
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="环境混响: ${revName} (点击 ✕ 一键关闭)">
+                        <i class="fas fa-water effects-tag-icon"></i>
+                        <span class="effects-tag-text">混响: ${revName}</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetReverb()" title="关闭混响" aria-label="关闭混响">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            // 2. EQ Tag
+            const nonZeroBands = settings.eq ? settings.eq.filter(v => v !== 0).length : 0;
+            if (nonZeroBands > 0) {
+                const matchedPreset = defaultPresets.find(p => p.values.join(',') === settings.eq.join(',')) ||
+                    customPresets.find(p => p.values.join(',') === settings.eq.join(','));
+                const eqLabel = activePresetName || matchedPreset?.name || `${nonZeroBands}段自定义`;
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="均衡器: ${eqLabel} (点击 ✕ 一键重置为 0dB)">
+                        <i class="fas fa-sliders-h effects-tag-icon"></i>
+                        <span class="effects-tag-text">EQ: ${eqLabel}</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetEQ()" title="重置均衡器" aria-label="重置均衡器">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            // 3. Pitch Tag
+            if (settings.pitch && Math.abs(settings.pitch - 1.0) > 0.001) {
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="音调: ${settings.pitch.toFixed(2)}x (点击 ✕ 恢复原调)">
+                        <i class="fas fa-tachometer-alt effects-tag-icon"></i>
+                        <span class="effects-tag-text">音调: ${settings.pitch.toFixed(2)}x</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetPitch()" title="恢复原调" aria-label="恢复原调">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            // 4. 3D Surround Tag
+            if (settings.panner && settings.panner.enable) {
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="3D 环绕: 开启 (点击 ✕ 一键关闭)">
+                        <i class="fas fa-headphones effects-tag-icon"></i>
+                        <span class="effects-tag-text">3D 环绕</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetPanner()" title="关闭 3D 环绕" aria-label="关闭 3D 环绕">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            if (tags.length === 0) {
+                tagsContainer.innerHTML = `
+                    <span class="effects-no-tags-tip">
+                        <i class="fas fa-circle-check text-emerald-500/80 text-[10px]"></i>
+                        <span>当前为纯净直通音色，未开启任何额外音效</span>
+                    </span>
+                `;
+            } else {
+                let html = tags.join('');
+                if (tags.length >= 2) {
+                    html += `
+                        <button type="button" class="effects-tag-reset-all" onclick="window.soundEffects.resetAll()" title="一键关闭并重置所有已生效配置">
+                            <i class="fas fa-rotate-left text-[10px]"></i>
+                            <span>全部重置</span>
+                        </button>
+                    `;
+                }
+                tagsContainer.innerHTML = html;
+            }
+        }
     }
 
     function renderUI() {
@@ -518,14 +595,14 @@ window.soundEffects = (function () {
         const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
         const status = document.getElementById('sound-effects-status');
         if (status) status.textContent = remote
-            ? 'AirPlay / 投放正在播放：音效仅保存，不改变接收设备的声音。'
+            ? 'AirPlay / 投放中：仅保存音效配置'
             : settings.enabled === false
-                ? '正在播放原始音色，重新开启即可恢复以上设置。'
-            : isGraphBuilt
-                ? (isMobileDevice() ? '本机音效已开启。使用 AirPlay 前请恢复原生播放。' : '本机音效已开启。')
-                : isMobileDevice()
-                    ? '选择音效后立即在本机生效。使用 AirPlay 前需恢复原生播放；刷新后默认使用原生播放。'
-                    : '选择音效后立即在本机生效。';
+                ? '正在播放原始音色，重新开启即可恢复以上设置'
+                : isGraphBuilt
+                    ? (isMobileDevice() ? '本机音效已开启' : '')
+                    : isMobileDevice()
+                        ? '选择音效后立即生效'
+                        : '';
         const nativeButton = document.getElementById('sound-effects-native');
         if (nativeButton) nativeButton.hidden = !isGraphBuilt || !isMobileDevice();
         // EQ Presets
@@ -535,7 +612,7 @@ window.soundEffects = (function () {
             let html = defaultPresets.map(p => {
                 const isActive = activePresetName === p.name || (activePresetName === '' && settings.eq.join(',') === p.values.join(','));
                 return `
-                <button class="px-3 py-1.5 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
+                <button class="px-2.5 py-1 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
                     onclick="window.soundEffects.applyPreset('${p.name}')">${p.name}</button>
             `;
             }).join('');
@@ -545,14 +622,14 @@ window.soundEffects = (function () {
                 const isActive = activePresetName === p.name;
                 return `
                 <div class="relative group">
-                    <button class="px-3 py-1.5 pr-10 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
+                    <button class="px-2.5 py-1 pr-9 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
                         onclick="window.soundEffects.applyPreset('${p.name}')">${p.name}</button>
                     <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center transition-opacity">
-                        <button class="w-4 h-4 flex items-center justify-center text-[10px] text-gray-400 hover:text-emerald-500" 
+                        <button class="w-3.5 h-3.5 flex items-center justify-center text-[9px] text-gray-400 hover:text-emerald-500" 
                             onclick="event.stopPropagation(); window.soundEffects.renameCustomPreset('${p.name}')" title="重命名">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="w-4 h-4 flex items-center justify-center text-[10px] text-gray-400 hover:text-red-500" 
+                        <button class="w-3.5 h-3.5 flex items-center justify-center text-[9px] text-gray-400 hover:text-red-500" 
                             onclick="event.stopPropagation(); window.soundEffects.deleteCustomPreset('${p.name}')" title="删除">
                             <i class="fas fa-trash-alt"></i>
                         </button>
@@ -565,15 +642,15 @@ window.soundEffects = (function () {
                 html += `
                     <div class="relative flex items-center">
                         <input type="text" id="new-preset-name" placeholder="输入名称..." 
-                            class="w-24 px-2 py-1 text-[11px] rounded-lg border border-emerald-500 t-bg-main t-text-main focus:outline-none shadow-sm"
+                            class="w-24 px-2 py-0.5 text-[11px] rounded-lg border border-emerald-500 t-bg-main t-text-main focus:outline-none shadow-sm"
                             onkeydown="if(event.key==='Enter') window.soundEffects.saveNewPreset(this.value); if(event.key==='Escape') window.soundEffects.cancelAddPreset();"
                             onblur="window.soundEffects.saveNewPreset(this.value)">
                         <script>setTimeout(() => document.getElementById('new-preset-name')?.focus(), 50);</script>
                     </div>
                 `;
             } else {
-                html += `<button class="p-1 px-3 text-xs rounded-lg border border-dashed t-border-main hover:text-emerald-500 transition-colors" 
-                    onclick="window.soundEffects.startAddPreset()" title="在此添加自定义预设">+</button>`;
+                html += `<button class="py-0.5 px-2.5 text-xs rounded-lg border border-dashed t-border-main hover:text-emerald-500 transition-colors" 
+                    onclick="window.soundEffects.startAddPreset()" title="添加自定义预设">+</button>`;
             }
             presetContainer.innerHTML = html;
         }
@@ -582,30 +659,30 @@ window.soundEffects = (function () {
         const reverbList = document.getElementById('reverb-list');
         if (reverbList) {
             reverbList.innerHTML = reverbOptions.map(r => `
-                <label class="flex items-center gap-2 cursor-pointer group text-[12px] font-bold t-text-muted hover:t-text-main min-w-[75px]">
-                    <div class="relative w-4 h-4 border t-border-dim rounded flex items-center justify-center transition-colors ${settings.reverb.id === r.id ? 'bg-emerald-500 border-emerald-500' : 'bg-white'}">
+                <label class="flex items-center gap-1.5 cursor-pointer group text-[11px] font-semibold t-text-muted hover:t-text-main">
+                    <div class="relative w-3.5 h-3.5 border t-border-dim rounded flex items-center justify-center transition-colors ${settings.reverb.id === r.id ? 'bg-emerald-500 border-emerald-500' : 'bg-white dark:bg-gray-800'}">
                          <input type="radio" name="reverb-opt" value="${r.id}" ${settings.reverb.id === r.id ? 'checked' : ''} 
                             class="absolute inset-0 opacity-0 cursor-pointer" onchange="window.soundEffects.setReverb('${r.id}')">
-                         ${settings.reverb.id === r.id ? '<i class="fas fa-check text-[9px] text-white"></i>' : ''}
+                         ${settings.reverb.id === r.id ? '<i class="fas fa-check text-[8px] text-white"></i>' : ''}
                     </div>
                     <span>${r.name}</span>
                 </label>
             `).join('');
         }
 
-        // EQ Sliders (Horizontal 2-column grid)
+        // EQ Sliders (Compact horizontal 2-column grid)
         const eqContainer = document.getElementById('eq-sliders-container');
         if (eqContainer) {
-            let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 w-full px-2">';
+            let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 w-full">';
             freqs.forEach((f, i) => {
                 const label = f >= 1000 ? (f / 1000) + 'k' : f;
                 html += `
-                <div class="flex items-center gap-4 w-full">
-                    <span class="w-8 text-[12px] font-bold t-text-muted text-right">${label}</span>
+                <div class="flex items-center gap-2.5 w-full">
+                    <span class="w-7 text-[11px] font-bold t-text-muted text-right">${label}</span>
                     <input type="range" min="-12" max="12" step="1" value="${settings.eq[i]}" 
                         class="flex-1 h-1.5 rounded-full lc-range-input cursor-pointer"
                         oninput="window.soundEffects.setEQ(${i}, this.value)">
-                    <span class="w-10 text-[12px] font-mono font-bold text-emerald-600 text-left">${settings.eq[i]}db</span>
+                    <span class="w-9 text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 text-left">${settings.eq[i]}db</span>
                 </div>
                 `;
             });
@@ -764,6 +841,31 @@ window.soundEffects = (function () {
             if (ensureLocalGraph()) updateReverb();
             renderUI();
         },
+        resetReverb: function () {
+            this.setReverb('none');
+        },
+        resetAll: function () {
+            if (!isGraphBuilt) loadSettings();
+            settings.reverb.id = 'none';
+            settings.reverb.mainGain = 1.0;
+            settings.reverb.sendGain = 0;
+            animateSlider('reverb-main-gain', 100);
+            animateSlider('reverb-send-gain', 0);
+            settings.eq = Array(10).fill(0);
+            activePresetName = '';
+            settings.pitch = 1.0;
+            settings.panner = { enable: false, speed: 25, distance: 5 };
+            saveSettings();
+            if (ensureLocalGraph()) {
+                updateReverb();
+                if (eqFilters.length) eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
+                disconnectPitchShifter();
+                applyPitch();
+                updatePanner();
+            }
+            renderUI();
+            if (window.showSuccess) window.showSuccess('已重置所有生效音效配置');
+        },
         setPitch: function (val) {
             if (!isGraphBuilt) loadSettings();
             val = parseFloat(val);
@@ -779,6 +881,7 @@ window.soundEffects = (function () {
             if (label) label.innerText = settings.pitch.toFixed(2) + 'x';
             const slider = document.getElementById('pitch-slider');
             if (slider) slider.value = settings.pitch;
+            renderStatus();
         },
         resetPitch: function () {
             settings.pitch = 1.0;
@@ -791,6 +894,7 @@ window.soundEffects = (function () {
             if (label) label.innerText = '1.00x';
             const slider = document.getElementById('pitch-slider');
             if (slider) slider.value = 1.0;
+            renderUI();
         },
         resetPanner: function () {
             settings.panner = { enable: false, speed: 25, distance: 5 };
