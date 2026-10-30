@@ -6,575 +6,575 @@
 
 ## login
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/login` | — | `src/server/server.ts:1417` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/login` | — |
 
 ## status
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/status` | — | `src/server/server.ts:1441` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/status` | — |
 
 ## users
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET / POST / PUT / DELETE | `/api/users` | — | `src/server/server.ts:1513` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / POST / PUT / DELETE | `/api/users` | — |
 
 ## data
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/data` | `user` | `src/server/server.ts:1800` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/data` | `user` |
 
 ## data/snapshots
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/data/snapshots` | `user` | `src/server/server.ts:1862` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/data/snapshots` | `user` |
 
 ## data/snapshot
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/data/snapshot` | `user`, `id` | `src/server/server.ts:1904` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/data/snapshot` | `user`, `id` |
 
 ## data/restore-snapshot
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/restore-snapshot` | `user` | `src/server/server.ts:1956` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/restore-snapshot` | `user` |
 
 ## music/user
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/user/list/remove` | — | `src/server/server.ts:1999` |
-| POST | `/api/music/user/list/reorder` | — | `src/server/server.ts:2050` |
-| POST | `/api/music/user/list/add` | — | `src/server/server.ts:2107` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/user/list/remove` | — |
+| POST | `/api/music/user/list/reorder` | — |
+| POST | `/api/music/user/list/add` | — |
 
 ## data/delete-snapshot
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/delete-snapshot` | `user` | `src/server/server.ts:2153` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/delete-snapshot` | `user` |
 
 ## data/upload-snapshot
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/upload-snapshot` | `user`, `time`, `filename` | `src/server/server.ts:2196` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/upload-snapshot` | `user`, `time`, `filename` |
 
 ## user/verify
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/user/verify` | — | `src/server/server.ts:2283` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/user/verify` | — |
 
 ## user/login
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/user/login` | — | `src/server/server.ts:2315` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/user/login` | — |
 
 ## user/logout
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/user/logout` | — | `src/server/server.ts:2349` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/user/logout` | — |
 
 ## user/auth
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/auth/verify` | — | `src/server/server.ts:2358` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/auth/verify` | — |
 
 ## user/list
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/list` | `user` | `src/server/server.ts:2385` |
-| POST | `/api/user/list` | `user` | `src/server/server.ts:2419` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/list` | `user` |
+| POST | `/api/user/list` | `user` |
 
 ## user/library
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/library/artists` | — | `src/server/server.ts:2474` |
-| POST | `/api/user/library/artists` | — | `src/server/server.ts:2510` |
-| GET | `/api/user/library/albums` | — | `src/server/server.ts:2561` |
-| POST | `/api/user/library/albums` | — | `src/server/server.ts:2597` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/library/artists` | — |
+| POST | `/api/user/library/artists` | — |
+| GET | `/api/user/library/albums` | — |
+| POST | `/api/user/library/albums` | — |
 
 ## user/dislike
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/dislike/library/artists` | — | `src/server/server.ts:2649` |
-| POST | `/api/user/dislike/library/artists` | — | `src/server/server.ts:2668` |
-| GET | `/api/user/dislike/library/albums` | — | `src/server/server.ts:2721` |
-| POST | `/api/user/dislike/library/albums` | — | `src/server/server.ts:2740` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/dislike/library/artists` | — |
+| POST | `/api/user/dislike/library/artists` | — |
+| GET | `/api/user/dislike/library/albums` | — |
+| POST | `/api/user/dislike/library/albums` | — |
 
 ## user/sync-download
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/sync-download/status` | — | `src/server/server.ts:2794` |
-| PUT | `/api/user/sync-download/settings` | — | `src/server/server.ts:2894` |
-| POST | `/api/user/sync-download/trigger` | `playlistId` | `src/server/server.ts:2943` |
-| POST | `/api/user/sync-download/cancel` | — | `src/server/server.ts:2975` |
-| POST | `/api/user/sync-download/pause` | — | `src/server/server.ts:2975` |
-| GET | `/api/user/sync-download/progress` | — | `src/server/server.ts:2996` |
-| POST | `/api/user/sync-download/migrate-storage` | — | `src/server/server.ts:3016` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/sync-download/status` | — |
+| PUT | `/api/user/sync-download/settings` | — |
+| POST | `/api/user/sync-download/trigger` | `playlistId` |
+| POST | `/api/user/sync-download/cancel` | — |
+| POST | `/api/user/sync-download/pause` | — |
+| GET | `/api/user/sync-download/progress` | — |
+| POST | `/api/user/sync-download/migrate-storage` | — |
 
 ## user/settings
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/settings` | — | `src/server/server.ts:3079` |
-| POST | `/api/user/settings` | — | `src/server/server.ts:3111` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/settings` | — |
+| POST | `/api/user/settings` | — |
 
 ## user/token
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET / POST | `/api/user/token/config` | — | `src/server/server.ts:3187` |
-| POST | `/api/user/token/add` | — | `src/server/server.ts:3231` |
-| POST | `/api/user/token/remove` | — | `src/server/server.ts:3265` |
-| POST | `/api/user/token/update` | — | `src/server/server.ts:3315` |
-| POST | `/api/user/token/toggle` | — | `src/server/server.ts:3356` |
-| GET | `/api/user/token/logs` | `tokenMasked` | `src/server/server.ts:3392` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / POST | `/api/user/token/config` | — |
+| POST | `/api/user/token/add` | — |
+| POST | `/api/user/token/remove` | — |
+| POST | `/api/user/token/update` | — |
+| POST | `/api/user/token/toggle` | — |
+| GET | `/api/user/token/logs` | `tokenMasked` |
 
 ## user/sound-effects
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/user/sound-effects` | — | `src/server/server.ts:3430` |
-| POST | `/api/user/sound-effects` | — | `src/server/server.ts:3591` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/user/sound-effects` | — |
+| POST | `/api/user/sound-effects` | — |
 
 ## tasks/status
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/tasks/status` | — | `src/server/server.ts:3454` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/tasks/status` | — |
 
 ## music/tasks
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/tasks/status` | — | `src/server/server.ts:3454` |
-| POST | `/api/music/tasks/trigger` | `id` | `src/server/server.ts:3471` |
-| GET / POST | `/api/music/tasks/user-data` | `task`, `trim` | `src/server/server.ts:3507` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/tasks/status` | — |
+| POST | `/api/music/tasks/trigger` | `id` |
+| GET / POST | `/api/music/tasks/user-data` | `task`, `trim` |
 
 ## tasks/trigger
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/tasks/trigger` | `id` | `src/server/server.ts:3471` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/tasks/trigger` | `id` |
 
 ## tasks/user-data
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET / POST | `/api/tasks/user-data` | `task`, `trim` | `src/server/server.ts:3507` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / POST | `/api/tasks/user-data` | `task`, `trim` |
 
 ## music/cache
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/cache/config` | — | `src/server/server.ts:3708` |
-| GET | `/api/music/cache/directories` | — | `src/server/server.ts:3778` |
-| POST | `/api/music/cache/sync` | — | `src/server/server.ts:3820` |
-| GET | `/api/music/cache/subdirs` | `user`, `folder` | `src/server/server.ts:3847` |
-| POST | `/api/music/cache/mkdir` | — | `src/server/server.ts:3869` |
-| POST | `/api/music/cache/categorize` | — | `src/server/server.ts:3903` |
-| POST | `/api/music/cache/subdirs/rename` | — | `src/server/server.ts:3937` |
-| POST | `/api/music/cache/subdirs/delete` | — | `src/server/server.ts:4018` |
-| POST | `/api/music/cache/rename` | — | `src/server/server.ts:4061` |
-| GET | `/api/music/cache/check` | `name`, `singer`, `source`, `songmid`, `songId`, `quality`, `exactQuality` | `src/server/server.ts:4088` |
-| GET | `/api/music/cache/queue` | — | `src/server/server.ts:4130` |
-| POST | `/api/music/cache/queue` | — | `src/server/server.ts:4142` |
-| POST | `/api/music/cache/queue/concurrency` | — | `src/server/server.ts:4184` |
-| POST | `/api/music/cache/queue/resume` | — | `src/server/server.ts:4205` |
-| POST | `/api/music/cache/queue/remove` | — | `src/server/server.ts:4227` |
-| POST | `/api/music/cache/download` | — | `src/server/server.ts:4250` |
-| POST | `/api/music/cache/stop` | — | `src/server/server.ts:4340` |
-| GET | `/api/music/cache/stats` | — | `src/server/server.ts:4412` |
-| POST | `/api/music/cache/clear` | — | `src/server/server.ts:4437` |
-| POST | `/api/music/cache/lyric/clear` | — | `src/server/server.ts:4462` |
-| GET | `/api/music/cache/lyric/orphans` | — | `src/server/server.ts:4488` |
-| POST | `/api/music/cache/lyric/orphans/delete` | — | `src/server/server.ts:4513` |
-| GET | `/api/music/cache/progress` | `ids` | `src/server/server.ts:4551` |
-| GET | `/api/music/cache/list` | `user` | `src/server/server.ts:4566` |
-| GET | `/api/music/cache/cover` | `user`, `token`, `filename`, `size` | `src/server/server.ts:4612` |
-| POST | `/api/music/cache/remove` | — | `src/server/server.ts:4654` |
-| POST | `/api/music/cache/move` | — | `src/server/server.ts:5023` |
-| POST | `/api/music/cache/switch-base` | — | `src/server/server.ts:5057` |
-| POST | `/api/music/cache/updateMetadata` | — | `src/server/server.ts:5093` |
-| GET | `/api/music/cache/embedLyric` | `filename`, `folder` | `src/server/server.ts:5126` |
-| POST | `/api/music/cache/embedLyric` | — | `src/server/server.ts:5169` |
-| POST | `/api/music/cache/link` | — | `src/server/server.ts:5317` |
-| GET | `/api/music/cache/lyric` | `source`, `songmid`, `songId`, `id`, `name`, `singer` | `src/server/server.ts:5493` |
-| POST | `/api/music/cache/lyric` | — | `src/server/server.ts:5531` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/cache/config` | — |
+| GET | `/api/music/cache/directories` | — |
+| POST | `/api/music/cache/sync` | — |
+| GET | `/api/music/cache/subdirs` | `user`, `folder` |
+| POST | `/api/music/cache/mkdir` | — |
+| POST | `/api/music/cache/categorize` | — |
+| POST | `/api/music/cache/subdirs/rename` | — |
+| POST | `/api/music/cache/subdirs/delete` | — |
+| POST | `/api/music/cache/rename` | — |
+| GET | `/api/music/cache/check` | `name`, `singer`, `source`, `songmid`, `songId`, `quality`, `exactQuality` |
+| GET | `/api/music/cache/queue` | — |
+| POST | `/api/music/cache/queue` | — |
+| POST | `/api/music/cache/queue/concurrency` | — |
+| POST | `/api/music/cache/queue/resume` | — |
+| POST | `/api/music/cache/queue/remove` | — |
+| POST | `/api/music/cache/download` | — |
+| POST | `/api/music/cache/stop` | — |
+| GET | `/api/music/cache/stats` | — |
+| POST | `/api/music/cache/clear` | — |
+| POST | `/api/music/cache/lyric/clear` | — |
+| GET | `/api/music/cache/lyric/orphans` | — |
+| POST | `/api/music/cache/lyric/orphans/delete` | — |
+| GET | `/api/music/cache/progress` | `ids` |
+| GET | `/api/music/cache/list` | `user` |
+| GET | `/api/music/cache/cover` | `user`, `token`, `filename`, `size` |
+| POST | `/api/music/cache/remove` | — |
+| POST | `/api/music/cache/move` | — |
+| POST | `/api/music/cache/switch-base` | — |
+| POST | `/api/music/cache/updateMetadata` | — |
+| GET | `/api/music/cache/embedLyric` | `filename`, `folder` |
+| POST | `/api/music/cache/embedLyric` | — |
+| POST | `/api/music/cache/link` | — |
+| GET | `/api/music/cache/lyric` | `source`, `songmid`, `songId`, `id`, `name`, `singer` |
+| POST | `/api/music/cache/lyric` | — |
 
 ## utils/check-dir
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/utils/check-dir` | — | `src/server/server.ts:3980` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/utils/check-dir` | — |
 
 ## music/custom
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/custom/list` | — | `src/server/server.ts:4731` |
-| POST | `/api/music/custom/sync` | — | `src/server/server.ts:4758` |
-| handler | `/api/music/custom/file` | `filename`, `user`, `token` | `src/server/server.ts:4776` |
-| GET | `/api/music/custom/cover` | `user`, `token`, `filename`, `size` | `src/server/server.ts:4809` |
-| POST | `/api/music/custom/remove` | — | `src/server/server.ts:4846` |
-| POST | `/api/music/custom/link` | — | `src/server/server.ts:4885` |
-| POST | `/api/music/custom/updateMetadata` | — | `src/server/server.ts:4920` |
-| GET | `/api/music/custom/embedLyric` | `filename` | `src/server/server.ts:4952` |
-| POST | `/api/music/custom/embedLyric` | — | `src/server/server.ts:4991` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/custom/list` | — |
+| POST | `/api/music/custom/sync` | — |
+| handler | `/api/music/custom/file` | `filename`, `user`, `token` |
+| GET | `/api/music/custom/cover` | `user`, `token`, `filename`, `size` |
+| POST | `/api/music/custom/remove` | — |
+| POST | `/api/music/custom/link` | — |
+| POST | `/api/music/custom/updateMetadata` | — |
+| GET | `/api/music/custom/embedLyric` | `filename` |
+| POST | `/api/music/custom/embedLyric` | — |
 
 ## music/identify
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/identify` | — | `src/server/server.ts:5346` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/identify` | — |
 
 ## music/lyric
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/lyric` | `source`, `songmid`, `songId`, `id`, `name`, `singer`, `hash`, `interval`, `copyrightId`, `albumId`, `lrcUrl`, `mrcUrl`, `trcUrl` | `src/server/server.ts:5396` |
-| POST | `/api/music/lyric` | — | `src/server/server.ts:6676` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/lyric` | `source`, `songmid`, `songId`, `id`, `name`, `singer`, `hash`, `interval`, `copyrightId`, `albumId`, `lrcUrl`, `mrcUrl`, `trcUrl` |
+| POST | `/api/music/lyric` | — |
 
 ## music/download
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET / HEAD | `/api/music/download` | `token`, `url`, `filename`, `inline`, `tag`, `taskId`, `name`, `singer`, `album`, `pic`, `lyric`, `source`, `songmid`, `hash`, `interval` | `src/server/server.ts:5576` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / HEAD | `/api/music/download` | `token`, `url`, `filename`, `inline`, `tag`, `taskId`, `name`, `singer`, `album`, `pic`, `lyric`, `source`, `songmid`, `hash`, `interval` |
 
 ## data/delete-playlist
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/delete-playlist` | — | `src/server/server.ts:5868` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/delete-playlist` | — |
 
 ## data/delete-song
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/delete-song` | — | `src/server/server.ts:5907` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/delete-song` | — |
 
 ## data/rename-playlist
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/rename-playlist` | — | `src/server/server.ts:5961` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/rename-playlist` | — |
 
 ## data/batch-delete-songs
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/data/batch-delete-songs` | — | `src/server/server.ts:6015` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/data/batch-delete-songs` | — |
 
 ## music/config
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/config` | — | `src/server/server.ts:6078` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/config` | — |
 
 ## music/auth
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/auth` | — | `src/server/server.ts:6097` |
-| POST | `/api/music/auth/logout` | — | `src/server/server.ts:6165` |
-| GET | `/api/music/auth/verify` | — | `src/server/server.ts:6178` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/auth` | — |
+| POST | `/api/music/auth/logout` | — |
+| GET | `/api/music/auth/verify` | — |
 
 ## music/search
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/search` | `name`, `singer`, `source`, `type`, `limit`, `page` | `src/server/server.ts:6208` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/search` | `name`, `singer`, `source`, `type`, `limit`, `page` |
 
 ## music/tipSearch
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/tipSearch` | `name`, `source` | `src/server/server.ts:6347` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/tipSearch` | `name`, `source` |
 
 ## music/artistDetail
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/artistDetail` | `id`, `source` | `src/server/server.ts:6368` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/artistDetail` | `id`, `source` |
 
 ## music/artistAlbums
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/artistAlbums` | `id`, `source`, `page` | `src/server/server.ts:6385` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/artistAlbums` | `id`, `source`, `page` |
 
 ## music/artistSongs
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/artistSongs` | `id`, `source`, `order` | `src/server/server.ts:6403` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/artistSongs` | `id`, `source`, `order` |
 
 ## music/albumSongs
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/albumSongs` | `id`, `source` | `src/server/server.ts:6433` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/albumSongs` | `id`, `source` |
 
 ## music/progress
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/progress` | `reqId` | `src/server/server.ts:6450` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/progress` | `reqId` |
 
 ## music/url
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/url` | — | `src/server/server.ts:6473` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/url` | — |
 
 ## music/quality
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/quality/size` | — | `src/server/server.ts:6630` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/quality/size` | — |
 
 ## music/hotSearch
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/hotSearch` | `source` | `src/server/server.ts:6701` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/hotSearch` | `source` |
 
 ## music/songList
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/songList/tags` | `source` | `src/server/server.ts:6730` |
-| GET | `/api/music/songList/list` | `source`, `tagId`, `sortId`, `page` | `src/server/server.ts:6748` |
-| GET | `/api/music/songList/detail` | `source`, `id`, `page` | `src/server/server.ts:6768` |
-| GET | `/api/music/songList/search` | `source`, `text`, `page` | `src/server/server.ts:6795` |
-| GET | `/api/music/songList/userPlaylist` | `source`, `uid`, `page` | `src/server/server.ts:6820` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/songList/tags` | `source` |
+| GET | `/api/music/songList/list` | `source`, `tagId`, `sortId`, `page` |
+| GET | `/api/music/songList/detail` | `source`, `id`, `page` |
+| GET | `/api/music/songList/search` | `source`, `text`, `page` |
+| GET | `/api/music/songList/userPlaylist` | `source`, `uid`, `page` |
 
 ## music/leaderboard
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/leaderboard/boards` | `source` | `src/server/server.ts:6845` |
-| GET | `/api/music/leaderboard/list` | `source`, `bangid`, `page` | `src/server/server.ts:6866` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/leaderboard/boards` | `source` |
+| GET | `/api/music/leaderboard/list` | `source`, `bangid`, `page` |
 
 ## music/comment
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/comment` | — | `src/server/server.ts:6892` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/comment` | — |
 
 ## music/dislike
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/dislike` | — | `src/server/server.ts:6935` |
-| POST | `/api/music/dislike/add` | — | `src/server/server.ts:6956` |
-| POST | `/api/music/dislike/remove` | — | `src/server/server.ts:6956` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/dislike` | — |
+| POST | `/api/music/dislike/add` | — |
+| POST | `/api/music/dislike/remove` | — |
 
 ## admin/verify
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/admin/verify` | — | `src/server/server.ts:7070` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/admin/verify` | — |
 
 ## custom-source/validate
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/validate` | — | `src/server/server.ts:7082` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/validate` | — |
 
 ## custom-source/import
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/import` | — | `src/server/server.ts:7100` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/import` | — |
 
 ## custom-source/upload
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/upload` | — | `src/server/server.ts:7103` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/upload` | — |
 
 ## custom-source/update
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/update` | — | `src/server/server.ts:7106` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/update` | — |
 
 ## custom-source/list
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/custom-source/list` | `username` | `src/server/server.ts:7109` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/custom-source/list` | `username` |
 
 ## custom-source/toggle
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/toggle` | — | `src/server/server.ts:7126` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/toggle` | — |
 
 ## custom-source/delete
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/delete` | — | `src/server/server.ts:7129` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/delete` | — |
 
 ## custom-source/reorder
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/reorder` | — | `src/server/server.ts:7133` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/reorder` | — |
 
 ## custom-source/update-platforms
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/custom-source/update-platforms` | — | `src/server/server.ts:7136` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/custom-source/update-platforms` | — |
 
 ## config
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET / POST | `/api/config` | — | `src/server/server.ts:7150` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / POST | `/api/config` | — |
 
 ## config/backups
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/config/backups` | — | `src/server/server.ts:7619` |
-| GET | `/api/config/backups/download` | `file` | `src/server/server.ts:7719` |
-| POST | `/api/config/backups/restore` | — | `src/server/server.ts:7795` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/config/backups` | — |
+| GET | `/api/config/backups/download` | `file` |
+| POST | `/api/config/backups/restore` | — |
 
 ## config/backup-now
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/config/backup-now` | — | `src/server/server.ts:7689` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/config/backup-now` | — |
 
 ## config/test-proxy
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/config/test-proxy` | — | `src/server/server.ts:7849` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/config/test-proxy` | — |
 
 ## logs
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/logs` | `type`, `lines` | `src/server/server.ts:7902` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/logs` | `type`, `lines` |
 
 ## stats
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/stats` | — | `src/server/server.ts:7931` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/stats` | — |
 
 ## webdav/test
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/webdav/test` | — | `src/server/server.ts:7955` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/webdav/test` | — |
 
 ## webdav/sync-file
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/webdav/sync-file` | — | `src/server/server.ts:7978` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/webdav/sync-file` | — |
 
 ## webdav/backup
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/webdav/backup` | — | `src/server/server.ts:8015` |
-| DELETE | `/api/webdav/backup` | — | `src/server/server.ts:8092` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/webdav/backup` | — |
+| DELETE | `/api/webdav/backup` | — |
 
 ## webdav/sync
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/webdav/sync` | — | `src/server/server.ts:8040` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/webdav/sync` | — |
 
 ## webdav/backups
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/webdav/backups` | — | `src/server/server.ts:8063` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/webdav/backups` | — |
 
 ## webdav/restore
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/webdav/restore` | — | `src/server/server.ts:8137` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/webdav/restore` | — |
 
 ## webdav/logs
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/webdav/logs` | — | `src/server/server.ts:8176` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/webdav/logs` | — |
 
 ## webdav/progress
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/webdav/progress` | `auth` | `src/server/server.ts:8200` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/webdav/progress` | `auth` |
 
 ## backup/download
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/backup/download` | `auth` | `src/server/server.ts:8234` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/backup/download` | `auth` |
 
 ## backup/upload
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/backup/upload` | — | `src/server/server.ts:8269` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/backup/upload` | — |
 
 ## admin/reload
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/admin/reload` | — | `src/server/server.ts:8311` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/admin/reload` | — |
 
 ## restart
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/restart` | — | `src/server/server.ts:8328` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/restart` | — |
 
 ## files/download
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/files/download` | `path` | `src/server/server.ts:8403` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/files/download` | `path` |
 
 ## music/auto-link
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| GET | `/api/music/auto-link/status` | — | `src/server/server.ts:3628` |
-| GET | `/api/music/auto-link/candidates` | — | `src/server/server.ts:3632` |
-| POST | `/api/music/auto-link/start` | — | `src/server/server.ts:3634` |
-| POST | `/api/music/auto-link/cancel` | — | `src/server/server.ts:3630` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/music/auto-link/status` | — |
+| GET | `/api/music/auto-link/candidates` | — |
+| POST | `/api/music/auto-link/start` | — |
+| POST | `/api/music/auto-link/cancel` | — |
 
 ## music/remaster
 
-| 方法 | 路径 | 直接读取字段（部分） | 处理位置 |
-| --- | --- | --- | --- |
-| POST | `/api/music/remaster/start` | — | `src/server/server.ts:3661` |
-| GET | `/api/music/remaster/status` | — | `src/server/server.ts:3685` |
-| POST | `/api/music/remaster/cancel` | — | `src/server/server.ts:3694` |
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/music/remaster/start` | — |
+| GET | `/api/music/remaster/status` | — |
+| POST | `/api/music/remaster/cancel` | — |
