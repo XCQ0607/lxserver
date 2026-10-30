@@ -138,7 +138,12 @@ window.soundEffects = (function () {
 
         // Panner
         pannerNode = audioContext.createPanner();
-        // pannerNode.panningModel = 'HRTF';
+        // Binaural head/ear filtering supplies front/back cues for headphones.
+        pannerNode.distanceModel = 'inverse';
+        pannerNode.refDistance = 1;
+        pannerNode.rolloffFactor = 1;
+        pannerNode.coneInnerAngle = 360;
+        pannerNode.coneOuterAngle = 360;
 
 
         // 2. Connect Link: Source -> EQ -> Split(Dry/Wet)
@@ -387,11 +392,31 @@ window.soundEffects = (function () {
         if (pannerInfo.interval) {
             clearInterval(pannerInfo.interval);
             pannerInfo.interval = null;
-            pannerInfo.rad = 0;
         }
 
         if (p.enable) {
-            console.log('[SoundEffects] Starting Panner (Desktop Logic)');
+            pannerNode.panningModel = 'HRTF';
+            const speed = Math.max(1, Math.min(50, Number(p.speed) || 25));
+            const radius = Math.max(0.1, Math.min(3, (Number(p.distance) || 5) * 0.1));
+            const period = 4 + (50 - speed) * 0.32;
+            let lastTime = audioContext.currentTime;
+            const move = () => {
+                const now = audioContext.currentTime;
+                // Use elapsed audio time: timer throttling must not change rotation speed.
+                pannerInfo.rad = (pannerInfo.rad + (now - lastTime) * 2 * Math.PI / period) % (2 * Math.PI);
+                lastTime = now;
+                const coords = [Math.sin(pannerInfo.rad) * radius, 0, -Math.cos(pannerInfo.rad) * radius];
+                [pannerNode.positionX, pannerNode.positionY, pannerNode.positionZ].forEach((param, i) => {
+                    if (param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(now);
+                    else {
+                        const value = param.value;
+                        param.cancelScheduledValues(now);
+                        param.setValueAtTime(value, now);
+                    }
+                    param.linearRampToValueAtTime(coords[i], now + 0.025);
+                });
+            };
+            move();
             pannerInfo.interval = setInterval(() => {
                 if (!canProcessLocally()) {
                     clearInterval(pannerInfo.interval);
@@ -399,23 +424,16 @@ window.soundEffects = (function () {
                     return;
                 }
                 if (!pannerNode) return;
-                pannerInfo.rad += 1;
-                if (pannerInfo.rad > 360) pannerInfo.rad -= 360;
-
-                const rad = pannerInfo.rad * Math.PI / 180;
-                const nx = Math.sin(rad);
-                const ny = Math.cos(rad);
-                const nz = Math.cos(rad);
-
-                const factor = p.distance * 0.1; // Adjust distance factor to match desktop feel
-                pannerNode.positionX.value = nx * factor;
-                pannerNode.positionY.value = ny * factor;
-                pannerNode.positionZ.value = nz * factor;
-            }, p.speed * 10);
+                move();
+            }, 25);
         } else {
-            pannerNode.positionX.value = 0;
-            pannerNode.positionY.value = 0;
-            pannerNode.positionZ.value = 0;
+            // Equal-power at the listener preserves the original stereo when disabled.
+            pannerNode.panningModel = 'equalpower';
+            for (const param of [pannerNode.positionX, pannerNode.positionY, pannerNode.positionZ]) {
+                param.cancelScheduledValues(audioContext.currentTime);
+                param.setValueAtTime(0, audioContext.currentTime);
+            }
+            pannerInfo.rad = 0;
         }
     }
 
