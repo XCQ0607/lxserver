@@ -56,7 +56,8 @@ export default defineConfig({
           {
             text: '配置指南',
             items: [
-              { text: '配置文件及环境变量', link: '/guide/configuration' }
+              { text: '配置文件及环境变量', link: '/guide/configuration' },
+              { text: '云端备份与恢复', link: '/guide/backup-recovery' }
             ]
           },
           {
@@ -128,7 +129,8 @@ export default defineConfig({
           {
             text: 'Config Guide',
             items: [
-              { text: 'Config & Env Vars', link: '/en/guide/configuration' }
+              { text: 'Config & Env Vars', link: '/en/guide/configuration' },
+              { text: 'Cloud Backup & Recovery', link: '/en/guide/backup-recovery' }
             ]
           },
           {

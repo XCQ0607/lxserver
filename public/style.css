@@ -1822,7 +1822,8 @@ body {
 /* 卡片主体 */
 .config-card {
     border-radius: 16px;
-    overflow: hidden;
+    overflow: visible;
+    position: relative;
     transition: box-shadow 0.3s ease, transform 0.2s ease;
 }
 
@@ -1831,8 +1832,14 @@ body {
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.3);
 }
 
+.config-card:has(.lx-select.is-open) {
+    z-index: 60;
+    transform: none !important;
+}
+
 /* 卡片标题栏 */
 .config-card-header {
+    border-radius: 16px 16px 0 0;
     display: flex;
     align-items: center;
     gap: 1rem;
@@ -1886,6 +1893,10 @@ body {
 }
 
 .config-label {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 2px;
     font-size: 0.8rem;
     font-weight: 500;
     color: var(--text-secondary);
@@ -6317,4 +6328,784 @@ input:-webkit-autofill:active {
     .config-backup-actions-wrap button {
         flex: 1;
     }
+}
+/* 现代化云端备份范围卡片 */
+.backup-policy-card {
+    grid-column: 1 / -1;
+}
+
+.backup-table-wrapper {
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+}
+
+.backup-policy-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.backup-policy-table thead {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.backup-policy-table th {
+    padding: 12px 18px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--glass-border);
+    letter-spacing: 0.02em;
+}
+
+.backup-policy-table th.backup-col-name {
+    text-align: left;
+    width: auto;
+}
+
+.backup-policy-table th.backup-col-dest,
+.backup-policy-table td.backup-col-dest {
+    text-align: center;
+    width: 120px;
+    vertical-align: middle;
+}
+
+.backup-policy-table tbody tr {
+    transition: background 0.2s ease;
+}
+
+.backup-policy-table tbody tr:not(:last-child) td {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.backup-policy-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.035);
+}
+
+.backup-policy-table td {
+    padding: 14px 18px;
+    vertical-align: middle;
+}
+
+.backup-type-title {
+    font-size: 0.885rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.4;
+    margin-bottom: 3px;
+}
+
+.backup-type-desc {
+    font-size: 0.775rem;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.backup-toggle {
+    display: inline-flex;
+    margin: 0 auto;
+}
+
+.backup-policy-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: rgba(56, 189, 248, 0.08);
+    border: 1px solid rgba(56, 189, 248, 0.18);
+    border-radius: 10px;
+    font-size: 0.775rem;
+    color: #bae6fd;
+    line-height: 1.55;
+}
+
+.backup-policy-banner code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: #38bdf8;
+    font-family: inherit;
+    font-size: 0.75rem;
+}
+
+.backup-banner-icon {
+    width: 16px;
+    height: 16px;
+    color: #38bdf8;
+    flex-shrink: 0;
+}
+
+.backup-options-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+    padding: 1rem 1.25rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+}
+
+.backup-policy-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+    margin-top: 4px;
+}
+
+.backup-policy-actions button {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 0.65rem 1.25rem;
+}
+
+.backup-matrix-placeholder {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 1.5rem;
+    justify-content: center;
+    background: rgba(15, 23, 42, 0.3);
+    border: 1px dashed var(--glass-border);
+    border-radius: 12px;
+}
+
+@media (max-width: 640px) {
+    .backup-policy-table th.backup-col-dest,
+    .backup-policy-table td.backup-col-dest {
+        width: 80px;
+        padding: 10px 8px;
+    }
+    .backup-policy-table th.backup-col-name,
+    .backup-policy-table td.backup-col-name {
+        padding: 10px 12px;
+    }
+    .backup-policy-actions button {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* =========================================================
+   现代化帮助提示 (Help Icon & Popover)
+   ========================================================= */
+.help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+    margin-left: 0.4rem;
+    border-radius: 50%;
+    cursor: pointer;
+    user-select: none;
+    background: rgba(59, 130, 246, 0.18);
+    border: 1px solid rgba(59, 130, 246, 0.35);
+    color: #60a5fa;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    vertical-align: middle;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
+    flex-shrink: 0;
+}
+
+.help-icon:hover {
+    background: var(--accent-primary, #6366f1);
+    border-color: var(--accent-primary, #6366f1);
+    color: #fff;
+    transform: scale(1.12);
+    box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
+}
+
+.help-pop {
+    position: absolute;
+    z-index: 9999;
+    max-width: 320px;
+    width: max-content;
+    background: rgba(15, 23, 42, 0.94);
+    backdrop-filter: blur(14px);
+    -webkit-backdrop-filter: blur(14px);
+    color: #f1f5f9;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 10px;
+    padding: 0.65rem 0.85rem;
+    font-size: 0.8rem;
+    line-height: 1.55;
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.04);
+    white-space: normal;
+    animation: helpPopFadeIn 0.15s ease-out;
+}
+
+@keyframes helpPopFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* =========================================================
+   OpenList 操作底栏与用户卡片
+   ========================================================= */
+.openlist-actions-bar {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    flex-wrap: wrap;
+    gap: 0.85rem;
+    padding: 0.85rem 1.25rem;
+    margin-top: 1.25rem;
+    border-radius: 14px;
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid var(--glass-border);
+}
+
+.openlist-actions-bar .actions-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+}
+
+.openlist-actions-bar .actions-divider-v {
+    width: 1px;
+    height: 24px;
+    background: var(--glass-border);
+    margin: 0 0.35rem;
+}
+
+.openlist-actions-bar button {
+    width: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 0.65rem 1.15rem;
+    font-size: 0.86rem;
+    font-weight: 500;
+    border-radius: 10px;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.openlist-actions-bar button svg {
+    flex-shrink: 0;
+}
+
+.openlist-actions-bar .btn-sync-highlight {
+    background: rgba(14, 165, 233, 0.12);
+    border-color: rgba(14, 165, 233, 0.35);
+    color: #38bdf8;
+}
+
+.openlist-actions-bar .btn-sync-highlight:hover {
+    background: rgba(14, 165, 233, 0.22);
+    border-color: #38bdf8;
+    color: #fff;
+    box-shadow: 0 0 16px rgba(14, 165, 233, 0.35);
+}
+
+/* OpenList 用户独立配置卡片 */
+.openlist-user-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    padding: 1rem 1.15rem;
+    margin-top: 0.75rem;
+    transition: all 0.2s ease;
+}
+
+.openlist-user-card:hover {
+    background: rgba(255, 255, 255, 0.035);
+    border-color: rgba(99, 102, 241, 0.3);
+}
+
+.openlist-user-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.openlist-user-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: var(--text-primary);
+    background: rgba(99, 102, 241, 0.15);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 3px 10px;
+    border-radius: 6px;
+}
+
+.openlist-user-badge svg {
+    color: #818cf8;
+}
+
+@media (max-width: 768px) {
+    .openlist-actions-bar {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .openlist-actions-bar .actions-divider-v {
+        width: 100%;
+        height: 1px;
+        margin: 0.25rem 0;
+    }
+    .openlist-actions-bar .actions-group {
+        width: 100%;
+        flex-direction: column;
+    }
+    .openlist-actions-bar button {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* =========================================================
+   OpenList 文件记录面板 (Status Cards & Records Table)
+   ========================================================= */
+.olb-status-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+    gap: 0.75rem;
+    margin-bottom: 1.15rem;
+}
+
+.olb-stat-card {
+    position: relative;
+    cursor: pointer;
+    padding: 0.75rem 0.95rem;
+    border-radius: 12px;
+    background: rgba(15, 23, 42, 0.45);
+    border: 1px solid var(--glass-border);
+    transition: all 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+    user-select: none;
+    overflow: hidden;
+}
+
+.olb-stat-card:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--stat-color, #64748b);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
+.olb-stat-card.active {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--stat-color, #64748b);
+    box-shadow: 0 0 0 1px var(--stat-color, #64748b), 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+.olb-stat-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 0.35rem;
+}
+
+.olb-stat-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.olb-stat-label {
+    font-size: 0.76rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.olb-stat-num {
+    font-size: 1.45rem;
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+}
+
+/* 工具栏与筛选区 */
+.olb-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+    margin-bottom: 1.15rem;
+    padding: 0.9rem 1.1rem;
+    background: rgba(255, 255, 255, 0.015);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+}
+
+.olb-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    flex-wrap: wrap;
+}
+
+.olb-filters-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex-wrap: wrap;
+}
+
+.olb-filters-row .lx-select {
+    width: auto;
+    min-width: 130px;
+    flex: 0 1 auto;
+}
+
+.olb-select,
+.olb-input {
+    height: 36px;
+    font-size: 0.82rem !important;
+    padding: 0.45rem 0.75rem !important;
+    border-radius: 8px !important;
+    background: rgba(15, 23, 42, 0.5) !important;
+}
+
+.olb-input {
+    min-width: 140px;
+    flex: 1 1 140px;
+}
+
+.olb-filter-btns {
+    display: flex;
+    gap: 0.5rem;
+    margin-left: auto;
+}
+
+.olb-filter-btns button {
+    height: 36px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 0.85rem;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+
+.btn-danger-soft {
+    background: rgba(239, 68, 68, 0.12);
+    border-color: rgba(239, 68, 68, 0.35);
+    color: #fca5a5;
+}
+
+.btn-danger-soft:not(:disabled):hover {
+    background: rgba(239, 68, 68, 0.25);
+    border-color: #ef4444;
+    color: #fff;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.35);
+}
+
+.olb-selcount-badge {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+/* 空状态 */
+.olb-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 3.5rem 1.5rem;
+    text-align: center;
+    background: rgba(15, 23, 42, 0.35);
+    border: 1px dashed var(--glass-border);
+    border-radius: 12px;
+}
+
+.olb-empty-icon {
+    width: 44px;
+    height: 44px;
+    color: var(--text-secondary);
+    opacity: 0.5;
+    margin-bottom: 0.75rem;
+}
+
+.olb-empty-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.35rem;
+}
+
+.olb-empty-desc {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+}
+
+/* 状态徽章与表格细节 */
+.olb-table-wrapper {
+    max-height: 480px;
+    overflow: auto;
+}
+
+.olb-records-table {
+    font-size: 0.82rem;
+}
+
+.olb-records-table th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: rgba(20, 27, 45, 0.95);
+    backdrop-filter: blur(8px);
+}
+
+.olb-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 0.72rem;
+    font-weight: 500;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    color: var(--badge-color, #cbd5e1);
+}
+
+.olb-badge-dot {
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: var(--badge-color, currentColor);
+}
+
+.olb-user-tag {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+    font-size: 0.76rem;
+    font-family: monospace;
+}
+
+/* 分页栏 */
+.olb-pager {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0.5rem;
+    margin-top: 0.85rem;
+    flex-wrap: wrap;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.olb-pager button {
+    height: 30px;
+    padding: 0 0.65rem;
+    font-size: 0.76rem;
+    border-radius: 6px;
+}
+
+.olb-pager-info {
+    margin: 0 0.35rem;
+}
+
+@media (max-width: 900px) {
+    .olb-filter-btns {
+        margin-left: 0;
+        width: 100%;
+        justify-content: flex-end;
+    }
+}
+
+/* =========================================================
+   现代化圆角毛玻璃自定义下拉框样式 (.lx-select)
+   ========================================================= */
+.lx-select {
+    position: relative;
+    width: 100%;
+    user-select: none;
+    font-size: 0.9rem;
+}
+
+.lx-select-native {
+    position: absolute !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: none !important;
+    overflow: hidden !important;
+}
+
+.lx-select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    width: 100%;
+    min-height: 40px;
+    padding: 0.65rem 0.95rem;
+    background: rgba(15, 23, 42, 0.55);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    box-sizing: border-box;
+}
+
+.lx-select:hover .lx-select-trigger {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.25);
+}
+
+.lx-select.is-open .lx-select-trigger {
+    border-color: var(--accent-primary, #6366f1);
+    background: rgba(15, 23, 42, 0.75);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+}
+
+.lx-select-text {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+    font-weight: 500;
+}
+
+.lx-select-arrow {
+    width: 16px;
+    height: 16px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.lx-select.is-open .lx-select-arrow {
+    transform: rotate(180deg);
+    color: var(--accent-primary, #6366f1);
+}
+
+/* 真正的圆角毛玻璃弹出菜单 */
+.lx-select-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    right: 0;
+    z-index: 1002;
+    background: rgba(15, 23, 42, 0.96);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 12px;
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.05);
+    padding: 6px;
+    max-height: 280px;
+    overflow-y: auto;
+    display: none;
+    flex-direction: column;
+    gap: 2px;
+    animation: lxSelectFadeIn 0.15s ease-out;
+    /* 去除侧边下拉滚动条，鼠标滚轮依然保持丝滑滚动 */
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+.lx-select-menu::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+}
+
+.lx-select.drop-up .lx-select-menu {
+    top: auto;
+    bottom: calc(100% + 6px);
+}
+
+.lx-select.is-open .lx-select-menu {
+    display: flex;
+}
+
+@keyframes lxSelectFadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.lx-select-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 0.55rem 0.85rem;
+    border-radius: 8px;
+    font-size: 0.86rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.lx-select-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+}
+
+.lx-select-item.is-selected {
+    background: rgba(99, 102, 241, 0.18);
+    color: #a5b4fc;
+    font-weight: 600;
+}
+
+/* 小号选择器 */
+.lx-select.select-sm .lx-select-trigger {
+    min-height: 36px;
+    padding: 0.42rem 0.75rem;
+    font-size: 0.82rem;
+    border-radius: 8px;
+}
+.lx-select.select-sm .lx-select-item {
+    padding: 0.42rem 0.75rem;
+    font-size: 0.8rem;
+}
+
+/* 彻底去除主页面侧边滑动条（保留滚轮顺畅滑动页面） */
+html,
+body,
+#app,
+.main-content,
+.content-wrapper {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+}
+
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#app::-webkit-scrollbar,
+.main-content::-webkit-scrollbar,
+.content-wrapper::-webkit-scrollbar {
+    width: 0 !important;
+    height: 0 !important;
+    display: none !important;
+}
+
+/* 局部弹窗和日志等容器的极简微型滚动条 */
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.3);
 }

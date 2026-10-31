@@ -43,6 +43,7 @@ class App {
         this.monitorTimer = null;
         this.init();
         this.initVersion();
+        this.initCustomSelects();
     }
 
     init() {
@@ -504,6 +505,7 @@ class App {
             logs: '系统日志',
             webdav: 'WebDAV同步',
             subsonic: 'Subsonic 配置',
+            openlist: 'OpenList 同步',
             files: '文件管理',
             snapshots: '快照管理',
             about: '关于'
@@ -550,6 +552,9 @@ class App {
                     this.loadConfigBackups();
                 }
                 break;
+            case 'openlist':
+                this.loadOpenlistConfig();
+                break;
             case 'about':
                 this.loadAbout();
                 break;
@@ -565,6 +570,7 @@ class App {
         if (viewName !== 'logs') {
             this.stopLogsAutoRefresh();
         }
+        setTimeout(() => this.initCustomSelects(), 50);
     }
 
     handleQuickAction(action) {
@@ -2588,6 +2594,7 @@ class App {
             this.configLoaded = true;
             this.loadedConfig = config; // 保存原始配置，供 saveConfig 对比「需重启」字段是否变更
             const form = document.getElementById('config-form');
+            this.renderBackupPolicy(config);
 
             form.elements['serverName'].value = config.serverName || '';
             if (form.elements['debug.enabled']) {
@@ -2737,6 +2744,8 @@ class App {
             if (configBackupJsPathRef && config.configFilePath) {
                 configBackupJsPathRef.textContent = config.configFilePath;
             }
+            this.initCustomSelects();
+            this.syncCustomSelects();
         } catch (err) {
             console.error('Failed to load config:', err);
         }
@@ -2875,7 +2884,7 @@ class App {
         });
     }
 
-    renderSortableTagGroup(containerId, hiddenInputName, orderList, labelMap, allItems) {
+    renderSortableTagGroup(containerId, hiddenInputName, orderList, labelMap, allItems, allowEmpty = false) {
         const container = document.getElementById(containerId);
         const hiddenInput = document.querySelector(`input[name="${hiddenInputName}"]`);
         if (!container) return;
@@ -2972,9 +2981,9 @@ class App {
                     }
                 } else {
                     // 从启用 -> 禁用：直接移到最后变灰
-                    // 至少保留一项可用
+                    // 至少保留一项可用（allowEmpty 时允许全部移除，例如 OpenList 用户备份可清空）
                     const remainingActive = container.querySelectorAll('.tag-sortable-item:not(.disabled)');
-                    if (remainingActive.length <= 1) {
+                    if (!allowEmpty && remainingActive.length <= 1) {
                         if (typeof this?.showToast === 'function') {
                             this.showToast('至少需要保留一个可用项', 'warning');
                         }
@@ -3191,8 +3200,7 @@ class App {
             'webdav.backupPath': (formData.get('webdav.backupPath') || '').trim() || '/lx-sync-backups',
             'sync.interval': parseInt(formData.get('sync.interval')) || 60,
             'sync.backupInterval': parseInt(formData.get('sync.backupInterval')) || 24,
-            'webdav.excludeCache': formData.get('webdav.excludeCache') === 'on',
-            'webdav.excludeMusic': formData.get('webdav.excludeMusic') === 'on',
+            ...this.collectBackupPolicy(),
             'configBackup.enable': formData.get('configBackup.enable') === 'on',
             'configBackup.retentionDays': parseInt(formData.get('configBackup.retentionDays')) || 7,
             'configBackup.dir': (formData.get('configBackup.dir') || '').trim(),
@@ -3377,6 +3385,12 @@ class App {
             if (form.elements['subsonic.playCacheFirst']) {
                 form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] === true;
             }
+            if (form.elements['subsonic.playCacheFirstUseOpenlist']) {
+                form.elements['subsonic.playCacheFirstUseOpenlist'].checked = config['subsonic.playCacheFirstUseOpenlist'] === true;
+            }
+            if (form.elements['subsonic.openlistDelivery']) {
+                form.elements['subsonic.openlistDelivery'].value = config['subsonic.openlistDelivery'] || 'direct';
+            }
 
 
             // 不喜欢 / 评分联动
@@ -3430,6 +3444,8 @@ class App {
                 form.elements['subsonic.source.autoSwitchCustom'].checked = config['subsonic.source.autoSwitchCustom'] !== false;
             }
 
+            this.initCustomSelects();
+            this.syncCustomSelects();
         } catch (e) {
             console.error('Failed to load subsonic config:', e);
         }
@@ -3458,6 +3474,8 @@ class App {
             'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
             'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
             'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
+            'subsonic.playCacheFirstUseOpenlist': formData.get('subsonic.playCacheFirstUseOpenlist') === 'on',
+            'subsonic.openlistDelivery': (formData.get('subsonic.openlistDelivery') || 'direct').trim(),
 
             'subsonic.dislikeRating': Number(formData.get('subsonic.dislikeRating') || 1),
             'subsonic.hideDisliked': formData.get('subsonic.hideDisliked') === 'on',
@@ -3599,6 +3617,568 @@ class App {
     closeModal() {
         document.getElementById('modal').classList.add('hidden');
     }
+
+
+    // ===== OpenList 音频备份配置 =====
+    renderBackupPolicy(config) {
+        const target = document.getElementById('backup-policy-matrix');
+        if (!target || !Array.isArray(config.backupTypeInfo)) return;
+        this._backupTypesLoaded = true;
+        target.innerHTML = '<div class="backup-table-wrapper"><table class="backup-policy-table"><thead><tr><th scope="col" class="backup-col-name">备份内容</th><th scope="col" class="backup-col-dest">WebDAV</th><th scope="col" class="backup-col-dest">OpenList</th></tr></thead><tbody>' + config.backupTypeInfo.map(type => {
+            const cells = ['webdav', 'openlist'].map(destination => {
+                const isChecked = (config['backup.' + destination + '.types'] || []).includes(type.id);
+                return '<td class="backup-col-dest">' +
+                    '<label class="toggle-switch backup-toggle" title="' + this.escapeHtml(type.label + ' 备份到 ' + (destination === 'webdav' ? 'WebDAV' : 'OpenList')) + '">' +
+                        '<input type="checkbox" name="backup.' + destination + '.types" value="' + this.escapeHtml(type.id) + '" aria-label="' + this.escapeHtml(type.label + ' 备份到 ' + destination) + '"' + (isChecked ? ' checked' : '') + ' />' +
+                        '<span class="toggle-track"><span class="toggle-thumb"></span></span>' +
+                    '</label>' +
+                '</td>';
+            }).join('');
+            return '<tr>' +
+                '<td class="backup-col-name">' +
+                    '<div class="backup-type-title">' + this.escapeHtml(type.label) + '</div>' +
+                    '<div class="backup-type-desc">' + this.escapeHtml(type.description) + '</div>' +
+                '</td>' +
+                cells +
+            '</tr>';
+        }).join('') + '</tbody></table></div>';
+        const form = document.getElementById('config-form');
+        ['backup.webdav.mirrorDeletes', 'backup.webdav.restoreOnStartup'].forEach(key => {
+            if (form && form.elements[key]) {
+                form.elements[key].checked = config[key] === true;
+            }
+        });
+    }
+
+    collectBackupPolicy() {
+        if (!this._backupTypesLoaded) return {};
+        const fd = new FormData(document.getElementById('config-form'));
+        return {
+            'backup.webdav.types': fd.getAll('backup.webdav.types'),
+            'backup.openlist.types': fd.getAll('backup.openlist.types'),
+            'backup.webdav.mirrorDeletes': fd.get('backup.webdav.mirrorDeletes') === 'on',
+            'backup.webdav.restoreOnStartup': fd.get('backup.webdav.restoreOnStartup') === 'on',
+        };
+    }
+
+    async saveBackupPolicy() {
+        if (!this._backupTypesLoaded) return;
+        const status = document.getElementById('backup-policy-status');
+        try {
+            const result = await this.request('/api/config', { method: 'POST', body: JSON.stringify(this.collectBackupPolicy()) });
+            status.textContent = result.warning || '备份范围已写入 config.js。云端已有副本保持不变。';
+        } catch (e) { status.textContent = '保存失败：' + e.message; }
+    }
+
+    async restoreOpenlistBackup() {
+        if (!(await showSelect('恢复 OpenList 数据备份', '按系统设置中已保存的备份类型，从 OpenList 恢复同名文件。会覆盖本地对应文件，保留本地独有文件；不会上传文件。恢复后需重启服务。', { danger: true }))) return;
+        try {
+            const result = await this.request('/api/openlist/restore', { method: 'POST' });
+            if (!result.success) throw new Error((result.errors || []).join('；') || result.error || '云端没有所选类型的文件');
+            showSuccess('已恢复 ' + result.restored + ' 个文件。请重启服务完整加载数据。');
+        } catch (e) { showError('恢复失败：' + e.message); }
+    }
+
+    async loadOpenlistConfig() {
+        try {
+            const config = await this.request('/api/config')
+            const form = document.getElementById('openlist-form')
+            if (!form) return
+            form.elements['openlist.enable'].checked = config['openlist.enable'] === true
+            form.elements['openlist.endpoint'].value = config['openlist.endpoint'] || ''
+            form.elements['openlist.token'].value = config['openlist.token'] || ''
+            form.elements['openlist.root'].value = config['openlist.root'] || '/lx_music'
+            form.elements['openlist.externalUrl'].value = config['openlist.externalUrl'] || ''
+            form.elements['openlist.includeNonAudio'].checked = config['openlist.includeNonAudio'] === true
+            form.elements['openlist.verifyInterval'].value = config['openlist.verifyInterval'] || 5
+            form.elements['openlist.syncInterval'].value = config['openlist.syncInterval'] || 60
+            this.toggleOpenlistVisibility()
+            form.elements['openlist.enable'].onchange = () => this.toggleOpenlistVisibility()
+
+            let users = []
+            this._olbUsersLoaded = true
+            try {
+                const ulist = await this.request('/api/users')
+                users = (ulist || []).map(u => u.name).filter(Boolean)
+            } catch (e) {
+                this._olbUsersLoaded = false
+                console.warn('获取用户列表失败', e)
+                if (window.showError) window.showError('获取用户列表失败，OpenList 用户备份配置可能不准确：' + (e && e.message || e))
+            }
+            this.renderOpenlistUserConfig(users, config['openlist.userBackups'])
+            this.loadOpenlistBackups()
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('加载 OpenList 配置失败: ' + (e && e.message || e))
+        }
+    }
+
+    async saveOpenlistConfig() {
+        const form = document.getElementById('openlist-form')
+        if (!form) return
+        const fd = new FormData(form)
+        const userBackupsRaw = this.collectOpenlistUserBackups()
+        const cfg = {
+            'openlist.enable': fd.get('openlist.enable') === 'on',
+            'openlist.endpoint': (fd.get('openlist.endpoint') || '').trim(),
+            'openlist.token': fd.get('openlist.token'),
+            'openlist.root': (fd.get('openlist.root') || '').trim() || '/lx_music',
+            'openlist.includeNonAudio': fd.get('openlist.includeNonAudio') === 'on',
+            'openlist.externalUrl': (fd.get('openlist.externalUrl') || '').trim(),
+            'openlist.verifyInterval': parseInt(fd.get('openlist.verifyInterval')) || 5,
+            'openlist.syncInterval': parseInt(fd.get('openlist.syncInterval')) || 60,
+            // 仅当用户列表成功加载后才提交备份配置，避免失败时以空选择覆盖已保存规则
+            'openlist.userBackups': this._olbUsersLoaded ? userBackupsRaw : undefined,
+        }
+        // 仅当用户列表成功加载时，才根据「上传后删除」模式自动开启 Subsonic「缓存优先时优先使用 OpenList」，
+        // 避免本地被删后下次播放回源重下，而是直接命中 OpenList 直链（需 Subsonic「缓存优先」也已开启）。
+        if (this._olbUsersLoaded) {
+            try {
+                const arr = JSON.parse(userBackupsRaw)
+                if (cfg['openlist.enable'] && Array.isArray(arr) && arr.some(b => b && b.enabled && b.backupCache === true && b.mode === 'upload-delete')) {
+                    cfg['subsonic.playCacheFirst'] = true
+                    cfg['subsonic.playCacheFirstUseOpenlist'] = true
+                }
+            } catch {}
+        }
+        try {
+            const result = await this.request('/api/config', { method: 'POST', body: JSON.stringify(cfg) })
+            if (result.warning) {
+                if (window.showInfo) window.showInfo(result.warning)
+                else alert(result.warning)
+                return
+            }
+            if (window.showSuccess) window.showSuccess('OpenList 配置已保存')
+            else alert('OpenList 配置已保存')
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('保存失败: ' + (e && e.message || e))
+        }
+    }
+
+    toggleOpenlistVisibility() {
+        const form = document.getElementById('openlist-form')
+        const enabled = !!(form && form.elements['openlist.enable'] && form.elements['openlist.enable'].checked)
+        const opts = document.getElementById('openlist-options')
+        const hint = document.getElementById('openlist-disabled-hint')
+        if (opts) opts.style.display = enabled ? 'block' : 'none'
+        if (hint) hint.style.display = enabled ? 'none' : 'block'
+    }
+
+    renderOpenlistUserConfig(users, userBackupsRaw) {
+        let backups = []
+        try { backups = JSON.parse(userBackupsRaw || '[]') } catch {}
+        const selected = backups.map(b => b.user)
+        const labelMap = {}
+        users.forEach(u => { labelMap[u] = u })
+        this.renderSortableTagGroup('tag-group-openlist-users', 'openlist.userBackupUsers', selected, labelMap, users, true)
+        const container = document.getElementById('tag-group-openlist-users')
+        if (container) container.onclick = () => setTimeout(() => this.renderOpenlistUserDirs(backups), 0)
+        this.renderOpenlistUserDirs(backups)
+    }
+
+    renderOpenlistUserDirs(backups) {
+        const hidden = document.querySelector('input[name="openlist.userBackupUsers"]')
+        const selected = (hidden && hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [])
+        const dirsContainer = document.getElementById('openlist-user-dirs')
+        if (!dirsContainer) return
+        const map = {}
+        ;(backups || []).forEach(b => { map[b.user] = b })
+        const prev = {}
+        selected.forEach(u => {
+            const d = document.getElementById('openlist-dl-sw-' + u)
+            const c = document.getElementById('openlist-ca-sw-' + u)
+            const s = document.getElementById('openlist-snap-sw-' + u)
+            const m = document.getElementById('openlist-mode-' + u)
+            prev[u] = { download: d ? d.checked : null, cache: c ? c.checked : null, snapshot: s ? s.checked : null, mode: m ? m.value : '' }
+        })
+        const modeOptions = (sel) => ([
+            ['upload', '上传（保留本地）'],
+            ['upload-delete', '上传后删除本地'],
+            ['download', '下载（远端→本地）'],
+            ['sync', '双向同步'],
+        ]).map(([v, t]) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + t + '</option>').join('')
+        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：上传完成即删本地并清缓存索引；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
+        const toggleHtml = (id, checked) =>
+            '<label class="toggle-switch">' +
+            '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
+            '<span class="toggle-track"><span class="toggle-thumb"></span></span>' +
+            '</label>'
+        const escU = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+        dirsContainer.innerHTML = selected.map(u => {
+            const tpl = map[u] || {}
+            const caOn = (prev[u] && prev[u].cache !== null) ? prev[u].cache : (tpl.backupCache === true)
+            const md = (prev[u] && prev[u].mode) ? prev[u].mode : (tpl.mode || 'upload')
+            return '<div class="openlist-user-card">' +
+                '<div class="openlist-user-header">' +
+                    '<div class="openlist-user-badge">' +
+                        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>' +
+                        '<span>用户 <b>' + escU(u) + '</b> 的独立同步配置</span>' +
+                    '</div>' +
+                '</div>' +
+                '<div class="config-field-row" style="margin-top:0.6rem;">' +
+                    '<div class="config-field">' +
+                        '<label class="config-label">' +
+                            '<span>启用永久播放缓存</span>' +
+                            '<span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="自动使用该用户缓存目录，无需填写路径">?</span>' +
+                        '</label>' +
+                        '<div style="margin-top:4px;">' + toggleHtml('openlist-ca-sw-' + u, caOn) + '</div>' +
+                    '</div>' +
+                    '<div class="config-field">' +
+                        '<label class="config-label">' +
+                            '<span>同步模式</span>' +
+                            '<span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="' + modeHelp + '">?</span>' +
+                        '</label>' +
+                        '<select id="openlist-mode-' + u + '" class="form-input config-input" title="' + modeHelp + '" onchange="app.onOpenlistModeChange(this)">' + modeOptions(md) + '</select>' +
+                    '</div>' +
+                '</div>' +
+            '</div>'
+        }).join('')
+    }
+
+    /** 用户在 OpenList 备份里把某用户模式改为「上传后删除本地」时给出强提示：
+     *  该模式会清除本地缓存索引，下次播放将无本地缓存；为保证直接命中 OpenList 直链（而非回源重下），
+     *  保存时会自动开启 Subsonic 的「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
+    onOpenlistModeChange(sel) {
+        if (!sel || sel.value !== 'upload-delete') return
+        if (window.showInfo) {
+            window.showInfo('已选择「上传后删除本地」：该模式会在上传完成后清除本地缓存索引，下次播放将无本地缓存。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
+        }
+    }
+
+    collectOpenlistUserBackups() {
+        const hidden = document.querySelector('input[name="openlist.userBackupUsers"]')
+        const selected = (hidden && hidden.value ? hidden.value.split(',').map(s => s.trim()).filter(Boolean) : [])
+        return JSON.stringify(selected.map(u => {
+            const d = document.getElementById('openlist-dl-sw-' + u)
+            const c = document.getElementById('openlist-ca-sw-' + u)
+            const s = document.getElementById('openlist-snap-sw-' + u)
+            const m = document.getElementById('openlist-mode-' + u)
+            return { user: u, enabled: true, backupDownload: false, backupCache: c ? !!c.checked : false, backupSnapshot: false, mode: (m ? m.value : 'upload') }
+        }))
+    }
+
+    async testOpenlistConnection() {
+        const form = document.getElementById('openlist-form')
+        if (!form) return
+        const fd = new FormData(form)
+        const payload = {
+            endpoint: (fd.get('openlist.endpoint') || '').trim(),
+            token: fd.get('openlist.token'),
+            root: (fd.get('openlist.root') || '').trim() || '/lx_music',
+        }
+        if (!payload.endpoint) {
+            if (window.showError) window.showError('请先填写 OpenList 服务器地址')
+            return
+        }
+        try {
+            const r = await this.request('/api/openlist/test', { method: 'POST', body: JSON.stringify(payload) })
+            if (r && r.success && r.ok) {
+                if (window.showSuccess) window.showSuccess('OpenList 连接成功')
+                else alert('连接成功')
+            } else {
+                if (window.showError) window.showError('连接失败: ' + ((r && r.error) || '未知错误'))
+                else alert('连接失败: ' + ((r && r.error) || ''))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('测试连接出错: ' + (e && e.message || e))
+        }
+    }
+
+    async runOpenlistSync() {
+        try {
+            if (window.showInfo) window.showInfo('正在同步，请稍候…')
+            const r = await this.request('/api/openlist/sync', { method: 'POST', body: JSON.stringify({}) })
+            if (r && r.success) {
+                const s = r.summary || {}
+                const msg = '同步完成：上传 ' + (s.uploaded || 0) + '，下载 ' + (s.downloaded || 0) + '，删除 ' + (s.deleted || 0) +
+                    ((s.errors && s.errors.length) ? ('，错误 ' + s.errors.length + ' 项') : '')
+                if (window.showSuccess) window.showSuccess(msg)
+                else alert(msg)
+                if (s.errors && s.errors.length) console.warn('OpenList 同步错误', s.errors)
+                this.loadOpenlistBackups()
+            } else {
+                if (window.showError) window.showError('同步失败: ' + ((r && r.error) || (r.summary?.errors || []).join('；') || '未知错误'))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('同步出错: ' + (e && e.message || e))
+        }
+    }
+
+    async loadOpenlistBackups(silent) {
+        const box = document.getElementById('openlist-backups-list')
+        if (!box) return
+        if (!silent) box.innerHTML = '<div class="config-hint">加载中…</div>'
+        try {
+            const r = await this.request('/api/openlist/backups')
+            let list = (r && r.list) || []
+            // 状态指标卡：基于全量列表统计各状态数量（deleted 不计入 list，通常为 0）
+            const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
+            const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
+            const statusOrder = ['pending', 'uploading', 'completed', 'verified', 'failed', 'deleted']
+            const statusCounts = {}
+            for (const s of statusOrder) statusCounts[s] = 0
+            for (const f of list) { if (f && f.status && statusCounts[f.status] !== undefined) statusCounts[f.status]++ }
+            const cardsBox = document.getElementById('openlist-status-cards')
+            if (cardsBox) {
+              const activeStatus = (document.getElementById('olb-filter-status') || {}).value || ''
+              cardsBox.innerHTML = statusOrder.map((st) => {
+                const n = statusCounts[st] || 0
+                const color = STATUS_COLOR[st] || '#64748b'
+                const label = STATUS_LABEL[st] || st
+                const isActive = activeStatus === st ? ' active' : ''
+                return '<div class="olb-stat-card' + isActive + '" data-status="' + st + '" title="点击按「' + label + '」筛选" onclick="app.filterOpenlistByStatus(\'' + st + '\')" style="--stat-color:' + color + ';">' +
+                  '<div class="olb-stat-header">' +
+                    '<span class="olb-stat-dot" style="background:' + color + ';"></span>' +
+                    '<span class="olb-stat-label">' + label + '</span>' +
+                  '</div>' +
+                  '<div class="olb-stat-num" style="color:' + color + ';">' + n + '</div>' +
+                  '</div>'
+              }).join('')
+            }
+            // 填充「用户」筛选（仅在首次/选项不足时）
+            const userSel = document.getElementById('olb-filter-user')
+            if (userSel && userSel.options.length <= 1) {
+                const users = [...new Set(list.map(f => f.user).filter(Boolean))].sort()
+                users.forEach(u => { const o = document.createElement('option'); o.value = u; o.textContent = u; userSel.appendChild(o) })
+            }
+            const fu = document.getElementById('olb-filter-user')
+            const ff = document.getElementById('olb-filter-folder')
+            const fs2 = document.getElementById('olb-filter-status')
+            const fn = document.getElementById('olb-filter-name')
+            const fp = document.getElementById('olb-filter-path')
+            const uv = fu ? fu.value : ''
+            const fv = ff ? ff.value : ''
+            const sv = fs2 ? fs2.value : ''
+            const qn = (fn && fn.value ? fn.value : '').trim().toLowerCase()
+            const qp = (fp && fp.value ? fp.value : '').trim().toLowerCase()
+            list = list.filter(f => {
+                if (uv && f.user !== uv) return false
+                if (fv && f.folder_type !== fv) return false
+                if (sv && f.status !== sv) return false
+                if (qn) {
+                    const hay = ((f.name || '') + ' ' + (f.local_path || '') + ' ' + (f.remote_path || '')).toLowerCase()
+                    if (!hay.includes(qn)) return false
+                }
+                if (qp) {
+                    const hay = ((f.local_path || '') + ' ' + (f.remote_path || '')).toLowerCase()
+                    if (!hay.includes(qp)) return false
+                }
+                return true
+            })
+            const pageSize = this._olbPageSize || 50
+            const total = list.length
+            const totalPages = Math.max(1, Math.ceil(total / pageSize))
+            this._olbTotalPages = totalPages
+            if (!this._olbPage || this._olbPage < 1) this._olbPage = 1
+            if (this._olbPage > totalPages) this._olbPage = totalPages
+            const start = (this._olbPage - 1) * pageSize
+            if (!total) {
+                box.innerHTML = '<div class="olb-empty-state">' +
+                    '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" class="olb-empty-icon">' +
+                        '<path d="M19 11H5m14 0a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6a2 2 0 0 1 2-2m14 0V9a2 2 0 0 0-2-2M5 11V9a2 2 0 0 1 2-2m0 0V5a2 2 0 0 1 2-2h6a2 2 0 0 1 2 2v2M7 7h10"></path>' +
+                    '</svg>' +
+                    '<div class="olb-empty-title">暂无符合条件的备份记录</div>' +
+                    '<div class="olb-empty-desc">可尝试调整或清除上方筛选条件，或点击「立即全量同步」触发新同步</div>' +
+                '</div>'
+                return
+            }
+            const statusMap = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
+            const badgeColor = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
+            const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+            const fmtName = (f) => {
+                const nm = (f.name || '').toString().trim()
+                const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
+                return esc(base)
+            }
+            const fmtSize = (n) => {
+                n = Number(n) || 0
+                if (n < 1024) return n + ' B'
+                if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'
+                return (n / 1024 / 1024).toFixed(1) + ' MB'
+            }
+            this._olbPageIds = list.slice(start, start + pageSize).map(f => f.id)
+            const rows = list.slice(start, start + pageSize).map(f => {
+                const d = new Date(f.updated_at || f.created_at || Date.now())
+                const color = badgeColor[f.status] || '#64748b'
+                const label = statusMap[f.status] || f.status || ''
+                const typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                const canRetry = f.status !== 'verified' && f.status !== 'deleted'
+                const retryBtn = canRetry
+                    ? '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
+                    : '<span style="color:var(--text-secondary);">—</span>'
+                const hasLocal = !!f.local_exists
+                const localMark = hasLocal ? '<span style="color:#22c55e;font-weight:600;">✓</span>' : '<span style="color:#ef4444;font-weight:600;">✗</span>'
+                const pathStr = f.local_path || f.remote_path || ''
+                const errStr = f.error || ''
+                const errCell = errStr
+                    ? '<span style="color:#ef4444;font-size:.75rem;" title="' + esc(errStr) + '">' + esc(errStr.length > 50 ? errStr.slice(0, 50) + '…' : errStr) + '</span>'
+                    : '<span style="color:var(--text-secondary);">—</span>'
+                const sel = this._olbSelected || (this._olbSelected = new Set())
+                const checked = sel.has(f.id) ? 'checked' : ''
+                return '<tr>' +
+                    '<td style="text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
+                    '<td><span class="olb-user-tag">' + esc(f.user || '') + '</span></td>' +
+                    '<td style="white-space:nowrap;color:var(--text-secondary);">' + typeLabel + '</td>' +
+                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
+                    '<td style="text-align:center;white-space:nowrap;"><span class="olb-badge" style="--badge-color:' + color + ';"><span class="olb-badge-dot"></span>' + label + '</span></td>' +
+                    '<td style="white-space:nowrap;font-family:monospace;font-size:0.8rem;">' + fmtSize(f.size) + '</td>' +
+                    '<td style="text-align:center;">' + localMark + '</td>' +
+                    '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + errCell + '</td>' +
+                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString() + '</td>' +
+                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '</td>' +
+                    '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:.76rem;font-family:monospace;" title="' + esc(pathStr) + '">' + esc(pathStr) + '</td>' +
+                    '</tr>'
+            }).join('')
+            const pager = '<div class="olb-pager">' +
+                '<button type="button" class="btn-secondary" onclick="app.gotoOpenlistPage(1)">« 首页</button>' +
+                '<button type="button" class="btn-secondary" onclick="app.gotoOpenlistPage(Math.max(1,(app._olbPage||1)-1))">上一页</button>' +
+                '<span class="olb-pager-info">第 ' + this._olbPage + ' / ' + totalPages + ' 页（共 ' + total + ' 条）</span>' +
+                '<button type="button" class="btn-secondary" onclick="app.gotoOpenlistPage(Math.min(' + totalPages + ',(app._olbPage||1)+1))">下一页</button>' +
+                '<button type="button" class="btn-secondary" onclick="app.gotoOpenlistPage(' + totalPages + ')">末页 »</button>' +
+                '<select class="form-input config-input olb-select" style="width:auto;font-size:.78rem;" onchange="app.setOpenlistPageSize(this.value)">' +
+                '<option value="50"' + (pageSize === 50 ? ' selected' : '') + '>50/页</option>' +
+                '<option value="100"' + (pageSize === 100 ? ' selected' : '') + '>100/页</option>' +
+                '<option value="200"' + (pageSize === 200 ? ' selected' : '') + '>200/页</option>' +
+                '</select></div>'
+            box.innerHTML = '<div class="backup-table-wrapper olb-table-wrapper">' +
+                '<table class="backup-policy-table olb-records-table">' +
+                '<thead><tr>' +
+                '<th style="width:40px;text-align:center;"><input type="checkbox" id="olb-selall" onchange="app.toggleOpenlistSelectAll(this)"></th>' +
+                '<th style="width:80px;">用户</th>' +
+                '<th style="width:85px;">类型</th>' +
+                '<th>文件名</th>' +
+                '<th style="width:95px;text-align:center;">状态</th>' +
+                '<th style="width:85px;">大小</th>' +
+                '<th style="width:55px;text-align:center;">本地</th>' +
+                '<th>异常原因</th>' +
+                '<th style="width:145px;">更新时间</th>' +
+                '<th style="width:65px;text-align:center;">操作</th>' +
+                '<th>云端路径</th>' +
+                '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pager
+            this.updateOlbSelCount()
+        } catch (e) {
+            console.error(e)
+            box.innerHTML = '<div class="config-hint" style="color:var(--danger);">加载失败: ' + (e && e.message || e) + '</div>'
+        }
+    }
+
+    async retryOpenlistBackup(id) {
+        try {
+            const r = await this.request('/api/openlist/retry', { method: 'POST', body: JSON.stringify({ id }) })
+            if (r && r.success) {
+                if (window.showInfo) window.showInfo('已提交重试')
+                this.loadOpenlistBackups(true)
+            } else if (window.showError) {
+                window.showError('重试失败: ' + ((r && (r.message || r.error)) || '未知错误'))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    toggleOpenlistSelect(el) {
+        const id = parseInt(el.dataset.id)
+        if (!this._olbSelected) this._olbSelected = new Set()
+        if (el.checked) this._olbSelected.add(id); else this._olbSelected.delete(id)
+        this.updateOlbSelCount()
+    }
+
+    toggleOpenlistSelectAll(el) {
+        if (!this._olbSelected) this._olbSelected = new Set()
+        const ids = this._olbPageIds || []
+        ids.forEach(id => { if (el.checked) this._olbSelected.add(id); else this._olbSelected.delete(id) })
+        document.querySelectorAll('.olb-sel').forEach(cb => {
+            const id = parseInt(cb.dataset.id)
+            cb.checked = this._olbSelected.has(id)
+        })
+        this.updateOlbSelCount()
+    }
+
+    updateOlbSelCount() {
+        const n = this._olbSelected ? this._olbSelected.size : 0
+        const span = document.getElementById('olb-selcount')
+        if (span) span.textContent = n ? ('已选 ' + n + ' 项') : ''
+        const btn = document.getElementById('olb-bulkdel')
+        if (btn) btn.disabled = n === 0
+    }
+
+    async deleteSelectedOpenlist() {
+        if (!this._olbSelected || !this._olbSelected.size) return
+        const ids = Array.from(this._olbSelected)
+        if (!confirm('确认删除选中的 ' + ids.length + ' 条备份记录？\n将软删除记录并级联删除绑定的附件记录与文件（缓存音频副本一并删除；音乐库文件仅删记录不删本地）。')) return
+        try {
+            const r = await this.request('/api/openlist/delete', { method: 'POST', body: JSON.stringify({ ids }) })
+            if (r && r.success) {
+                this._olbSelected.clear()
+                if (window.showInfo) window.showInfo('已删除 ' + (r.deleted || 0) + ' 条记录')
+                this.loadOpenlistBackups()
+            } else if (window.showError) {
+                window.showError('删除失败: ' + ((r && r.error) || '未知错误'))
+            }
+        } catch (e) {
+            if (window.showError) window.showError('删除失败: ' + (e && e.message || e))
+        }
+    }
+
+    switchOpenlistTab(name) {
+        const map = {
+            config: ['tab-btn-openlist-config', 'openlist-pane-config'],
+            records: ['tab-btn-openlist-records', 'openlist-pane-records'],
+        }
+        for (const [btnId, paneId] of Object.values(map)) {
+            const b = document.getElementById(btnId); if (b) b.classList.remove('active')
+            const p = document.getElementById(paneId); if (p) p.classList.remove('active')
+        }
+        const [btnId, paneId] = map[name] || map.config
+        const b = document.getElementById(btnId); if (b) b.classList.add('active')
+        const p = document.getElementById(paneId); if (p) p.classList.add('active')
+        if (name === 'records') this.loadOpenlistBackups()
+    }
+
+    scheduleOpenlistReload() {
+        if (this._olbReloadTimer) clearTimeout(this._olbReloadTimer)
+        this._olbReloadTimer = setTimeout(() => { this._olbPage = 1; this.loadOpenlistBackups() }, 300)
+    }
+
+    clearOpenlistFilters() {
+        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
+            const el = document.getElementById(id); if (el) el.value = ''
+        })
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
+    applyOpenlistFilter() {
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
+    filterOpenlistByStatus(status) {
+        const el = document.getElementById('olb-filter-status')
+        if (!el) return
+        // 再次点击当前已选状态则取消筛选
+        el.value = (el.value === status) ? '' : status
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
+    gotoOpenlistPage(n) {
+        const tp = this._olbTotalPages || 1
+        n = Math.max(1, Math.min(tp, parseInt(n) || 1))
+        this._olbPage = n
+        this.loadOpenlistBackups(true)
+    }
+
+    setOpenlistPageSize(v) {
+        this._olbPageSize = parseInt(v) || 50
+        this._olbPage = 1
+        this.loadOpenlistBackups()
+    }
+
 
     async request(url, options = {}) {
         const defaultOptions = {
@@ -3868,7 +4448,7 @@ class App {
 
     async executeZipRestore(targetFilename, targetBasename) {
         const displayName = targetBasename ? `备份快照「${targetBasename}」` : '最新全量备份';
-        if (!(await showSelect('全量 ZIP 恢复', `⚠️ 警告：恢复${displayName}将覆盖本地数据！\n\n确定要立即恢复吗？建议恢复前确保本地数据已妥善归档。`, { danger: true }))) return;
+        if (!(await showSelect('全量 ZIP 恢复', `⚠️ 警告：恢复${displayName}将按已保存的备份类型覆盖同名本地文件！\n\n确定要立即恢复吗？建议恢复前确保本地数据已妥善归档。`, { danger: true }))) return;
 
         this.closeRestoreModal();
 
@@ -3876,7 +4456,7 @@ class App {
         if (statusEl) {
             statusEl.innerHTML = `<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-warning);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在从云端下载并恢复${displayName}...</span></div>`;
         }
-        this.showProgress(true, '全量快照还原', `正在从云端下载${displayName}并完全还原系统状态...`);
+        this.showProgress(true, '全量快照还原', `正在从云端下载${displayName}并恢复已选择的数据类型...`);
 
         try {
             const result = await this.request('/api/webdav/restore', {
@@ -3885,9 +4465,9 @@ class App {
             });
             if (result.success) {
                 if (statusEl) {
-                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 全量恢复成功！数据已更新，页面即将刷新...</p>';
+                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">恢复已完成。请重启服务，完整加载配置、用户数据和音乐索引。</p>';
                 }
-                setTimeout(() => location.reload(), 2000);
+
             } else {
                 if (statusEl) {
                     statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 恢复失败</p>';
@@ -3918,7 +4498,7 @@ class App {
             });
             if (result.success) {
                 if (statusEl) {
-                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 散文件已成功增量同步还原！</p>';
+                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">已按保存的类型恢复散文件。请重启服务完整加载数据。</p>';
                 }
                 this.loadSyncLogs();
             } else {
@@ -4864,7 +5444,7 @@ class App {
 
     // [新增] 本地备份下载
     async downloadLocalBackup() {
-        if (!(await showSelect('本地备份', '确定要创建并下载本地全量 ZIP 备份吗？\n\n数据将被打包压缩为 ZIP 文件并由浏览器直接下载。'))) return;
+        if (!(await showSelect('本地备份', '按系统设置中 WebDAV 已保存的类型打包本地 ZIP。不会上传到云端，也不包含 cache。确定下载吗？'))) return;
 
         this.showProgress(true, '本地 ZIP 备份下载', '正在打包服务器数据，请稍候...');
         this.setTaskStep(1);
@@ -4898,7 +5478,7 @@ class App {
         const file = event.target.files[0];
         if (!file) return;
 
-        if (!(await showSelect('还原数据', '确定要从上传的 ZIP 文件还原数据吗？\n\n⚠️ 警告：这将覆盖当前的服务器所有数据！\n强烈建议在还原前先手动下载一个本地备份。操作不可撤销。', { danger: true }))) {
+        if (!(await showSelect('还原数据', '按系统设置中 WebDAV 已保存的类型恢复 ZIP：覆盖同名本地文件，保留其他文件，不恢复 cache。恢复后需重启服务。请先保存当前数据的副本。', { danger: true }))) {
             event.target.value = '';
             return;
         }
@@ -4934,8 +5514,8 @@ class App {
             }
 
             const result = await response.json();
-            showSuccess('🎉 还原成功！数据已更新，页面将立即刷新以加载最新配置。');
-            setTimeout(() => window.location.reload(), 1500);
+            showSuccess(result.message || '还原成功，请重启服务完整加载数据。');
+            loadingOverlay.remove();
         } catch (err) {
             console.error(err);
             showError('本地还原失败: ' + err.message);
@@ -5037,13 +5617,106 @@ class App {
             modal.classList.add('hidden');
         }
     }
+
+    initCustomSelects() {
+        const selects = document.querySelectorAll('select.config-input, select.form-input, .config-field select, select.olb-select');
+        selects.forEach(sel => {
+            if (sel._lxInit) {
+                sel._lxSync?.();
+                return;
+            }
+            sel._lxInit = true;
+
+            const wrap = document.createElement('div');
+            wrap.className = 'lx-select' + (sel.classList.contains('olb-select') ? ' select-sm' : '');
+            sel.parentNode.insertBefore(wrap, sel);
+            wrap.appendChild(sel);
+            sel.classList.add('lx-select-native');
+
+            const trigger = document.createElement('div');
+            trigger.className = 'lx-select-trigger';
+            const text = document.createElement('span');
+            text.className = 'lx-select-text';
+            const arrow = document.createElement('div');
+            arrow.className = 'lx-select-arrow';
+            arrow.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;display:block;"><polyline points="6 9 12 15 18 9"/></svg>';
+            trigger.appendChild(text);
+            trigger.appendChild(arrow);
+            wrap.appendChild(trigger);
+
+            const menu = document.createElement('div');
+            menu.className = 'lx-select-menu';
+            wrap.appendChild(menu);
+
+            const sync = () => {
+                const opt = sel.options[sel.selectedIndex] || sel.options[0];
+                text.textContent = opt ? opt.textContent : '';
+                menu.querySelectorAll('.lx-select-item').forEach(it => {
+                    it.classList.toggle('is-selected', it.dataset.value === (opt ? opt.value : ''));
+                });
+            };
+
+            const render = () => {
+                menu.innerHTML = '';
+                Array.from(sel.options).forEach(opt => {
+                    const item = document.createElement('div');
+                    item.className = 'lx-select-item' + (opt.value === sel.value ? ' is-selected' : '');
+                    item.dataset.value = opt.value;
+                    item.textContent = opt.textContent;
+                    item.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        if (sel.value !== opt.value) {
+                            sel.value = opt.value;
+                            sel.dispatchEvent(new Event('change', { bubbles: true }));
+                            sel.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                        sync();
+                        wrap.classList.remove('is-open');
+                    });
+                    menu.appendChild(item);
+                });
+            };
+
+            trigger.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const isOpen = wrap.classList.contains('is-open');
+                document.querySelectorAll('.lx-select.is-open').forEach(el => el.classList.remove('is-open'));
+                if (!isOpen) {
+                    render();
+                    sync();
+                    const rect = wrap.getBoundingClientRect();
+                    const spaceBelow = window.innerHeight - rect.bottom;
+                    if (spaceBelow < 220 && rect.top > 200) {
+                        wrap.classList.add('drop-up');
+                    } else {
+                        wrap.classList.remove('drop-up');
+                    }
+                    wrap.classList.add('is-open');
+                }
+            });
+
+            sel.addEventListener('change', sync);
+            sel._lxSync = sync;
+            render();
+            sync();
+        });
+    }
+
+    syncCustomSelects() {
+        document.querySelectorAll('select.lx-select-native').forEach(sel => {
+            sel._lxSync?.();
+        });
+    }
 }
 
-// 监听点击外部关闭下拉菜单
+// 监听点击外部关闭下拉菜单与自定义选择器
 document.addEventListener('click', (e) => {
     if (!e.target.closest('.custom-user-selector')) {
         document.querySelectorAll('.selector-dropdown').forEach(d => d.classList.add('hidden'));
         document.querySelectorAll('.custom-user-selector').forEach(s => s.classList.remove('open'));
+    }
+    if (!e.target.closest('.lx-select')) {
+        document.querySelectorAll('.lx-select.is-open').forEach(el => el.classList.remove('is-open'));
     }
 });
 

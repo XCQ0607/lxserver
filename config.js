@@ -3,6 +3,13 @@
  * 配置优先级：WEBDAV备份数据 > 环境变量 > config.js (本文件) > src/defaultConfig.ts (默认配置)
  */
 module.exports = {
+  // 云端备份类型：music=仅 data/music 歌曲与歌词；userFiles=音源/用户文件；
+  // snapshots=歌单与不喜欢快照；userData=用户 JSON 数据；system=系统配置与账户。
+  // cache、runtime、日志、备份临时文件不属于数据备份；关闭某类不会删除已有云端副本。
+  'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.webdav.mirrorDeletes': false,
+  'backup.webdav.restoreOnStartup': false,
   // 同步服务名称
   // 环境变量: SERVER_NAME
   "serverName": "lxserver",
