@@ -35,8 +35,8 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `WEBDAV_BACKUP_PATH` | `webdav.backupPath` | WebDAV remote backup path | `/lx-sync-backups` |
 | `SYNC_INTERVAL` | `sync.interval` | WebDAV incremental sync interval (min) | `60` |
 | `BACKUP_INTERVAL` | `sync.backupInterval` | WebDAV full backup interval (hours) | `24` |
-| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Exclude cache dir from sync (`data/cache/<user>`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
-| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Exclude music/download dir from sync (`data/music/<user>`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Legacy compatibility; data backup now always excludes caches | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Legacy fallback; explicit backup type arrays take precedence | `false` |
 | `ENABLE_WEBPLAYER_AUTH` | `player.enableAuth` | Enable Web Player password | `false` |
 | `WEBPLAYER_PASSWORD` | `player.password` | Web Player password | `123456` |
 | `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |
@@ -105,7 +105,7 @@ Keep `subsonic-local-registry.json` and `subsonic-local-state.json` with user da
 
 Playlist snapshots restore playlists; configuration backups restore configuration. Neither substitutes for audio backups. Configuration backups default to a seven-day retention period under the data directory's `backups/` folder.
 
-WebDAV supports remote sync and backups. Startup with WebDAV configured can restore remote data and reload configuration/accounts. Confirm the remote namespace before connecting a new installation. `WEBDAV_EXCLUDE_CACHE` and `WEBDAV_EXCLUDE_MUSIC` exclude the corresponding audio folders within data; they do not back up external or root-directory libraries for you.
+WebDAV and OpenList use the data types selected in **System settings → Cloud backup scope**. Startup restore is off by default and requires `backup.webdav.restoreOnStartup=true`. `backup.webdav.types` and `backup.openlist.types` independently select each destination's scope. Music means `data/music`; cache and external libraries are excluded. See [Cloud backup and recovery](./backup-recovery.md) for provider behavior, compatibility and restore steps.
 
 For container updates:
 

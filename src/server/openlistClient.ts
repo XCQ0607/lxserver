@@ -9,6 +9,7 @@
  */
 import fs from 'node:fs'
 import path from 'node:path'
+import { randomUUID, createHash } from 'node:crypto'
 import { Readable } from 'node:stream'
 import { pipeline } from 'node:stream/promises'
 
@@ -27,6 +28,8 @@ export interface OpenListFileInfo {
   name?: string
   modified?: string
 }
+
+export class OpenListNotFoundError extends Error {}
 
 const encodePath = (p: string) => p.split('/').map((s) => encodeURIComponent(s)).join('/')
 
@@ -82,6 +85,20 @@ export class OpenListClient {
     return { Authorization: this.token || this.directToken || '' }
   }
 
+  private async request(route: string, init: RequestInit): Promise<Response> {
+    await this.ensureToken(init.signal || undefined)
+    const send = () => fetch(`${this.endpoint}${route}`, { ...init, headers: { ...init.headers, ...this.authHeader() } })
+    const response = await send()
+    const data: any = await response.clone().json().catch(() => ({}))
+    if (!this.directToken && (response.status === 401 || data.code === 401)) {
+      await response.body?.cancel()
+      this.token = null
+      await this.ensureToken(init.signal || undefined)
+      return send()
+    }
+    return response
+  }
+
   /** 拼接完整远端路径：root + 相对路径 */
   resolveRemotePath(relativePath: string): string {
     const rel = relativePath.replace(/^\/+/, '')
@@ -97,13 +114,14 @@ export class OpenListClient {
     let total = 0
     // 按 total 分页累积所有条目，避免单页(默认 100)截断导致 listFilesRecursive 漏文件
     do {
-      const resp = await fetch(`${this.endpoint}/api/fs/list`, {
+      const resp = await this.request('/api/fs/list', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...this.authHeader() },
         body: JSON.stringify({ path: p, password: '', page, per_page: perPage }),
         signal: signal ?? AbortSignal.timeout(META_TIMEOUT_MS),
       })
       const data: any = await resp.json().catch(() => ({}))
+      if (resp.status === 404 || data?.code === 404) throw new OpenListNotFoundError('OpenList 目录不存在：' + p)
       if (data?.code !== 200) throw new Error('OpenList 列目录失败：' + (data?.message || resp.status))
       const d = data.data || {}
       const items: any[] = d.content || []
@@ -118,7 +136,7 @@ export class OpenListClient {
 
   async mkdir(dir: string): Promise<void> {
     await this.ensureToken()
-    const resp = await fetch(`${this.endpoint}/api/fs/mkdir`, {
+    const resp = await this.request('/api/fs/mkdir', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeader() },
       body: JSON.stringify({ path: dir }),
@@ -161,7 +179,7 @@ export class OpenListClient {
       password: '',
       'last-modified': goTime(),
     }
-    const resp = await fetch(`${this.endpoint}/api/fs/put`, {
+    const resp = await this.request('/api/fs/put', {
       method: 'PUT',
       headers,
       body: buf,
@@ -170,6 +188,8 @@ export class OpenListClient {
     const text = await resp.text()
     let data: any = {}
     try { data = JSON.parse(text) } catch { /* 非 JSON 响应 */ }
+    const code = Number(data?.code || resp.status)
+    if (code !== 200 && code !== 500) throw new Error('OpenList 上传被拒绝：' + (data?.message || code))
     const info = await this.pollFileInfo(remotePath, TRANSFER_TIMEOUT_MS, expectedSize)
     if (info && info.size != null) {
       return { ...info, name: info.name || path.basename(remotePath) }
@@ -179,13 +199,14 @@ export class OpenListClient {
 
   async getFileInfo(remotePath: string): Promise<OpenListFileInfo> {
     await this.ensureToken()
-    const resp = await fetch(`${this.endpoint}/api/fs/get`, {
+    const resp = await this.request('/api/fs/get', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeader() },
       body: JSON.stringify({ path: remotePath, password: '' }),
       signal: AbortSignal.timeout(META_TIMEOUT_MS),
     })
     const data: any = await resp.json().catch(() => ({}))
+    if (resp.status === 404 || data?.code === 404) throw new OpenListNotFoundError('OpenList 文件不存在：' + remotePath)
     if (data?.code !== 200) throw new Error('OpenList 获取文件信息失败：' + (data?.message || resp.status))
     const d = data.data || {}
     return {
@@ -201,7 +222,7 @@ export class OpenListClient {
     await this.ensureToken()
     const dir = path.posix.dirname(remotePath)
     const name = path.posix.basename(remotePath)
-    const resp = await fetch(`${this.endpoint}/api/fs/remove`, {
+    const resp = await this.request('/api/fs/remove', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...this.authHeader() },
       body: JSON.stringify({ dir, names: [name] }),
@@ -209,6 +230,17 @@ export class OpenListClient {
     })
     const data: any = await resp.json().catch(() => ({}))
     if (data?.code !== 200) throw new Error('OpenList 删除失败：' + (data?.message || resp.status))
+  }
+
+  /** 删除唯一的本地副本前，校验远端实际字节，不能只相信同名文件的大小。 */
+  async verifyFile(remotePath: string, expectedHash: string): Promise<boolean> {
+    const info = await this.getFileInfo(remotePath)
+    if (!info.rawUrl) return false
+    const resp = await fetch(info.rawUrl, { signal: AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
+    if (!resp.ok || !resp.body) { await resp.body?.cancel(); return false }
+    const hash = createHash('sha256')
+    for await (const chunk of Readable.fromWeb(resp.body as any)) hash.update(chunk)
+    return hash.digest('hex') === expectedHash
   }
 
   /**
@@ -255,11 +287,14 @@ export class OpenListClient {
     const url = info.rawUrl
     if (!url) throw new Error('OpenList 无法获取下载直链：' + remotePath)
     // 先写入临时文件，全部落盘成功后再 rename，避免半截文件覆盖/残留
-    const tmpPath = localPath + '.oltmp'
+    const tmpPath = localPath + '.' + randomUUID() + '.oltmp'
     try {
       const resp = await fetch(url, { signal: signal ?? AbortSignal.timeout(TRANSFER_TIMEOUT_MS) })
       if (!resp.ok) throw new Error('OpenList 下载失败：' + resp.status)
       await pipeline(Readable.fromWeb(resp.body as any), fs.createWriteStream(tmpPath))
+      if (info.size == null || (await fs.promises.stat(tmpPath)).size !== info.size) {
+        throw new Error('OpenList 下载文件大小与远端不一致')
+      }
       await fs.promises.rename(tmpPath, localPath)
     } catch (e) {
       await fs.promises.rm(tmpPath, { force: true }).catch(() => {})

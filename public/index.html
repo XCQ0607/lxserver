@@ -973,6 +973,80 @@
                             </div>
                         </div>
 
+                        <div id="config-card-cloudbackup" class="config-card glass backup-policy-card">
+                            <div class="config-card-header">
+                                <div class="config-card-icon"
+                                    style="background: linear-gradient(135deg, #0284c7, #2563eb);">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z" />
+                                        <polyline points="16 16 12 12 8 16" />
+                                        <line x1="12" y1="12" x2="12" y2="21" />
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="config-card-title">云端备份范围</h3>
+                                    <p class="config-card-desc">按数据类型选择目的地。备份与恢复使用这里已保存的范围。</p>
+                                </div>
+                            </div>
+                            <div class="config-card-body">
+                                <div id="backup-policy-matrix" aria-live="polite">
+                                    <div class="backup-matrix-placeholder">
+                                        <span class="config-hint">正在加载备份范围…</span>
+                                    </div>
+                                </div>
+                                <div class="backup-policy-banner">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="backup-banner-icon">
+                                        <circle cx="12" cy="12" r="10"></circle>
+                                        <line x1="12" y1="16" x2="12" y2="12"></line>
+                                        <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                    </svg>
+                                    <span>歌曲只来自 <code>data/music</code>。cache、runtime、日志、临时文件及本地备份包始终排除。关闭类型不会删除已有云端文件。</span>
+                                </div>
+                                <div class="backup-options-group">
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">WebDAV 增量备份同时删除云端对应文件</span>
+                                            <span class="config-toggle-desc">默认关闭：本地删除后仍保留云端副本。开启后属于镜像同步；ZIP 历史备份不受影响。</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="backup.webdav.mirrorDeletes" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="config-divider"></div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">启动时从 WebDAV 恢复所选类型</span>
+                                            <span class="config-toggle-desc">默认关闭。恢复会覆盖所选类型中的同名本地文件；不会删除本地独有文件，也不会反向上传。</span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="backup.webdav.restoreOnStartup" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                </div>
+                                <div class="backup-policy-actions">
+                                    <button type="button" class="btn-primary" onclick="app.saveBackupPolicy()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                            <polyline points="7 3 7 8 15 8"></polyline>
+                                        </svg>
+                                        保存备份范围
+                                    </button>
+                                    <button type="button" class="btn-secondary" onclick="app.switchView('openlist')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                                            <polyline points="15 3 21 3 21 9"></polyline>
+                                            <line x1="10" y1="14" x2="21" y2="3"></line>
+                                        </svg>
+                                        OpenList 连接与记录
+                                    </button>
+                                </div>
+                                <p id="backup-policy-status" class="config-hint" role="status"></p>
+                            </div>
+                        </div>
+
                         <!-- WebDAV 配置卡片 -->
                         <div id="config-card-webdav" class="config-card glass">
                             <div class="config-card-header">
@@ -1048,31 +1122,7 @@
                                             value="24" min="1" />
                                         <small class="config-hint">用于定时自动创建 ZIP 全量备份包并上传至云端</small>
                                     </div>
-                                    <div class="config-divider"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">排除缓存目录同步</span>
-                                            <span class="config-toggle-desc">开启后 data/&lt;用户&gt;/cache
-                                                目录将不参与增量同步及全量备份（已同步至云端的文件不会被删除）</span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="webdav.excludeCache" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-divider"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">排除下载目录同步</span>
-                                            <span class="config-toggle-desc">开启后 data/&lt;用户&gt;/music
-                                                目录将不参与增量同步及全量备份（已同步至云端的文件不会被删除）</span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="webdav.excludeMusic" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-divider"></div>
+                                    <p class="config-hint">备份内容统一在上方「云端备份范围」中设置；增量文件与 ZIP 使用相同范围。</p>
                                     <div
                                         style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0 0.1rem;">
                                         <span style="font-size: 0.8rem; color: var(--text-secondary);">💡
@@ -2077,7 +2127,7 @@
                                         </svg>
                                     </div>
                                     <h4>打包本地备份</h4>
-                                    <p>即时创建全量 ZIP 并由浏览器直接下载保存至本地</p>
+                                    <p>按 WebDAV 已保存的备份类型打包 ZIP，下载到本地，不上传云端</p>
                                     <div class="card-action-tag tag-emerald">ZIP 下载</div>
                                 </button>
                                 <button id="restore-local-btn" class="action-card glass border-amber">
@@ -2090,7 +2140,7 @@
                                         </svg>
                                     </div>
                                     <h4>上传还原备份</h4>
-                                    <p>选择本地已有的 ZIP 备份包一键还原并自动热重载数据</p>
+                                    <p>按 WebDAV 已保存的类型恢复本地 ZIP；恢复后重启服务完整加载</p>
                                     <div class="card-action-tag tag-amber">离线恢复</div>
                                 </button>
                             </div>
@@ -2353,17 +2403,23 @@
 
                 <!-- OpenList 备份配置视图 -->
                 <div id="view-openlist" class="view">
-                    <style>
-                        .help-icon{display:inline-flex;align-items:center;justify-content:center;width:15px;height:15px;margin-left:.35rem;border-radius:50%;cursor:pointer;user-select:none;background:var(--accent,#3b82f6);color:#fff;font-size:10px;font-weight:700;line-height:1;vertical-align:middle;}
-                        .help-icon:hover{opacity:.85;}
-                        .help-pop{position:absolute;z-index:9999;max-width:300px;width:max-content;background:#20242e;color:#e5e7eb;border:1px solid rgba(255,255,255,.14);border-radius:8px;padding:.55rem .7rem;font-size:.8rem;line-height:1.55;box-shadow:0 8px 24px rgba(0,0,0,.4);white-space:normal;}
-                    </style>
                     <div class="webdav-container">
-                        <div class="backup-segmented-tabs glass" style="margin-bottom:1rem;">
+                        <div class="backup-segmented-tabs glass" style="margin-bottom:1.25rem;">
                             <button type="button" class="backup-tab-btn active" id="tab-btn-openlist-config" onclick="app.switchOpenlistTab('config')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
                                 <span>备份配置</span>
                             </button>
                             <button type="button" class="backup-tab-btn" id="tab-btn-openlist-records" onclick="app.switchOpenlistTab('records')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                                    <polyline points="14 2 14 8 20 8"></polyline>
+                                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                                    <polyline points="10 9 9 9 8 9"></polyline>
+                                </svg>
                                 <span>文件记录</span>
                             </button>
                         </div>
@@ -2382,7 +2438,11 @@
                                 <div class="config-card-body">
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">启用Openlist同步 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后按用户配置把音频/歌单/系统配置备份到 OpenList">?</span></span>
+                                            <span class="config-toggle-label">
+                                                <span>启用 OpenList 同步</span>
+                                                <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后按系统设置中的类型备份数据；高级播放缓存可按用户单独启用。">?</span>
+                                            </span>
+                                            <span class="config-toggle-desc">开启或关闭 OpenList 云端数据备份与播放缓存</span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="openlist.enable" id="openlist-enable" />
@@ -2391,64 +2451,81 @@
                                     </div>
                                     <div id="openlist-options" style="display:none;">
                                         <div class="config-divider"></div>
-                                        <div class="config-field">
-                                            <label class="config-label">OpenList 服务器地址</label>
-                                            <input type="text" name="openlist.endpoint" class="form-input config-input" placeholder="http://127.0.0.1:5244" />
-                                        </div>
-                                        <div class="config-field">
-                                            <label class="config-label">令牌（OpenList API Token）</label>
-                                            <input type="password" name="openlist.token" class="form-input config-input" placeholder="openlist-xxxx" autocomplete="off" />
-                                            <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="在 OpenList 网页「设置 → 其他」中生成；所有接口均通过令牌认证，不再支持账号密码方式">?</span>
-                                        </div>
-                                        <div class="config-field">
-                                            <label class="config-label">OpenList 外网地址（可选）</label>
-                                            <input type="text" name="openlist.externalUrl" class="form-input config-input" placeholder="留空则同服务器地址" />
-                                            <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="客户端直连 OpenList 时使用的公网地址；若 OpenList 部署在内网，此处填其公网反代地址。结尾斜杠可写可不写">?</span>
-                                        </div>
-                                        <div class="config-field">
-                                            <label class="config-label">根目录（OpenList 挂载名）</label>
-                                            <input type="text" name="openlist.root" class="form-input config-input" placeholder="/tyCloud" />
-                                            <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="OpenList 中的挂载路径，例如天翼云盘为 /tyCloud">?</span>
+                                        <div class="config-field-row">
+                                            <div class="config-field">
+                                                <label class="config-label">
+                                                    <span>OpenList 服务器地址</span>
+                                                </label>
+                                                <input type="text" name="openlist.endpoint" class="form-input config-input" placeholder="http://127.0.0.1:5244" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-label">
+                                                    <span>令牌（OpenList API Token）</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="在 OpenList 网页「设置 → 其他」中生成；所有接口均通过令牌认证，不再支持账号密码方式">?</span>
+                                                </label>
+                                                <input type="password" name="openlist.token" class="form-input config-input" placeholder="openlist-xxxx" autocomplete="off" />
+                                            </div>
                                         </div>
                                         <div class="config-field-row">
                                             <div class="config-field">
-                                                <label class="config-label">验证轮询间隔（分钟）</label>
+                                                <label class="config-label">
+                                                    <span>OpenList 外网地址（可选）</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="客户端直连 OpenList 时使用的公网地址；若 OpenList 部署在内网，此处填其公网反代地址。结尾斜杠可写可不写">?</span>
+                                                </label>
+                                                <input type="text" name="openlist.externalUrl" class="form-input config-input" placeholder="留空则同服务器地址" />
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-label">
+                                                    <span>根目录（OpenList 挂载名）</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="OpenList 中的挂载路径，例如天翼云盘为 /tyCloud">?</span>
+                                                </label>
+                                                <input type="text" name="openlist.root" class="form-input config-input" placeholder="/tyCloud" />
+                                            </div>
+                                        </div>
+                                        <div class="config-divider"></div>
+                                        <div class="config-field-row">
+                                            <div class="config-field">
+                                                <label class="config-label">
+                                                    <span>验证轮询间隔（分钟）</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="轮询确认文件已落库后标记为「已验证」">?</span>
+                                                </label>
                                                 <input type="number" name="openlist.verifyInterval" class="form-input config-input" value="5" min="1" />
-                                                <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="轮询确认文件已落库后标记为「已验证」">?</span>
                                             </div>
-                                            <div class="config-toggle-row" style="flex:1;">
-                                                <div class="config-toggle-info">
-                                                    <span class="config-toggle-label">上传后保留本地文件</span>
-                                                </div>
-                                                <label class="toggle-switch">
-                                                    <input type="checkbox" name="openlist.keepLocalAfterUpload" />
-                                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            <div class="config-field">
+                                                <label class="config-label">
+                                                    <span>同步间隔（分钟）</span>
                                                 </label>
-                                            </div>
-                                            <div class="config-toggle-row" style="flex:1;">
-                                                <div class="config-toggle-info">
-                                                    <span class="config-toggle-label">备份目录中的图片等非音频文件</span>
-                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片也会一并上传">?</span>
-                                                </div>
-                                                <label class="toggle-switch">
-                                                    <input type="checkbox" name="openlist.includeNonAudio" />
-                                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                                </label>
+                                                <input type="number" name="openlist.syncInterval" class="form-input config-input" value="60" min="1" />
+                                                <small class="config-hint">按已保存的范围备份数据，并检查高级播放缓存规则。</small>
                                             </div>
                                         </div>
                                         <div class="config-toggle-row">
                                             <div class="config-toggle-info">
-                                                <span class="config-toggle-label">同步系统配置到 OpenList <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，每次「立即同步」会把本服务的 config.js 备份上传到 OpenList（路径 &lt;root&gt;/_system/config.js），作为云端灾备">?</span></span>
+                                                <span class="config-toggle-label">
+                                                    <span>播放缓存同时上传封面与歌词</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词也会一并上传">?</span>
+                                                </span>
+                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本</span>
                                             </div>
                                             <label class="toggle-switch">
-                                                <input type="checkbox" name="openlist.backupSystemConfig" />
+                                                <input type="checkbox" name="openlist.includeNonAudio" />
                                                 <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                             </label>
                                         </div>
+                                        <div class="backup-policy-banner">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="backup-banner-icon">
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                            </svg>
+                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地；如需恢复请使用下方恢复按钮。</span>
+                                        </div>
                                         <div class="config-divider"></div>
                                         <div class="config-field">
-                                            <label class="config-label">备份用户（多选）</label>
-                                            <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="选择开启音频备份的用户；每个用户可单独开关下载 / 缓存目录备份（路径自动使用该用户的音乐 / 缓存目录，无需手动填写）">?</span>
+                                            <label class="config-label">
+                                                <span>播放缓存用户（高级，可选）</span>
+                                                <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="仅配置 OpenList 永久播放缓存，和数据备份范围独立。歌曲数据备份不会读取 cache。">?</span>
+                                            </label>
                                             <div id="tag-group-openlist-users" class="tag-group-container"></div>
                                             <input type="hidden" name="openlist.userBackupUsers" />
                                         </div>
@@ -2456,15 +2533,64 @@
                                     </div>
                                     <div id="openlist-disabled-hint" style="display:none;">
                                         <div class="config-divider"></div>
-                                        <p style="color:var(--text-secondary);text-align:center;padding:1rem 0;">请先开启 OpenList 音频备份以配置详细参数</p>
+                                        <p style="color:var(--text-secondary);text-align:center;padding:1.5rem 0;">请先开启 OpenList 数据备份与播放缓存以配置详细参数</p>
                                     </div>
                                 </div>
                             </div>
-                            <div class="config-actions" style="display:flex;flex-wrap:wrap;gap:.6rem;align-items:center;">
-                                <button type="button" class="btn-primary" style="width:auto;" onclick="app.saveOpenlistConfig()">保存配置</button>
-                                <button type="button" class="btn-secondary" style="width:auto;" onclick="app.loadOpenlistConfig()">重新加载</button>
-                                <button type="button" class="btn-secondary" style="width:auto;" onclick="app.testOpenlistConnection()">测试连接</button>
-                                <button type="button" class="btn-secondary" style="width:auto;" onclick="app.runOpenlistSync()">立即同步</button>
+                            <div class="openlist-actions-bar glass">
+                                <div class="actions-group config-core-actions">
+                                    <button type="button" class="btn-primary" onclick="app.saveOpenlistConfig()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                            <polyline points="17 21 17 13 7 13 7 21"></polyline>
+                                            <polyline points="7 3 7 8 15 8"></polyline>
+                                        </svg>
+                                        保存配置
+                                    </button>
+                                    <button type="button" class="btn-secondary" onclick="app.loadOpenlistConfig()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M23 4v6h-6"></path>
+                                            <path d="M1 20v-6h6"></path>
+                                            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+                                        </svg>
+                                        重新加载
+                                    </button>
+                                    <button type="button" class="btn-secondary" onclick="app.testOpenlistConnection()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M5 12.55a11 11 0 0 1 14.08 0"></path>
+                                            <path d="M1.42 9a16 16 0 0 1 21.16 0"></path>
+                                            <path d="M8.53 16.11a6 6 0 0 1 6.95 0"></path>
+                                            <line x1="12" y1="20" x2="12.01" y2="20"></line>
+                                        </svg>
+                                        测试连接
+                                    </button>
+                                </div>
+                                <div class="actions-divider-v"></div>
+                                <div class="actions-group sync-ops-actions">
+                                    <button type="button" class="btn-secondary btn-sync-highlight" onclick="app.runOpenlistSync()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="17 8 12 3 7 8"></polyline>
+                                            <line x1="12" y1="3" x2="12" y2="15"></line>
+                                        </svg>
+                                        立即备份 / 同步缓存
+                                    </button>
+                                    <button type="button" class="btn-secondary" onclick="app.restoreOpenlistBackup()">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                            <polyline points="7 10 12 15 17 10"></polyline>
+                                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                                        </svg>
+                                        恢复所选数据类型
+                                    </button>
+                                    <button type="button" class="btn-secondary" onclick="app.switchView('config')">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                            <circle cx="12" cy="12" r="3"></circle>
+                                            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                        </svg>
+                                        设置备份范围
+                                    </button>
+                                </div>
                             </div>
                         </form>
                         </div><!-- /openlist-pane-config -->
@@ -2475,38 +2601,72 @@
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3v18h18"></path><path d="M7 14l4-4 3 3 5-5"></path></svg>
                                 </div>
                                 <div>
-                                    <h3 class="config-card-title">同步状态 <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="查看已备份文件与同步结果（含图片等附件计数）">?</span></h3>
+                                    <h3 class="config-card-title">
+                                        <span>同步状态与文件记录</span>
+                                        <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="查看已备份文件与同步结果（含图片等附件计数）">?</span>
+                                    </h3>
+                                    <p class="config-card-desc">实时查看文件备份进度、验证状态及失败重试</p>
                                 </div>
                             </div>
-                            <div id="openlist-status-cards" class="olb-status-cards" style="display:flex;flex-wrap:wrap;gap:.6rem;margin:.4rem 0 .2rem;"></div>
                             <div class="config-card-body">
-                                <div class="config-actions" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin-bottom:.6rem;">
-                                    <button type="button" class="btn-primary" style="width:auto;" onclick="app.runOpenlistSync()">立即全量同步</button>
-                                    <button type="button" id="olb-bulkdel" class="btn-secondary" style="width:auto;padding:.3rem .7rem;font-size:.8rem;" onclick="app.deleteSelectedOpenlist()" disabled>批量删除</button>
-                                    <span id="olb-selcount" style="font-size:.8rem;color:var(--text-secondary);"></span>
+                                <div id="openlist-status-cards" class="olb-status-cards"></div>
+                                <div class="olb-toolbar">
+                                    <div class="olb-actions-row">
+                                        <button type="button" class="btn-primary" onclick="app.runOpenlistSync()">
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                                <polyline points="17 8 12 3 7 8"></polyline>
+                                                <line x1="12" y1="3" x2="12" y2="15"></line>
+                                            </svg>
+                                            立即全量同步
+                                        </button>
+                                        <button type="button" id="olb-bulkdel" class="btn-secondary btn-danger-soft" onclick="app.deleteSelectedOpenlist()" disabled>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                                <polyline points="3 6 5 6 21 6"></polyline>
+                                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                            </svg>
+                                            批量删除
+                                        </button>
+                                        <span id="olb-selcount" class="olb-selcount-badge"></span>
+                                    </div>
+                                    <div class="olb-filters-row">
+                                        <select id="olb-filter-user" class="form-input config-input olb-select" onchange="app.applyOpenlistFilter()"><option value="">全部用户</option></select>
+                                        <select id="olb-filter-folder" class="form-input config-input olb-select" onchange="app.applyOpenlistFilter()">
+                                            <option value="">全部目录</option>
+                                            <option value="music">下载</option>
+                                            <option value="data">数据备份</option>
+                                            <option value="cache">播放缓存</option>
+                                        </select>
+                                        <select id="olb-filter-status" class="form-input config-input olb-select" onchange="app.applyOpenlistFilter()">
+                                            <option value="">全部状态</option>
+                                            <option value="pending">待上传</option>
+                                            <option value="uploading">进行中</option>
+                                            <option value="completed">已完成</option>
+                                            <option value="verified">已验证</option>
+                                            <option value="failed">失败</option>
+                                            <option value="deleted">已删除</option>
+                                        </select>
+                                        <input type="text" id="olb-filter-name" class="form-input config-input olb-input" placeholder="文件名搜索" oninput="app.scheduleOpenlistReload()" />
+                                        <input type="text" id="olb-filter-path" class="form-input config-input olb-input" placeholder="路径包含搜索" oninput="app.scheduleOpenlistReload()" />
+                                        <div class="olb-filter-btns">
+                                            <button type="button" class="btn-primary" onclick="app.loadOpenlistBackups()">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                                    <circle cx="11" cy="11" r="8"></circle>
+                                                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                                </svg>
+                                                查询
+                                            </button>
+                                            <button type="button" class="btn-secondary" onclick="app.clearOpenlistFilters()">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;">
+                                                    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+                                                    <path d="M3 3v5h5"></path>
+                                                </svg>
+                                                清除
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div class="config-actions" style="display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;">
-                                    <select id="olb-filter-user" class="form-input config-input" style="width:auto;" onchange="app.applyOpenlistFilter()"><option value="">全部用户</option></select>
-                                    <select id="olb-filter-folder" class="form-input config-input" style="width:auto;" onchange="app.applyOpenlistFilter()">
-                                        <option value="">全部目录</option>
-                                        <option value="music">下载</option>
-                                        <option value="cache">缓存</option>
-                                    </select>
-                                    <select id="olb-filter-status" class="form-input config-input" style="width:auto;" onchange="app.applyOpenlistFilter()">
-                                        <option value="">全部状态</option>
-                                        <option value="pending">待上传</option>
-                                        <option value="uploading">进行中</option>
-                                        <option value="completed">已完成</option>
-                                        <option value="verified">已验证</option>
-                                        <option value="failed">失败</option>
-                                        <option value="deleted">已删除</option>
-                                    </select>
-                                    <input type="text" id="olb-filter-name" class="form-input config-input" style="width:auto;min-width:150px;" placeholder="文件名模糊" oninput="app.scheduleOpenlistReload()" />
-                                    <input type="text" id="olb-filter-path" class="form-input config-input" style="width:auto;min-width:150px;" placeholder="路径包含" oninput="app.scheduleOpenlistReload()" />
-                                    <button type="button" class="btn-primary" style="width:auto;" onclick="app.loadOpenlistBackups()">查询</button>
-                                    <button type="button" class="btn-secondary" style="width:auto;padding:.3rem .7rem;font-size:.8rem;" onclick="app.clearOpenlistFilters()">清除筛选</button>
-                                </div>
-                                <div id="openlist-backups-list"><span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="点击「查询」查看备份记录">?</span></div>
+                                <div id="openlist-backups-list"></div>
                             </div>
                         </div>
                         </div><!-- /openlist-pane-records -->

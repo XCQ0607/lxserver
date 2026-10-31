@@ -173,6 +173,10 @@ declare namespace LX {
      * 是否启用 WebDAV 同步服务
      */
     'webdav.enable'?: boolean
+    'backup.webdav.types'?: Array<'music' | 'userFiles' | 'snapshots' | 'userData' | 'system'>
+    'backup.openlist.types'?: Array<'music' | 'userFiles' | 'snapshots' | 'userData' | 'system'>
+    'backup.webdav.mirrorDeletes'?: boolean
+    'backup.webdav.restoreOnStartup'?: boolean
 
     /**
      * WebDAV URL

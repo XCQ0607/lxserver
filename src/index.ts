@@ -206,17 +206,23 @@ const backupConfigNow = (): { success: boolean, filename?: string, error?: strin
 
 const saveConfigToFile = () => {
   const content = `module.exports = ${JSON.stringify(global.lx.config, null, 2)}`
+  const temporary = `${global.lx.configPath}.${process.pid}.${crypto.randomUUID()}.tmp`
   try {
     const targetDir = path.dirname(global.lx.configPath)
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true })
     }
-    fs.writeFileSync(global.lx.configPath, content)
+    const mode = fs.existsSync(global.lx.configPath) ? fs.statSync(global.lx.configPath).mode & 0o777 : 0o600
+    fs.writeFileSync(temporary, content, { mode })
+    fs.renameSync(temporary, global.lx.configPath)
     lastConfigHash = crypto.createHash('md5').update(content).digest('hex')
     // console.log('Current memory config saved to ' + global.lx.configPath)
     backupConfig()
   } catch (err) {
     console.error('Failed to save config file:', err)
+    throw err
+  } finally {
+    try { fs.rmSync(temporary, { force: true }) } catch { /* 保留原始保存错误 */ }
   }
 }
 
@@ -777,6 +783,8 @@ const webdavSync = new WebDAVSync({
   backupInterval: global.lx.config['sync.backupInterval'],
   excludeCache: global.lx.config['webdav.excludeCache'],
   excludeMusic: global.lx.config['webdav.excludeMusic'],
+  types: global.lx.config['backup.webdav.types'],
+  mirrorDeletes: global.lx.config['backup.webdav.mirrorDeletes'],
 }, global.lx.dataPath)
 
 
@@ -784,7 +792,7 @@ const webdavSync = new WebDAVSync({
 global.lx.webdavSync = webdavSync
 
 // 如果配置了 WebDAV，在启动时尝试从远程恢复
-if (webdavSync.isConfigured()) {
+if (webdavSync.isConfigured() && global.lx.config['backup.webdav.restoreOnStartup']) {
   console.log('[WebDAV] 已配置 WebDAV，正在尝试从远端恢复数据...')
   void webdavSync.restoreFromRemote().then(async (success: boolean) => {
     if (success) {
@@ -836,7 +844,8 @@ if (webdavSync.isConfigured()) {
     webdavSync.startAutoSync()
   })
 } else {
-  console.log('[WebDAV] 未配置 WebDAV，跳过远端恢复')
+  if (webdavSync.isConfigured()) webdavSync.startAutoSync()
+  console.log('[WebDAV] 未开启启动恢复；保留本地数据，按配置执行自动备份')
 }
 
 // [新增] 确保数据目录下的 _open 及 _open/library 目录存在 (用于公共受限资源 & 公开收藏)

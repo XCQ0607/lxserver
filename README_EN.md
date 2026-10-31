@@ -56,8 +56,8 @@ See the [documentation site](https://xcq0607.github.io/lxserver/en/), [API refer
 | Method | Suitable for | Requirements |
 | --- | --- | --- |
 | Docker / Compose | NAS and unattended servers | Docker and persistent host directories |
-| Source build | Development and custom builds | Node.js 22+, npm and Git |
-| Server release archive | Running compiled server files | Node.js 22+ and the server release package |
+| Source build | Development and custom builds | Node.js 22.13.0+, npm and Git |
+| Server release archive | Running compiled server files | Node.js 22.13.0+ and the server release package |
 | Desktop app | Using the player and admin console in desktop windows | A package matching your OS and architecture |
 | PM2 | Keeping a compiled Node.js deployment running | A built server and separately installed PM2 |
 
@@ -340,7 +340,30 @@ Keep `subsonic-local-registry.json` and `subsonic-local-state.json` with user da
 
 Playlist snapshots restore playlists; configuration backups restore configuration. Neither substitutes for audio backups. Configuration backups default to a seven-day retention period under the data directory's `backups/` folder.
 
-WebDAV supports remote sync and backups. Startup with WebDAV configured can restore remote data and reload configuration/accounts. Confirm the remote namespace before connecting a new installation. `WEBDAV_EXCLUDE_CACHE` and `WEBDAV_EXCLUDE_MUSIC` exclude the corresponding audio folders within data; they do not back up external or root-directory libraries for you.
+In **System settings → Cloud backup scope**, select data types independently for WebDAV and OpenList. Both default to all five types below, but each provider must also be enabled and configured. Enabling both creates two copies; it does not synchronize the providers with each other.
+
+| Type | Contents |
+| --- | --- |
+| `music` | Only `music/` inside the data directory: audio, lyrics, artwork and music indexes |
+| `userFiles` | Source scripts, source-related state and uploads |
+| `snapshots` | Playlist/dislike snapshots and indexes, including the configured external snapshot directory |
+| `userData` | Other persistent user-directory data, such as playlists, preferences and Subsonic local relationships |
+| `system` | The active configuration file and account/server JSON files at the data-directory root |
+
+These system settings are saved in the active `config.js` and have no corresponding environment variables:
+
+```js
+'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+'backup.webdav.mirrorDeletes': false,
+'backup.webdav.restoreOnStartup': false,
+```
+
+An empty type array selects no data for that provider. Ordinary data backups always exclude caches, logs, temporary files, runtime databases and local backup archives. Back up root-directory music and custom external libraries separately. OpenList's **permanent playback cache** is configured separately; selecting music files does not enable cache uploads or local song deletion.
+
+WebDAV incremental files and ZIP backups use the same scope, running every 60 minutes and 24 hours by default. OpenList stores data backups under `_data/` within its root and checks every 60 minutes by default. Ordinary backups retain local files. WebDAV also retains existing cloud files by default; explicitly enabling `backup.webdav.mirrorDeletes` propagates local deletions to the incremental directory, without changing historical ZIPs.
+
+WebDAV startup restore is disabled by default and requires `backup.webdav.restoreOnStartup`. Manual restore downloads the provider's currently selected types, overwrites matching local files and preserves local-only files, without uploading local data. Restore is not an atomic replacement of the entire directory. Restart the service afterward to fully reload configuration, accounts, playlists and music indexes. Confirm the cloud namespace and selected scope before connecting a new installation. See [Backup and recovery](docs/en/guide/backup-recovery.md) for procedures.
 
 For container updates:
 
@@ -356,7 +379,7 @@ Preserve all used storage first. Source updates require dependency installation,
 
 The default configuration is `data/config.js`. `DATA_PATH` changes the data directory; `CONFIG_PATH` selects an external configuration file. If the target configuration is absent on first start, the server tries to initialize it from the legacy/bundled root configuration.
 
-Normal startup merges defaults, configuration and environment variables. WebDAV restoration can subsequently reload remote configuration and accounts, so environment variables do not universally remain the final authority. Check the active path and effective values in the console.
+Normal startup merges defaults, configuration and environment variables. Explicitly enabled WebDAV startup restoration can subsequently reload remote configuration and accounts; manual restoration requires a service restart. Check the active path and effective values in the console.
 
 Environment changes need a process restart or container recreation. Some console changes apply immediately; listener/path changes can require restart and reconnection.
 
@@ -389,8 +412,8 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `WEBDAV_BACKUP_PATH` | `webdav.backupPath` | WebDAV remote backup path | `/lx-sync-backups` |
 | `SYNC_INTERVAL` | `sync.interval` | WebDAV incremental sync interval (min) | `60` |
 | `BACKUP_INTERVAL` | `sync.backupInterval` | WebDAV full backup interval (hours) | `24` |
-| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Exclude cache dir from sync (`data/cache/<user>`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
-| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Exclude music/download dir from sync (`data/music/<user>`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Legacy compatibility option; ordinary data backups always exclude cache | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Legacy fallback without explicit backup types; `backup.webdav.types` takes precedence | `false` |
 | `ENABLE_WEBPLAYER_AUTH` | `player.enableAuth` | Enable Web Player password | `false` |
 | `WEBPLAYER_PASSWORD` | `player.password` | Web Player password | `123456` |
 | `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |

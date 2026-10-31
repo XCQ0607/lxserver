@@ -13,12 +13,14 @@
  */
 import path from 'node:path'
 import fs from 'node:fs'
-import { OpenListClient } from './openlistClient'
+import crypto from 'node:crypto'
+import { OpenListClient, OpenListNotFoundError } from './openlistClient'
 import { registerOpenListCacheFile, unregisterOpenListCacheFile, getCacheDir, getIndexItemByFilename } from '@/server/music/fileCache'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
 import { getUserDirname } from '@/user/data'
 import { getUserSpace } from '@/user'
 import { File } from '@/constants'
+import { backupType, backupLocalPath, getBackupTypes, scanBackupFiles, beginCloudRestore, isCloudRestoreRunning } from '@/utils/backupPolicy'
 import {
   ensureBackupTables,
   upsertBackupFile,
@@ -28,11 +30,9 @@ import {
   listAllBackups,
   listBackupsByUserFolder,
   listAttachments,
-  deleteAttachmentsForParent,
   getAttachmentByLocalPath,
   upsertAttachment,
   setAttachmentStatus,
-  countRefsToLocalPath,
   listAttachmentsToVerify,
   listAttachmentsByStatus,
   getBackupById,
@@ -43,6 +43,9 @@ import {
   softDeleteLocalFile,
   softDeleteLocalFileByPath,
   getActiveBackupLocalPaths,
+  getLocalFile,
+  linkAttachment,
+  unlinkAttachment,
 } from './openlistBackupDb'
 
 type SyncMode = 'upload-delete' | 'upload' | 'sync' | 'download'
@@ -135,6 +138,9 @@ function effectiveMode(entry: UserBackupCfg, cfg: BackupConfig): SyncMode {
 
 /** 从已有备份行推断其模式（用于验证/删除环节） */
 function effectiveModeFromRow(row: any, cfg: BackupConfig): SyncMode {
+  if (row.folder_type === 'data') return 'upload'
+  const entry = cfg.userBackups.find(u => u.user === row.user && u.enabled)
+  if (entry) return effectiveMode(entry, cfg)
   if (row.mode) return row.mode as SyncMode
   return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
 }
@@ -166,6 +172,31 @@ let client: OpenListClient | null = null
 let clientSig = ''
 let verifyTimer: ReturnType<typeof setInterval> | null = null
 let verifyRunning = false
+let syncTimer: ReturnType<typeof setInterval> | null = null
+let schedulerSignature = ''
+let syncJob: Promise<SyncSummary> | null = null
+let manualTransfers = 0
+
+function hashFile(localPath: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(localPath)).digest('hex')
+}
+
+function folderEnabled(user: string, folder: string, cfg = getConfig()): boolean {
+  const entry = cfg.userBackups.find(u => u.user === user && u.enabled)
+  if (!entry) return user === '_system' && cfg.backupSystemConfig
+  return folder === 'cache' ? ((global.lx.config as any)['backup.openlist.types'] !== undefined ? entry.backupCache === true : entry.backupCache !== false) : folder === 'music' ? entry.backupDownload !== false : entry.backupSnapshot !== false
+}
+
+function rowEnabled(row: any, cfg = getConfig()): boolean {
+  if (row.folder_type === 'data') {
+    const relative = row.remote_path.split('/_data/')[1]
+    const type = relative ? backupType(relative) : null
+    return cfg.enable && row.user === '_system' && !!type && getBackupTypes('openlist', global.lx.config as any).includes(type)
+  }
+  // 启用统一数据备份后，不再执行旧音乐/快照记录的上传即删策略。
+  if ((global.lx.config as any)['backup.openlist.types'] !== undefined && row.folder_type !== 'cache') return false
+  return cfg.enable && folderEnabled(row.user, row.folder_type, cfg)
+}
 
 function getClient(): OpenListClient | null {
   const cfg = getConfig()
@@ -213,6 +244,7 @@ function resolveUserDir(entry: UserBackupCfg, folderType: 'cache' | 'music' | 'l
   }
   if (folderType === 'music' && entry.backupDownload === false) return null
   if (folderType === 'cache' && entry.backupCache === false) return null
+  if (folderType === 'cache' && (global.lx.config as any)['backup.openlist.types'] !== undefined && entry.backupCache !== true) return null
   const legacy = folderType === 'music' ? entry.downloadDir : entry.cacheDir
   if (legacy && fs.existsSync(legacy)) return legacy
   try {
@@ -247,6 +279,8 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
   const base = path.basename(localPath)
   const ext = path.extname(base)
   const row = getBackupByLocalPath(user, folderType, localPath)
+  let metadata: any = {}
+  try { metadata = JSON.parse(row?.cache_metadata || '{}') } catch { /* 旧记录无元数据 */ }
   // 优先使用上传记录里的规范化歌曲 ID，避免以文件名生成的缓存键无法匹配
   const id = (row && row.songmid) ? row.songmid : base.slice(0, Math.max(0, base.length - ext.length))
   let size = 0
@@ -259,32 +293,33 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
   registerOpenListCacheFile(normalizeUser(user), {
     id,
     songmid: id,
-    name: id,
-    singer: '',
-    album: '',
-    albumId: '',
-    img: '',
-    interval: 0,
+    ...metadata,
+    name: metadata.name || id,
+    singer: metadata.singer || '',
+    album: metadata.album || '',
+    albumId: metadata.albumId || '',
+    img: metadata.img || '',
+    interval: metadata.interval || 0,
     // source 与 quality 均从 openlist_backup_files 回填（上传时已持久化原始音源平台与音质），
     // 恢复后的缓存条目同时保留准确来源与音质，供按平台解析与精确音质检索的请求使用
     source: row?.source || '',
-    requestedSource: '',
-    downloadSource: '',
-    sourceName: '',
+    requestedSource: metadata.requestedSource || '',
+    downloadSource: metadata.downloadSource || '',
+    sourceName: metadata.sourceName || '',
     origin: 'openlist',
     quality: row?.quality || 'unknown',
-    filename: base,
+    filename: path.relative(getCacheDir(user, folderType === 'music'), localPath).replace(/\\/g, '/'),
     folder: folderType,
     mtime,
     size,
     ext: ext.replace('.', ''),
-    hasCover: false,
-    hasLyric: false,
-    audioContainer: '',
-    bitrate: 0,
-    sampleRate: 0,
-    bitDepth: 0,
-    nativeIds: undefined,
+    hasCover: metadata.hasCover || false,
+    hasLyric: metadata.hasLyric || false,
+    audioContainer: metadata.audioContainer || '',
+    bitrate: metadata.bitrate || 0,
+    sampleRate: metadata.sampleRate || 0,
+    bitDepth: metadata.bitDepth || 0,
+    nativeIds: metadata.nativeIds,
   }, folderType)
   return id
 }
@@ -306,7 +341,7 @@ async function refetchLocalFile(row: any): Promise<boolean> {
     const r = await callUserApiGetMusicUrl(row.source, songInfo, row.quality || 'flac', row.user)
     if (!r || !r.url) return false
     fs.mkdirSync(path.dirname(row.local_path), { recursive: true })
-    const resp = await fetch(r.url)
+    const resp = await fetch(r.url, { signal: AbortSignal.timeout(300000) })
     if (!resp.ok) return false
     const buf = Buffer.from(await resp.arrayBuffer())
     fs.writeFileSync(row.local_path, buf)
@@ -317,7 +352,8 @@ async function refetchLocalFile(row: any): Promise<boolean> {
   }
 }
 
-async function uploadOne(row: any, cl: OpenListClient, mode: SyncMode, retries = UPLOAD_RETRY_TIMES): Promise<void> {
+async function uploadOne(row: any, cl: OpenListClient, mode: SyncMode, retries = UPLOAD_RETRY_TIMES): Promise<boolean> {
+  if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) return false
   // 本地源文件缺失时尝试按源重新拉取（缓存被清理 / 容器重建导致丢失 -> ENOENT 自愈）
   if (!row.local_path || !fs.existsSync(row.local_path)) {
     const ok = await refetchLocalFile(row)
@@ -326,39 +362,53 @@ async function uploadOne(row: any, cl: OpenListClient, mode: SyncMode, retries =
         error: '本地源文件已不存在且无法从音源重新下载（缓存已被清理），请重新播放该歌曲后再试',
         retryCount: (row.retry_count || 0) + 1,
       })
-      return
+      return false
     }
   }
   for (let attempt = 1; attempt <= retries; attempt++) {
     try {
       setBackupStatus(row.id, 'uploading')
+      const before = fs.statSync(row.local_path)
+      const localHash = hashFile(row.local_path)
       await cl.mkdir(path.posix.dirname(row.remote_path))
       const info = await cl.upload(row.local_path, row.remote_path)
+      const after = fs.statSync(row.local_path)
+      if (before.mtimeMs !== after.mtimeMs || before.size !== after.size || localHash !== hashFile(row.local_path) || info.size !== after.size) {
+        throw new Error('上传期间本地文件发生变化或远端大小不一致，保留本地文件')
+      }
+      if (getBackupById(row.id)?.deleted_at) return false
       setBackupStatus(row.id, 'completed', {
         size: info.size,
-        name: info.name || path.basename(row.remote_path),
+        name: row.folder_type === 'data' ? row.name : info.name || path.basename(row.remote_path),
         remotePath: row.remote_path,
+        localMtime: after.mtimeMs,
+        localHash,
+        remoteMtime: parseMod(info.modified),
+        error: null,
       })
-      return
+      return true
     } catch (e: any) {
       if (attempt >= retries) {
         setBackupStatus(row.id, 'failed', { error: String(e?.message || e), retryCount: (row.retry_count || 0) + 1 })
-        return
+        return false
       }
       await sleep(backoffMs(attempt))
     }
   }
+  return false
 }
 
 /**
  * 单文件从远端下载到本地（download / sync 模式），并补登记缓存索引。
  * 与 uploadOne 对称，失败记为 failed（带重试计数）。
  */
-async function downloadOne(row: any, cl: OpenListClient, mode: SyncMode): Promise<void> {
+async function downloadOne(row: any, cl: OpenListClient, mode: SyncMode): Promise<boolean> {
+  if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) return false
   try {
     setBackupStatus(row.id, 'uploading')
     fs.mkdirSync(path.dirname(row.local_path), { recursive: true })
     await cl.download(row.remote_path, row.local_path)
+    const info = await cl.getFileInfo(row.remote_path)
     upsertLocalFile({ user: row.user, source: row.source, folderType: row.folder_type, localPath: row.local_path })
     const isAud = isAudio(row.local_path)
     let size = 0
@@ -373,8 +423,11 @@ async function downloadOne(row: any, cl: OpenListClient, mode: SyncMode): Promis
     } else {
       setBackupStatus(row.id, 'completed', { size, remotePath: row.remote_path })
     }
+    setBackupStatus(row.id, 'verified', { size, remoteMtime: parseMod(info.modified), localMtime: fs.statSync(row.local_path).mtimeMs, localHash: hashFile(row.local_path), error: null, retryCount: 0 })
+    return true
   } catch (e: any) {
     setBackupStatus(row.id, 'failed', { error: String(e?.message || e), retryCount: (row.retry_count || 0) + 1 })
+    return false
   }
 }
 
@@ -439,10 +492,10 @@ export async function tryRestoreFromOpenlist(
   dir: string,
   baseName: string,
   quality: string,
+  signal?: AbortSignal,
 ): Promise<{ size: number } | null> {
   const cfg = getConfig()
-  if (!cfg.enable) return null
-  if (!cfg.userBackups.some((u) => u.user === user && u.enabled)) return null
+  if (!cfg.enable || !isOpenlistCacheFirstEnabled() || !folderEnabled(user, folderType, cfg)) return null
   const row = findOpenlistBackupRow(user, folderType, baseName)
   if (!row) return null
   try {
@@ -450,8 +503,11 @@ export async function tryRestoreFromOpenlist(
     if (!cl) return null
     const ext = path.extname(row.local_path) || path.extname(row.remote_path) || ''
     const finalPath = path.join(dir, baseName + ext)
+    // 自定义目标目录不应复用另一目录的索引或附件绝对路径。
+    if (path.resolve(finalPath) !== path.resolve(row.local_path)) return null
     fs.mkdirSync(path.dirname(finalPath), { recursive: true })
-    await cl.download(row.remote_path, finalPath)
+    await cl.download(row.remote_path, finalPath, signal)
+    if (signal?.aborted) return null
     upsertLocalFile({ user, source: row.source, folderType, localPath: finalPath })
     registerDownloadedCache(user, folderType, finalPath)
     await downloadAttachmentsForFile(row, cl)
@@ -470,32 +526,41 @@ export async function tryRestoreFromOpenlist(
  *  - 否则用外网 url 拼接 /d/<remote_path>（外网 url 缺省等于内网 endpoint）
  * 未匹配/未开启/失败返回 null（调用方继续走原始回源）。
  */
-export async function resolveOpenlistCacheDirectUrl(
+export async function resolveOpenlistCacheEntry(
   user: string,
   folderType: 'cache' | 'music',
   baseName: string,
-): Promise<string | null> {
+  song?: { id: string; source: string; quality: string },
+): Promise<{ url: string; filename: string; quality: string } | null> {
   const cfg = getConfig()
   if (!cfg.enable) return null
-  if (!cfg.userBackups.some((u) => u.user === user && u.enabled)) return null
+  if (!folderEnabled(user, folderType, cfg)) return null
   if (!isOpenlistCacheFirstEnabled()) return null
-  const row = findOpenlistBackupRow(user, folderType, baseName)
+  const row = song ? listBackupsByUserFolder(user, folderType).find(r =>
+    ['verified', 'completed'].includes(r.status) && r.songmid === song.id && r.source === song.source && r.quality === song.quality,
+  ) || findOpenlistBackupRow(user, folderType, baseName) : findOpenlistBackupRow(user, folderType, baseName)
   if (!row) return null
   try {
     const cl = getClient()
     if (!cl) return null
     const info = await cl.getFileInfo(row.remote_path)
-    if (info?.rawUrl) return info.rawUrl
+    const filename = path.basename(row.remote_path)
+    if (info?.rawUrl) return { url: info.rawUrl, filename, quality: row.quality || song?.quality || 'unknown' }
     const base = normalizeTrailingSlash(cfg.externalUrl || cfg.endpoint || '')
     if (!base) return null
     const p = row.remote_path.replace(/^\/+/, '')
-    return `${base}/d/${p.split('/').map((s: string) => encodeURIComponent(s)).join('/')}`
+    return { url: `${base}/d/${p.split('/').map((s: string) => encodeURIComponent(s)).join('/')}`, filename, quality: row.quality || song?.quality || 'unknown' }
   } catch {
     return null
   }
 }
 
+export async function resolveOpenlistCacheDirectUrl(user: string, folder: 'cache' | 'music', baseName: string): Promise<string | null> {
+  return (await resolveOpenlistCacheEntry(user, folder, baseName))?.url || null
+}
+
 async function uploadAttachment(att: any, cl: OpenListClient): Promise<void> {
+  if (!folderEnabled(att.user, att.folder_type)) return
   try {
     setAttachmentStatus(att.id, 'uploading')
     if (att.local_path && fs.existsSync(att.local_path)) {
@@ -575,12 +640,19 @@ function queueAttachmentsForFile(
     if (!e.isFile()) continue
     const ext = (path.extname(e.name).split('.').pop() || '').toLowerCase()
     if (!NON_AUDIO_EXT.includes(ext)) continue
+    const audioStem = path.basename(audioLocalPath, path.extname(audioLocalPath)).toLowerCase()
+    const stem = path.basename(e.name, path.extname(e.name)).toLowerCase()
+    // 同名歌词/封面属于该音频；只有明确约定的目录封面才允许共享。
+    if (stem !== audioStem && !(['cover', 'folder', 'front'].includes(stem) && categoryOf(ext) === 'image')) continue
     if (e.name === path.basename(audioLocalPath)) continue
     const full = path.join(audioDir, e.name)
     const rel = path.relative(dir, full).replace(/\\/g, '/')
     const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${rel}`)
     const existing = getAttachmentByLocalPath(user, folderType, full)
-    if (existing && ['uploading', 'completed', 'verified'].includes(existing.status)) continue
+    if (existing && ['uploading', 'completed', 'verified'].includes(existing.status) && !existing.deleted_at && existing.size === fs.statSync(full).size) {
+      linkAttachment(parentRow.id, existing.id)
+      continue
+    }
     const att = upsertAttachment({
       backupFileId: parentRow.id,
       user,
@@ -607,6 +679,8 @@ export function onFileCached(
 ): void {
   const cfg = getConfig()
   if (!cfg.enable) return
+  if ((global.lx.config as any)['backup.openlist.types'] !== undefined && folderType === 'music') return
+  if (!folderEnabled(user, folderType, cfg)) return
   // 来自 OpenList 回写的文件（独立字段 origin='openlist'）禁止再次回推，杜绝回写环路
   if (meta.origin === 'openlist') return
   const entry = cfg.userBackups.find((u) => u.user === user && u.enabled)
@@ -625,10 +699,11 @@ export function onFileCached(
   const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${relative}`)
 
   const existing = getBackupByLocalPath(user, folderType, localPath)
-  if (existing && ['uploading', 'completed', 'verified'].includes(existing.status)) {
+  if (existing && !existing.deleted_at && (['uploading', 'completed'].includes(existing.status) || (existing.status === 'verified' && !localChanged(existing)))) {
     return
   }
 
+  const item = getIndexItemByFilename(path.basename(localPath), user)
   const row = upsertBackupFile({
     user,
     folderType,
@@ -639,6 +714,8 @@ export function onFileCached(
     quality: meta.quality || null,
     mode,
     status: 'pending',
+    direction: 'upload',
+    cacheMetadata: item ? JSON.stringify(item) : existing?.cache_metadata,
   })
   void enqueueUpload(row, cl, mode)
   if (cfg.includeNonAudio) {
@@ -653,40 +730,66 @@ export function onFileCached(
  */
 export function registerFileCacheSyncHook(): void {
   const lx = (globalThis as any).lx
-  if (!lx) return
-  ;(lx.fileCachedListeners ??= []).push(() => { lx.scheduleOpenlistSync?.() })
+  if (!lx || lx.openlistCacheHooksRegistered) return
+  lx.openlistCacheHooksRegistered = true
+  ;(lx.fileCachedListeners ??= []).push((info: { dir?: string }) => {
+    const selectedData = lx.config?.['backup.openlist.types'] !== undefined
+    // 播放缓存落盘已经由专用上传钩子处理，不要每播放一首歌就全盘扫描数据备份。
+    if (!selectedData || info.dir && isSubPath(path.resolve(info.dir), path.resolve(lx.dataPath, 'music'))) lx.scheduleOpenlistSync?.()
+  })
   ;(lx.fileCachedUploadListeners ??= []).push((info: any) => {
     onFileCached(info.user, info.folderType, info.localPath, info.meta)
   })
   // 以下为 fileCache 反向调用的统一出口，避免 fileCache 直接 import openlist 模块
-  lx.cacheRestoreResolver = (user: string, folderType: 'cache' | 'music', dir: string, baseName: string, quality: string) =>
-    tryRestoreFromOpenlist(user, folderType, dir, baseName, quality)
-  lx.softDeleteLocalFileByPath = softDeleteLocalFileByPath
-  lx.getActiveBackupLocalPaths = getActiveBackupLocalPaths
+  lx.cacheRestoreResolver = (user: string, folderType: 'cache' | 'music', dir: string, baseName: string, quality: string, signal?: AbortSignal) =>
+    tryRestoreFromOpenlist(user, folderType, dir, baseName, quality, signal)
+  lx.softDeleteLocalFileByPath = (localPath: string) => { if (getConfig().enable) softDeleteLocalFileByPath(localPath) }
+  lx.getActiveBackupLocalPaths = () => {
+    const cfg = getConfig()
+    if (!cfg.enable) return new Set()
+    const paths = getActiveBackupLocalPaths(MAX_AUTO_RETRIES)
+    return new Set(listAllBackups().filter(row => rowEnabled(row, cfg) && paths.has(row.local_path)).map(row => row.local_path))
+  }
 }
 
 // ---------- 验证轮询（确认网盘已落库，并按模式决定删本地/补缓存）----------
 
 export async function verifyPending(): Promise<void> {
-  if (verifyRunning) return
+  if (verifyRunning || syncJob || manualTransfers || isCloudRestoreRunning()) return
   verifyRunning = true
   try {
     const cl = getClient()
     if (!cl) return
     const cfg = getConfig()
-    const rows = [...listBackupByStatus('completed'), ...listBackupByStatus('uploading')]
+    const rows = [...listBackupByStatus('completed'), ...listBackupByStatus('uploading'), ...listBackupByStatus('verified')]
     for (const row of rows) {
+      if (!rowEnabled(row, cfg) || enqueuedIds.has(`f:${row.id}`)) continue
       try {
         const info = await cl.getFileInfo(row.remote_path)
+        if (row.status === 'verified' && !(effectiveModeFromRow(row, cfg) === 'upload-delete' && fs.existsSync(row.local_path))) {
+          // 保留同步基线；远端变化应由同步引擎处理，不能在此覆盖基线。
+          setBackupStatus(row.id, 'verified', { error: info.size === row.size ? null : '远端文件大小发生变化，等待同步确认' })
+          continue
+        }
         if (info && info.size != null) {
           // 仅当远端大小与本地文件一致时才确认上传成功，避免仅凭路径存在误判
-          let sizeMatch = true
+          let sizeMatch = row.size != null && row.size === info.size
           if (row.local_path && fs.existsSync(row.local_path)) {
-            try { sizeMatch = Number(fs.statSync(row.local_path).size) === Number(info.size) } catch { sizeMatch = false }
+            try { sizeMatch = sizeMatch && !!row.local_hash && hashFile(row.local_path) === row.local_hash } catch { sizeMatch = false }
           }
-          if (!sizeMatch) continue
-          setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified) })
+          if (!sizeMatch) {
+            setBackupStatus(row.id, 'failed', { error: '上传校验不一致，保留本地文件并重新上传', retryCount: (row.retry_count || 0) + 1 })
+            continue
+          }
           const mode = effectiveModeFromRow(row, cfg)
+          if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
+            if (!row.local_hash || !await cl.verifyFile(row.remote_path, row.local_hash) || hashFile(row.local_path) !== row.local_hash) {
+              setBackupStatus(row.id, 'failed', { error: '远端内容校验失败，保留本地文件', retryCount: (row.retry_count || 0) + 1 })
+              continue
+            }
+          }
+          if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) continue
+          setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified), error: null, retryCount: 0 })
           if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
             try {
               fs.unlinkSync(row.local_path)
@@ -694,23 +797,25 @@ export async function verifyPending(): Promise<void> {
               softDeleteLocalFile(row.user, row.local_path)
               // 级联删除本地附件：仅当该附件自身已 verified 且未被其它备份引用时（避免附件仍在上传中被误删）
               for (const a of listAttachments(row.id)) {
-                if (a.status === 'verified' && a.local_path && fs.existsSync(a.local_path) && countRefsToLocalPath(a.local_path, row.id) === 0) {
+                if (a.status === 'verified' && a.local_path && fs.existsSync(a.local_path) && countLocalPathRefs(a.local_path, row.id, a.id) === 0) {
                   try { fs.unlinkSync(a.local_path); softDeleteLocalFile(row.user, a.local_path) } catch { /* ignore */ }
                 }
               }
             } catch { /* ignore */ }
           }
         }
-      } catch {
-        // 仍在后台处理，留待下次轮询
+      } catch (e: any) {
+        const missingDataBackup = row.folder_type === 'data' && e instanceof OpenListNotFoundError && fs.existsSync(row.local_path)
+        setBackupStatus(row.id, missingDataBackup ? 'failed' : row.status, { error: String(e?.message || e) })
       }
     }
     // 失败自动重投（限次，超过 MAX_AUTO_RETRIES 后保持 failed，由用户手动重试）
     for (const row of listBackupByStatus('failed')) {
+      if (!rowEnabled(row, cfg)) continue
       if ((row.retry_count || 0) >= MAX_AUTO_RETRIES) continue
       const mode = effectiveModeFromRow(row, cfg)
       try {
-        if (mode === 'download' || mode === 'sync') {
+        if (row.direction === 'download' || mode === 'download') {
           if (row.local_path) await downloadOne(row, cl, mode)
         } else {
           // 不再以「本地文件存在」为门禁：本地缺失时 uploadOne 会尝试按源重拉（缓存被清理/容器重建丢失的自愈）
@@ -721,21 +826,43 @@ export async function verifyPending(): Promise<void> {
     // 卡死回收：重启/并发打挂导致的 pending 或长时间 uploading 孤儿记录，重新入队重试
     const STALE_MS = 10 * 60 * 1000
     const now = Date.now()
-    for (const row of listBackupByStatus('pending')) enqueueUpload(row, cl, effectiveModeFromRow(row, cfg))
-    for (const row of listBackupByStatus('uploading')) {
-      if (now - (row.updated_at || 0) > STALE_MS) enqueueUpload(row, cl, effectiveModeFromRow(row, cfg))
+    for (const row of listBackupByStatus('pending')) {
+      if (!rowEnabled(row, cfg)) continue
+      if (row.direction === 'download') await downloadOne(row, cl, effectiveModeFromRow(row, cfg))
+      else enqueueUpload(row, cl, effectiveModeFromRow(row, cfg))
     }
-    for (const att of listAttachmentsByStatus('pending')) enqueueAttachment(att, cl)
+    for (const row of listBackupByStatus('uploading')) {
+      if (!rowEnabled(row, cfg) || enqueuedIds.has(`f:${row.id}`)) continue
+      if (now - (row.updated_at || 0) > STALE_MS) {
+        if (row.direction === 'download') await downloadOne(row, cl, effectiveModeFromRow(row, cfg))
+        else enqueueUpload(row, cl, effectiveModeFromRow(row, cfg))
+      }
+    }
+    for (const att of listAttachmentsByStatus('pending')) if (folderEnabled(att.user, att.folder_type, cfg)) enqueueAttachment(att, cl)
     for (const att of listAttachmentsByStatus('uploading')) {
+      if (!folderEnabled(att.user, att.folder_type, cfg)) continue
       if (now - (att.updated_at || 0) > STALE_MS) enqueueAttachment(att, cl)
     }
 
     // 附件二次校验
     for (const att of listAttachmentsToVerify()) {
+      if (!folderEnabled(att.user, att.folder_type) || enqueuedIds.has(`a:${att.id}`)) continue
       try {
         const info = await cl.getFileInfo(att.remote_path)
-        if (info && info.size != null) setAttachmentStatus(att.id, 'verified', { size: info.size })
+        if (info && info.size != null && info.size === att.size) setAttachmentStatus(att.id, 'verified', { size: info.size, error: null })
       } catch { /* ignore */ }
+    }
+    // 附件往往晚于音频完成上传，不能只在音频第一次 verified 时清理。
+    for (const row of listBackupByStatus('verified')) {
+      if (!rowEnabled(row, cfg) || effectiveModeFromRow(row, cfg) !== 'upload-delete' || fs.existsSync(row.local_path)) continue
+      for (const att of listAttachments(row.id)) {
+        if (att.status !== 'verified' || !att.local_path || !fs.existsSync(att.local_path) || countLocalPathRefs(att.local_path, row.id, att.id) > 0) continue
+        const hash = hashFile(att.local_path)
+        if (await cl.verifyFile(att.remote_path, hash) && fs.existsSync(att.local_path) && hashFile(att.local_path) === hash) {
+          fs.unlinkSync(att.local_path)
+          softDeleteLocalFile(row.user, att.local_path)
+        }
+      }
     }
   } catch (e) {
     console.warn('[openlist-backup] 验证轮询出错:', e)
@@ -745,16 +872,22 @@ export async function verifyPending(): Promise<void> {
 }
 
 function lazyStartScheduler(): void {
-  if (verifyTimer) return
-  const cfg = getConfig()
-  const intervalMs = Math.max(1, cfg.verifyInterval) * 60 * 1000
-  verifyTimer = setInterval(() => { void verifyPending() }, intervalMs)
-  void verifyPending()
+  startVerifyScheduler()
 }
 
 export function startVerifyScheduler(): void {
-  if (verifyTimer) return
-  lazyStartScheduler()
+  const cfg = getConfig()
+  const signature = JSON.stringify([cfg.enable, cfg.verifyInterval, cfg.syncInterval])
+  if (signature === schedulerSignature) return
+  stopVerifyScheduler()
+  schedulerSignature = signature
+  if (!cfg.enable) return
+  const delay = (minutes: number, fallback: number) => Number.isFinite(minutes) && minutes > 0 ? Math.min(2147483647, Math.max(60000, minutes * 60000)) : fallback * 60000
+  verifyTimer = setInterval(() => { void verifyPending() }, delay(cfg.verifyInterval, 5))
+  syncTimer = setInterval(() => { void runSyncNow().catch(e => console.warn('[OpenList] 定时同步失败:', e)) }, delay(cfg.syncInterval, 60))
+  verifyTimer.unref()
+  syncTimer.unref()
+  void verifyPending()
 }
 
 export function stopVerifyScheduler(): void {
@@ -762,6 +895,9 @@ export function stopVerifyScheduler(): void {
     clearInterval(verifyTimer)
     verifyTimer = null
   }
+  if (syncTimer) clearInterval(syncTimer)
+  syncTimer = null
+  schedulerSignature = ''
 }
 
 // ---------- 手动同步引擎（download / sync / upload 全量）----------
@@ -776,176 +912,130 @@ function walkLocal(dir: string, folderType: 'cache' | 'music' | 'list', out: str
   for (const e of entries) {
     const p = path.join(dir, e.name)
     if (e.isDirectory()) walkLocal(p, folderType, out)
-    else if (folderType === 'list' ? e.name.endsWith('.json') : isAudio(e.name)) out.push(p)
+    else if (e.isFile() && (folderType === 'list' ? e.name === 'snapshotInfo.json' || e.name.startsWith('snapshot_') : isAudio(e.name))) out.push(p)
   }
   return out
 }
 
-function walkLocalAll(dir: string, map: Map<string, string> = new Map()): Map<string, string> {
-  let entries: fs.Dirent[]
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return map
-  }
-  for (const e of entries) {
+function walkLocalAll(dir: string, map = new Map<string, string>(), root = dir): Map<string, string> {
+  if (!fs.existsSync(dir)) return map
+  for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const p = path.join(dir, e.name)
-    if (e.isDirectory()) walkLocalAll(p, map)
-    else map.set(path.relative(dir, p).replace(/\\/g, '/'), p)
+    if (e.isDirectory()) walkLocalAll(p, map, root)
+    else if (e.isFile()) map.set(path.relative(root, p).replace(/\\/g, '/'), p)
   }
   return map
 }
 
-async function downloadDirection(
-  entry: UserBackupCfg,
-  cl: OpenListClient,
-  cfg: BackupConfig,
-  folderType: 'cache' | 'music' | 'list',
-  summary: SyncSummary,
-): Promise<void> {
+function localChanged(row: any): boolean {
+  if (!fs.existsSync(row.local_path)) return false
+  const st = fs.statSync(row.local_path)
+  return row.local_hash ? hashFile(row.local_path) !== row.local_hash : row.size !== st.size || row.local_mtime == null || st.mtimeMs !== row.local_mtime
+}
+
+async function downloadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
   const dir = resolveUserDir(entry, folderType, cfg)
   if (!dir) return
-  const remoteBase = cl.resolveRemotePath(`${entry.user}/${folderType}`)
-  let remoteFiles: any[] = []
-  try {
-    remoteFiles = await cl.listFilesRecursive(remoteBase)
-  } catch {
-    return
-  }
-  const remoteMap = new Map<string, any>()
-  for (const f of remoteFiles) {
-    if (f.isDir) continue
-    const rel = f.path.startsWith(remoteBase + '/') ? f.path.slice(remoteBase.length + 1) : f.path.replace(remoteBase, '')
-    remoteMap.set(rel, f)
-  }
+  const remoteBase = cl.resolveRemotePath(entry.user + '/' + folderType)
+  let remoteFiles: Awaited<ReturnType<OpenListClient['listFilesRecursive']>>
+  try { remoteFiles = await cl.listFilesRecursive(remoteBase) }
+  catch (e) { if (e instanceof OpenListNotFoundError) return; throw e }
   const localMap = walkLocalAll(dir)
   const mode = effectiveMode(entry, cfg)
-  const isList = folderType === 'list'
-  for (const [rel, rf] of remoteMap) {
-    const localTarget = path.join(dir, rel)
+  for (const rf of remoteFiles) {
+    if (rf.isDir) continue
+    if (!rf.path.startsWith(remoteBase + '/')) throw new Error('远端文件不在配置的同步目录内')
+    const rel = rf.path.slice(remoteBase.length + 1)
+    const target = path.resolve(dir, rel)
+    if (!isSubPath(target, path.resolve(dir)) || target === path.resolve(dir)) throw new Error('远端路径超出同步目录')
+    // 不跟随本地目录联接，避免写入同步目录之外。
+    let parent = target
+    while (parent !== path.resolve(dir)) {
+      if (fs.existsSync(parent) && fs.lstatSync(parent).isSymbolicLink()) throw new Error('同步目标包含符号链接')
+      parent = path.dirname(parent)
+    }
     const isAud = isAudio(rel)
-    const isListFile = isList && rel.endsWith('.json')
+    const isListFile = folderType === 'list' && rel.endsWith('.json')
+    if (!isAud && !isListFile) continue  // 附件由所属音频负责恢复
+    const existing = getBackupByLocalPath(entry.user, folderType, target)
+    if (existing?.deleted_at || existing?.status === 'deleted' || enqueuedIds.has('f:' + existing?.id)) continue
     if (localMap.has(rel)) {
-      if (mode === 'sync') {
-        const lm = fs.statSync(localMap.get(rel)!).mtimeMs
-        const rm = Date.parse(rf.modified) || 0
-        if (rm > lm) {
-          fs.mkdirSync(path.dirname(localTarget), { recursive: true })
-          await cl.download(rf.path, localTarget)
-          if (isAud) {
-            const id = registerDownloadedCache(entry.user, folderType as 'cache' | 'music', localTarget)
-            upsertBackupFile({
-              user: entry.user, folderType, localPath: localTarget, remotePath: rf.path,
-              songmid: id, mode, status: 'verified', size: rf.size,
-            })
-          } else if (isListFile) {
-            upsertBackupFile({
-              user: entry.user, folderType: 'list', localPath: localTarget, remotePath: rf.path,
-              songmid: null, mode, status: 'verified', size: rf.size,
-            })
-          }
-        }
+      const rm = parseMod(rf.modified)
+      const remoteChanged = existing ? rf.size !== existing.size || (rm != null && existing.remote_mtime != null && rm !== existing.remote_mtime) : true
+      if (!remoteChanged) continue
+      // 双侧均改动时较新者优先；时间不明确时保留本地，避免覆盖用户修改。
+      if (mode === 'sync' && (!existing || localChanged(existing))) {
+        if (rm == null || rm <= fs.statSync(target).mtimeMs) continue
       }
-      continue
     }
-    fs.mkdirSync(path.dirname(localTarget), { recursive: true })
-    await cl.download(rf.path, localTarget)
-    if (isAud) {
-      const id = registerDownloadedCache(entry.user, folderType as 'cache' | 'music', localTarget)
-      upsertBackupFile({
-        user: entry.user, folderType, localPath: localTarget, remotePath: rf.path,
-        songmid: id, mode, status: 'verified', size: rf.size,
-      })
-      summary.downloaded++
-    } else if (isListFile) {
-      upsertBackupFile({
-        user: entry.user, folderType: 'list', localPath: localTarget, remotePath: rf.path,
-        songmid: null, mode, status: 'verified', size: rf.size,
-      })
-      summary.downloaded++
-    }
-  }
-  if (isList) {
-    try { getUserSpace(entry.user).listManage.snapshotDataManage.updateSnapshotDir() } catch { /* 用户空间未初始化时忽略 */ }
+    const row = upsertBackupFile({
+      user: entry.user, folderType, localPath: target, remotePath: rf.path, mode,
+      size: existing?.size, source: existing?.source, songmid: existing?.songmid,
+      quality: existing?.quality, cacheMetadata: existing?.cache_metadata,
+      direction: 'download', status: 'pending',
+    })
+    if (await downloadOne(row, cl, mode)) summary.downloaded++
+    else summary.errors.push(entry.user + '/' + rel + ': 下载失败')
   }
 }
 
-async function uploadDirection(
-  entry: UserBackupCfg,
-  cl: OpenListClient,
-  cfg: BackupConfig,
-  folderType: 'cache' | 'music' | 'list',
-  summary: SyncSummary,
-): Promise<void> {
+async function uploadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
   const dir = resolveUserDir(entry, folderType, cfg)
   if (!dir) return
-  const files = walkLocal(dir, folderType)
   const mode = effectiveMode(entry, cfg)
-  for (const lp of files) {
+  for (const lp of walkLocal(dir, folderType)) {
     const rel = path.relative(dir, lp).replace(/\\/g, '/')
-    const remotePath = cl.resolveRemotePath(`${entry.user}/${folderType}/${rel}`)
+    const remotePath = cl.resolveRemotePath(entry.user + '/' + folderType + '/' + rel)
     const existing = getBackupByLocalPath(entry.user, folderType, lp)
-    if (existing && ['uploading', 'completed', 'verified'].includes(existing.status)) continue
-    // 反查缓存索引，记录原始音源平台到 openlist_backup_files.source，供日后从 OpenList 恢复时回填
-    const cacheItem = getIndexItemByFilename(path.basename(lp), entry.user)
-    const row = upsertBackupFile({
-      user: entry.user, folderType, localPath: lp, remotePath, mode, status: 'pending',
-      source: cacheItem?.source || null,
-      quality: cacheItem?.quality || null,
-    })
-    void enqueueUpload(row, cl, mode)
-    summary.uploaded++
-    if (cfg.includeNonAudio && folderType !== 'list') {
-      queueAttachmentsForFile(entry.user, folderType, lp, row, dir, cl, cfg)
+    if ((existing?.deleted_at || existing?.status === 'deleted') && !localChanged(existing)) continue
+    if (existing && (enqueuedIds.has('f:' + existing.id) || existing.status === 'uploading' || existing.status === 'completed')) continue
+    if (existing?.status === 'failed' && existing.retry_count >= MAX_AUTO_RETRIES) continue
+    const unchanged = existing?.status === 'verified' && !localChanged(existing) && existing.remote_path === remotePath
+    const item = getIndexItemByFilename(path.basename(lp), entry.user)
+    let row = existing
+    if (!unchanged) {
+      row = upsertBackupFile({
+        user: entry.user, folderType, localPath: lp, remotePath, mode, direction: 'upload', status: 'pending',
+        source: item?.source || existing?.source, quality: item?.quality || existing?.quality,
+        songmid: item?.id || item?.songmid || existing?.songmid,
+        cacheMetadata: item ? JSON.stringify(item) : existing?.cache_metadata,
+      })
+      enqueueUpload(row, cl, mode)
+      summary.uploaded++
     }
+    if (row && cfg.includeNonAudio && folderType !== 'list') queueAttachmentsForFile(entry.user, folderType, lp, row, dir, cl, cfg)
   }
 }
 
-async function deletionDetection(
-  entry: UserBackupCfg,
-  cl: OpenListClient,
-  cfg: BackupConfig,
-  folderType: 'cache' | 'music' | 'list',
-  summary: SyncSummary,
-): Promise<void> {
-  const rows = listBackupsByUserFolder(entry.user, folderType)
-  for (const row of rows) {
-    if (row.status !== 'verified' && row.status !== 'completed') continue
-    const localExists = !!row.local_path && fs.existsSync(row.local_path)
-    // 明确区分远端状态：exists / missing / error，避免 getFileInfo 异常被当作「远端已删」而误删
-    let remoteStatus: 'exists' | 'missing' | 'error' = 'error'
-    try {
-      const info = await cl.getFileInfo(row.remote_path)
-      remoteStatus = (info && info.size != null) ? 'exists' : 'missing'
-    } catch {
-      remoteStatus = 'error'
+async function deletionDetection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
+  for (const row of listBackupsByUserFolder(entry.user, folderType)) {
+    if (!['verified', 'completed'].includes(row.status) || enqueuedIds.has('f:' + row.id)) continue
+    if (listAttachments(row.id).some(a => enqueuedIds.has(`a:${a.id}`))) continue
+    const localExists = fs.existsSync(row.local_path)
+    let info: Awaited<ReturnType<OpenListClient['getFileInfo']>> | null = null
+    try { info = await cl.getFileInfo(row.remote_path) }
+    catch (e) {
+      if (!(e instanceof OpenListNotFoundError)) throw e // 网络/权限错误绝不能解释为删除
     }
-    if (remoteStatus === 'error') continue  // 远端状态未知，跳过，避免误删
-    if (!localExists && remoteStatus === 'exists') {
-      // 本地已删 -> 仅当用户确实删除（本地登记已软删/不在活跃列表）时才删远端，避免缓存清理误删远端
-      const activePaths = getActiveBackupLocalPaths()
-      const activeSet = activePaths instanceof Set ? activePaths : new Set(activePaths as any)
-      if (!activeSet.has(row.local_path)) {
-        try { await cl.remove(row.remote_path) } catch { /* ignore */ }
-        deleteAttachmentsForParent(row.id)
-        removeLocalCache(row)
-        setBackupStatus(row.id, 'deleted')
-        summary.deleted++
-      } else {
-        // 仅本地缓存清理（物理文件缺失但登记仍活跃），保留远端，仅清理本地缓存登记
-        removeLocalCache(row)
-      }
-    } else if (localExists && remoteStatus === 'missing') {
-      // 远端确实不存在 -> 删本地 + 注销缓存 + 软删本地文件登记
-      try { if (row.local_path) { fs.unlinkSync(row.local_path); softDeleteLocalFile(row.user, row.local_path) } } catch { /* ignore */ }
-      removeLocalCache(row)
-      setBackupStatus(row.id, 'deleted')
-      for (const a of listAttachments(row.id)) {
-        if (a.local_path) { try { fs.unlinkSync(a.local_path); softDeleteLocalFile(row.user, a.local_path) } catch { /* ignore */ } }
-        setAttachmentStatus(a.id, 'deleted')
-      }
-      summary.deleted++
-    }
+    if (!localExists && info) {
+      // cache 是可淘汰的副本，缺失不代表用户希望删除云端。
+      // 显式清理登记也保留远端；只有音乐/快照的已同步文件缺失才传播删除。
+      const registered = getLocalFile(row.user, row.local_path)
+      if (folderType === 'cache' || !registered || !row.local_hash) continue
+      const rm = parseMod(info.modified)
+      if (info.size !== row.size || (rm != null && row.remote_mtime != null && rm !== row.remote_mtime)) continue
+      await cl.remove(row.remote_path)
+    } else if (!info && localExists) {
+      // 本地有尚未同步的新修改时保留它，让上传方向重建远端。
+      if (localChanged(row)) continue
+      fs.unlinkSync(row.local_path)
+    } else if (info || localExists) continue
+    softDeleteLocalFile(row.user, row.local_path)
+    removeLocalCache(row)
+    // 级联附件并留下墓碑，防止本轮扫描立即把删除操作反向补回。
+    const deleted = await deleteOpenlistBackups([row.id], true)
+    summary.errors.push(...deleted.remoteFailed)
+    summary.deleted++
   }
 }
 
@@ -976,29 +1066,104 @@ async function backupSystemConfigFile(cl: OpenListClient, _cfg: BackupConfig, su
   summary.uploaded++
 }
 
+function dataBackupContext() {
+  return { dataPath: global.lx.dataPath, configPath: global.lx.configPath, config: global.lx.config as any }
+}
+
+/** 数据备份使用统一的相对目录布局，与播放缓存和旧版按用户同步分开。 */
+async function backupSelectedData(cl: OpenListClient, summary: SyncSummary): Promise<void> {
+  const context = dataBackupContext()
+  const types = getBackupTypes('openlist', context.config)
+  for (const [relative, local] of scanBackupFiles(context, types)) {
+    const existing = getBackupByLocalPath('_system', 'data', local)
+    if ((existing?.deleted_at || existing?.status === 'deleted') && !localChanged(existing)) continue
+    if (existing && (enqueuedIds.has(`f:${existing.id}`) || existing.status === 'completed' || existing.status === 'uploading')) continue
+    if (existing?.status === 'failed' && existing.retry_count >= MAX_AUTO_RETRIES) continue
+    const remotePath = cl.resolveRemotePath('_data/' + relative)
+    if (existing?.status === 'verified' && existing.remote_path === remotePath && !localChanged(existing)) {
+      try {
+        const remote = await cl.getFileInfo(remotePath)
+        const modified = parseMod(remote.modified)
+        if (remote.size === existing.size && (modified == null || existing.remote_mtime == null || modified === existing.remote_mtime)) continue
+      } catch (e: any) {
+        if (!(e instanceof OpenListNotFoundError)) { summary.errors.push(relative + ': ' + (e?.message || e)); continue }
+      }
+    }
+    const row = upsertBackupFile({ user: '_system', folderType: 'data', localPath: local, remotePath, name: relative, mode: 'upload', direction: 'upload', status: 'pending' })
+    enqueueUpload(row, cl, 'upload')
+    summary.uploaded++
+  }
+}
+
+export async function restoreOpenlistData(): Promise<{ restored: number; errors: string[] }> {
+  if (syncJob || verifyRunning || manualTransfers || activeUploads) throw new Error('OpenList 正在同步或校验，请稍后恢复')
+  const cl = getClient()
+  if (!cl) throw new Error('OpenList 未启用或未配置')
+  const releaseRestore = beginCloudRestore()
+  manualTransfers++
+  const result = { restored: 0, errors: [] as string[] }
+  try {
+    const context = dataBackupContext()
+    const types = getBackupTypes('openlist', context.config)
+    const base = cl.resolveRemotePath('_data')
+    const files = await cl.listFilesRecursive(base)
+    // 先验证完整清单，避免先写一部分后才发现越界路径。
+    const selected = files.filter(file => !file.isDir).map(file => {
+      if (!file.path.startsWith(base + '/')) throw new Error('OpenList 备份文件超出数据目录')
+      const relative = file.path.slice(base.length + 1)
+      const type = backupType(relative)
+      if (!type || !types.includes(type)) return null
+      return { file, local: backupLocalPath(relative, context), relative }
+    }).filter((item): item is NonNullable<typeof item> => !!item)
+    // config.js 最后恢复，整个操作使用恢复开始时的类型和目标目录。
+    selected.sort((a, b) => Number(a.relative === 'config.js') - Number(b.relative === 'config.js'))
+    for (const { file, local, relative } of selected) {
+      try {
+        fs.mkdirSync(path.dirname(local), { recursive: true })
+        await cl.download(file.path, local)
+        const row = upsertBackupFile({ user: '_system', folderType: 'data', localPath: local, remotePath: file.path, name: relative, mode: 'upload', status: 'verified', direction: 'upload' })
+        setBackupStatus(row.id, 'verified', { size: file.size, localMtime: fs.statSync(local).mtimeMs, localHash: hashFile(local), remoteMtime: parseMod(file.modified), error: null })
+        result.restored++
+      } catch (e: any) { result.errors.push(relative + ': ' + (e?.message || e)) }
+    }
+    return result
+  } finally { manualTransfers--; releaseRestore() }
+}
+
 /**
  * 手动触发同步（UI 按钮调用）。可选按 user / folder 过滤。
- * 暂未启用定时触发（配置项 openlist.syncInterval 预留，注明未生效）。
+ * 与定时同步串行执行，上传完成后才返回结果。
  */
 export async function runSyncNow(opts: { user?: string; folder?: 'cache' | 'music' | 'list' } = {}): Promise<SyncSummary> {
+  while (syncJob) await syncJob.catch(() => {})
+  const job = runSyncImpl(opts)
+  syncJob = job
+  try { return await job } finally { if (syncJob === job) syncJob = null }
+}
+
+async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | 'list' }): Promise<SyncSummary> {
+  while (verifyRunning || manualTransfers || activeUploads || uploadQueue.length) await sleep(20)
+  if (isCloudRestoreRunning()) throw new Error('云端恢复正在执行，请稍后备份')
   const cfg = getConfig()
   if (!cfg.enable) throw new Error('OpenList 未启用')
   const cl = getClient()
   if (!cl) throw new Error('OpenList 客户端不可用')
   const summary: SyncSummary = { uploaded: 0, downloaded: 0, deleted: 0, errors: [] }
+  const selectedData = (global.lx.config as any)['backup.openlist.types'] !== undefined
   for (const entry of cfg.userBackups) {
     if (!entry.enabled) continue
     if (opts.user && entry.user !== opts.user) continue
     const mode = effectiveMode(entry, cfg)
-    const folders: Array<'cache' | 'music' | 'list'> = opts.folder ? [opts.folder] : (['cache', 'music', 'list'] as const)
+    const folders: Array<'cache' | 'music' | 'list'> = opts.folder ? [opts.folder] : (selectedData ? ['cache'] : ['cache', 'music', 'list'])
     for (const ft of folders) {
+      if (selectedData && ft !== 'cache') continue
       const dir = resolveUserDir(entry, ft, cfg)
       if (!dir) continue
       try {
+        if (mode === 'sync') await deletionDetection(entry, cl, cfg, ft, summary)
         if (mode === 'download' || mode === 'sync') await downloadDirection(entry, cl, cfg, ft, summary)
         if (mode === 'sync') {
           await uploadDirection(entry, cl, cfg, ft, summary)
-          await deletionDetection(entry, cl, cfg, ft, summary)
         } else if (mode === 'upload' || mode === 'upload-delete') {
           await uploadDirection(entry, cl, cfg, ft, summary)
         }
@@ -1007,7 +1172,12 @@ export async function runSyncNow(opts: { user?: string; folder?: 'cache' | 'musi
       }
     }
   }
-  if (cfg.backupSystemConfig) {
+  if (selectedData && !opts.user && !opts.folder) await backupSelectedData(cl, summary)
+  while (activeUploads || uploadQueue.length) await sleep(20)
+  for (const row of listBackupByStatus('failed')) {
+    if (rowEnabled(row, cfg) && (!opts.user || row.user === opts.user) && (!opts.folder || row.folder_type === opts.folder)) summary.errors.push(row.user + '/' + row.name + ': ' + row.error)
+  }
+  if (!selectedData && cfg.backupSystemConfig) {
     try {
       await backupSystemConfigFile(cl, cfg, summary)
     } catch (e: any) {
@@ -1037,59 +1207,31 @@ export function listBackups(): any[] {
 }
 
 /**
- * 单文件手动重试：先验证记录的真实状态（本地/远端是否存在），再基于状态决定动作——
- * 已完成的（本地已存在 / 远端已存在）直接修正状态，无需重复传输；否则重新上传/下载。
+ * 单文件手动重试：沿用该记录的实际传输方向，成功落盘后才返回成功。
  * 返回 { ok, message }，前端据此给出明确提示（不再笼统报“未知错误”）。
  */
 export async function retryBackup(id: number): Promise<{ ok: boolean; message?: string }> {
   const cfg = getConfig()
-  if (!cfg.enable) return { ok: false, message: 'OpenList 备份未启用' }
-  const cl = getClient()
-  if (!cl) return { ok: false, message: '无法连接 OpenList（未配置或登录失败）' }
   const row = getBackupById(id)
-  if (!row) return { ok: false, message: '备份记录不存在' }
-  if (row.deleted_at) return { ok: false, message: '该记录已删除' }
+  if (!row || row.deleted_at || row.status === 'deleted') return { ok: false, message: '备份记录不存在或已删除' }
+  if (!rowEnabled(row, cfg)) return { ok: false, message: '该用户或目录未启用 OpenList 同步' }
+  if (syncJob || verifyRunning || enqueuedIds.has('f:' + id)) return { ok: false, message: '文件正在同步或校验，请稍后重试' }
+  const cl = getClient()
+  if (!cl) return { ok: false, message: 'OpenList 客户端不可用' }
   const mode = effectiveModeFromRow(row, cfg)
+  const download = row.direction === 'download' || mode === 'download'
+  // 不以“路径存在”判断成功。上传必须重新传输并确认大小/本地指纹；下载必须完整落盘。
+  enqueuedIds.add('f:' + id)
+  manualTransfers++
   try {
-    if (mode === 'download' || mode === 'sync') {
-      // 下载/同步：本地文件已存在 → 实际已完成，直接标完成（并补登缓存）
-      if (row.local_path && fs.existsSync(row.local_path)) {
-        const isAud = isAudio(row.local_path)
-        if (isAud) {
-          try { registerDownloadedCache(row.user, row.folder_type as 'cache' | 'music', row.local_path) } catch { /* 已登记则忽略 */ }
-        }
-        setBackupStatus(id, isAud ? 'verified' : 'completed', { remotePath: row.remote_path })
-        return { ok: true, message: '本地文件已存在，已标记为完成' }
-      }
-      if (!row.local_path) return { ok: false, message: '缺少本地路径，无法下载' }
-      // 校验远端是否存在
-      let remoteInfo: any = null
-      try { remoteInfo = await cl.getFileInfo(row.remote_path) } catch { remoteInfo = null }
-      if (!(remoteInfo && remoteInfo.size != null)) return { ok: false, message: '远端文件不存在，无法下载' }
-      await downloadOne(row, cl, mode)
-      return { ok: true, message: '已重新下载' }
-    } else {
-      // 上传/上传即删：先校验本地源文件
-      if (!row.local_path) return { ok: false, message: '缺少本地路径，无法上传' }
-      if (!fs.existsSync(row.local_path)) {
-        const ok = await refetchLocalFile(row)
-        if (!ok) return { ok: false, message: '本地源文件已不存在且无法从音源重新下载（缓存已被清理），请重新播放该歌曲后再试' }
-      }
-      // 校验远端是否已存在（中间态可能实际已上传成功）
-      let remoteInfo: any = null
-      try { remoteInfo = await cl.getFileInfo(row.remote_path) } catch { remoteInfo = null }
-      if (remoteInfo && remoteInfo.size != null) {
-        setBackupStatus(id, 'verified', { size: remoteInfo.size, remotePath: row.remote_path, remoteMtime: parseMod(remoteInfo.modified) })
-        if (mode === 'upload-delete') {
-          try { fs.unlinkSync(row.local_path); removeLocalCache(row); softDeleteLocalFile(row.user, row.local_path) } catch { /* 忽略 */ }
-        }
-        return { ok: true, message: '远端文件已存在，已标记为完成' }
-      }
-      await uploadOne(row, cl, mode)
-      return { ok: true, message: '已重新上传' }
-    }
+    const ok = download ? await downloadOne(row, cl, mode) : await uploadOne(row, cl, mode)
+    if (!ok) return { ok: false, message: getBackupById(id)?.error || '重试失败' }
+    return { ok: true, message: download ? '已重新下载' : '已重新上传，等待校验' }
   } catch (e: any) {
-    return { ok: false, message: '重试异常：' + String(e?.message || e) }
+    return { ok: false, message: String(e?.message || e) }
+  } finally {
+    enqueuedIds.delete('f:' + id)
+    manualTransfers--
   }
 }
 
@@ -1099,11 +1241,12 @@ export async function retryBackup(id: number): Promise<{ ok: boolean; message?: 
  * 音乐库文件（folder_type=music）仅软删除记录、不删除用户实际音频，避免误删聆听源。
  * 删除前用 countLocalPathRefs 确认本地文件未被其它活跃记录引用，避免误删共享文件。
  */
-export async function deleteOpenlistBackups(ids: number[]): Promise<{
+export async function deleteOpenlistBackups(ids: number[], skipMainRemote = false): Promise<{
   deleted: number
   remoteRemoved: number
   remoteFailed: string[]
 }> {
+  if (!skipMainRemote && (syncJob || verifyRunning || manualTransfers)) throw new Error('OpenList 正在同步或校验，请稍后删除')
   const db = getBackupDb()
   const cl = getClient()
   const ts = Date.now()
@@ -1113,15 +1256,14 @@ export async function deleteOpenlistBackups(ids: number[]): Promise<{
   for (const id of ids) {
     const row = getBackupById(id)
     if (!row || row.deleted_at) continue
-    const atts = db.prepare(
-      'SELECT * FROM openlist_backup_attachments WHERE backup_file_id = ?',
-    ).all(id) as any[]
+    if (enqueuedIds.has(`f:${id}`)) { remoteFailed.push(`${row.remote_path} (文件正在上传，请稍后删除)`); continue }
+    const atts = listAttachments(id)
+    if (atts.some(a => enqueuedIds.has(`a:${a.id}`))) { remoteFailed.push(`${row.remote_path} (附件正在上传，请稍后删除)`); continue }
     // 先软删除附件记录（避免后续远程引用计数把同属本记录的附件误判为「被其它活跃记录引用」）
-    db.prepare(
-      'UPDATE openlist_backup_attachments SET deleted_at = ?, status = ? WHERE backup_file_id = ?',
-    ).run(ts, 'deleted', id)
     // 附件：删远端（仅当无其它活跃记录引用同一远端路径）+ 删本地
     for (const a of atts) {
+      if (unlinkAttachment(id, a.id) > 0) continue
+      db.prepare('UPDATE openlist_backup_attachments SET deleted_at = ?, status = ? WHERE id = ?').run(ts, 'deleted', a.id)
       if (a.remote_path) {
         if (cl && countRemotePathRefs(a.remote_path, id, a.id) === 0) {
           try {
@@ -1141,7 +1283,7 @@ export async function deleteOpenlistBackups(ids: number[]): Promise<{
       'UPDATE openlist_backup_files SET deleted_at = ?, status = ?, error = NULL WHERE id = ?',
     ).run(ts, 'deleted', id)
     // 主文件远端：删远端（仅当无其它活跃记录引用同一远端路径）
-    if (row.remote_path) {
+    if (row.remote_path && !skipMainRemote) {
       if (cl && countRemotePathRefs(row.remote_path, id, -1) === 0) {
         try {
           await cl.remove(row.remote_path)
