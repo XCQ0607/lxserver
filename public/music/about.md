@@ -314,10 +314,10 @@
     <div class="about-logo-box">
       <img src="/music/assets/logo.svg" class="about-logo-img" alt="LX Music Logo">
     </div>
-    <div class="about-tagline">Next-Gen Web Audio Streaming Platform</div>
+    <div class="about-tagline">Listen Anywhere, Right in Your Browser</div>
     <h1 class="about-title">LX Music Web</h1>
     <p class="about-desc">
-      专为现代浏览器量身定制的高性能流媒体音乐播放器。支持多源聚合检索、Subsonic 开放协议桥接、LRU 自动化缓存与 PWA 离线运行，提供原生 App 级的沉浸式聆听体验。
+      打开浏览器就能用的音乐播放器。多个平台一起搜歌，自动缓存听过的歌，可以安装成应用，用起来和手机 App 一样顺手。
     </p>
 
     <!-- Dynamic Status Pills -->
@@ -365,19 +365,19 @@
   <div class="about-stats">
     <div class="about-stat-card">
       <div class="about-stat-val">5+</div>
-      <div class="about-stat-label">主流平台聚合检索</div>
+      <div class="about-stat-label">个平台一起搜</div>
     </div>
     <div class="about-stat-card">
       <div class="about-stat-val">Hi-Res</div>
-      <div class="about-stat-label">FLAC / 高保真自适应串流</div>
+      <div class="about-stat-label">支持 FLAC 无损音质</div>
     </div>
     <div class="about-stat-card">
       <div class="about-stat-val">Subsonic</div>
-      <div class="about-stat-label">全平台三方客户端兼容</div>
+      <div class="about-stat-label">可用第三方客户端播放</div>
     </div>
     <div class="about-stat-card">
       <div class="about-stat-val">100%</div>
-      <div class="about-stat-label">私有化本地数据主权</div>
+      <div class="about-stat-label">数据存在你自己的服务器</div>
     </div>
   </div>
 
@@ -385,7 +385,7 @@
   <div class="about-section-header">
     <h2 class="about-section-title">
       <i class="fas fa-sparkles text-emerald-500"></i>
-      <span>核心架构与特性矩阵</span>
+      <span>主要功能</span>
     </h2>
     <span class="about-section-tag">Core Capabilities</span>
   </div>
@@ -397,20 +397,20 @@
         <div class="about-card-icon" style="background: rgba(16, 185, 129, 0.12); color: #10b981;">
           <i class="fas fa-headphones-simple"></i>
         </div>
-        <h3 class="about-card-title">极致播放与声学引擎</h3>
+        <h3 class="about-card-title">好听的播放体验</h3>
       </div>
       <ul class="about-card-list">
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>智能码率优选</strong>：FLAC 无损 / 320k / 128k 自适应策略，支持毫秒级流式起播。</span>
+          <span><strong>音质自动选择</strong>：按 FLAC / 320k / 128k 顺序自动选最佳音质，点击即播。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>声学频谱动效</strong>：Web Audio 实时音频分析频谱，与沉浸式全屏歌词封面律动协同。</span>
+          <span><strong>频谱动画</strong>：播放时显示实时频谱，搭配全屏歌词和封面。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>智能播放队列</strong>：支持拖拽排序、批量插播、快速定位与定时伴眠关机。</span>
+          <span><strong>播放队列</strong>：支持拖拽排序、批量添加、快速定位，还有睡眠定时。</span>
         </li>
       </ul>
     </div>
@@ -421,20 +421,20 @@
         <div class="about-card-icon" style="background: rgba(59, 130, 246, 0.12); color: #3b82f6;">
           <i class="fas fa-magnifying-glass"></i>
         </div>
-        <h3 class="about-card-title">全网多源智能聚合检索</h3>
+        <h3 class="about-card-title">多平台搜索</h3>
       </div>
       <ul class="about-card-list">
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>全维度检索</strong>：整合多平台曲库资源，支持单曲、精选歌单、专辑、歌手一网打尽。</span>
+          <span><strong>一次搜全部</strong>：同时搜索多个平台，可查歌曲、歌单、专辑和歌手。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>自定义音源扩展</strong>：支持导入第三方 JS 音源脚本，无缝热插拔拓展更多音乐源。</span>
+          <span><strong>自定义音源</strong>：可导入第三方 JS 音源脚本，随时增减音乐来源。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>公共曲库与共享收藏</strong>：支持全站公共收藏夹，方便家庭与团队协同共建高品质曲库。</span>
+          <span><strong>公共收藏</strong>：可开启公共收藏夹，家人朋友一起攒歌单。</span>
         </li>
       </ul>
     </div>
@@ -445,20 +445,20 @@
         <div class="about-card-icon" style="background: rgba(245, 158, 11, 0.12); color: #f59e0b;">
           <i class="fas fa-palette"></i>
         </div>
-        <h3 class="about-card-title">前沿美学与全天候自适应</h3>
+        <h3 class="about-card-title">界面与主题</h3>
       </div>
       <ul class="about-card-list">
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>Glassmorphism 视觉</strong>：融合现代拟态毛玻璃美学，提供「森之韵」「深海鲨」等定制主题。</span>
+          <span><strong>毛玻璃界面</strong>：提供「森之韵」「深海鲨」等多款主题。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>深色模式无缝融合</strong>：深度跟随系统明暗色彩，浅色清爽明亮，深色沉浸护眼。</span>
+          <span><strong>深色模式</strong>：自动跟随系统，白天明亮，夜间护眼。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>歌词卡片海报生成器</strong>：支持横版/竖版/方版多种视觉规格，一键生成精美歌词海报分享。</span>
+          <span><strong>歌词海报</strong>：横版、竖版、方形任选，一键生成歌词图片分享给朋友。</span>
         </li>
       </ul>
     </div>
@@ -469,20 +469,20 @@
         <div class="about-card-icon" style="background: rgba(139, 92, 246, 0.12); color: #8b5cf6;">
           <i class="fas fa-bolt-lightning"></i>
         </div>
-        <h3 class="about-card-title">智能 LRU 缓存与 PWA 体验</h3>
+        <h3 class="about-card-title">缓存与安装</h3>
       </div>
       <ul class="about-card-list">
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>全自动多级缓存</strong>：歌词、封面及音频文件自动落盘，支持弱网与离线环境秒开。</span>
+          <span><strong>自动缓存</strong>：歌词、封面和音频自动保存，网络不好时也能快速打开。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>缓存控制仪表盘</strong>：支持细粒度可视化管理，可配置最大缓存配额与 LRU 自动清理。</span>
+          <span><strong>缓存管理</strong>：可查看缓存占用，设置容量上限，超出后自动清理最久没听的歌。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>PWA 原生级应用</strong>：支持一键安装至桌面端与手机主屏幕，支持全手势侧边栏交互。</span>
+          <span><strong>可安装成应用</strong>：一键添加到电脑桌面或手机主屏幕，支持手势操作侧边栏。</span>
         </li>
       </ul>
     </div>
@@ -493,20 +493,20 @@
         <div class="about-card-icon" style="background: rgba(6, 182, 212, 0.12); color: #06b6d4;">
           <i class="fas fa-network-wired"></i>
         </div>
-        <h3 class="about-card-title">Subsonic 开放生态协议桥接</h3>
+        <h3 class="about-card-title">Subsonic 支持</h3>
       </div>
       <ul class="about-card-list">
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>协议全面兼容</strong>：支持使用音流（Streamer）、Feishin、Symfonium 等客户端直连。</span>
+          <span><strong>兼容常用客户端</strong>：可直接连接音流（Streamer）、Feishin、Symfonium 等。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>指令化在线搜索</strong>：支持在三方客户端使用 <code>wy:</code>、<code>tx:</code> 等平台前缀指令全网检索。</span>
+          <span><strong>在线搜歌</strong>：在第三方客户端搜索时加上 <code>wy:</code>、<code>tx:</code> 等前缀，即可搜索对应平台。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>在线排行榜映射</strong>：官方排行榜无缝映射为客户端只读歌单，随时随地掌握流行趋势。</span>
+          <span><strong>排行榜</strong>：各平台排行榜会显示为只读歌单，随时看热门歌曲。</span>
         </li>
       </ul>
     </div>
@@ -517,20 +517,20 @@
         <div class="about-card-icon" style="background: rgba(239, 68, 68, 0.12); color: #ef4444;">
           <i class="fas fa-shield-halved"></i>
         </div>
-        <h3 class="about-card-title">数据主权与细粒度权限安全</h3>
+        <h3 class="about-card-title">同步与安全</h3>
       </div>
       <ul class="about-card-list">
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>跨端双向云同步</strong>：与 LX Music 官方桌面端/移动端实现歌单与收藏双向数据互通。</span>
+          <span><strong>多端同步</strong>：歌单和收藏可与 LX Music 官方桌面端、手机端双向同步。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>RBAC 权限矩阵</strong>：严格区分访客、普通账号与管理员，限制未授权公开源与缓存写入。</span>
+          <span><strong>分级权限</strong>：访客、普通用户和管理员权限分开，未授权的人不能导入音源或写入缓存。</span>
         </li>
         <li>
           <i class="fas fa-check"></i>
-          <span><strong>访问密码守护</strong>：支持配置 Web 播放器独立访问密码，确保私人音乐数据不被窥探。</span>
+          <span><strong>访问密码</strong>：可给网页播放器单独设置密码，保护你的私人歌单。</span>
         </li>
       </ul>
     </div>
@@ -540,24 +540,24 @@
   <div class="about-section-header">
     <h2 class="about-section-title">
       <i class="fas fa-handshake-angle text-emerald-500"></i>
-      <span>开源生态与鸣谢</span>
+      <span>致谢</span>
     </h2>
     <span class="about-section-tag">Acknowledgements</span>
   </div>
 
   <div class="about-box about-credits-content">
     <p style="margin: 0 0 0.5rem 0;">
-      本项目遵循开放与共享的开源精神构建，衷心感谢以下优秀开源项目与技术贡献者：
+      本项目基于以下开源项目开发，感谢它们的作者：
     </p>
     <ul style="margin: 0; padding-left: 1.25rem;">
       <li>
-        <strong><a href="https://github.com/lyswhut/lx-music-desktop" target="_blank">lx-music-desktop</a></strong>：提供极佳的交互规范与产品设计参考。
+        <strong><a href="https://github.com/lyswhut/lx-music-desktop" target="_blank">lx-music-desktop</a></strong>：交互与产品设计参考。
       </li>
       <li>
-        <strong><a href="https://github.com/lyswhut/lx-music-sync-server" target="_blank">lx-music-sync-server</a></strong>：本项目数据同步架构的核心上游基石。
+        <strong><a href="https://github.com/lyswhut/lx-music-sync-server" target="_blank">lx-music-sync-server</a></strong>：本项目的数据同步基础。
       </li>
       <li>
-        特别感谢 <strong><a href="https://github.com/lyswhut" target="_blank">lyswhut</a></strong> 为开源社区带来的卓越贡献。
+        感谢 <strong><a href="https://github.com/lyswhut" target="_blank">lyswhut</a></strong> 与开源社区。
       </li>
     </ul>
   </div>
@@ -566,7 +566,7 @@
   <div class="about-section-header">
     <h2 class="about-section-title">
       <i class="fas fa-scale-balanced text-emerald-500"></i>
-      <span>法律合规与服务协议</span>
+      <span>许可与声明</span>
     </h2>
     <span class="about-section-tag">Terms & Disclaimer</span>
   </div>
@@ -574,20 +574,20 @@
   <div class="about-box">
     <div class="about-disclaimer-grid">
       <div class="about-disclaimer-card">
-        <h4><i class="fas fa-file-contract text-emerald-500"></i> 开源许可与补充协议</h4>
-        <p style="margin: 0;">本项目基于 Apache License 2.0 许可证开源发行。代码仓库完全公开透明，旨在为全网开发者及音乐爱好者提供技术交流与前端架构学习案例。</p>
+        <h4><i class="fas fa-file-contract text-emerald-500"></i> 开源许可</h4>
+        <p style="margin: 0;">本项目基于 Apache License 2.0 开源，代码完全公开，供开发者和音乐爱好者学习交流。</p>
       </div>
       <div class="about-disclaimer-card">
-        <h4><i class="fas fa-globe text-blue-500"></i> 数据来源中立性声明</h4>
-        <p style="margin: 0;">各音源平台在线数据由公开服务器接口按需合并展示，音频流依赖自定义源脚本解析，本项目自身不存储亦不对第三方音源数据的有效性与合法性承担担保责任。</p>
+        <h4><i class="fas fa-globe text-blue-500"></i> 数据来源</h4>
+        <p style="margin: 0;">在线歌曲信息来自各平台的公开接口，音频由自定义音源脚本解析。本项目不存储这些内容，也不保证第三方数据的可用性与合法性。</p>
       </div>
       <div class="about-disclaimer-card">
-        <h4><i class="fas fa-clock-rotate-left text-amber-500"></i> 版权数据 24 小时自律</h4>
-        <p style="margin: 0;">使用过程中如产生包含版权音频、封面或文本数据，使用者务必在 <strong>24 小时内</strong> 从本地缓存中清除，严禁将其用于商业盈利、公开转播或二次分发。</p>
+        <h4><i class="fas fa-clock-rotate-left text-amber-500"></i> 版权提醒</h4>
+        <p style="margin: 0;">使用中缓存的版权音频、封面或文本，请在 <strong>24 小时内</strong> 清除，不得用于商业盈利、公开传播或二次分发。</p>
       </div>
       <div class="about-disclaimer-card">
-        <h4><i class="fas fa-shield text-rose-500"></i> 法律遵从与免责约定</h4>
-        <p style="margin: 0;">严禁在违反当地法律法规的环境下使用本项目。因使用者个人使用行为或音源脚本解析所产生的一切纠纷与法律责任，均由使用者本人独立承担。</p>
+        <h4><i class="fas fa-shield text-rose-500"></i> 免责声明</h4>
+        <p style="margin: 0;">请在符合当地法律法规的前提下使用本项目。因个人使用或音源脚本产生的一切纠纷和责任，由使用者自行承担。</p>
       </div>
     </div>
   </div>

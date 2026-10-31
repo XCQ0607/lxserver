@@ -96,3 +96,5 @@ dist-electron/
 /output/playwright/
 
 /docs/.vitepress
+
+/scrollcraft

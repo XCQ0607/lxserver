@@ -3,10 +3,21 @@
     "target": "ESNext",
     "module": "ESNext",
     "moduleResolution": "bundler",
-    "allowJs": true
+    "allowJs": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "types": [
+      "vitepress/client"
+    ]
   },
   "include": [
     ".vitepress/**/*",
     "**/*"
+  ],
+  "exclude": [
+    ".vitepress/dist",
+    ".vitepress/cache",
+    "node_modules"
   ]
 }
+

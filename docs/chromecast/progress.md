@@ -56,7 +56,7 @@ The existing customization history includes eleven commits from October 12–13,
 - [x] Deploy code `6cafc09`: 41 isolated and 41 live runtime checks pass, seven changed and 256 preserved file hashes match, all five sources initialize, and signed-in HTTPS/browser checks pass. Configuration, six mounts and 51 unrelated containers remain unchanged.
 - [x] Port the four shared Cast/recovery/sync corrections to upstream PR #451 (`abd404a`), with all 54 tests and type checks passing.
 
-See [the compatibility audit](../combined-conflict-audit.md) for reproductions, fixes and validation limits. Frontend worker v43 refreshes the corrected assets.
+The compatibility audit (`combined-conflict-audit.md`, not included in this documentation tree) records reproductions, fixes and validation limits. Frontend worker v43 refreshes the corrected assets.
 
 - [x] Follow-up compatibility audit: retain seeks during pending Cast LOAD, reject stale local-recovery timers after route changes, and synchronize unique sync-status views with the correct initiating connection form. Four focused regressions cover these shared fixes.
 
