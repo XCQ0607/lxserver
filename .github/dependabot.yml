@@ -7,6 +7,9 @@ updates:
       interval: "weekly"
     ignore:
       - dependency-name: "message2call"
+      # Electron 44+ 官方废弃了 32 位支持 (ia32 与 armv7l)，固定在 43.x 以保障多架构构建
+      - dependency-name: "electron"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: "npm"
     directory: "/docs"
     target-branch: "dev"

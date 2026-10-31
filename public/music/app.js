@@ -8600,8 +8600,15 @@ let isMuted = false;
 // 初始化音量
 audio.volume = currentVolume;
 updateVolumeUI();
+let volumeFollowsRemote = false;
 audio.addEventListener('volumechange', () => {
-    if (!audio.isRemote) return;
+    // Ignore ordinary native volume events (including crossfade automation).
+    if (audio.isRemote) volumeFollowsRemote = true;
+    else if (volumeFollowsRemote) {
+        volumeFollowsRemote = false;
+        try { localStorage.setItem('lx_volume', audio.volume.toString()); } catch (_) { }
+    }
+    else return;
     currentVolume = audio.volume;
     isMuted = audio.muted;
     updateVolumeUI();
@@ -12540,6 +12547,7 @@ async function handleLocalLogin() {
             if (pass) {
                 localStorage.setItem('lx_sync_pass', pass);
             }
+            if (passInput) passInput.value = '';
 
             // [新增] 成功登录后立即更新顶部栏 UI
             if (typeof updateUserUI === 'function') updateUserUI();
