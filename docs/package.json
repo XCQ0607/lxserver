@@ -8,6 +8,6 @@
     },
     "devDependencies": {
         "vitepress": "^1.4.0",
-        "vue": "^3.5.43"
+        "vue": "^3.5.44"
     }
 }
