@@ -76,11 +76,34 @@ const VU_TICK_PROFILES = {
         compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-5, '-5', true], [-3], [0, '0', true], [3, '+3', true]]),
         full: makeVuTicks([[-20, '-20', true], [-15, '-15'], [-12], [-10, '-10', true], [-8], [-5, '-5', true], [-3, '-3'], [-1], [0, '0', true], [1, '+1'], [2], [3, '+3', true]])
     },
+    reference: {
+        compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-5, '-5', true], [-2], [0, '0', true], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-2], [0, '0', true], [2], [3, '+3', true]])
+    },
+    brass: {
+        compact: makeVuTicks([[-20, '-20', true], [-13], [-10, '-10', true], [-5, '-5', true], [-3], [0, '0', true], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-17], [-13, '-13'], [-10], [-8, '-8'], [-6], [-5, '-5', true], [-3, '-3'], [-2], [0, '0', true], [1, '+1'], [2, '+2'], [3, '+3', true]])
+    },
+    open: {
+        compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-3], [0, '0', true], [3, '+3', true]]),
+        full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-5], [-3, '-3'], [0, '0', true], [3, '+3', true]])
+    },
+    mastering: {
+        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-6], [-3], [0, '0', true], [1], [2], [3, '+3', true]]),
+        full: makeVuTicks([[-24], [-20, '-20', true], [-18], [-15, '-15', true], [-12, '-12'], [-10], [-9, '-9'], [-7], [-6, '-6', true], [-5], [-4, '-4'], [-3, '-3'], [-2, '-2'], [-1], [0, '0', true], [1, '+1'], [2, '+2'], [3, '+3', true]])
+    },
     studio: {
         compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-5, '-5', true], [0, '0', true], [3, '+3', true]]),
         full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [-1], [0, '0', true], [1], [2], [3, '+3', true]])
     }
 };
+
+// Study designs use one printed palette for both UI modes.
+function studyDesign(d) {
+    const face = { kind: d.face.kind, cy: d.face.cy, light: d.face.stops, dark: d.face.stops, glow: d.face.glow, glowAlways: !!d.face.glow };
+    return Object.assign({ tagAlign: 'center', mark: 'VU', markStyle: 'normal', peak: null, sheen: false, deco: 'study' }, d,
+        { face, light: d.palette, dark: d.palette });
+}
 
 const LX_VU_DIAL_DESIGNS = {
     // Classic broadcast meter: warm lamp-lit plate, serif numerals, double scale rail,
@@ -177,7 +200,68 @@ const LX_VU_DIAL_DESIGNS = {
         needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', peak: null, sheen: false, deco: 'mono', lamp: ['235, 240, 255', 0.3],
         light: { ink: '#0f172a', muted: 'rgba(15, 23, 42, 0.55)', arc: '#334155', red: '#f43f5e', needle: '#0f172a', tip: '#f43f5e', rule: 'rgba(15, 23, 42, 0.25)', rim: 'rgba(148, 163, 184, 0.55)' },
         dark: { ink: '#f8fafc', muted: 'rgba(226, 232, 240, 0.6)', arc: 'rgba(241, 245, 249, 0.85)', red: '#f43f5e', needle: '#e2e8f0', tip: '#f43f5e', rule: 'rgba(226, 232, 240, 0.25)', rim: '#334155' }
-    }
+    },
+    // Industrial design study: printed cards are identical in light and dark mode.
+    // Smoked-titanium reference meter: wide shallow sweep, hairline nickel pointer, warm diffuser.
+    'study-nocturne': studyDesign({
+        name: 'Nocturne', scaleProfile: 'reference',
+        geom: { span: 0.05, baseY: { c: 0.66, f: 0.62 }, sag: { c: 0.05, f: 0.055 }, curve: 2.2, pivot: { c: 2.3, f: 2.7 } },
+        font: { family: '"Avenir Next", Avenir, "Segoe UI", sans-serif', weight: '600', style: 'normal', scale: 1.0 },
+        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT',
+        face: { kind: 'linear', stops: [[0, '#323536'], [0.56, '#202425'], [1, '#15191a']], glow: { color: '216, 196, 159', a0: 0.12, a1: 0.04 } },
+        arc: 'double', arcInset: 2.2, tick: { style: 'bar', len: 1, lwMajor: 1.2, lwMinor: 0.6 },
+        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', lamp: ['216, 196, 159', 0.45],
+        palette: { ink: '#e5ded0', muted: 'rgba(157, 160, 156, 0.85)', arc: '#c5a36d', red: '#c9654f', needle: '#f3eee1', tip: '#c9654f', glow: 'rgba(216, 196, 159, 0.5)', frame: 'rgba(197, 163, 109, 0.45)', edge: '#c5a36d', rule: 'rgba(197, 163, 109, 0.3)', rim: '#706d66' },
+        study: { caption: 'IEC 60268-17', pins: true }
+    }),
+    // Broadcast meter on lamp-lit ivory: double rail, serif numerals, tapered blade, watts sub-scale.
+    'study-heritage': studyDesign({
+        name: 'Heritage', scaleProfile: 'broadcast', warm: true, markDrop: 1.75,
+        geom: { span: 0.07, baseY: { c: 0.62, f: 0.56 }, sag: { c: 0.08, f: 0.09 }, curve: 2, pivot: { c: 1.95, f: 2.2 } },
+        font: { family: 'Georgia, "Times New Roman", serif', weight: '500', style: 'normal', scale: 1.0 },
+        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', markStyle: 'italic',
+        face: { kind: 'radial', cy: 0.42, stops: [[0, '#fffaf0'], [0.56, '#f0e2c5'], [1, '#d9c39d']] },
+        arc: 'double', arcInset: 2.4, tick: { style: 'bar', len: 1, lwMajor: 1.5, lwMinor: 0.85 },
+        needle: { type: 'blade', reach: 1.1, width: 1 }, cap: 'screw', lamp: ['255, 196, 120', 0.8],
+        palette: { ink: '#332a1e', muted: 'rgba(117, 102, 79, 0.9)', arc: '#826843', red: '#bf4436', needle: '#171717', tip: '#bf4436', glow: 'rgba(255, 210, 140, 0.45)', frame: 'rgba(130, 104, 67, 0.5)', edge: '#826843', rule: 'rgba(130, 104, 67, 0.35)', rim: '#b39765' },
+        study: { caption: '8 Ω · 100 W REF @ 0 VU', pins: true, watts: [[-20, '1'], [-10, '10'], [-5, '32'], [-3, '50'], [0, '100'], [3, '200']] }
+    }),
+    // Mastering meter in a champagne-brass frame: single rail, wedge graduations, faceted blade.
+    'study-atelier': studyDesign({
+        name: 'Atelier', scaleProfile: 'brass', warm: true,
+        geom: { span: 0.065, baseY: { c: 0.64, f: 0.60 }, sag: { c: 0.10, f: 0.12 }, curve: 1.8, pivot: { c: 1.8, f: 2.1 } },
+        font: { family: '"Avenir Next", Avenir, "Segoe UI", sans-serif', weight: '600', style: 'normal', scale: 1.0 },
+        tag: ch => '· ' + ch + ' ·',
+        face: { kind: 'linear', stops: [[0, '#292824'], [0.56, '#1a1b19'], [1, '#121311']] },
+        arc: 'none-rail', tick: { style: 'wedge', len: 1, lwMajor: 1.6, lwMinor: 0.9 },
+        needle: { type: 'blade', reach: 1.0, width: 0.85 }, cap: 'rosette', lamp: ['240, 210, 160', 0.45],
+        palette: { ink: '#e7d3ae', muted: 'rgba(161, 143, 112, 0.9)', arc: '#d0ad73', red: '#cf674f', needle: '#e7d3ae', tip: '#cf674f', glow: 'rgba(208, 173, 115, 0.45)', frame: 'rgba(208, 173, 115, 0.5)', edge: '#a7844b', rule: 'rgba(208, 173, 115, 0.3)', rim: '#a7844b' },
+        study: { caption: 'MASTERING · ANODIZED BRASS', pins: true }
+    }),
+    // Porcelain reference meter: open shallow sweep, fine charcoal indices, blue-steel hairline.
+    'study-riviera': studyDesign({
+        name: 'Riviera', scaleProfile: 'open',
+        geom: { span: 0.06, baseY: { c: 0.66, f: 0.62 }, sag: { c: 0.06, f: 0.07 }, curve: 2, pivot: { c: 2.1, f: 2.45 } },
+        font: { family: '"Avenir Next", Avenir, "Segoe UI", sans-serif', weight: '500', style: 'normal', scale: 1.0 },
+        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT',
+        face: { kind: 'radial', cy: 0.40, stops: [[0, '#f1f0e9'], [0.56, '#d9d9d1'], [1, '#c5c6c0']] },
+        arc: 'double', arcInset: 2.2, tick: { style: 'bar', len: 1.05, lwMajor: 1.2, lwMinor: 0.6 },
+        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', lamp: ['255, 250, 235', 0.35],
+        palette: { ink: '#252923', muted: 'rgba(119, 123, 117, 0.9)', arc: '#6d7771', red: '#bd5947', needle: '#1d2a32', tip: '#bd5947', glow: 'rgba(255, 255, 245, 0.4)', frame: 'rgba(109, 119, 113, 0.45)', edge: '#6d7771', rule: 'rgba(109, 119, 113, 0.3)', rim: '#a9aaa5' },
+        study: { caption: 'IEC 60268-17', pins: true }
+    }),
+    // Cobalt mastering instrument: extended dB scale, 8 Ω power arc, vermilion-tipped blade.
+    'study-cobalt': studyDesign({
+        name: 'Cobalt', scaleProfile: 'mastering', markDrop: 1.75,
+        geom: { span: 0.065, baseY: { c: 0.62, f: 0.56 }, sag: { c: 0.11, f: 0.12 }, curve: 1.7, pivot: { c: 1.8, f: 2.05 } },
+        font: { family: '"Avenir Next", Avenir, "Segoe UI", sans-serif', weight: '600', style: 'normal', scale: 0.95 },
+        tag: ch => 'CH · ' + ch,
+        face: { kind: 'linear', stops: [[0, '#16345a'], [0.56, '#0c2343'], [1, '#08172d']], glow: { color: '83, 170, 255', a0: 0.22, a1: 0.05 } },
+        arc: 'none-rail', tick: { style: 'bar', len: 1, lwMajor: 1.4, lwMinor: 0.8 },
+        needle: { type: 'blade', reach: 1.0, width: 0.8 }, cap: 'jewel', lamp: ['128, 186, 209', 0.6],
+        palette: { ink: '#dce9ef', muted: 'rgba(156, 182, 197, 0.9)', arc: '#80bad1', red: '#ff785f', needle: '#dce9ef', tip: '#ff785f', glow: 'rgba(128, 186, 209, 0.55)', frame: 'rgba(128, 186, 209, 0.45)', edge: '#80bad1', rule: 'rgba(128, 186, 209, 0.3)', rim: '#576d82' },
+        study: { caption: '8 Ω · 100 W REF @ 0 VU', pins: true, watts: [[-24, '.4'], [-18, '1.6'], [-12, '6'], [-6, '25'], [-3, '50'], [0, '100'], [3, '200']] }
+    })
 };
 
 
@@ -601,7 +685,7 @@ class LXStudioVUMeterAnimation {
             ctx.fillStyle = vg;
             ctx.fillRect(x, y, w, h);
         }
-        if (D.face.glow && !isLight) {
+        if (D.face.glow && (!isLight || D.face.glowAlways)) {
             const gl = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 10 * scale, x + w / 2, y + h * 0.5, w * 0.65);
             gl.addColorStop(0, `rgba(${D.face.glow.color}, ${D.face.glow.a0})`);
             gl.addColorStop(0.6, `rgba(${D.face.glow.color}, ${D.face.glow.a1})`);
@@ -619,7 +703,7 @@ class LXStudioVUMeterAnimation {
             ctx.fillRect(x, y, w, h);
             ctx.restore();
         }
-        const warm = D.deco === 'vintage' || D.deco === 'champagne';
+        const warm = D.warm || D.deco === 'vintage' || D.deco === 'champagne';
         const age = ctx.createRadialGradient(x + w / 2, y + h * 0.5, Math.min(w, h) * 0.2, x + w / 2, y + h * 0.5, Math.max(w * 0.62, h * 1.1));
         age.addColorStop(0, 'rgba(0, 0, 0, 0)');
         age.addColorStop(1, warm ? 'rgba(90, 50, 10, 0.28)' : (isLight ? 'rgba(0, 0, 0, 0.10)' : 'rgba(0, 0, 0, 0.30)'));
@@ -772,6 +856,9 @@ class LXStudioVUMeterAnimation {
                 strokeRail(i / N + 0.004, (i + 0.66) / N, 0, col, segW, 3);
                 ctx.restore();
             }
+        } else if (D.arc === 'none-rail') {
+            strokeRail(0, normZero, 0, P.arc, railW * 1.1, 40);
+            strokeRail(normZero, 1, 0, P.red, redW, 15);
         } else if (D.arc === 'none') {
             strokeRail(normZero, 1, 0, P.red, redW, 15);
         }
@@ -844,7 +931,7 @@ class LXStudioVUMeterAnimation {
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.letterSpacing = '2px';
-        ctx.fillText(D.mark, x + w / 2, baseY + sz.mark * scale);
+        ctx.fillText(D.mark, x + w / 2, baseY + sz.mark * scale * (compactLike ? 1 : (D.markDrop || 1)));
         ctx.restore();
 
         // 8. Peak-hold markers (designs that opt in)
@@ -1048,7 +1135,7 @@ class LXStudioVUMeterAnimation {
         if (!compactLike) {
             const shTop = y + h * 0.84;
             const shEdge = y + h * 0.94;
-            const warmShroud = D.deco === 'vintage' || D.deco === 'champagne';
+            const warmShroud = D.warm || D.deco === 'vintage' || D.deco === 'champagne';
             const curve = (first) => {
                 for (let i = 0; i <= 24; i++) {
                     const u = i / 24;
@@ -1103,24 +1190,6 @@ class LXStudioVUMeterAnimation {
             ctx.fillStyle = sg;
             ctx.fillRect(x, y, w, h);
         }
-        // Curved crystal reflection across the upper glass
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + w, y);
-        ctx.lineTo(x + w, y + h * 0.22);
-        for (let i = 1; i <= 24; i++) {
-            const u = 1 - i / 24;
-            const v = 2 * u - 1;
-            ctx.lineTo(x + w * u, y + h * (0.36 - 0.14 * v * v));
-        }
-        ctx.closePath();
-        const cr = ctx.createLinearGradient(x, y, x, y + h * 0.36);
-        cr.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.09)');
-        cr.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = cr;
-        ctx.fill();
-        ctx.restore();
         ctx.restore(); // end clip
 
         // 12. Bezel
@@ -1131,7 +1200,7 @@ class LXStudioVUMeterAnimation {
             ctx.stroke();
         } else {
             // Machined metal bezel: brushed gradient ring with inner shadow lip and a specular top edge
-            const warmMetal = D.deco === 'vintage' || D.deco === 'champagne';
+            const warmMetal = D.warm || D.deco === 'vintage' || D.deco === 'champagne';
             const ringW = 3.2 * scale;
             const mg = ctx.createLinearGradient(x, y - ringW, x, y + h + ringW);
             if (warmMetal) {
@@ -1290,6 +1359,63 @@ class LXStudioVUMeterAnimation {
                 ctx.fillText('LX AUDIO', x + 12 * scale, y + h - 9 * scale);
                 ctx.textAlign = 'right';
                 ctx.fillText('MASTER SERIES', x + w - 12 * scale, y + h - 9 * scale);
+            }
+        } else if (D.deco === 'study' && D.study) {
+            const S = D.study;
+            if (S.pins) {
+                [-0.035, 1.035].forEach(n => {
+                    const p = gsp(n, inner - 2 * scale);
+                    ctx.fillStyle = P.edge;
+                    ctx.beginPath();
+                    ctx.arc(p.bx, p.by, (compactLike ? 1.4 : 2.2) * scale, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.fillStyle = P.ink;
+                    ctx.globalAlpha = 0.6;
+                    ctx.beginPath();
+                    ctx.arc(p.bx, p.by - 0.4 * scale, 0.6 * scale, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.globalAlpha = 1;
+                });
+            }
+            if (S.watts && !compactLike) {
+                const railOff = -10 * scale;
+                const n0 = mapVuToNorm(S.watts[0][0]);
+                ctx.strokeStyle = P.arc;
+                ctx.globalAlpha = 0.45;
+                ctx.lineWidth = 0.7 * scale;
+                ctx.beginPath();
+                for (let i = 0; i <= 40; i++) {
+                    const p = gsp(n0 + (1 - n0) * (i / 40), railOff);
+                    if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
+                }
+                ctx.stroke();
+                ctx.globalAlpha = 1;
+                ctx.font = `500 ${Math.max(6, Math.round(8 * scale))}px ${D.font.family}`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                S.watts.forEach(([vu, label]) => {
+                    const n = mapVuToNorm(vu);
+                    const a = gsp(n, railOff + 2.5 * scale);
+                    const b = gsp(n, railOff - 2.5 * scale);
+                    const col = vu >= 0 ? P.red : P.muted;
+                    ctx.strokeStyle = col;
+                    ctx.lineWidth = 0.8 * scale;
+                    ctx.beginPath();
+                    ctx.moveTo(a.bx, a.by);
+                    ctx.lineTo(b.bx, b.by);
+                    ctx.stroke();
+                    const l = gsp(n, railOff - 9 * scale);
+                    ctx.fillStyle = col;
+                    ctx.fillText(label, l.bx, l.by);
+                });
+            }
+            if (S.caption && !compactLike) {
+                ctx.font = `500 ${small}px ${D.font.family}`;
+                ctx.fillStyle = P.muted;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.letterSpacing = '1.5px';
+                ctx.fillText(S.caption, x + w / 2, y + h * 0.8);
             }
         } else if (D.deco === 'mono') {
             // Bauhaus layout: solid overload block, heavy top bar and a baseline rule

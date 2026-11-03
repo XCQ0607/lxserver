@@ -81,6 +81,23 @@ test('VU dial profiles vary scale detail without changing calibration', () => {
   }
 })
 
+test('design-study VU profiles are registered with calibrated scales', () => {
+  const { LXStudioVUMeterAnimation } = createVisualizerEnvironment()
+  const vu = new LXStudioVUMeterAnimation()
+  const studies = ['study-nocturne', 'study-heritage', 'study-atelier', 'study-riviera', 'study-cobalt']
+  const names = studies.map(id => vu.getDesign(id).name)
+  assert.deepEqual(names, ['Nocturne', 'Heritage', 'Atelier', 'Riviera', 'Cobalt'])
+  for (const id of studies) {
+    const design = vu.getDesign(id)
+    assert.equal(design.light, design.dark, `${id} should print one palette for both UI modes`)
+    for (const compact of [true, false]) {
+      const ticks = vu.getScaleTicks(id, compact)
+      assert.ok(ticks.some(tick => tick.label === '0' && Math.abs(tick.norm - vu.vuToNorm(0)) < 1e-6), `${id} should align its zero tick`)
+    }
+  }
+  assert.ok(vu.getScaleTicks('study-cobalt', false).length > vu.getScaleTicks('study-riviera', false).length, 'cobalt mastering scale should be denser than riviera open scale')
+})
+
 test('VU meter at 100% player volume oscillates and does not stay pinned at max level (1.0)', () => {
   const { LXStudioVUMeterAnimation, setSimulatedTime } = createVisualizerEnvironment()
 
