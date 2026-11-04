@@ -39,6 +39,7 @@ function createVisualizerEnvironment() {
   return {
     LXStudioVUMeterAnimation: context.window.LXStudioVUMeterAnimation,
     setSimulatedTime: (t) => { currentTime = t },
+    window: context.window,
     audioPlayer
   }
 }
@@ -63,39 +64,64 @@ test('vuToNorm accurately maps dial scale points to dial tick norms', () => {
   assert.ok(Math.abs(vu.vuToNorm(3) - 1.00) < 1e-3, '+3 VU must map to norm 1.00')
 })
 
-test('VU dial profiles vary scale detail without changing calibration', () => {
+const STUDY_THEMES = ['study-nocturne', 'study-heritage', 'study-atelier', 'study-riviera', 'study-cobalt']
+
+function createMockCtx(width, height) {
+  const base = {
+    canvas: { width, height, clientWidth: width, clientHeight: height },
+    createLinearGradient: () => ({ addColorStop: () => {} }),
+    createRadialGradient: () => ({ addColorStop: () => {} }),
+    measureText: text => ({ width: String(text).length * 6 }),
+    fillTextCalls: []
+  }
+  base.fillText = (text, x, y) => base.fillTextCalls.push({ text, x, y })
+  return new Proxy(base, {
+    get: (target, key) => (key in target ? target[key] : () => {}),
+    set: (target, key, value) => { target[key] = value; return true }
+  })
+}
+
+test('design-study dials replace the legacy themes and migrate saved values', () => {
   const { LXStudioVUMeterAnimation } = createVisualizerEnvironment()
   const vu = new LXStudioVUMeterAnimation()
-  const profiles = ['vintage-amber', 'ocean-blue', 'cyber-cyan', 'champagne-gold', 'studio-monochrome']
-  const detailed = vu.getScaleTicks('ocean-blue', false)
-  const essential = vu.getScaleTicks('cyber-cyan', false)
-
-  assert.ok(detailed.length > essential.length, 'precision profile should have more graduations than essential profile')
-  assert.equal(vu.getScaleTicks('vintage-amber', false).filter(tick => tick.label).length, 10)
-  assert.equal(vu.getScaleTicks('cyber-cyan', false).filter(tick => tick.label).length, 5)
-  assert.equal(new Set(profiles.map(profile => vu.getScaleTicks(profile, false).length)).size, profiles.length, 'each profile should have a distinct full-scale density')
-
-  for (const profile of profiles) {
-    const ticks = vu.getScaleTicks(profile, true)
-    assert.ok(ticks.some(tick => tick.label === '0' && Math.abs(tick.norm - vu.vuToNorm(0)) < 1e-6), `${profile} should align its zero tick to the calibration`)
+  assert.deepEqual(STUDY_THEMES.map(id => vu.getDesign(id).name), ['Nocturne', 'Heritage', 'Atelier', 'Riviera', 'Cobalt'])
+  const legacy = { 'vintage-amber': 'study-heritage', 'ocean-blue': 'study-cobalt', 'cyber-cyan': 'study-nocturne', 'champagne-gold': 'study-atelier', 'studio-monochrome': 'study-riviera', unknown: 'study-nocturne' }
+  for (const [from, to] of Object.entries(legacy)) {
+    assert.equal(LXStudioVUMeterAnimation.normalizeTheme(from), to)
   }
 })
 
-test('design-study VU profiles are registered with calibrated scales', () => {
+test('every dial prints a calibrated, monotonic scale inside its sweep', () => {
   const { LXStudioVUMeterAnimation } = createVisualizerEnvironment()
   const vu = new LXStudioVUMeterAnimation()
-  const studies = ['study-nocturne', 'study-heritage', 'study-atelier', 'study-riviera', 'study-cobalt']
-  const names = studies.map(id => vu.getDesign(id).name)
-  assert.deepEqual(names, ['Nocturne', 'Heritage', 'Atelier', 'Riviera', 'Cobalt'])
-  for (const id of studies) {
-    const design = vu.getDesign(id)
-    assert.equal(design.light, design.dark, `${id} should print one palette for both UI modes`)
-    for (const compact of [true, false]) {
-      const ticks = vu.getScaleTicks(id, compact)
-      assert.ok(ticks.some(tick => tick.label === '0' && Math.abs(tick.norm - vu.vuToNorm(0)) < 1e-6), `${id} should align its zero tick`)
+  for (const id of STUDY_THEMES) {
+    const { geometry: g } = vu.getDesign(id)
+    const marks = vu.getScaleMarks(id)
+    const angles = marks.map(m => vu.scaleAngle(id, m.norm))
+    for (let i = 1; i < angles.length; i++) assert.ok(angles[i] > angles[i - 1], `${id} ticks must increase`)
+    assert.ok(angles[0] >= g.start - 1e-9 && angles.at(-1) <= g.start + g.sweep + 1e-9, `${id} ticks must stay in the sweep`)
+    const zero = marks.find(m => m.label === '0')
+    assert.ok(zero && Math.abs(zero.norm - vu.vuToNorm(0)) < 1e-9, `${id} must align 0 VU to the shared calibration`)
+  }
+  assert.ok(vu.getScaleMarks('study-cobalt').length > vu.getScaleMarks('study-riviera').length, 'cobalt should be denser than riviera')
+})
+
+test('every dial renders at detail and footer sizes and hides on mobile', () => {
+  const { LXStudioVUMeterAnimation, window } = createVisualizerEnvironment()
+  for (const id of STUDY_THEMES) {
+    window.settings = { vuMeterTheme: id }
+    for (const [w, h, compact] of [[1200, 380, false], [456, 72, true]]) {
+      window.innerWidth = 1440
+      const ctx = createMockCtx(w, h)
+      new LXStudioVUMeterAnimation({ isCompact: compact }).renderConsole(ctx, w, h, 0.6, 0.7, compact)
+      assert.ok(ctx.fillTextCalls.some(c => c.text === '0'), `${id} ${w}x${h} should print its scale`)
+      for (const c of ctx.fillTextCalls) assert.ok(c.x >= 0 && c.x <= w && c.y >= 0 && c.y <= h, `${id} label ${c.text} must stay on canvas`)
     }
   }
-  assert.ok(vu.getScaleTicks('study-cobalt', false).length > vu.getScaleTicks('study-riviera', false).length, 'cobalt mastering scale should be denser than riviera open scale')
+  window.innerWidth = 390
+  const ctx = createMockCtx(390, 40)
+  new LXStudioVUMeterAnimation({ isCompact: true }).renderConsole(ctx, 390, 40, 0.6, 0.7, true)
+  assert.equal(ctx.fillTextCalls.length, 0, 'mobile viewports should not draw a VU meter')
 })
 
 test('VU meter at 100% player volume oscillates and does not stay pinned at max level (1.0)', () => {
