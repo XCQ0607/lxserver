@@ -130,19 +130,32 @@ function parseUserBackups(raw: any): UserBackupCfg[] {
 /** 去掉结尾斜杠（兼容用户误填的 / 或 \），用于规范化 externalUrl */
 const normalizeTrailingSlash = (u: string) => u.replace(/[\\/]+$/, '')
 
+// 这些 folder_type 属于“应用运行规则/用户数据”（系统配置、歌单与不喜欢快照、统一模型用户数据）。
+// 它们的本地副本必须保留：OpenList 的“不保留本地(upload-delete)”对它们不生效，
+// 否则删除本地会改变应用运行规则（配置丢失、歌单/快照无法恢复）。见业务约束。
+const PROTECTED_LOCAL_TYPES = new Set(['system', 'data', 'list'])
+
 /** 解析条目的有效模式：显式 mode 优先；否则沿用全局 keepLocalAfterUpload 的语义 */
 function effectiveMode(entry: UserBackupCfg, cfg: BackupConfig): SyncMode {
   if (entry.mode) return entry.mode
   return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
 }
 
-/** 从已有备份行推断其模式（用于验证/删除环节） */
+/** 从已有备份行推断其模式（用于验证/删除环节）。
+ *  受保护类型（配置/快照/用户数据）禁止 upload-delete：即便关闭 keepLocalAfterUpload 或条目设为 upload-delete，
+ *  也回退为 upload，确保本地配置与快照永不被删除。其余类型（cache/music）维持原语义。 */
 function effectiveModeFromRow(row: any, cfg: BackupConfig): SyncMode {
-  if (row.folder_type === 'data') return 'upload'
-  const entry = cfg.userBackups.find(u => u.user === row.user && u.enabled)
-  if (entry) return effectiveMode(entry, cfg)
-  if (row.mode) return row.mode as SyncMode
-  return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
+  const derive = (): SyncMode => {
+    const entry = cfg.userBackups.find(u => u.user === row.user && u.enabled)
+    if (entry) return effectiveMode(entry, cfg)
+    if (row.mode) return row.mode as SyncMode
+    return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
+  }
+  if (PROTECTED_LOCAL_TYPES.has(row.folder_type)) {
+    const m = derive()
+    return m === 'upload-delete' ? 'upload' : m
+  }
+  return derive()
 }
 
 function normalizeUser(u?: string): string {
@@ -782,7 +795,7 @@ export async function verifyPending(): Promise<void> {
             continue
           }
           const mode = effectiveModeFromRow(row, cfg)
-          if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
+          if (mode === 'upload-delete' && !PROTECTED_LOCAL_TYPES.has(row.folder_type) && row.local_path && fs.existsSync(row.local_path)) {
             if (!row.local_hash || !await cl.verifyFile(row.remote_path, row.local_hash) || hashFile(row.local_path) !== row.local_hash) {
               setBackupStatus(row.id, 'failed', { error: '远端内容校验失败，保留本地文件', retryCount: (row.retry_count || 0) + 1 })
               continue
@@ -790,7 +803,7 @@ export async function verifyPending(): Promise<void> {
           }
           if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) continue
           setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified), error: null, retryCount: 0 })
-          if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
+          if (mode === 'upload-delete' && !PROTECTED_LOCAL_TYPES.has(row.folder_type) && row.local_path && fs.existsSync(row.local_path)) {
             try {
               fs.unlinkSync(row.local_path)
               removeLocalCache(row)
