@@ -94,8 +94,8 @@ const getConfigHash = (filePath: string) => {
 const dataPath = envParams.DATA_PATH ?? path.join(__dirname, '../data')
 const resolvedConfigPath = process.env.CONFIG_PATH || path.join(dataPath, 'config.js')
 
-// [本地配置备份] 每天一份 config-YYYY-MM-DD.js，保留可配置天数（见 configBackup.*）
-let lastBackupDate = ''
+// [本地配置备份] 按周期生成 config-<槽位>.js，保留可配置天数（见 configBackup.*）
+let lastBackupSlot = ''
 
 const getConfigBackupDir = (): string => {
   const dir = global.lx?.config['configBackup.dir']
@@ -167,19 +167,26 @@ const migrateConfigBackups = (targetBackupDir: string) => {
   }
 }
 
-// 每天自动备份一次（同日覆盖），备份后顺带清理过期文件
+// 按配置的备份周期生成槽位键：周期≥24h 按天（同日覆盖），否则带时分（每周期一个文件）
+// 备份后顺带清理过期文件
 const backupConfig = () => {
   if (global.lx?.config['configBackup.enable'] === false) return
   const backupDir = getConfigBackupDir()
   migrateConfigBackups(backupDir)
+  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+  const now = new Date()
   const dateStr = getTodayStr()
-  if (dateStr === lastBackupDate) return
+  const slotKey = intervalHours >= 24
+    ? dateStr
+    : `${dateStr}-${pad2(now.getHours())}${pad2(now.getMinutes())}`
+  if (slotKey === lastBackupSlot) return
   try {
     if (!global.lx?.configPath || !fs.existsSync(global.lx.configPath)) return
     fs.mkdirSync(backupDir, { recursive: true })
-    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${dateStr}.js`))
-    lastBackupDate = dateStr
-    console.log(`[Config] Local backup saved to ${backupDir}/config-${dateStr}.js`)
+    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${slotKey}.js`))
+    lastBackupSlot = slotKey
+    if (global.lx) global.lx.lastConfigBackupAt = Date.now()
+    console.log(`[Config] Local backup saved to ${backupDir}/config-${slotKey}.js`)
   } catch (err) {
     console.error('[Config] Failed to backup config:', err)
   }
@@ -861,10 +868,44 @@ if (!fs.existsSync(openLibDir)) {
 // 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
 saveConfigToFile()
 
-// 每日清理过期本地配置备份（保留最近 7 天）
+// 本地配置备份调度：每 N 小时一次，可选锚点时间（HH:MM）对齐到该时刻首次触发
+const getNextRunTime = (anchor: string, intervalMs: number, now: number): number => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(anchor)
+  if (!m) return now + intervalMs
+  const base = new Date(now)
+  base.setHours(Number(m[1]), Number(m[2]), 0, 0)
+  const diff = now - base.getTime()
+  let t = base.getTime() + Math.ceil(Math.max(diff, 0) / intervalMs) * intervalMs
+  if (t <= now) t += intervalMs
+  return t
+}
+let configBackupTimer: ReturnType<typeof setTimeout> | undefined
+const scheduleConfigBackup = () => {
+  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+  const intervalMs = intervalHours * 60 * 60 * 1000
+  const anchor = String(global.lx?.config?.['configBackup.scheduleTime'] || '00:00').trim()
+  const now = Date.now()
+  const nextRun = getNextRunTime(anchor, intervalMs, now)
+  if (global.lx) global.lx.nextConfigBackupAt = nextRun
+  configBackupTimer = setTimeout(() => {
+    backupConfig()
+    scheduleConfigBackup()
+  }, nextRun - now)
+  if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+}
+
+// 启动即备份一次，并按当前配置调度后续自动备份
+backupConfig()
+scheduleConfigBackup()
+if (global.lx) global.lx.rescheduleConfigBackup = () => {
+  if (configBackupTimer) clearTimeout(configBackupTimer)
+  scheduleConfigBackup()
+}
+
+// 每日清理过期本地配置备份（保留最近 N 天；即便备份被禁用也照常执行）
 cleanOldConfigBackups()
-const configBackupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
-if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+const configCleanupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
+if (typeof configCleanupTimer.unref === 'function') configCleanupTimer.unref()
 
 startServer(global.lx.config.port, '0.0.0.0')
 

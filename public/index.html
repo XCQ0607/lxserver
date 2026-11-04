@@ -1196,6 +1196,20 @@
                                     </div>
                                 </div>
                                 <div class="config-divider"></div>
+                                <div class="config-field-row">
+                                    <div class="config-field">
+                                        <label class="config-label">备份周期（小时）</label>
+                                        <input type="number" name="configBackup.intervalHours"
+                                            class="form-input config-input" min="1" max="8760" placeholder="24" />
+                                        <small class="config-hint">每 N 小时自动备份一次</small>
+                                    </div>
+                                    <div class="config-field">
+                                        <label class="config-label">锚点时间</label>
+                                        <input type="time" name="configBackup.scheduleTime" class="form-input config-input" />
+                                        <small class="config-hint">留空=进程启动后每 N 小时；填 HH:MM 则在该时刻首次触发，之后每 N 小时循环</small>
+                                    </div>
+                                </div>
+                                <div class="config-divider"></div>
                                 <div class="config-field">
                                     <label class="config-label">歌单快照备份路径</label>
                                     <input type="text" name="snapshot.backupPath" class="form-input config-input"
@@ -2300,6 +2314,14 @@
                                     <div class="meta-label">备份保存目录</div>
                                     <div class="meta-value text-truncate" id="config-backup-dir-text" title="backups">
                                         backups</div>
+                                </div>
+                                <div class="config-backup-meta-item">
+                                    <div class="meta-label">下一次自动备份</div>
+                                    <div class="meta-value" id="config-backup-next-text">—</div>
+                                </div>
+                                <div class="config-backup-meta-item">
+                                    <div class="meta-label">上次自动备份</div>
+                                    <div class="meta-value" id="config-backup-last-text">—</div>
                                 </div>
                             </div>
                             <div class="config-backup-actions-wrap">

@@ -7302,6 +7302,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
             'configBackup.enable': global.lx.config['configBackup.enable'] ?? true,
             'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
+            'configBackup.intervalHours': global.lx.config['configBackup.intervalHours'] ?? 24,
+            'configBackup.scheduleTime': global.lx.config['configBackup.scheduleTime'] ?? '00:00',
             'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
             'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
             'openlist.enable': global.lx.config['openlist.enable'] ?? false,
@@ -7533,11 +7535,24 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
               if (newConfig['subsonic.enableDebug'] !== undefined) global.lx.config['subsonic.enableDebug'] = newConfig['subsonic.enableDebug']
               // [本地配置备份] configBackup 配置
-              if (newConfig['configBackup.enable'] !== undefined) global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']
+              let configBackupChanged = false
+              if (newConfig['configBackup.enable'] !== undefined) { global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']; configBackupChanged = true }
               if (newConfig['configBackup.retentionDays'] !== undefined) {
                 const rd = Number(newConfig['configBackup.retentionDays'])
                 global.lx.config['configBackup.retentionDays'] = Number.isFinite(rd) && rd > 0 ? Math.floor(rd) : 7
+                configBackupChanged = true
               }
+              if (newConfig['configBackup.intervalHours'] !== undefined) {
+                const ih = parseInt(newConfig['configBackup.intervalHours'])
+                global.lx.config['configBackup.intervalHours'] = Number.isFinite(ih) && ih >= 1 && ih <= 8760 ? Math.floor(ih) : 24
+                configBackupChanged = true
+              }
+              if (newConfig['configBackup.scheduleTime'] !== undefined) {
+                const st = String(newConfig['configBackup.scheduleTime']).trim()
+                global.lx.config['configBackup.scheduleTime'] = /^([01]?\d|2[0-3]):[0-5]\d$/.test(st) ? st : ''
+                configBackupChanged = true
+              }
+              if (configBackupChanged) global.lx.rescheduleConfigBackup?.()
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
@@ -7674,14 +7689,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 // 优先从文件名解析精确时间戳
                 let timestamp = 0
                 const manualMatch = file.match(/^config-manual-(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})\.js$/)
-                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})\.js$/)
+                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2}))?\.js$/)
 
                 if (manualMatch) {
                   const [, y, m, d, h, min, s] = manualMatch
                   timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), Number(s)).getTime()
                 } else if (autoMatch) {
-                  // 自动备份若与 mtime/birthtime 在同一天，优先使用文件修改时间以展示具体时刻；否则取日期当天 00:00
-                  timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                  // 带时分后缀的文件解析为精确时刻；否则使用文件修改时间以展示具体时刻
+                  if (autoMatch[4] !== undefined) {
+                    const [, y, m, d, h, min] = autoMatch
+                    timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), 0).getTime()
+                  } else {
+                    timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                  }
                 }
 
                 if (!timestamp) {
@@ -7710,6 +7730,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             backupDir,
             autoBackupEnabled: global.lx.config['configBackup.enable'] !== false,
             retentionDays: global.lx.config['configBackup.retentionDays'] || 7,
+            intervalHours: global.lx.config['configBackup.intervalHours'] || 24,
+            scheduleTime: global.lx.config['configBackup.scheduleTime'] || '00:00',
+            nextBackupAt: global.lx.nextConfigBackupAt || 0,
+            lastBackupAt: global.lx.lastConfigBackupAt || 0,
             list,
           }))
         } catch (err: any) {

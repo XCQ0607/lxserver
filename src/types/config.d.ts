@@ -239,6 +239,18 @@ declare namespace LX {
     'configBackup.dir'?: string
 
     /**
+     * 本地配置自动备份周期（小时），默认 24；留空或非法值回退为 24
+     */
+    'configBackup.intervalHours'?: number
+
+    /**
+     * 本地配置自动备份锚点时间（HH:MM），默认 00:00（即每天 0 点）。
+     * 若设置，则在该时刻首次触发，之后每 intervalHours 小时循环；
+     * 留空（或清除）则按每天 00:00（每 intervalHours 小时，从 00:00 起）触发
+     */
+    'configBackup.scheduleTime'?: string
+
+    /**
      * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
      * 相对路径基于 data 目录，绝对路径直接使用
      */

@@ -2716,6 +2716,12 @@ class App {
             if (form.elements['configBackup.dir']) {
                 form.elements['configBackup.dir'].value = config['configBackup.dir'] || '';
             }
+            if (form.elements['configBackup.intervalHours']) {
+                form.elements['configBackup.intervalHours'].value = config['configBackup.intervalHours'] || 24;
+            }
+            if (form.elements['configBackup.scheduleTime']) {
+                form.elements['configBackup.scheduleTime'].value = config['configBackup.scheduleTime'] || '00:00';
+            }
             if (form.elements['snapshot.backupPath']) {
                 form.elements['snapshot.backupPath'].value = config['snapshot.backupPath'] || '';
             }
@@ -3203,6 +3209,8 @@ class App {
             ...this.collectBackupPolicy(),
             'configBackup.enable': formData.get('configBackup.enable') === 'on',
             'configBackup.retentionDays': parseInt(formData.get('configBackup.retentionDays')) || 7,
+            'configBackup.intervalHours': parseInt(formData.get('configBackup.intervalHours')) || 24,
+            'configBackup.scheduleTime': (formData.get('configBackup.scheduleTime') || '').trim(),
             'configBackup.dir': (formData.get('configBackup.dir') || '').trim(),
             'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
@@ -5126,6 +5134,20 @@ class App {
             if (dirText) {
                 dirText.textContent = data.backupDir || 'backups';
                 dirText.title = data.backupDir || 'backups';
+            }
+            const nextText = document.getElementById('config-backup-next-text');
+            if (nextText) {
+                if (data.autoBackupEnabled && data.nextBackupAt) {
+                    nextText.textContent = new Date(data.nextBackupAt).toLocaleString();
+                } else if (data.autoBackupEnabled) {
+                    nextText.textContent = '计算中…';
+                } else {
+                    nextText.textContent = '已停用';
+                }
+            }
+            const lastText = document.getElementById('config-backup-last-text');
+            if (lastText) {
+                lastText.textContent = data.lastBackupAt ? new Date(data.lastBackupAt).toLocaleString() : '暂无';
             }
 
             if (!list.length) {
