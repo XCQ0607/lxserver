@@ -3802,11 +3802,11 @@ class App {
         })
         const modeOptions = (sel) => ([
             ['upload', '上传（保留本地）'],
-            ['upload-delete', '上传后删除本地'],
+            ['upload-delete', '上传后删除本地（仅歌曲/歌词）'],
             ['download', '下载（远端→本地）'],
             ['sync', '双向同步'],
         ]).map(([v, t]) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + t + '</option>').join('')
-        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：上传完成即删本地并清缓存索引；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
+        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：仅对「下载 / 缓存」目录中的歌曲文件及其随同上传的歌词、封面等附件生效，上传校验通过后删除这些本地文件并清除缓存索引；系统配置、歌单与不喜欢快照、用户数据一律保留本地，不受此模式影响；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
         const toggleHtml = (id, checked) =>
             '<label class="toggle-switch">' +
             '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
@@ -3845,12 +3845,14 @@ class App {
     }
 
     /** 用户在 OpenList 备份里把某用户模式改为「上传后删除本地」时给出强提示：
-     *  该模式会清除本地缓存索引，下次播放将无本地缓存；为保证直接命中 OpenList 直链（而非回源重下），
-     *  保存时会自动开启 Subsonic 的「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
+     *  该模式只删「下载 / 缓存」目录里的歌曲及其歌词、封面等附件，并清除本地缓存索引，
+     *  不会删除系统配置、歌单与不喜欢快照、用户数据；下次播放将无本地缓存；
+     *  为保证直接命中 OpenList 直链（而非回源重下），保存时会自动开启 Subsonic 的
+     *  「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
     onOpenlistModeChange(sel) {
         if (!sel || sel.value !== 'upload-delete') return
         if (window.showInfo) {
-            window.showInfo('已选择「上传后删除本地」：该模式会在上传完成后清除本地缓存索引，下次播放将无本地缓存。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
+            window.showInfo('已选择「上传后删除本地」：\n仅删除「下载 / 缓存」目录中已成功上传的歌曲文件及其歌词、封面等附件，并清除本地缓存索引，下次播放将无本地缓存。\n系统配置、歌单与不喜欢快照、用户数据不会被删除，始终保留本地。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
         }
     }
 

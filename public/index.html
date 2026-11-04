@@ -2525,9 +2525,9 @@
                                             <div class="config-toggle-info">
                                                 <span class="config-toggle-label">
                                                     <span>播放缓存同时上传封面与歌词</span>
-                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词也会一并上传">?</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词会随歌曲一并上传；在「上传后删除本地」模式下，这些附件也会随歌曲一起从本地删除">?</span>
                                                 </span>
-                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本</span>
+                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本；「上传后删除本地」模式下会一并删除</span>
                                             </div>
                                             <label class="toggle-switch">
                                                 <input type="checkbox" name="openlist.includeNonAudio" />
@@ -2540,7 +2540,7 @@
                                                 <line x1="12" y1="16" x2="12" y2="12"></line>
                                                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                             </svg>
-                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地；如需恢复请使用下方恢复按钮。</span>
+                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地。「上传后删除本地」仅对下载 / 缓存目录中的歌曲及其歌词、封面等附件生效；系统配置、歌单与不喜欢快照、用户数据一律保留本地，不受该模式影响。如需恢复请使用下方恢复按钮。</span>
                                         </div>
                                         <div class="config-divider"></div>
                                         <div class="config-field">
