@@ -4035,7 +4035,7 @@ class App {
                     '<td style="white-space:nowrap;font-family:monospace;font-size:0.8rem;">' + fmtSize(f.size) + '</td>' +
                     '<td style="text-align:center;">' + localMark + '</td>' +
                     '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + errCell + '</td>' +
-                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString() + '</td>' +
+                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</td>' +
                     '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '</td>' +
                     '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:.76rem;font-family:monospace;" title="' + esc(pathStr) + '">' + esc(pathStr) + '</td>' +
                     '</tr>'
@@ -4380,7 +4380,7 @@ class App {
                 res.backups.forEach((item, index) => {
                     const isLatest = index === 0;
                     const sizeStr = item.size ? (item.size / (1024 * 1024)).toFixed(1) + ' MB' : '大小未知';
-                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString() : '未知时间');
+                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '未知时间');
                     const escapedFilename = this.escapeHtml(item.filename || item.basename);
                     const escapedBasename = this.escapeHtml(item.basename);
 
@@ -4851,7 +4851,7 @@ class App {
         if (diff < day) return Math.floor(diff / hour) + '小时前';
 
         const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN');
+        return date.toLocaleString('zh-CN', { hour12: false });
     }
 
     // ========== 文件管理器功能 ==========
@@ -5020,7 +5020,7 @@ class App {
 
     formatDate(timestamp) {
         const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN');
+        return date.toLocaleString('zh-CN', { hour12: false });
     }
 
     formatUptime(seconds) {
@@ -5138,7 +5138,7 @@ class App {
             const nextText = document.getElementById('config-backup-next-text');
             if (nextText) {
                 if (data.autoBackupEnabled && data.nextBackupAt) {
-                    nextText.textContent = new Date(data.nextBackupAt).toLocaleString();
+                    nextText.textContent = new Date(data.nextBackupAt).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
                 } else if (data.autoBackupEnabled) {
                     nextText.textContent = '计算中…';
                 } else {
@@ -5147,7 +5147,7 @@ class App {
             }
             const lastText = document.getElementById('config-backup-last-text');
             if (lastText) {
-                lastText.textContent = data.lastBackupAt ? new Date(data.lastBackupAt).toLocaleString() : '暂无';
+                lastText.textContent = data.lastBackupAt ? new Date(data.lastBackupAt).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '暂无';
             }
 
             if (!list.length) {
@@ -5164,7 +5164,7 @@ class App {
 
                 return `
                 <div class="snapshot-row">
-                    <div class="col-time">${new Date(item.time).toLocaleString()}</div>
+                    <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
                     <div class="col-id" title="${item.name}">
                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span style="font-family:monospace; font-weight:600;">${item.name}</span>
@@ -5303,7 +5303,7 @@ class App {
 
             container.innerHTML = list.map(item => `
             <div class="snapshot-row">
-                <div class="col-time">${new Date(item.time).toLocaleString()}</div>
+                <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
                 <div class="col-id" title="${item.id}">snapshot_${item.id}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">

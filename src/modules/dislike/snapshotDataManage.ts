@@ -100,6 +100,10 @@ export class SnapshotDataManage {
     const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
     try {
       fs.writeFileSync(filePath, JSON.stringify(data, null, 2))
+      // 不喜欢快照落盘后，防抖触发一次云端备份（与歌单快照、缓存落盘上传同一入口；按配置备份 snapshots 类型）
+      void (globalThis as any).lx?.scheduleOpenlistSync?.()
+      // 本地备份开关打开时，复制一份快照到备份目录（"跟配置走"，复用 configBackup.enable 与备份目录约定）
+      void (globalThis as any).lx?.backupSnapshotToLocal?.(filePath, this.userDataManage.userName, name)
     } catch (err) {
       syncLog.error(err)
       throw err
@@ -114,6 +118,14 @@ export class SnapshotDataManage {
     } catch (err) {
       syncLog.error(err)
     }
+    // 一并清理本地备份目录中的对应副本（若存在），避免孤儿文件
+    try {
+      const backupDir = (globalThis as any).lx?.getConfigBackupDir?.()
+      if (backupDir) {
+        const backupPath = path.join(backupDir, 'snapshots', this.userDataManage.userName, `snapshot_${name}`)
+        if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath)
+      }
+    } catch { /* ignore */ }
   }
 
 

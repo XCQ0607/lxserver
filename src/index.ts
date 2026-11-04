@@ -193,6 +193,21 @@ const backupConfig = () => {
   cleanOldConfigBackups()
 }
 
+// 本地快照备份：当本地备份开关打开时，把刚落盘的歌单/不喜欢快照复制一份到备份目录，作为本地安全副本
+// 复用 configBackup.enable 开关与 getConfigBackupDir 目录约定（"跟配置走"）
+const backupSnapshotToLocal = (srcPath: string, user: string, name: string) => {
+  if (global.lx?.config['configBackup.enable'] === false) return
+  if (!srcPath || !fs.existsSync(srcPath) || !user || !name) return
+  const backupDir = getConfigBackupDir()
+  const destDir = path.join(backupDir, 'snapshots', user)
+  try {
+    fs.mkdirSync(destDir, { recursive: true })
+    fs.copyFileSync(srcPath, path.join(destDir, `snapshot_${name}`))
+  } catch (err) {
+    console.error('[Config] Failed to backup snapshot locally:', err)
+  }
+}
+
 // 手动立即备份一次（精确到秒时间戳，不覆盖当天的自动备份）
 const backupConfigNow = (): { success: boolean, filename?: string, error?: string } => {
   const backupDir = getConfigBackupDir()
@@ -243,6 +258,7 @@ global.lx = {
   saveConfig: saveConfigToFile,
   backupConfigNow,
   getConfigBackupDir,
+  backupSnapshotToLocal,
 }
 
 const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string>>) => {
