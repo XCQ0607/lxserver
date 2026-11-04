@@ -122,7 +122,37 @@ const getTimestampStr = () => {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
 }
 
-// 清理超过保留期的本地配置备份（按文件 mtime 判断）
+// 本地快照备份文件名：snapshot_<name>-<日期_时分秒>[-序号]。每次落盘生成独立文件，不覆盖历史，可按时间点回溯。
+const snapshotBackupPrefix = (name: string) => `snapshot_${name}-`
+const isSnapshotBackupOf = (file: string, name: string): boolean => {
+  if (file === `snapshot_${name}`) return true // 兼容旧版无时间戳的副本
+  const prefix = snapshotBackupPrefix(name)
+  if (!file.startsWith(prefix)) return false
+  return /^\d{4}-\d{2}-\d{2}_\d{6}(?:-\d+)?$/.test(file.slice(prefix.length))
+}
+
+// 按同一保留期清理过期的本地快照副本（snapshots/<user>/ 下的 snapshot_* 文件）
+const cleanOldSnapshotBackups = (backupDir: string, cutoff: number) => {
+  const root = path.join(backupDir, 'snapshots')
+  if (!fs.existsSync(root)) return
+  for (const user of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!user.isDirectory()) continue
+    const dir = path.join(root, user.name)
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        if (!file.startsWith('snapshot_')) continue
+        const fp = path.join(dir, file)
+        try {
+          const stat = fs.statSync(fp)
+          if (stat.isFile() && stat.mtimeMs < cutoff) fs.unlinkSync(fp)
+        } catch { /* ignore */ }
+      }
+      if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir)
+    } catch { /* ignore */ }
+  }
+}
+
+// 清理超过保留期的本地配置备份与快照备份（按文件 mtime 判断）
 const cleanOldConfigBackups = () => {
   const backupDir = getConfigBackupDir()
   try {
@@ -135,6 +165,7 @@ const cleanOldConfigBackups = () => {
         if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp)
       } catch { /* ignore */ }
     }
+    cleanOldSnapshotBackups(backupDir, cutoff)
   } catch (err) {
     console.error('[Config] Failed to clean old config backups:', err)
   }
@@ -193,7 +224,8 @@ const backupConfig = () => {
   cleanOldConfigBackups()
 }
 
-// 本地快照备份：当本地备份开关打开时，把刚落盘的歌单/不喜欢快照复制一份到备份目录，作为本地安全副本
+// 本地快照备份：当本地备份开关打开时，把刚落盘的歌单/不喜欢快照复制一份带时间戳的副本到备份目录。
+// 每次落盘都独立成文件（秒级时间戳 + 同秒序号），保证可按时间点回溯，不覆盖历史。
 // 复用 configBackup.enable 开关与 getConfigBackupDir 目录约定（"跟配置走"）
 const backupSnapshotToLocal = (srcPath: string, user: string, name: string) => {
   if (global.lx?.config['configBackup.enable'] === false) return
@@ -202,9 +234,28 @@ const backupSnapshotToLocal = (srcPath: string, user: string, name: string) => {
   const destDir = path.join(backupDir, 'snapshots', user)
   try {
     fs.mkdirSync(destDir, { recursive: true })
-    fs.copyFileSync(srcPath, path.join(destDir, `snapshot_${name}`))
+    const base = `${snapshotBackupPrefix(name)}${getTimestampStr()}`
+    let dest = path.join(destDir, base)
+    let seq = 1
+    while (fs.existsSync(dest)) dest = path.join(destDir, `${base}-${seq++}`)
+    fs.copyFileSync(srcPath, dest)
   } catch (err) {
     console.error('[Config] Failed to backup snapshot locally:', err)
+  }
+}
+
+// 删除某个快照时，清理其所有本地历史副本（含旧版无时间戳副本），避免孤儿文件
+const removeSnapshotLocalBackups = (user: string, name: string) => {
+  if (!user || !name) return
+  const destDir = path.join(getConfigBackupDir(), 'snapshots', user)
+  if (!fs.existsSync(destDir)) return
+  try {
+    for (const file of fs.readdirSync(destDir)) {
+      if (!isSnapshotBackupOf(file, name)) continue
+      try { fs.unlinkSync(path.join(destDir, file)) } catch { /* ignore */ }
+    }
+  } catch (err) {
+    console.error('[Config] Failed to remove snapshot local backups:', err)
   }
 }
 
@@ -259,6 +310,7 @@ global.lx = {
   backupConfigNow,
   getConfigBackupDir,
   backupSnapshotToLocal,
+  removeSnapshotLocalBackups,
 }
 
 const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string>>) => {

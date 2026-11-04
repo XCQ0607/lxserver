@@ -556,8 +556,6 @@ declare namespace LX {
     'openlist.token'?: string
     /** OpenList 中 lx-music 备份根目录 */
     'openlist.root'?: string
-    /** 上传 OpenList 后是否保留本地文件 */
-    'openlist.keepLocalAfterUpload'?: boolean
     /** 远端可用性校验周期(分钟) */
     'openlist.verifyInterval'?: number
     /** 双向同步周期(分钟) */

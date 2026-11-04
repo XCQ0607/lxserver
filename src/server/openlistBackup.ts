@@ -86,7 +86,6 @@ interface BackupConfig {
   password: string
   token: string
   root: string
-  keepLocalAfterUpload: boolean
   verifyInterval: number
   includeNonAudio: boolean
   syncInterval: number
@@ -107,7 +106,6 @@ function getConfig(): BackupConfig {
     password: c['openlist.password'] || '',
     token: c['openlist.token'] || '',
     root: c['openlist.root'] || '/lx_music',
-    keepLocalAfterUpload: c['openlist.keepLocalAfterUpload'] !== false,
     verifyInterval: Number(c['openlist.verifyInterval'] || 5),
     includeNonAudio: c['openlist.includeNonAudio'] === true,
     syncInterval: Number(c['openlist.syncInterval'] || 60),
@@ -135,21 +133,22 @@ const normalizeTrailingSlash = (u: string) => u.replace(/[\\/]+$/, '')
 // 否则删除本地会改变应用运行规则（配置丢失、歌单/快照无法恢复）。见业务约束。
 const PROTECTED_LOCAL_TYPES = new Set(['system', 'data', 'list'])
 
-/** 解析条目的有效模式：显式 mode 优先；否则沿用全局 keepLocalAfterUpload 的语义 */
-function effectiveMode(entry: UserBackupCfg, cfg: BackupConfig): SyncMode {
-  if (entry.mode) return entry.mode
-  return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
+/** 解析条目的有效模式：唯一来源为条目显式 mode；未配置时默认 upload（保留本地）。
+ *  「上传后删除本地」只能由显式 mode === 'upload-delete' 表达，不再有全局兜底开关。 */
+function effectiveMode(entry: UserBackupCfg, _cfg?: BackupConfig): SyncMode {
+  return entry.mode || 'upload'
 }
 
 /** 从已有备份行推断其模式（用于验证/删除环节）。
- *  受保护类型（配置/快照/用户数据）禁止 upload-delete：即便关闭 keepLocalAfterUpload 或条目设为 upload-delete，
- *  也回退为 upload，确保本地配置与快照永不被删除。其余类型（cache/music）维持原语义。 */
+ *  受保护类型（系统配置/歌单与不喜欢快照/统一模型用户数据）禁止 upload-delete：
+ *  即便条目显式设为 upload-delete 或历史行残留该值，也回退为 upload，确保本地配置与快照永不被删除。
+ *  其余类型（cache/music）维持原语义，仅显式 upload-delete 会删本地。 */
 function effectiveModeFromRow(row: any, cfg: BackupConfig): SyncMode {
   const derive = (): SyncMode => {
     const entry = cfg.userBackups.find(u => u.user === row.user && u.enabled)
     if (entry) return effectiveMode(entry, cfg)
     if (row.mode) return row.mode as SyncMode
-    return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
+    return 'upload'
   }
   if (PROTECTED_LOCAL_TYPES.has(row.folder_type)) {
     const m = derive()
@@ -995,7 +994,8 @@ async function downloadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: 
 async function uploadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
   const dir = resolveUserDir(entry, folderType, cfg)
   if (!dir) return
-  const mode = effectiveMode(entry, cfg)
+  // list 是歌单/不喜欢快照，属受保护类型：upload-delete 对其不生效，入库模式固定为 upload
+  const mode = folderType === 'list' ? 'upload' : effectiveMode(entry, cfg)
   for (const lp of walkLocal(dir, folderType)) {
     const rel = path.relative(dir, lp).replace(/\\/g, '/')
     const remotePath = cl.resolveRemotePath(entry.user + '/' + folderType + '/' + rel)
@@ -1077,6 +1077,55 @@ async function backupSystemConfigFile(cl: OpenListClient, _cfg: BackupConfig, su
     size: info?.size ?? null,
   })
   summary.uploaded++
+}
+
+/**
+ * 额外保留带时间戳的系统配置「时间点副本」，用于回溯历史配置。
+ * - 主镜像（_data/config.js 或 _system/config.js）文件名保持不变，恢复逻辑只扫 _data，
+ *   因此历史副本放在独立的 _system/config-history/ 下，不参与恢复、也不会被 backupType 识别。
+ * - 文件名含内容指纹（md5 前 8 位）：配置未变化时不会重复产生副本。
+ * - 仅当系统配置确实被云端备份时才触发（统一模型的 system 类型 / 旧模型 backupSystemConfig），
+ *   并按 configBackup.retentionDays 清理过期的历史副本。
+ */
+let lastConfigHistoryHash = ''
+async function backupSystemConfigHistory(cl: OpenListClient, cfg: BackupConfig, summary: SyncSummary): Promise<void> {
+  const lx: any = (globalThis as any).lx
+  const configPath: string = lx?.configPath || process.env.CONFIG_PATH || path.join(lx?.dataPath || '.', 'config.js')
+  if (!configPath || !fs.existsSync(configPath)) return
+  const selectedData = lx?.config?.['backup.openlist.types'] !== undefined
+  const shouldBackupSystem = selectedData
+    ? getBackupTypes('openlist', lx?.config as any).includes('system')
+    : cfg.backupSystemConfig
+  if (!shouldBackupSystem) return
+
+  const fingerprint = crypto.createHash('md5').update(fs.readFileSync(configPath)).digest('hex').slice(0, 8)
+  if (fingerprint === lastConfigHistoryHash) return
+
+  const historyDir = cl.resolveRemotePath('_system/config-history')
+  await cl.mkdir(historyDir)
+  let files: Awaited<ReturnType<OpenListClient['listFilesRecursive']>> = []
+  try { files = await cl.listFilesRecursive(historyDir) } catch { /* 空目录/列举失败按空处理 */ }
+  const historyNameRe = /^config-\d{4}-\d{2}-\d{2}_\d{6}-[0-9a-f]{8}\.js$/
+  // 进程重启后内存指纹丢失，用远端已有的同名指纹文件兜底去重
+  if (files.some(f => !f.isDir && f.name.endsWith(`-${fingerprint}.js`) && historyNameRe.test(f.name))) {
+    lastConfigHistoryHash = fingerprint
+    return
+  }
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  await cl.upload(configPath, `${historyDir}/config-${stamp}-${fingerprint}.js`)
+  lastConfigHistoryHash = fingerprint
+  summary.uploaded++
+
+  const days = Number(lx?.config?.['configBackup.retentionDays'])
+  const cutoff = Date.now() - (Number.isFinite(days) && days > 0 ? days : 7) * 24 * 60 * 60 * 1000
+  for (const f of files) {
+    if (f.isDir || !historyNameRe.test(f.name)) continue
+    const modified = parseMod(f.modified)
+    if (modified == null || modified >= cutoff) continue
+    try { await cl.remove(f.path) } catch { /* ignore */ }
+  }
 }
 
 function dataBackupContext() {
@@ -1195,6 +1244,14 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
       await backupSystemConfigFile(cl, cfg, summary)
     } catch (e: any) {
       summary.errors.push('system-config: ' + (e?.message || e))
+    }
+  }
+  // 全量同步时额外留一份带时间戳的系统配置时间点副本（主镜像文件名不变）
+  if (!opts.user && !opts.folder) {
+    try {
+      await backupSystemConfigHistory(cl, cfg, summary)
+    } catch (e: any) {
+      summary.errors.push('system-config-history: ' + (e?.message || e))
     }
   }
   return summary

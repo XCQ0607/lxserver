@@ -118,14 +118,8 @@ export class SnapshotDataManage {
     } catch (err) {
       syncLog.error(err)
     }
-    // 一并清理本地备份目录中的对应副本（若存在），避免孤儿文件
-    try {
-      const backupDir = (globalThis as any).lx?.getConfigBackupDir?.()
-      if (backupDir) {
-        const backupPath = path.join(backupDir, 'snapshots', this.userDataManage.userName, `snapshot_${name}`)
-        if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath)
-      }
-    } catch { /* ignore */ }
+    // 一并清理本地备份目录中该快照的所有带时间戳历史副本（含旧版无时间戳副本），避免孤儿文件
+    void (globalThis as any).lx?.removeSnapshotLocalBackups?.(this.userDataManage.userName, name)
   }
 
 
