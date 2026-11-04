@@ -6,7 +6,7 @@ import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
 import { downloadAndCache, checkCache, serveCacheFile, getFileName } from '@/server/music/fileCache'
-import { resolveOpenlistCacheDirectUrl } from '@/server/openlistBackup'
+import { resolveOpenlistCacheEntry } from '@/server/openlistBackup'
 import {
     getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
     resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
@@ -6248,17 +6248,61 @@ class SubsonicHandler {
             // 按「交付方式」配置决定：direct=302 直链（客户端直连，省服务器出向流量）；proxy=服务端代理转发（兼容不支持跳转的客户端）。
             // 仅在「缓存优先 + 优先使用 OpenList」同时开启时生效。
             if (method === 'stream' || method === 'download') {
-              const openlistBase = getFileName(musicInfo, quality, false, username)
-              const directUrl = await resolveOpenlistCacheDirectUrl(username, 'cache', openlistBase)
-              if (directUrl) {
+              let openlistHit: Awaited<ReturnType<typeof resolveOpenlistCacheEntry>> = null
+              const cloudQualities = this.getCacheProbeOrder(quality, maxBitrate).qualities
+              if (global.lx.config['subsonic.transcode.enabled']) {
+                for (const q of this.getCacheProbeOrder('flac', 0).qualities) if (!cloudQualities.includes(q)) cloudQualities.push(q)
+              }
+              for (const q of cloudQualities) {
+                for (const folder of ['cache', 'music'] as const) {
+                  const openlistBase = getFileName(musicInfo, q, folder === 'music', username)
+                  openlistHit = await resolveOpenlistCacheEntry(username, folder, openlistBase, { id: musicInfo.id || id, source, quality: q })
+                  if (openlistHit) break
+                }
+                if (openlistHit) break
+              }
+              if (openlistHit) {
+                const directUrl = openlistHit.url
+                const needTranscode = this.shouldTranscodeFormat(params, openlistHit.filename) || this.isQualityOverCap(openlistHit.quality, maxBitrate) || timeOffsetSec > 0
+                if (needTranscode && global.lx.config['subsonic.transcode.enabled']) {
+                  await this.transcodeStream(req, res, directUrl, maxBitrate || 320, format, timeOffsetSec, this.getRequestedAudioFormat(params))
+                  return
+                }
                 const delivery = (global.lx.config['subsonic.openlistDelivery'] as string) || 'direct'
                 if (delivery === 'proxy') {
                   try {
                     const fwd: Record<string, string> = {}
                     if (req.headers.range) fwd['Range'] = String(req.headers.range)
-                    // 30s 超时避免上游挂起；非成功状态（含非 206）进入回退
-                    const upstream = await fetch(directUrl, { headers: fwd, redirect: 'follow', signal: AbortSignal.timeout(30000) })
-                    if (!upstream.ok) throw new Error('OpenList 上游返回 ' + upstream.status)
+                    // 超时只限制建立响应，不能在播放 30 秒后截断整首音频。
+                    const controller = new AbortController()
+                    const timer = setTimeout(() => controller.abort(), 30000)
+                    const onDisconnect = () => controller.abort()
+                    res.once('close', onDisconnect)
+                    let upstream: Response
+                    try {
+                      upstream = await fetch(directUrl, { headers: fwd, redirect: 'follow', signal: controller.signal })
+                    } catch (e) {
+                      res.off('close', onDisconnect)
+                      throw e
+                    } finally { clearTimeout(timer) }
+                    if (req.headers.range && upstream.status !== 206 && upstream.status !== 416) {
+                      controller.abort()
+                      res.off('close', onDisconnect)
+                      throw new Error('OpenList 上游未响应 Range 请求')
+                    }
+                    if (upstream.status === 416) {
+                      controller.abort()
+                      res.off('close', onDisconnect)
+                      const cr = upstream.headers.get('content-range')
+                      res.writeHead(416, cr ? { 'Content-Range': cr } : {})
+                      res.end()
+                      return
+                    }
+                    if (!upstream.ok) {
+                      controller.abort()
+                      res.off('close', onDisconnect)
+                      throw new Error('OpenList 上游返回 ' + upstream.status)
+                    }
                     const outHeaders: Record<string, any> = { 'Accept-Ranges': 'bytes' }
                     const ct = upstream.headers.get('content-type'); if (ct) outHeaders['Content-Type'] = ct
                     const cl = upstream.headers.get('content-length'); if (cl) outHeaders['Content-Length'] = cl
@@ -6275,20 +6319,22 @@ class SubsonicHandler {
                         subsonicLog.warn(`[Subsonic] ${method} proxy OpenList stream error for ${id}:`, se?.message || se)
                       } finally {
                         res.off('close', onClose)
+                        res.off('close', onDisconnect)
                       }
                     } else {
                       res.end(Buffer.from(await upstream.arrayBuffer()))
+                      res.off('close', onDisconnect)
                     }
                     subsonicLog.debug(`[Subsonic] ${method} proxied OpenList for ${id} (status ${upstream.status})`)
                     return
                   } catch (e: any) {
                     subsonicLog.warn(`[Subsonic] ${method} proxy OpenList failed for ${id}:`, e?.message || e)
+                    if (res.headersSent || res.destroyed) { res.destroy(); return }
                     // 失败则继续走原回源逻辑
                   }
                 } else {
                   subsonicLog.debug(`[Subsonic] ${method} hit OpenList direct link for ${id}: ${directUrl.slice(0, 80)}`)
-                  res.writeHead(302, { Location: directUrl })
-                  res.end()
+                  safeRedirect(res, directUrl)
                   return
                 }
               }

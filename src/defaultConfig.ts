@@ -53,6 +53,11 @@ const config: LX.Config = {
   'sync.backupInterval': 24, // 全量备份间隔（小时）默认24小时
   'webdav.excludeCache': false, // 是否排除缓存目录 (data/<user>/cache) 的同步与备份
   'webdav.excludeMusic': false, // 是否排除音乐下载目录 (data/<user>/music) 的同步与备份
+  // 云端备份范围，两种后端使用同一套类型；cache、runtime、日志和备份临时文件始终排除。
+  'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.webdav.mirrorDeletes': false, // 默认保留云端已备份文件；true 时才传播本地删除
+  'backup.webdav.restoreOnStartup': false, // 恢复默认由管理员手动触发，避免启动时覆盖本地新数据
 
 
   // 本地配置备份（config.js 每日一份本地副本）

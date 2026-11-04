@@ -43,6 +43,10 @@ export interface BackupFileRow {
   error: string | null
   retry_count: number
   remote_mtime: number | null
+  local_mtime: number | null
+  local_hash: string | null
+  cache_metadata: string | null
+  direction: 'upload' | 'download' | null
   deleted_at: number | null
   created_at: number
   updated_at: number
@@ -60,6 +64,8 @@ export interface UpsertBackupInput {
   quality?: string | null
   mode?: string | null
   status?: BackupStatus
+  cacheMetadata?: string | null
+  direction?: 'upload' | 'download'
 }
 
 export interface UpsertAttachmentInput {
@@ -120,6 +126,9 @@ export function getBackupDb(): DatabaseSync {
   try { db.exec(`ALTER TABLE openlist_backup_attachments ADD COLUMN deleted_at INTEGER`) } catch { /* 列已存在 */ }
   // 远端文件最后编辑时间（来自 OpenList getFileInfo 的 modified）
   try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN remote_mtime INTEGER`) } catch { /* 列已存在 */ }
+  for (const column of ['local_mtime REAL', 'local_hash TEXT', 'cache_metadata TEXT', 'direction TEXT']) {
+    try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN ${column}`) } catch { /* 列已存在 */ }
+  }
   // 老数据迁移：原本仅 status='deleted'（硬删除）的记录补 deleted_at，保持隐藏
   try { db.exec(`UPDATE openlist_backup_files SET deleted_at = updated_at WHERE status = 'deleted' AND deleted_at IS NULL`) } catch { /* ignore */ }
   try { db.exec(`UPDATE openlist_backup_attachments SET deleted_at = updated_at WHERE status = 'deleted' AND deleted_at IS NULL`) } catch { /* ignore */ }
@@ -142,6 +151,12 @@ export function getBackupDb(): DatabaseSync {
   try {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ol_att_uniq ON openlist_backup_attachments(user, folder_type, local_path)')
   } catch { /* 列已存在或存在重复行，忽略 */ }
+  db.exec(`CREATE TABLE IF NOT EXISTS openlist_attachment_links (
+    backup_file_id INTEGER NOT NULL, attachment_id INTEGER NOT NULL,
+    PRIMARY KEY (backup_file_id, attachment_id)
+  )`)
+  db.exec(`INSERT OR IGNORE INTO openlist_attachment_links
+    SELECT backup_file_id, id FROM openlist_backup_attachments WHERE deleted_at IS NULL`)
   // 本地文件登记表：记录实际落盘的音频 / 缓存文件，作为「本地是否存在」的权威来源（软删除 deleted_at）
   db.exec(`CREATE TABLE IF NOT EXISTS openlist_local_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -181,12 +196,13 @@ const ACTIVE_UPLOAD_STATUSES: BackupStatus[] = ['pending', 'uploading', 'failed'
  * 避免本地缓存被清理后 OpenList 上传因「源文件不存在」而失败（error: 本地源文件已不存在...）。
  * completed/verified 不在此列：它们由上传流程在成功后自行清理本地（upload-delete 模式）。
  */
-export function getActiveBackupLocalPaths(): Set<string> {
+export function getActiveBackupLocalPaths(maxRetries = 5): Set<string> {
   const db = getBackupDb()
   const placeholders = ACTIVE_UPLOAD_STATUSES.map(() => '?').join(',')
   const rows = db.prepare(
-    `SELECT local_path FROM openlist_backup_files WHERE deleted_at IS NULL AND status IN (${placeholders})`,
-  ).all(...ACTIVE_UPLOAD_STATUSES) as Array<{ local_path: string }>
+    `SELECT local_path FROM openlist_backup_files WHERE deleted_at IS NULL AND status IN (${placeholders})
+      AND (status != 'failed' OR retry_count < ?)`,
+  ).all(...ACTIVE_UPLOAD_STATUSES, maxRetries) as Array<{ local_path: string }>
   const set = new Set<string>()
   for (const r of rows) if (r.local_path) set.add(r.local_path)
   return set
@@ -218,15 +234,17 @@ export function upsertBackupFile(input: UpsertBackupInput): BackupFileRow {
     input.songmid ?? null, input.quality ?? null, input.mode ?? null, status, now, now,
   )
   const row = getBackupByLocalPath(input.user, input.folderType, input.localPath)!
+  db.prepare(`UPDATE openlist_backup_files SET cache_metadata = COALESCE(?, cache_metadata),
+    direction = COALESCE(?, direction) WHERE id = ?`).run(input.cacheMetadata ?? null, input.direction ?? null, row.id)
   // 若本地文件已存在则登记到本地文件表（下载/缓存落盘后由各路径登记，此处兜底；文件尚不存在时 upsertLocalFile 自动跳过）
   try { upsertLocalFile({ user: input.user, source: input.source, folderType: input.folderType, localPath: input.localPath }) } catch { /* ignore */ }
-  return row
+  return getBackupById(row.id)!
 }
 
 export function setBackupStatus(
   id: number,
   status: BackupStatus,
-  opts: { error?: string | null; size?: number | null; name?: string | null; remotePath?: string | null; retryCount?: number | null; remoteMtime?: number | null } = {},
+  opts: { error?: string | null; size?: number | null; name?: string | null; remotePath?: string | null; retryCount?: number | null; remoteMtime?: number | null; localMtime?: number | null; localHash?: string | null } = {},
 ): void {
   const db = getBackupDb()
   const sets: string[] = ['status = ?', 'updated_at = ?']
@@ -237,6 +255,8 @@ export function setBackupStatus(
   if (opts.remotePath !== undefined) { sets.push('remote_path = ?'); params.push(opts.remotePath) }
   if (opts.retryCount !== undefined) { sets.push('retry_count = ?'); params.push(opts.retryCount) }
   if (opts.remoteMtime !== undefined) { sets.push('remote_mtime = ?'); params.push(opts.remoteMtime) }
+  if (opts.localMtime !== undefined) { sets.push('local_mtime = ?'); params.push(opts.localMtime) }
+  if (opts.localHash !== undefined) { sets.push('local_hash = ?'); params.push(opts.localHash) }
   params.push(id)
   db.prepare(`UPDATE openlist_backup_files SET ${sets.join(', ')} WHERE id = ?`).run(...params)
 }
@@ -289,6 +309,7 @@ export function upsertAttachment(input: UpsertAttachmentInput): AttachmentRow {
   // 附件表未声明 (user, folder_type, local_path) 唯一约束，不能依赖 ON CONFLICT；改为先查后写。
   const existing = localPath ? getAttachmentByLocalPath(input.user, input.folderType, localPath) : null
   if (existing) {
+    linkAttachment(input.backupFileId, existing.id)
     db.prepare(`UPDATE openlist_backup_attachments SET
       backup_file_id = ?, user = ?, folder_type = ?, local_path = ?, remote_path = ?,
       category = ?, size = ?, status = ?, updated_at = ?, deleted_at = NULL
@@ -303,6 +324,7 @@ export function upsertAttachment(input: UpsertAttachmentInput): AttachmentRow {
     input.backupFileId, input.user, input.folderType, localPath, input.remotePath,
     input.category ?? 'image', input.size ?? null, status, now)
   const id = Number((info as any).lastInsertRowid)
+  linkAttachment(input.backupFileId, id)
   return getAttachmentByLocalPath(input.user, input.folderType, localPath!)!
 }
 
@@ -332,8 +354,21 @@ export function getAttachmentByLocalPath(user: string, folderType: string, local
 export function listAttachments(backupFileId: number): AttachmentRow[] {
   const db = getBackupDb()
   return db.prepare(
-    'SELECT * FROM openlist_backup_attachments WHERE backup_file_id = ? AND deleted_at IS NULL ORDER BY updated_at ASC',
+    `SELECT a.* FROM openlist_backup_attachments a JOIN openlist_attachment_links l ON l.attachment_id = a.id
+      WHERE l.backup_file_id = ? AND a.deleted_at IS NULL ORDER BY a.updated_at ASC`,
   ).all(backupFileId) as unknown as AttachmentRow[]
+}
+
+export function linkAttachment(backupFileId: number, attachmentId: number): void {
+  getBackupDb().prepare('INSERT OR IGNORE INTO openlist_attachment_links VALUES (?, ?)').run(backupFileId, attachmentId)
+}
+
+export function unlinkAttachment(backupFileId: number, attachmentId: number): number {
+  const db = getBackupDb()
+  db.prepare('DELETE FROM openlist_attachment_links WHERE backup_file_id = ? AND attachment_id = ?').run(backupFileId, attachmentId)
+  return Number((db.prepare(`SELECT COUNT(*) AS c FROM openlist_attachment_links l
+    JOIN openlist_backup_files f ON f.id = l.backup_file_id
+    WHERE l.attachment_id = ? AND f.deleted_at IS NULL`).get(attachmentId) as any).c)
 }
 
 export function listAttachmentsByUser(user: string): AttachmentRow[] {
@@ -367,8 +402,11 @@ export function countLocalPathRefs(localPath: string, excludeBackupId: number, e
     'SELECT COUNT(*) AS c FROM openlist_backup_files WHERE local_path = ? AND id != ? AND deleted_at IS NULL',
   ).get(localPath, excludeBackupId) as any
   const b = db.prepare(
-    'SELECT COUNT(*) AS c FROM openlist_backup_attachments WHERE local_path = ? AND id != ? AND deleted_at IS NULL',
-  ).get(localPath, excludeAttachmentId) as any
+    `SELECT COUNT(*) AS c FROM openlist_backup_attachments a JOIN openlist_attachment_links l ON l.attachment_id = a.id
+      JOIN openlist_backup_files f ON f.id = l.backup_file_id
+      WHERE a.local_path = ? AND a.deleted_at IS NULL AND f.deleted_at IS NULL
+      AND (a.id != ? OR l.backup_file_id != ?)`,
+  ).get(localPath, excludeAttachmentId, excludeBackupId) as any
   return (a?.c || 0) + (b?.c || 0)
 }
 
@@ -379,8 +417,11 @@ export function countRemotePathRefs(remotePath: string, excludeBackupId: number,
     'SELECT COUNT(*) AS c FROM openlist_backup_files WHERE remote_path = ? AND id != ? AND deleted_at IS NULL',
   ).get(remotePath, excludeBackupId) as any
   const b = db.prepare(
-    'SELECT COUNT(*) AS c FROM openlist_backup_attachments WHERE remote_path = ? AND id != ? AND deleted_at IS NULL',
-  ).get(remotePath, excludeAttachmentId) as any
+    `SELECT COUNT(*) AS c FROM openlist_backup_attachments a JOIN openlist_attachment_links l ON l.attachment_id = a.id
+      JOIN openlist_backup_files f ON f.id = l.backup_file_id
+      WHERE a.remote_path = ? AND a.deleted_at IS NULL AND f.deleted_at IS NULL
+      AND (a.id != ? OR l.backup_file_id != ?)`,
+  ).get(remotePath, excludeAttachmentId, excludeBackupId) as any
   return (a?.c || 0) + (b?.c || 0)
 }
 
@@ -404,7 +445,8 @@ export function upsertLocalFile(input: { user: string; source?: string | null; f
   const filename = path.basename(lp)
   const created = (st.birthtimeMs && st.birthtimeMs > 0 && st.birthtimeMs !== st.mtimeMs) ? st.birthtimeMs : st.mtimeMs
   const modified = st.mtimeMs
-  const existing = getLocalFile(input.user, lp)
+  // 软删除记录仍占用唯一键，重新落盘时应恢复原记录。
+  const existing = db.prepare('SELECT id FROM openlist_local_files WHERE user = ? AND local_path = ?').get(input.user, lp) as { id: number } | undefined
   if (existing) {
     db.prepare(`UPDATE openlist_local_files SET source = ?, folder_type = ?, filename = ?, file_created_at = ?, file_modified_at = ?, size = ?, deleted_at = NULL, updated_at = ? WHERE id = ?`)
       .run(input.source ?? null, input.folderType, filename, created, modified, st.size, now, existing.id)

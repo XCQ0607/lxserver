@@ -35,8 +35,8 @@
 | `WEBDAV_BACKUP_PATH`                       | `webdav.backupPath`                        | WebDAV 全量备份远端路径                                                                            | `/lx-sync-backups` |
 | `SYNC_INTERVAL`                            | `sync.interval`                            | WebDAV 增量同步检测间隔(分钟)                                                                      | `60`               |
 | `BACKUP_INTERVAL`                          | `sync.backupInterval`                      | WebDAV 全量备份间隔(小时)                                                                          | `24`               |
-| `WEBDAV_EXCLUDE_CACHE`                     | `webdav.excludeCache`                      | 排除缓存目录同步 (`data/cache/<用户>`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
-| `WEBDAV_EXCLUDE_MUSIC`                     | `webdav.excludeMusic`                      | 排除下载目录同步 (`data/music/<用户>`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | 旧兼容项；数据备份现在固定排除缓存 | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | 旧兼容项；显式备份类型数组优先 | `false` |
 | `ENABLE_WEBPLAYER_AUTH`                    | `player.enableAuth`                        | 是否启用 Web 播放器访问密码                                                                        | `false`            |
 | `WEBPLAYER_PASSWORD`                       | `player.password`                          | Web 播放器访问密码                                                                                 | `123456`           |
 | `DISABLE_TELEMETRY`                        | `disableTelemetry`                         | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                                                 | `false`            |
@@ -122,9 +122,9 @@ Subsonic 用户目录中的 `subsonic-local-registry.json` 和 `subsonic-local-s
 
 配置备份默认开启，保留 7 天；默认位置为数据目录的 `backups/`。可以用 `CONFIG_BACKUP_DIR` 和 `SNAPSHOT_BACKUP_PATH` 自定义配置备份、歌单快照的存储位置。
 
-WebDAV 支持数据同步和远程备份。填写地址、账号、同步目录与备份目录后，先测试连接，再检查同步日志。启用 WebDAV 的服务在启动时会尝试从远端恢复数据，部署新实例时应确认远端目录属于预期的服务。
+WebDAV 和 OpenList 按「系统设置 → 云端备份范围」选择的数据类型备份。启动时恢复默认关闭，可用 `backup.webdav.restoreOnStartup` 显式开启。恢复步骤和两种后端的职责见 [云端备份与恢复](./backup-recovery.md)。
 
-`WEBDAV_EXCLUDE_CACHE` 和 `WEBDAV_EXCLUDE_MUSIC` 可以排除数据目录内对应音频目录的同步与备份，适合只同步账号和歌单的情况。不要据此假设外部音乐目录或程序根目录音频已得到备份。
+新的 `backup.webdav.types` 和 `backup.openlist.types` 类型数组分别控制两个目的地。歌曲只包含 `data/music`；`cache` 和外部音乐目录不属于数据备份。旧排除选项不再作为第二套界面开关。
 
 ### 更新与迁移
 

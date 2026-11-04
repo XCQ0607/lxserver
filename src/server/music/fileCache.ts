@@ -2360,13 +2360,15 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
     if (username) {
       const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
       const restoreResolver = (globalThis as any).lx?.cacheRestoreResolver
-      const restored = restoreResolver ? await restoreResolver(username, targetFolder, dir, baseName, quality || 'unknown') : null
+      const restored = restoreResolver ? await restoreResolver(username, targetFolder, dir, baseName, quality || 'unknown', signal) : null
       if (restored) {
         cacheProgress.set(songKey, { progress: 100, status: 'finished', total: restored.size, received: restored.size })
         expireProgress(songKey)
         return Promise.resolve()
       }
     }
+
+    if (signal?.aborted) return
 
     // 立即同步占坑标记下载中，关闭“拿到 200 响应前”的并发竞态窗口；
     // 后续到达的相同 songKey 请求会被上面的守卫跳过，不再重复下载。
@@ -2603,18 +2605,6 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
                         nativeIds: extractNativeIds(songInfo)
                     }, folderType)
 
-                    // [OpenList 备份] 音频落盘后，发中性事件由 openlist 模块订阅并判定是否上传
-                    const lxU = (globalThis as any).lx
-                    if (lxU?.fileCachedUploadListeners?.length) {
-                        for (const fn of lxU.fileCachedUploadListeners) {
-                            try {
-                                fn({ user: normalizedUsername, folderType, localPath: finalPath, meta: { source: metadata.source, songmid: id, quality: actualQuality, origin: 'platform' } })
-                            } catch (e) {
-                                console.warn('[fileCache] fileCachedUpload listener error:', e)
-                            }
-                        }
-                    }
-
                     let tagger: any
                     let metadataWritable = false
                     try {
@@ -2659,6 +2649,18 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
 
                     await ensureCachedLyrics(songInfo, actualQuality, username, isOnlyDownload, finalPath, folderType, shouldCacheLyric, shouldEmbedLyric)
                     alignOrphanLyric(username, id, actualQuality, folderType)
+
+                    // [OpenList 备份] 音频落盘后，发中性事件由 openlist 模块订阅并判定是否上传
+                    const lxU = (globalThis as any).lx
+                    if (lxU?.fileCachedUploadListeners?.length) {
+                        for (const fn of lxU.fileCachedUploadListeners) {
+                            try {
+                                fn({ user: normalizedUsername, folderType, localPath: finalPath, meta: { source: metadata.source, songmid: id, quality: actualQuality, origin: 'platform' } })
+                            } catch (e) {
+                                console.warn('[fileCache] fileCachedUpload listener error:', e)
+                            }
+                        }
+                    }
 
                     cacheProgress.set(songKey, { progress: 100, status: 'finished', total: total || received, received, speed: 0, updatedAt: Date.now() })
                     expireProgress(songKey)
@@ -3202,7 +3204,12 @@ export const checkAndCleanupCache = async (username?: string) => {
             if ((global as any).lx?.config?.['debug.enabled']) console.log(`[文件缓存] 跳过清理（仍有活跃备份记录）: ${file.path}`)
             continue
         }
-        try { fs.unlinkSync(file.path); currentSize -= file.size; deletedCount++ } catch (e) { }
+        try {
+            fs.unlinkSync(file.path)
+            ;(globalThis as any).lx?.softDeleteLocalFileByPath?.(file.path)
+            currentSize -= file.size
+            deletedCount++
+        } catch (e) { }
     }
     console.log(`[文件缓存] 用户 ${normalizedUsername} 缓存空间清理完成，已删除 ${deletedCount} 个过期文件`)
 }

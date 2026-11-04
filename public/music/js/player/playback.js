@@ -4,6 +4,7 @@
     if (!element) return;
     const events = new EventTarget();
     let remote = null;
+    let localVolumeState = null;
     const emit = type => events.dispatchEvent(new Event(type));
     for (const type of ['play', 'playing', 'pause', 'ended', 'error', 'timeupdate', 'loadedmetadata',
         'durationchange', 'canplay', 'seeked', 'seeking', 'waiting', 'stalled', 'ratechange', 'volumechange']) {
@@ -19,6 +20,7 @@
             if (key === 'connectRemote') return output => {
                 const snapshot = { src: element.currentSrc || element.src, currentTime: element.currentTime,
                     paused: element.paused, volume: element.volume, muted: element.muted, playbackRate: element.playbackRate };
+                if (!remote) localVolumeState = { volume: element.volume, muted: element.muted };
                 remote = output;
                 element.pause(); // Suppressed locally; the receiver will supply playback events.
                 return snapshot;
@@ -30,8 +32,11 @@
                 const resume = !(output.loaded === false ? output.desiredPaused : output.paused) && !output.ended;
                 remote = null;
                 if (output.src && element.src !== output.src) element.src = window.authorizeMediaUrl?.(output.src) || output.src;
-                element.volume = output.volume;
-                element.muted = output.muted;
+                if (localVolumeState) {
+                    element.volume = localVolumeState.volume;
+                    element.muted = localVolumeState.muted;
+                    localVolumeState = null;
+                }
                 const seek = () => { if (Number.isFinite(position)) element.currentTime = Math.max(0, position); };
                 if (element.readyState >= 1) seek();
                 else element.addEventListener('loadedmetadata', seek, { once: true });

@@ -145,6 +145,7 @@ window.ListSearch = {
     },
 
     handleKeydown: function (e) {
+        if (!e || e.isComposing || e.keyCode === 229) return;
         if (e.key === 'Enter') {
             e.preventDefault();
             this.navigate(1);
