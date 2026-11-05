@@ -3802,7 +3802,7 @@ class App {
         })
         const modeOptions = (sel) => ([
             ['upload', '上传（保留本地）'],
-            ['upload-delete', '上传后删除本地（仅歌曲/歌词）'],
+            ['upload-delete', '上传后删除本地（仅删除本地歌曲及其歌词等附件）'],
             ['download', '下载（远端→本地）'],
             ['sync', '双向同步'],
         ]).map(([v, t]) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + t + '</option>').join('')
@@ -3924,6 +3924,7 @@ class App {
         try {
             const r = await this.request('/api/openlist/backups')
             let list = (r && r.list) || []
+            this._olbCurrentList = list
             // 状态指标卡：基于全量列表统计各状态数量（deleted 不计入 list，通常为 0）
             const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
             const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
@@ -3964,6 +3965,12 @@ class App {
             const sv = fs2 ? fs2.value : ''
             const qn = (fn && fn.value ? fn.value : '').trim().toLowerCase()
             const qp = (fp && fp.value ? fp.value : '').trim().toLowerCase()
+            // 按当前 tab 的 folder scope 过滤（媒体文件记录=cache,music；系统配置=system；歌单快照=list）
+            const scope = this._olbFolderScope
+            if (scope) {
+                const allowed = scope.split(',')
+                list = list.filter(f => allowed.includes(f.folder_type))
+            }
             list = list.filter(f => {
                 if (uv && f.user !== uv) return false
                 if (fv && f.folder_type !== fv) return false
@@ -4038,8 +4045,7 @@ class App {
                     '<td style="text-align:center;">' + localMark + '</td>' +
                     '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + errCell + '</td>' +
                     '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</td>' +
-                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '</td>' +
-                    '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:.76rem;font-family:monospace;" title="' + esc(pathStr) + '">' + esc(pathStr) + '</td>' +
+                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;margin-left:.3rem;" onclick="app.showOpenlistDetail(' + f.id + ')">更多</button></td>' +
                     '</tr>'
             }).join('')
             const pager = '<div class="olb-pager">' +
@@ -4066,7 +4072,6 @@ class App {
                 '<th>异常原因</th>' +
                 '<th style="width:145px;">更新时间</th>' +
                 '<th style="width:65px;text-align:center;">操作</th>' +
-                '<th>云端路径</th>' +
                 '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pager
             this.updateOlbSelCount()
         } catch (e) {
@@ -4087,6 +4092,63 @@ class App {
         } catch (e) {
             console.error(e)
             if (window.showError) window.showError('重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    async retrySelectedOpenlist() {
+        if (!this._olbSelected || !this._olbSelected.size) return
+        const ids = Array.from(this._olbSelected)
+        if (!confirm('确认对选中的 ' + ids.length + ' 条记录提交批量重试？（失败/异常状态的记录将重新上传或验证）')) return
+        try {
+            const r = await this.request('/api/openlist/retry-batch', { method: 'POST', body: JSON.stringify({ ids }) })
+            if (r && r.success) {
+                if (window.showInfo) window.showInfo('已提交 ' + (r.retried || 0) + ' 条重试' + ((r.failed ? ('，' + r.failed + ' 条失败') : '')))
+                this.loadOpenlistBackups(true)
+            } else if (window.showError) {
+                window.showError('批量重试失败: ' + ((r && (r.error || r.message)) || '未知错误'))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('批量重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    showOpenlistDetail(id) {
+        const list = this._olbCurrentList || []
+        const f = list.find(x => x.id === id)
+        if (!f) { if (window.showError) window.showError('未找到该记录详情'); return }
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+        const fmtSize = (n) => { n = Number(n) || 0; if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(1) + ' MB' }
+        const row = (k, v) => '<tr><td class="olb-detail-key">' + esc(k) + '</td><td class="olb-detail-val">' + (v === '' || v == null ? '<span style="color:var(--text-secondary)">—</span>' : esc(v)) + '</td></tr>'
+        const html = '<table class="olb-detail-table">' +
+            row('记录 ID', f.id) +
+            row('用户', f.user) +
+            row('类型', f.folder_type) +
+            row('文件名', f.name) +
+            row('状态', f.status) +
+            row('大小', fmtSize(f.size)) +
+            row('来源平台', f.source) +
+            row('音质', f.quality) +
+            row('歌曲 ID', f.songmid) +
+            row('本地存在', f.local_exists ? '是' : '否') +
+            row('重试次数', f.retry_count) +
+            row('本地路径', f.local_path) +
+            row('云端路径', f.remote_path) +
+            row('远端大小', f.remote_size) +
+            row('本地哈希', f.local_hash) +
+            row('更新时间', f.updated_at) +
+            row('错误信息', f.error) +
+            row('缓存元数据', f.cache_metadata ? JSON.stringify(JSON.parse(f.cache_metadata || '{}'), null, 2) : '') +
+            '</table>'
+        const modal = document.getElementById('modal')
+        const title = document.getElementById('modal-title')
+        const body = document.getElementById('modal-body')
+        if (modal && title && body) {
+            title.textContent = '记录详情 #' + f.id + (f.name ? ' · ' + f.name : '')
+            body.innerHTML = html
+            modal.classList.remove('hidden')
+        } else {
+            alert('记录 #' + f.id + '\n用户: ' + f.user + '\n类型: ' + f.folder_type + '\n状态: ' + f.status + '\n云端路径: ' + (f.remote_path || '') + '\n本地路径: ' + (f.local_path || ''))
         }
     }
 
@@ -4114,6 +4176,8 @@ class App {
         if (span) span.textContent = n ? ('已选 ' + n + ' 项') : ''
         const btn = document.getElementById('olb-bulkdel')
         if (btn) btn.disabled = n === 0
+        const rbtn = document.getElementById('olb-bulkretry')
+        if (rbtn) rbtn.disabled = n === 0
     }
 
     async deleteSelectedOpenlist() {
@@ -4137,8 +4201,12 @@ class App {
     switchOpenlistTab(name) {
         const map = {
             config: ['tab-btn-openlist-config', 'openlist-pane-config'],
-            records: ['tab-btn-openlist-records', 'openlist-pane-records'],
+            media: ['tab-btn-openlist-media', 'openlist-pane-records'],
+            system: ['tab-btn-openlist-system', 'openlist-pane-records'],
+            snapshot: ['tab-btn-openlist-snapshot', 'openlist-pane-records'],
         }
+        const scopeMap = { media: 'cache,music', system: 'system', snapshot: 'list' }
+        this._olbFolderScope = scopeMap[name] || ''
         for (const [btnId, paneId] of Object.values(map)) {
             const b = document.getElementById(btnId); if (b) b.classList.remove('active')
             const p = document.getElementById(paneId); if (p) p.classList.remove('active')
@@ -4146,7 +4214,7 @@ class App {
         const [btnId, paneId] = map[name] || map.config
         const b = document.getElementById(btnId); if (b) b.classList.add('active')
         const p = document.getElementById(paneId); if (p) p.classList.add('active')
-        if (name === 'records') this.loadOpenlistBackups()
+        if (paneId === 'openlist-pane-records') this.loadOpenlistBackups()
     }
 
     scheduleOpenlistReload() {

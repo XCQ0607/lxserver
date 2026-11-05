@@ -737,6 +737,69 @@ export function onFileCached(
 }
 
 /**
+ * 保存配置、某用户模式变为 upload-delete 时，对本地 cache/music 存量文件触发一次性迁移：
+ *  - 已有 verified/completed 远端记录且本地未变 → 跳过上传，直接删除本地（含已 verified 附件）
+ *  - 其余本地文件 → 登记为 upload-delete 并上传，verifyPending 后续按大小一致确认后删除本地
+ * 仅 cache/music 生效；system/data/list 受 PROTECTED_LOCAL_TYPES 保护，永不删本地。
+ */
+export async function triggerBackfillUploadDelete(user: string): Promise<void> {
+  const cfg = getConfig()
+  if (!cfg.enable) return
+  const entry = cfg.userBackups.find(u => u.user === user && u.enabled)
+  if (!entry) return
+  const cl = getClient()
+  if (!cl) return
+  ensureBackupTables()
+
+  const folders: Array<'cache' | 'music'> = ['cache', 'music']
+  for (const folderType of folders) {
+    if (!folderEnabled(user, folderType, cfg)) continue
+    const dir = resolveUserDir(entry, folderType, cfg)
+    if (!dir || !fs.existsSync(dir)) continue
+    const locals = walkLocal(dir, folderType)
+    for (const localPath of locals) {
+      const existing = getBackupByLocalPath(user, folderType, localPath)
+      // 分支1：远端已存在且已确认 → 跳过上传，直接删本地（含已 verified 附件）
+      if (existing && !existing.deleted_at && (existing.status === 'verified' || existing.status === 'completed') && !localChanged(existing)) {
+        try {
+          if (existing.local_path && fs.existsSync(existing.local_path)) {
+            fs.unlinkSync(existing.local_path)
+            removeLocalCache(existing)
+            softDeleteLocalFile(existing.user, existing.local_path)
+          }
+          for (const a of listAttachments(existing.id)) {
+            if (a.status === 'verified' && a.local_path && fs.existsSync(a.local_path) && countLocalPathRefs(a.local_path, existing.id, a.id) === 0) {
+              try { fs.unlinkSync(a.local_path); softDeleteLocalFile(a.user, a.local_path) } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+        continue
+      }
+      // 分支2：登记为 upload-delete 并上传，verifyPending 后续按大小校验删除本地
+      const relative = path.relative(dir, localPath).replace(/\\/g, '/')
+      const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${relative}`)
+      const item = getIndexItemByFilename(path.basename(localPath), user)
+      const row = upsertBackupFile({
+        user,
+        folderType,
+        localPath,
+        remotePath,
+        source: existing?.source || null,
+        songmid: existing?.songmid || null,
+        quality: existing?.quality || null,
+        mode: 'upload-delete',
+        status: 'pending',
+        direction: 'upload',
+        cacheMetadata: item ? JSON.stringify(item) : existing?.cache_metadata,
+      })
+      void enqueueUpload(row, cl, 'upload-delete')
+      if (cfg.includeNonAudio) queueAttachmentsForFile(user, folderType, localPath, row, dir, cl, cfg)
+    }
+  }
+  lazyStartScheduler()
+}
+
+/**
  * 订阅通用「文件落盘」事件（由 fileCache 在音频写入后发出，事件本身与 openlist 无关），
  * 落盘即排程一次防抖全量同步。这样 fileCache 不直接依赖 openlist 实现，仅发中性事件。
  */

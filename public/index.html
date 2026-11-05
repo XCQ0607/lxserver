@@ -2434,7 +2434,7 @@
                                 </svg>
                                 <span>备份配置</span>
                             </button>
-                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-records" onclick="app.switchOpenlistTab('records')">
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-media" onclick="app.switchOpenlistTab('media')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <polyline points="14 2 14 8 20 8"></polyline>
@@ -2442,7 +2442,22 @@
                                     <line x1="16" y1="17" x2="8" y2="17"></line>
                                     <polyline points="10 9 9 9 8 9"></polyline>
                                 </svg>
-                                <span>文件记录</span>
+                                <span>媒体文件记录</span>
+                            </button>
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-system" onclick="app.switchOpenlistTab('system')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                                <span>系统配置记录</span>
+                            </button>
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-snapshot" onclick="app.switchOpenlistTab('snapshot')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <path d="M9 18V5l12-2v13"></path>
+                                    <circle cx="6" cy="18" r="3"></circle>
+                                    <circle cx="18" cy="16" r="3"></circle>
+                                </svg>
+                                <span>歌单快照记录</span>
                             </button>
                         </div>
                         <div id="openlist-pane-config" class="backup-tab-pane active">
@@ -2624,7 +2639,7 @@
                                 </div>
                                 <div>
                                     <h3 class="config-card-title">
-                                        <span>同步状态与文件记录</span>
+                                        <span>同步记录（媒体文件 / 系统配置 / 歌单快照）</span>
                                         <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="查看已备份文件与同步结果（含图片等附件计数）">?</span>
                                     </h3>
                                     <p class="config-card-desc">实时查看文件备份进度、验证状态及失败重试</p>
@@ -2641,6 +2656,13 @@
                                                 <line x1="12" y1="3" x2="12" y2="15"></line>
                                             </svg>
                                             立即全量同步
+                                        </button>
+                                        <button type="button" id="olb-bulkretry" class="btn-secondary" onclick="app.retrySelectedOpenlist()" disabled>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                                <polyline points="23 4 23 10 17 10"></polyline>
+                                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                            </svg>
+                                            批量重试
                                         </button>
                                         <button type="button" id="olb-bulkdel" class="btn-secondary btn-danger-soft" onclick="app.deleteSelectedOpenlist()" disabled>
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">

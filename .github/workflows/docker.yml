@@ -53,6 +53,15 @@ jobs:
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update build hash [skip ci]" && git push)
         continue-on-error: true
 
+      - name: Determine image tag by branch
+        # dev 分支只生成 dev + 版本号标签；main 分支生成 latest + 版本号标签
+        run: |
+          if [ "${{ github.ref_name }}" = "dev" ]; then
+            echo "BRANCH_TAG=dev" >> "$GITHUB_ENV"
+          else
+            echo "BRANCH_TAG=latest" >> "$GITHUB_ENV"
+          fi
+
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
@@ -60,7 +69,7 @@ jobs:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
-            type=raw,value=latest
+            type=raw,value=${{ env.BRANCH_TAG }}
             type=raw,value=${{ env.PROJECT_VERSION }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
