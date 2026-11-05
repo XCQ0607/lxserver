@@ -81,11 +81,11 @@ function createMockCtx(width, height) {
   })
 }
 
-test('design-study dials replace the legacy themes and migrate saved values', () => {
+test('design-study dials fall back to Nocturne for unsupported themes', () => {
   const { LXStudioVUMeterAnimation } = createVisualizerEnvironment()
   const vu = new LXStudioVUMeterAnimation()
   assert.deepEqual(STUDY_THEMES.map(id => vu.getDesign(id).name), ['Nocturne', 'Heritage', 'Atelier', 'Riviera', 'Cobalt'])
-  const legacy = { 'vintage-amber': 'study-heritage', 'ocean-blue': 'study-cobalt', 'cyber-cyan': 'study-nocturne', 'champagne-gold': 'study-atelier', 'studio-monochrome': 'study-riviera', unknown: 'study-nocturne' }
+  const legacy = { 'vintage-amber': 'study-nocturne', 'ocean-blue': 'study-nocturne', 'cyber-cyan': 'study-nocturne', 'champagne-gold': 'study-nocturne', 'studio-monochrome': 'study-nocturne', unknown: 'study-nocturne' }
   for (const [from, to] of Object.entries(legacy)) {
     assert.equal(LXStudioVUMeterAnimation.normalizeTheme(from), to)
   }

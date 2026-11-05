@@ -59,13 +59,6 @@ const vuPowerMarks = points => points.map(([vu, label]) => ({ vu, label, norm: m
 const LX_VU_FONT_SANS = '"Avenir Next", Avenir, "Segoe UI", "Helvetica Neue", Arial, sans-serif';
 const LX_VU_FONT_SERIF = 'Georgia, "Times New Roman", serif';
 const LX_VU_DEFAULT_THEME = 'study-nocturne';
-const LX_VU_LEGACY_THEMES = {
-    'vintage-amber': 'study-heritage',
-    'ocean-blue': 'study-cobalt',
-    'cyber-cyan': 'study-nocturne',
-    'champagne-gold': 'study-atelier',
-    'studio-monochrome': 'study-riviera'
-};
 
 const LX_VU_DIAL_DESIGNS = {
     // Smoked-titanium reference meter: wide shallow sweep, hairline nickel pointer, warm diffuser.
@@ -139,7 +132,6 @@ const vuDesignPoint = (deg, radius, cx, cy, scaleX) => [
 
 const normalizeVuTheme = theme => {
     if (theme && Object.prototype.hasOwnProperty.call(LX_VU_DIAL_DESIGNS, theme)) return theme;
-    if (theme && LX_VU_LEGACY_THEMES[theme]) return LX_VU_LEGACY_THEMES[theme];
     return LX_VU_DEFAULT_THEME;
 };
 // Phones get no VU meter: the instrument needs desktop width to stay legible.

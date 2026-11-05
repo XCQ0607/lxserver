@@ -200,10 +200,9 @@ function normalizeStoredSettings(nextSettings) {
     nextSettings.serverCacheNamingPattern = validPatterns.includes(nextSettings.serverCacheNamingPattern)
         ? nextSettings.serverCacheNamingPattern
         : 'simple';
-    const legacyVuThemes = { 'vintage-amber': 'study-heritage', 'ocean-blue': 'study-cobalt', 'cyber-cyan': 'study-nocturne', 'champagne-gold': 'study-atelier', 'studio-monochrome': 'study-riviera' };
     const vuThemes = ['study-nocturne', 'study-heritage', 'study-atelier', 'study-riviera', 'study-cobalt'];
     if (!vuThemes.includes(nextSettings.vuMeterTheme)) {
-        nextSettings.vuMeterTheme = legacyVuThemes[nextSettings.vuMeterTheme] || 'study-nocturne';
+        nextSettings.vuMeterTheme = 'study-nocturne';
     }
     return nextSettings;
 }
