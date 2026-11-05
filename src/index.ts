@@ -94,8 +94,8 @@ const getConfigHash = (filePath: string) => {
 const dataPath = envParams.DATA_PATH ?? path.join(__dirname, '../data')
 const resolvedConfigPath = process.env.CONFIG_PATH || path.join(dataPath, 'config.js')
 
-// [本地配置备份] 每天一份 config-YYYY-MM-DD.js，保留可配置天数（见 configBackup.*）
-let lastBackupDate = ''
+// [本地配置备份] 按周期生成 config-<槽位>.js，保留可配置天数（见 configBackup.*）
+let lastBackupSlot = ''
 
 const getConfigBackupDir = (): string => {
   const dir = global.lx?.config['configBackup.dir']
@@ -122,7 +122,37 @@ const getTimestampStr = () => {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
 }
 
-// 清理超过保留期的本地配置备份（按文件 mtime 判断）
+// 本地快照备份文件名：snapshot_<name>-<日期_时分秒>[-序号]。每次落盘生成独立文件，不覆盖历史，可按时间点回溯。
+const snapshotBackupPrefix = (name: string) => `snapshot_${name}-`
+const isSnapshotBackupOf = (file: string, name: string): boolean => {
+  if (file === `snapshot_${name}`) return true // 兼容旧版无时间戳的副本
+  const prefix = snapshotBackupPrefix(name)
+  if (!file.startsWith(prefix)) return false
+  return /^\d{4}-\d{2}-\d{2}_\d{6}(?:-\d+)?$/.test(file.slice(prefix.length))
+}
+
+// 按同一保留期清理过期的本地快照副本（snapshots/<user>/ 下的 snapshot_* 文件）
+const cleanOldSnapshotBackups = (backupDir: string, cutoff: number) => {
+  const root = path.join(backupDir, 'snapshots')
+  if (!fs.existsSync(root)) return
+  for (const user of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!user.isDirectory()) continue
+    const dir = path.join(root, user.name)
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        if (!file.startsWith('snapshot_')) continue
+        const fp = path.join(dir, file)
+        try {
+          const stat = fs.statSync(fp)
+          if (stat.isFile() && stat.mtimeMs < cutoff) fs.unlinkSync(fp)
+        } catch { /* ignore */ }
+      }
+      if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir)
+    } catch { /* ignore */ }
+  }
+}
+
+// 清理超过保留期的本地配置备份与快照备份（按文件 mtime 判断）
 const cleanOldConfigBackups = () => {
   const backupDir = getConfigBackupDir()
   try {
@@ -135,6 +165,7 @@ const cleanOldConfigBackups = () => {
         if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp)
       } catch { /* ignore */ }
     }
+    cleanOldSnapshotBackups(backupDir, cutoff)
   } catch (err) {
     console.error('[Config] Failed to clean old config backups:', err)
   }
@@ -167,23 +198,65 @@ const migrateConfigBackups = (targetBackupDir: string) => {
   }
 }
 
-// 每天自动备份一次（同日覆盖），备份后顺带清理过期文件
+// 按配置的备份周期生成槽位键：周期≥24h 按天（同日覆盖），否则带时分（每周期一个文件）
+// 备份后顺带清理过期文件
 const backupConfig = () => {
   if (global.lx?.config['configBackup.enable'] === false) return
   const backupDir = getConfigBackupDir()
   migrateConfigBackups(backupDir)
+  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+  const now = new Date()
   const dateStr = getTodayStr()
-  if (dateStr === lastBackupDate) return
+  const slotKey = intervalHours >= 24
+    ? dateStr
+    : `${dateStr}-${pad2(now.getHours())}${pad2(now.getMinutes())}`
+  if (slotKey === lastBackupSlot) return
   try {
     if (!global.lx?.configPath || !fs.existsSync(global.lx.configPath)) return
     fs.mkdirSync(backupDir, { recursive: true })
-    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${dateStr}.js`))
-    lastBackupDate = dateStr
-    console.log(`[Config] Local backup saved to ${backupDir}/config-${dateStr}.js`)
+    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${slotKey}.js`))
+    lastBackupSlot = slotKey
+    if (global.lx) global.lx.lastConfigBackupAt = Date.now()
+    console.log(`[Config] Local backup saved to ${backupDir}/config-${slotKey}.js`)
   } catch (err) {
     console.error('[Config] Failed to backup config:', err)
   }
   cleanOldConfigBackups()
+}
+
+// 本地快照备份：当本地备份开关打开时，把刚落盘的歌单/不喜欢快照复制一份带时间戳的副本到备份目录。
+// 每次落盘都独立成文件（秒级时间戳 + 同秒序号），保证可按时间点回溯，不覆盖历史。
+// 复用 configBackup.enable 开关与 getConfigBackupDir 目录约定（"跟配置走"）
+const backupSnapshotToLocal = (srcPath: string, user: string, name: string) => {
+  if (global.lx?.config['configBackup.enable'] === false) return
+  if (!srcPath || !fs.existsSync(srcPath) || !user || !name) return
+  const backupDir = getConfigBackupDir()
+  const destDir = path.join(backupDir, 'snapshots', user)
+  try {
+    fs.mkdirSync(destDir, { recursive: true })
+    const base = `${snapshotBackupPrefix(name)}${getTimestampStr()}`
+    let dest = path.join(destDir, base)
+    let seq = 1
+    while (fs.existsSync(dest)) dest = path.join(destDir, `${base}-${seq++}`)
+    fs.copyFileSync(srcPath, dest)
+  } catch (err) {
+    console.error('[Config] Failed to backup snapshot locally:', err)
+  }
+}
+
+// 删除某个快照时，清理其所有本地历史副本（含旧版无时间戳副本），避免孤儿文件
+const removeSnapshotLocalBackups = (user: string, name: string) => {
+  if (!user || !name) return
+  const destDir = path.join(getConfigBackupDir(), 'snapshots', user)
+  if (!fs.existsSync(destDir)) return
+  try {
+    for (const file of fs.readdirSync(destDir)) {
+      if (!isSnapshotBackupOf(file, name)) continue
+      try { fs.unlinkSync(path.join(destDir, file)) } catch { /* ignore */ }
+    }
+  } catch (err) {
+    console.error('[Config] Failed to remove snapshot local backups:', err)
+  }
 }
 
 // 手动立即备份一次（精确到秒时间戳，不覆盖当天的自动备份）
@@ -236,6 +309,8 @@ global.lx = {
   saveConfig: saveConfigToFile,
   backupConfigNow,
   getConfigBackupDir,
+  backupSnapshotToLocal,
+  removeSnapshotLocalBackups,
 }
 
 const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string>>) => {
@@ -276,6 +351,14 @@ const margeConfig = (p: string) => {
   for (const key of Object.keys(defaultConfig) as Array<keyof LX.Config>) {
     // @ts-expect-error
     if (config[key] !== undefined) newConfig[key] = config[key]
+  }
+
+  // [向后兼容] 旧版 Subsonic 独立端口靠 subsonic.port > 0 直接监听，无 standalone 开关概念。
+  // 升级到引入 subsonic.standalone（默认 false）的版本后，旧配置缺失该键会按默认值静默关闭独立端口，
+  // 造成「升级前已有端口值却被关掉」。故对「原始 config 缺开关键且有端口值(>0)」的旧配置默认视为开启；
+  // 仅当原始 config 未显式设置该键时生效（用户显式设为 false 则尊重其意图，不被覆盖）。
+  if (config['subsonic.standalone'] === undefined && (Number(config['subsonic.port']) || 0) > 0) {
+    newConfig['subsonic.standalone'] = true
   }
 
   console.log('[配置] 加载配置文件: ' + p)
@@ -861,10 +944,44 @@ if (!fs.existsSync(openLibDir)) {
 // 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
 saveConfigToFile()
 
-// 每日清理过期本地配置备份（保留最近 7 天）
+// 本地配置备份调度：每 N 小时一次，可选锚点时间（HH:MM）对齐到该时刻首次触发
+const getNextRunTime = (anchor: string, intervalMs: number, now: number): number => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(anchor)
+  if (!m) return now + intervalMs
+  const base = new Date(now)
+  base.setHours(Number(m[1]), Number(m[2]), 0, 0)
+  const diff = now - base.getTime()
+  let t = base.getTime() + Math.ceil(Math.max(diff, 0) / intervalMs) * intervalMs
+  if (t <= now) t += intervalMs
+  return t
+}
+let configBackupTimer: ReturnType<typeof setTimeout> | undefined
+const scheduleConfigBackup = () => {
+  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+  const intervalMs = intervalHours * 60 * 60 * 1000
+  const anchor = String(global.lx?.config?.['configBackup.scheduleTime'] || '00:00').trim()
+  const now = Date.now()
+  const nextRun = getNextRunTime(anchor, intervalMs, now)
+  if (global.lx) global.lx.nextConfigBackupAt = nextRun
+  configBackupTimer = setTimeout(() => {
+    backupConfig()
+    scheduleConfigBackup()
+  }, nextRun - now)
+  if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+}
+
+// 启动即备份一次，并按当前配置调度后续自动备份
+backupConfig()
+scheduleConfigBackup()
+if (global.lx) global.lx.rescheduleConfigBackup = () => {
+  if (configBackupTimer) clearTimeout(configBackupTimer)
+  scheduleConfigBackup()
+}
+
+// 每日清理过期本地配置备份（保留最近 N 天；即便备份被禁用也照常执行）
 cleanOldConfigBackups()
-const configBackupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
-if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+const configCleanupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
+if (typeof configCleanupTimer.unref === 'function') configCleanupTimer.unref()
 
 startServer(global.lx.config.port, '0.0.0.0')
 

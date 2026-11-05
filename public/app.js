@@ -2716,6 +2716,12 @@ class App {
             if (form.elements['configBackup.dir']) {
                 form.elements['configBackup.dir'].value = config['configBackup.dir'] || '';
             }
+            if (form.elements['configBackup.intervalHours']) {
+                form.elements['configBackup.intervalHours'].value = config['configBackup.intervalHours'] || 24;
+            }
+            if (form.elements['configBackup.scheduleTime']) {
+                form.elements['configBackup.scheduleTime'].value = config['configBackup.scheduleTime'] || '00:00';
+            }
             if (form.elements['snapshot.backupPath']) {
                 form.elements['snapshot.backupPath'].value = config['snapshot.backupPath'] || '';
             }
@@ -3203,6 +3209,8 @@ class App {
             ...this.collectBackupPolicy(),
             'configBackup.enable': formData.get('configBackup.enable') === 'on',
             'configBackup.retentionDays': parseInt(formData.get('configBackup.retentionDays')) || 7,
+            'configBackup.intervalHours': parseInt(formData.get('configBackup.intervalHours')) || 24,
+            'configBackup.scheduleTime': (formData.get('configBackup.scheduleTime') || '').trim(),
             'configBackup.dir': (formData.get('configBackup.dir') || '').trim(),
             'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
@@ -3794,11 +3802,11 @@ class App {
         })
         const modeOptions = (sel) => ([
             ['upload', '上传（保留本地）'],
-            ['upload-delete', '上传后删除本地'],
+            ['upload-delete', '上传后删除本地（仅删除本地歌曲及其歌词等附件）'],
             ['download', '下载（远端→本地）'],
             ['sync', '双向同步'],
         ]).map(([v, t]) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + t + '</option>').join('')
-        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：上传完成即删本地并清缓存索引；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
+        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：仅对「下载 / 缓存」目录中的歌曲文件及其随同上传的歌词、封面等附件生效，上传校验通过后删除这些本地文件并清除缓存索引；系统配置、歌单与不喜欢快照、用户数据一律保留本地，不受此模式影响；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
         const toggleHtml = (id, checked) =>
             '<label class="toggle-switch">' +
             '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
@@ -3837,12 +3845,14 @@ class App {
     }
 
     /** 用户在 OpenList 备份里把某用户模式改为「上传后删除本地」时给出强提示：
-     *  该模式会清除本地缓存索引，下次播放将无本地缓存；为保证直接命中 OpenList 直链（而非回源重下），
-     *  保存时会自动开启 Subsonic 的「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
+     *  该模式只删「下载 / 缓存」目录里的歌曲及其歌词、封面等附件，并清除本地缓存索引，
+     *  不会删除系统配置、歌单与不喜欢快照、用户数据；下次播放将无本地缓存；
+     *  为保证直接命中 OpenList 直链（而非回源重下），保存时会自动开启 Subsonic 的
+     *  「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
     onOpenlistModeChange(sel) {
         if (!sel || sel.value !== 'upload-delete') return
         if (window.showInfo) {
-            window.showInfo('已选择「上传后删除本地」：该模式会在上传完成后清除本地缓存索引，下次播放将无本地缓存。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
+            window.showInfo('已选择「上传后删除本地」：\n仅删除「下载 / 缓存」目录中已成功上传的歌曲文件及其歌词、封面等附件，并清除本地缓存索引，下次播放将无本地缓存。\n系统配置、歌单与不喜欢快照、用户数据不会被删除，始终保留本地。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
         }
     }
 
@@ -3914,7 +3924,26 @@ class App {
         try {
             const r = await this.request('/api/openlist/backups')
             let list = (r && r.list) || []
-            // 状态指标卡：基于全量列表统计各状态数量（deleted 不计入 list，通常为 0）
+            // 先按当前 tab 的 folder scope 过滤（媒体文件记录=cache,music；系统配置=system；歌单快照=list），统计卡与下方列表口径一致
+            const scope = this._olbFolderScope
+            if (scope) {
+                const allowed = scope.split(',')
+                list = list.filter(f => {
+                    if (allowed.includes(f.folder_type)) return true
+                    // 歌单快照 tab：selectedData 模式下歌单/不喜欢快照记在 folder_type='data'，路径含 /(list|dislike)/snapshot，需纳入展示
+                    if (allowed.includes('list') && f.folder_type === 'data' && /(^|[\\/])(list|dislike)[\\/]snapshot([\\/]|$)/i.test(f.local_path || f.name || '')) return true
+                    return false
+                })
+            }
+            // 歌单快照页：按「我的歌单 / 我不喜欢」类型下拉过滤
+            const inSnapshot = scope && scope.split(',').includes('list')
+            const tfEl = document.getElementById('olb-filter-type')
+            const tf = tfEl ? tfEl.value : ''
+            if (inSnapshot && tf) {
+                list = list.filter(f => this.olbSnapshotType(f) === tf)
+            }
+            this._olbCurrentList = list
+            // 状态指标卡：基于当前页签过滤后的列表统计各状态数量（deleted 不计入 list，通常为 0）
             const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
             const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
             const statusOrder = ['pending', 'uploading', 'completed', 'verified', 'failed', 'deleted']
@@ -3990,7 +4019,7 @@ class App {
             const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             const fmtName = (f) => {
                 const nm = (f.name || '').toString().trim()
-                const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
+                const base = nm ? nm.split(/[\\/]/).pop() : ((f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)')
                 return esc(base)
             }
             const fmtSize = (n) => {
@@ -4004,7 +4033,13 @@ class App {
                 const d = new Date(f.updated_at || f.created_at || Date.now())
                 const color = badgeColor[f.status] || '#64748b'
                 const label = statusMap[f.status] || f.status || ''
-                const typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                let typeLabel
+                if (this._olbFolderScope && this._olbFolderScope.split(',').includes('list')) {
+                    const st = this.olbSnapshotType(f)
+                    typeLabel = st === 'dislike' ? '我不喜欢' : (st === 'list' ? '我的歌单' : (f.folder_type === 'list' ? '我的歌单' : '数据备份'))
+                } else {
+                    typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                }
                 const canRetry = f.status !== 'verified' && f.status !== 'deleted'
                 const retryBtn = canRetry
                     ? '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
@@ -4022,14 +4057,13 @@ class App {
                     '<td style="text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
                     '<td><span class="olb-user-tag">' + esc(f.user || '') + '</span></td>' +
                     '<td style="white-space:nowrap;color:var(--text-secondary);">' + typeLabel + '</td>' +
-                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
+                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + esc(f.name || f.local_path || '') + '">' + fmtName(f) + '</td>' +
                     '<td style="text-align:center;white-space:nowrap;"><span class="olb-badge" style="--badge-color:' + color + ';"><span class="olb-badge-dot"></span>' + label + '</span></td>' +
                     '<td style="white-space:nowrap;font-family:monospace;font-size:0.8rem;">' + fmtSize(f.size) + '</td>' +
                     '<td style="text-align:center;">' + localMark + '</td>' +
                     '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + errCell + '</td>' +
-                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString() + '</td>' +
-                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '</td>' +
-                    '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:.76rem;font-family:monospace;" title="' + esc(pathStr) + '">' + esc(pathStr) + '</td>' +
+                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</td>' +
+                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;margin-left:.3rem;" onclick="app.showOpenlistDetail(' + f.id + ')">更多</button></td>' +
                     '</tr>'
             }).join('')
             const pager = '<div class="olb-pager">' +
@@ -4056,7 +4090,6 @@ class App {
                 '<th>异常原因</th>' +
                 '<th style="width:145px;">更新时间</th>' +
                 '<th style="width:65px;text-align:center;">操作</th>' +
-                '<th>云端路径</th>' +
                 '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pager
             this.updateOlbSelCount()
         } catch (e) {
@@ -4077,6 +4110,64 @@ class App {
         } catch (e) {
             console.error(e)
             if (window.showError) window.showError('重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    async retrySelectedOpenlist() {
+        if (!this._olbSelected || !this._olbSelected.size) return
+        const ids = Array.from(this._olbSelected)
+        if (!confirm('确认对选中的 ' + ids.length + ' 条记录提交批量重试？（失败/异常状态的记录将重新上传或验证）')) return
+        try {
+            const r = await this.request('/api/openlist/retry-batch', { method: 'POST', body: JSON.stringify({ ids }) })
+            if (r && r.success) {
+                if (window.showInfo) window.showInfo('已提交 ' + (r.retried || 0) + ' 条重试' + ((r.failed ? ('，' + r.failed + ' 条失败') : '')))
+                this.loadOpenlistBackups(true)
+            } else if (window.showError) {
+                window.showError('批量重试失败: ' + ((r && (r.error || r.message)) || '未知错误'))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('批量重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    showOpenlistDetail(id) {
+        const list = this._olbCurrentList || []
+        const f = list.find(x => x.id === id)
+        if (!f) { if (window.showError) window.showError('未找到该记录详情'); return }
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+        const fmtSize = (n) => { n = Number(n) || 0; if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(1) + ' MB' }
+        const row = (k, v) => '<tr><td class="olb-detail-key">' + esc(k) + '</td><td class="olb-detail-val">' + (v === '' || v == null ? '<span style="color:var(--text-secondary)">—</span>' : esc(v)) + '</td></tr>'
+        const html = '<table class="olb-detail-table">' +
+            row('记录 ID', f.id) +
+            row('用户', f.user) +
+            row('类型', f.folder_type) +
+            row('文件名', f.name) +
+            row('状态', f.status) +
+            row('大小', fmtSize(f.size)) +
+            row('来源平台', f.source) +
+            row('音质', f.quality) +
+            row('歌曲 ID', f.songmid) +
+            row('本地存在', f.local_exists ? '是' : '否') +
+            row('重试次数', f.retry_count) +
+            row('本地路径', f.local_path) +
+            row('云端路径', f.remote_path) +
+            row('远端大小', f.remote_size) +
+            row('本地哈希', f.local_hash) +
+            row('更新时间', f.updated_at) +
+            row('错误信息', f.error) +
+            row('缓存元数据', f.cache_metadata ? JSON.stringify(JSON.parse(f.cache_metadata || '{}'), null, 2) : '') +
+            '</table>'
+        const modal = document.getElementById('modal')
+        const title = document.getElementById('modal-title')
+        const body = document.getElementById('modal-body')
+        if (modal && title && body) {
+            const nmBase = String(f.name || '').trim().split(/[\\/]/).pop() || ''
+            title.textContent = '记录详情 #' + f.id + (nmBase ? ' · ' + nmBase : '')
+            body.innerHTML = html
+            modal.classList.remove('hidden')
+        } else {
+            alert('记录 #' + f.id + '\n用户: ' + f.user + '\n类型: ' + f.folder_type + '\n状态: ' + f.status + '\n云端路径: ' + (f.remote_path || '') + '\n本地路径: ' + (f.local_path || ''))
         }
     }
 
@@ -4104,6 +4195,8 @@ class App {
         if (span) span.textContent = n ? ('已选 ' + n + ' 项') : ''
         const btn = document.getElementById('olb-bulkdel')
         if (btn) btn.disabled = n === 0
+        const rbtn = document.getElementById('olb-bulkretry')
+        if (rbtn) rbtn.disabled = n === 0
     }
 
     async deleteSelectedOpenlist() {
@@ -4127,8 +4220,12 @@ class App {
     switchOpenlistTab(name) {
         const map = {
             config: ['tab-btn-openlist-config', 'openlist-pane-config'],
-            records: ['tab-btn-openlist-records', 'openlist-pane-records'],
+            media: ['tab-btn-openlist-media', 'openlist-pane-records'],
+            system: ['tab-btn-openlist-system', 'openlist-pane-records'],
+            snapshot: ['tab-btn-openlist-snapshot', 'openlist-pane-records'],
         }
+        const scopeMap = { media: 'cache,music', system: 'system', snapshot: 'list' }
+        this._olbFolderScope = scopeMap[name] || ''
         for (const [btnId, paneId] of Object.values(map)) {
             const b = document.getElementById(btnId); if (b) b.classList.remove('active')
             const p = document.getElementById(paneId); if (p) p.classList.remove('active')
@@ -4136,7 +4233,7 @@ class App {
         const [btnId, paneId] = map[name] || map.config
         const b = document.getElementById(btnId); if (b) b.classList.add('active')
         const p = document.getElementById(paneId); if (p) p.classList.add('active')
-        if (name === 'records') this.loadOpenlistBackups()
+        if (paneId === 'openlist-pane-records') this.loadOpenlistBackups()
     }
 
     scheduleOpenlistReload() {
@@ -4145,7 +4242,7 @@ class App {
     }
 
     clearOpenlistFilters() {
-        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
+        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-type', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
             const el = document.getElementById(id); if (el) el.value = ''
         })
         this._olbPage = 1
@@ -4164,6 +4261,17 @@ class App {
         el.value = (el.value === status) ? '' : status
         this._olbPage = 1
         this.loadOpenlistBackups()
+    }
+
+    // 判断 OpenList 同步记录属于「我的歌单」还是「我不喜欢」（仅歌单快照页有意义）
+    olbSnapshotType(f) {
+        if (f.folder_type === 'list') return 'list'
+        if (f.folder_type === 'data') {
+            const p = (f.local_path || f.name || '')
+            if (/(^|[\/])(dislike)[\/]snapshot([\/]|$)/i.test(p)) return 'dislike'
+            if (/(^|[\/])(list)[\/]snapshot([\/]|$)/i.test(p)) return 'list'
+        }
+        return ''
     }
 
     gotoOpenlistPage(n) {
@@ -4392,7 +4500,7 @@ class App {
                 res.backups.forEach((item, index) => {
                     const isLatest = index === 0;
                     const sizeStr = item.size ? (item.size / (1024 * 1024)).toFixed(1) + ' MB' : '大小未知';
-                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString() : '未知时间');
+                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '未知时间');
                     const escapedFilename = this.escapeHtml(item.filename || item.basename);
                     const escapedBasename = this.escapeHtml(item.basename);
 
@@ -4863,7 +4971,7 @@ class App {
         if (diff < day) return Math.floor(diff / hour) + '小时前';
 
         const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN');
+        return date.toLocaleString('zh-CN', { hour12: false });
     }
 
     // ========== 文件管理器功能 ==========
@@ -5032,7 +5140,7 @@ class App {
 
     formatDate(timestamp) {
         const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN');
+        return date.toLocaleString('zh-CN', { hour12: false });
     }
 
     formatUptime(seconds) {
@@ -5147,6 +5255,20 @@ class App {
                 dirText.textContent = data.backupDir || 'backups';
                 dirText.title = data.backupDir || 'backups';
             }
+            const nextText = document.getElementById('config-backup-next-text');
+            if (nextText) {
+                if (data.autoBackupEnabled && data.nextBackupAt) {
+                    nextText.textContent = new Date(data.nextBackupAt).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                } else if (data.autoBackupEnabled) {
+                    nextText.textContent = '计算中…';
+                } else {
+                    nextText.textContent = '已停用';
+                }
+            }
+            const lastText = document.getElementById('config-backup-last-text');
+            if (lastText) {
+                lastText.textContent = data.lastBackupAt ? new Date(data.lastBackupAt).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '暂无';
+            }
 
             if (!list.length) {
                 container.innerHTML = '<div style="padding: 2.5rem; text-align: center; color: var(--text-secondary);">暂无系统配置备份文件。可点击上方【立即备份配置】手动创建第一份备份。</div>';
@@ -5162,7 +5284,7 @@ class App {
 
                 return `
                 <div class="snapshot-row">
-                    <div class="col-time">${new Date(item.time).toLocaleString()}</div>
+                    <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
                     <div class="col-id" title="${item.name}">
                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span style="font-family:monospace; font-weight:600;">${item.name}</span>
@@ -5286,26 +5408,32 @@ class App {
             return;
         }
 
+        // 确保「全部 / 歌单快照 / 不喜欢」子页签存在
+        this.ensureSnapshotKindTabs();
+        const kind = this._snapshotKind || 'all';
+
         // 添加加载状态
         container.classList.add('content-loading');
 
         try {
             // 添加 user 参数
-            const list = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
+            const all = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
+            const list = kind === 'all' ? all : all.filter(i => (i.kind || 'list') === kind);
 
             if (!list.length) {
-                container.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">暂无快照</div>';
+                const emptyText = kind === 'dislike' ? '该用户暂无「不喜欢」快照' : '暂无快照';
+                container.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">${emptyText}</div>`;
                 container.classList.remove('content-loading');
                 return;
             }
 
             container.innerHTML = list.map(item => `
             <div class="snapshot-row">
-                <div class="col-time">${new Date(item.time).toLocaleString()}</div>
-                <div class="col-id" title="${item.id}">snapshot_${item.id}</div>
+                <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                <div class="col-id"><span class="col-id-text" title="snapshot_${item.id}">snapshot_${item.id}</span>${item.kind === 'dislike' ? '<span class="kind-tag" style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我不喜欢</span>' : '<span class="kind-tag" style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的歌单</span>'}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
-                    <button class="btn-download" onclick="app.downloadSnapshot('${item.id}')">
+                    <button class="btn-download" onclick="app.downloadSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <!-- 下载图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -5314,7 +5442,7 @@ class App {
                         </svg>
                         下载备份
                     </button>
-                    <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}')">
+                    <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <!-- 恢复图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="1 4 1 10 7 10"></polyline>
@@ -5349,6 +5477,26 @@ class App {
             container.classList.remove('content-loading');
         }
     }
+
+    // 在「歌单快照」面板顶部注入「类型」下拉查询条件，便于按 我的歌单 / 我不喜欢 过滤
+    ensureSnapshotKindTabs() {
+        if (document.getElementById('snapshot-kind-filter')) return;
+        const container = document.getElementById('snapshots-list');
+        if (!container || !container.parentElement) return;
+        const sel = document.createElement('select');
+        sel.id = 'snapshot-kind-filter';
+        sel.className = 'form-input config-input olb-select';
+        sel.style.cssText = 'margin:.25rem 0 .75rem;width:auto;';
+        const cur = this._snapshotKind || 'all';
+        sel.innerHTML = '<option value="all">全部类型</option><option value="list">我的歌单</option><option value="dislike">我不喜欢</option>';
+        sel.value = cur;
+        sel.addEventListener('change', () => {
+            this._snapshotKind = sel.value;
+            this.loadSnapshots();
+        });
+        container.parentElement.insertBefore(sel, container);
+    }
+
     triggerUploadSnapshot() {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
@@ -5425,7 +5573,7 @@ class App {
             showError('删除失败: ' + err.message);
         }
     }
-    async downloadSnapshot(id) {
+    async downloadSnapshot(id, kind) {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
             showInfo('请先选择用户');
@@ -5433,27 +5581,34 @@ class App {
         }
 
         try {
-            // 添加 user 参数
             const data = await this.request(`/api/data/snapshot?id=${id}&user=${encodeURIComponent(username)}`);
 
-            // 转换为 LX Music 备份格式
-            const defaultList = { id: 'default', name: 'list__name_default' };
-            const loveList = { id: 'love', name: 'list__name_love' };
+            let backupData, fname;
+            if (kind === 'dislike') {
+                // 不喜欢快照直接导出原始规则（{ dislikeList: [...] }），不要套 playList_v2（否则内容会被清空成空壳）
+                backupData = data;
+                fname = `lx_dislike_${username}_${id.substring(0, 8)}.json`;
+            } else {
+                // 转换为 LX Music 备份格式
+                const defaultList = { id: 'default', name: 'list__name_default' };
+                const loveList = { id: 'love', name: 'list__name_love' };
 
-            const backupData = {
-                type: 'playList_v2',
-                data: [
-                    { ...defaultList, list: data.defaultList || [] },
-                    { ...loveList, list: data.loveList || [] },
-                    ...(data.userList || []),
-                ],
-            };
+                backupData = {
+                    type: 'playList_v2',
+                    data: [
+                        { ...defaultList, list: data.defaultList || [] },
+                        { ...loveList, list: data.loveList || [] },
+                        ...(data.userList || []),
+                    ],
+                };
+                fname = `lx_backup_${username}_${id.substring(0, 8)}.json`;
+            }
 
             const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `lx_backup_${username}_${id.substring(0, 8)}.json`;
+            a.download = fname;
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {
@@ -5545,7 +5700,7 @@ class App {
         }
     }
 
-    async restoreSnapshot(id) {
+    async restoreSnapshot(id, kind) {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
             showInfo('请先选择用户');
@@ -5557,10 +5712,10 @@ class App {
         }
 
         try {
-            // 添加 user 参数
+            // 通用回滚入口：list / dislike 共用，按 kind 分流到后端对应快照恢复
             await this.request(`/api/data/restore-snapshot?user=${encodeURIComponent(username)}`, {
                 method: 'POST',
-                body: JSON.stringify({ id })
+                body: JSON.stringify({ id, kind })
             });
             showSuccess('回滚成功！请重启客户端或重新连接同步服务。');
             this.loadDashboard(); // 刷新数据概览

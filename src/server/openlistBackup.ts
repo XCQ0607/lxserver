@@ -86,7 +86,6 @@ interface BackupConfig {
   password: string
   token: string
   root: string
-  keepLocalAfterUpload: boolean
   verifyInterval: number
   includeNonAudio: boolean
   syncInterval: number
@@ -107,7 +106,6 @@ function getConfig(): BackupConfig {
     password: c['openlist.password'] || '',
     token: c['openlist.token'] || '',
     root: c['openlist.root'] || '/lx_music',
-    keepLocalAfterUpload: c['openlist.keepLocalAfterUpload'] !== false,
     verifyInterval: Number(c['openlist.verifyInterval'] || 5),
     includeNonAudio: c['openlist.includeNonAudio'] === true,
     syncInterval: Number(c['openlist.syncInterval'] || 60),
@@ -130,19 +128,33 @@ function parseUserBackups(raw: any): UserBackupCfg[] {
 /** 去掉结尾斜杠（兼容用户误填的 / 或 \），用于规范化 externalUrl */
 const normalizeTrailingSlash = (u: string) => u.replace(/[\\/]+$/, '')
 
-/** 解析条目的有效模式：显式 mode 优先；否则沿用全局 keepLocalAfterUpload 的语义 */
-function effectiveMode(entry: UserBackupCfg, cfg: BackupConfig): SyncMode {
-  if (entry.mode) return entry.mode
-  return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
+// 这些 folder_type 属于“应用运行规则/用户数据”（系统配置、歌单与不喜欢快照、统一模型用户数据）。
+// 它们的本地副本必须保留：OpenList 的“不保留本地(upload-delete)”对它们不生效，
+// 否则删除本地会改变应用运行规则（配置丢失、歌单/快照无法恢复）。见业务约束。
+const PROTECTED_LOCAL_TYPES = new Set(['system', 'data', 'list'])
+
+/** 解析条目的有效模式：唯一来源为条目显式 mode；未配置时默认 upload（保留本地）。
+ *  「上传后删除本地」只能由显式 mode === 'upload-delete' 表达，不再有全局兜底开关。 */
+function effectiveMode(entry: UserBackupCfg, _cfg?: BackupConfig): SyncMode {
+  return entry.mode || 'upload'
 }
 
-/** 从已有备份行推断其模式（用于验证/删除环节） */
+/** 从已有备份行推断其模式（用于验证/删除环节）。
+ *  受保护类型（系统配置/歌单与不喜欢快照/统一模型用户数据）禁止 upload-delete：
+ *  即便条目显式设为 upload-delete 或历史行残留该值，也回退为 upload，确保本地配置与快照永不被删除。
+ *  其余类型（cache/music）维持原语义，仅显式 upload-delete 会删本地。 */
 function effectiveModeFromRow(row: any, cfg: BackupConfig): SyncMode {
-  if (row.folder_type === 'data') return 'upload'
-  const entry = cfg.userBackups.find(u => u.user === row.user && u.enabled)
-  if (entry) return effectiveMode(entry, cfg)
-  if (row.mode) return row.mode as SyncMode
-  return cfg.keepLocalAfterUpload === false ? 'upload-delete' : 'upload'
+  const derive = (): SyncMode => {
+    const entry = cfg.userBackups.find(u => u.user === row.user && u.enabled)
+    if (entry) return effectiveMode(entry, cfg)
+    if (row.mode) return row.mode as SyncMode
+    return 'upload'
+  }
+  if (PROTECTED_LOCAL_TYPES.has(row.folder_type)) {
+    const m = derive()
+    return m === 'upload-delete' ? 'upload' : m
+  }
+  return derive()
 }
 
 function normalizeUser(u?: string): string {
@@ -251,6 +263,93 @@ function resolveUserDir(entry: UserBackupCfg, folderType: 'cache' | 'music' | 'l
     return getCacheDir(entry.user, folderType === 'music')
   } catch {
     return null
+  }
+}
+
+/** 所有真实用户（含系统用户 _open），用于快照类备份对所有用户生效，不受 userBackups 勾选限制。 */
+function getAllUserNames(): string[] {
+  const names: string[] = []
+  const users = (global.lx.config as any).users
+  if (Array.isArray(users)) for (const u of users) if (u && u.name) names.push(u.name)
+  if (!names.includes('_open')) names.push('_open')
+  return names
+}
+
+/**
+ * 统一数据备份（selectedData）模式下，歌单/不喜欢快照等记录的 user 被记为 _system，
+ * 但本地路径形如 dataPath/users/<dirName>/...（如 users/m_6f8f57/list/snapshot/xxx），
+ * 其中 <dirName> 是用户的真实数据目录名（与逻辑用户名未必相同，m -> m_6f8f57）。
+ * 此函数从路径反推真实逻辑用户名，供展示层按用户归位使用。
+ */
+let dirNameToUserCache: Record<string, string> | null = null
+function buildDirNameToUserMap(): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const u of getAllUserNames()) {
+    try {
+      const d = getUserDirname(u)
+      if (d) map[d] = u
+    } catch { /* ignore */ }
+  }
+  return map
+}
+function resolveUsernameFromPath(p?: string | null): string | null {
+  if (!p) return null
+  const m = String(p).replace(/\\/g, '/').match(/\/users\/([^/]+)\//)
+  if (!m) return null
+  if (dirNameToUserCache === null) dirNameToUserCache = buildDirNameToUserMap()
+  return dirNameToUserCache[m[1]] || null
+}
+
+/** 解析某用户 dislike 快照目录（与歌单快照同一 snapshot.backupPath 体系，但使用独立的 dislike/snapshot 子目录，避免互相覆盖）。 */
+function resolveDislikeSnapshotDir(user: string): string {
+  const backupPathConf = ((global.lx.config as any)['snapshot.backupPath'] || '').trim()
+  let dir: string
+  if (backupPathConf) {
+    const base = path.isAbsolute(backupPathConf) ? backupPathConf : path.join(global.lx.dataPath, backupPathConf)
+    dir = path.join(base, user, File.dislikeDir, File.dislikeSnapshotDir)
+  } else {
+    const userDir = path.join(global.lx.userPath, getUserDirname(user))
+    dir = path.join(userDir, File.dislikeDir, File.dislikeSnapshotDir)
+  }
+  try { fs.mkdirSync(dir, { recursive: true }) } catch { /* ignore */ }
+  return dir
+}
+
+/** 上传单个用户某类快照目录（list 或 dislike）到 OpenList，folder_type 仍记 'list'（复用旧表字段，避免 schema 变更）。 */
+async function backupUserSnapshotKind(cl: OpenListClient, cfg: BackupConfig, summary: SyncSummary, user: string, kind: 'list' | 'dislike'): Promise<void> {
+  const dir = kind === 'list' ? resolveSnapshotDir(user) : resolveDislikeSnapshotDir(user)
+  if (!dir || !fs.existsSync(dir)) return
+  for (const lp of walkLocal(dir, 'list')) {
+    const rel = path.relative(dir, lp).replace(/\\/g, '/')
+    // 传统布局下 dislike 快照置于 user/list/dislike/ 子目录，与歌单快照区分；统一数据模式（selectedData）不走此路。
+    const remoteSub = kind === 'dislike' ? 'dislike/' : ''
+    const remotePath = cl.resolveRemotePath(`${user}/list/${remoteSub}${rel}`)
+    const existing = getBackupByLocalPath(user, 'list', lp)
+    if ((existing?.deleted_at || existing?.status === 'deleted') && !localChanged(existing)) continue
+    if (existing && (enqueuedIds.has(`f:${existing.id}`) || existing.status === 'completed' || existing.status === 'uploading')) continue
+    if (existing?.status === 'failed' && existing.retry_count >= MAX_AUTO_RETRIES) continue
+    if (existing?.status === 'verified' && existing.remote_path === remotePath && !localChanged(existing)) {
+      try {
+        const remote = await cl.getFileInfo(remotePath)
+        const modified = parseMod(remote.modified)
+        if (remote.size === existing.size && (modified == null || existing.remote_mtime == null || modified === existing.remote_mtime)) continue
+      } catch (e: any) {
+        if (!(e instanceof OpenListNotFoundError)) { summary.errors.push(rel + ': ' + (e?.message || e)); continue }
+      }
+    }
+    const row = upsertBackupFile({ user, folderType: 'list', localPath: lp, remotePath, name: rel, mode: 'upload', direction: 'upload', status: 'pending' })
+    enqueueUpload(row, cl, 'upload')
+    summary.uploaded++
+  }
+}
+
+/** 对所有真实用户备份歌单与不喜欢快照（传统模式下脱离 userBackups 用户勾选；统一数据模式下仅在手动 folder='list' 时补充）。 */
+async function backupAllSnapshots(cl: OpenListClient, cfg: BackupConfig, summary: SyncSummary, opts: { user?: string; folder?: 'cache' | 'music' | 'list' }): Promise<void> {
+  if (opts.folder && opts.folder !== 'list') return
+  for (const user of getAllUserNames()) {
+    if (opts.user && user !== opts.user) continue
+    await backupUserSnapshotKind(cl, cfg, summary, user, 'list')
+    await backupUserSnapshotKind(cl, cfg, summary, user, 'dislike')
   }
 }
 
@@ -725,6 +824,69 @@ export function onFileCached(
 }
 
 /**
+ * 保存配置、某用户模式变为 upload-delete 时，对本地 cache/music 存量文件触发一次性迁移：
+ *  - 已有 verified/completed 远端记录且本地未变 → 跳过上传，直接删除本地（含已 verified 附件）
+ *  - 其余本地文件 → 登记为 upload-delete 并上传，verifyPending 后续按大小一致确认后删除本地
+ * 仅 cache/music 生效；system/data/list 受 PROTECTED_LOCAL_TYPES 保护，永不删本地。
+ */
+export async function triggerBackfillUploadDelete(user: string): Promise<void> {
+  const cfg = getConfig()
+  if (!cfg.enable) return
+  const entry = cfg.userBackups.find(u => u.user === user && u.enabled)
+  if (!entry) return
+  const cl = getClient()
+  if (!cl) return
+  ensureBackupTables()
+
+  const folders: Array<'cache' | 'music'> = ['cache', 'music']
+  for (const folderType of folders) {
+    if (!folderEnabled(user, folderType, cfg)) continue
+    const dir = resolveUserDir(entry, folderType, cfg)
+    if (!dir || !fs.existsSync(dir)) continue
+    const locals = walkLocal(dir, folderType)
+    for (const localPath of locals) {
+      const existing = getBackupByLocalPath(user, folderType, localPath)
+      // 分支1：远端已存在且已确认 → 跳过上传，直接删本地（含已 verified 附件）
+      if (existing && !existing.deleted_at && (existing.status === 'verified' || existing.status === 'completed') && !localChanged(existing)) {
+        try {
+          if (existing.local_path && fs.existsSync(existing.local_path)) {
+            fs.unlinkSync(existing.local_path)
+            removeLocalCache(existing)
+            softDeleteLocalFile(existing.user, existing.local_path)
+          }
+          for (const a of listAttachments(existing.id)) {
+            if (a.status === 'verified' && a.local_path && fs.existsSync(a.local_path) && countLocalPathRefs(a.local_path, existing.id, a.id) === 0) {
+              try { fs.unlinkSync(a.local_path); softDeleteLocalFile(a.user, a.local_path) } catch { /* ignore */ }
+            }
+          }
+        } catch { /* ignore */ }
+        continue
+      }
+      // 分支2：登记为 upload-delete 并上传，verifyPending 后续按大小校验删除本地
+      const relative = path.relative(dir, localPath).replace(/\\/g, '/')
+      const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${relative}`)
+      const item = getIndexItemByFilename(path.basename(localPath), user)
+      const row = upsertBackupFile({
+        user,
+        folderType,
+        localPath,
+        remotePath,
+        source: existing?.source || null,
+        songmid: existing?.songmid || null,
+        quality: existing?.quality || null,
+        mode: 'upload-delete',
+        status: 'pending',
+        direction: 'upload',
+        cacheMetadata: item ? JSON.stringify(item) : existing?.cache_metadata,
+      })
+      void enqueueUpload(row, cl, 'upload-delete')
+      if (cfg.includeNonAudio) queueAttachmentsForFile(user, folderType, localPath, row, dir, cl, cfg)
+    }
+  }
+  lazyStartScheduler()
+}
+
+/**
  * 订阅通用「文件落盘」事件（由 fileCache 在音频写入后发出，事件本身与 openlist 无关），
  * 落盘即排程一次防抖全量同步。这样 fileCache 不直接依赖 openlist 实现，仅发中性事件。
  */
@@ -782,7 +944,7 @@ export async function verifyPending(): Promise<void> {
             continue
           }
           const mode = effectiveModeFromRow(row, cfg)
-          if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
+          if (mode === 'upload-delete' && !PROTECTED_LOCAL_TYPES.has(row.folder_type) && row.local_path && fs.existsSync(row.local_path)) {
             if (!row.local_hash || !await cl.verifyFile(row.remote_path, row.local_hash) || hashFile(row.local_path) !== row.local_hash) {
               setBackupStatus(row.id, 'failed', { error: '远端内容校验失败，保留本地文件', retryCount: (row.retry_count || 0) + 1 })
               continue
@@ -790,7 +952,7 @@ export async function verifyPending(): Promise<void> {
           }
           if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) continue
           setBackupStatus(row.id, 'verified', { size: info.size, remotePath: row.remote_path, remoteMtime: parseMod(info.modified), error: null, retryCount: 0 })
-          if (mode === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) {
+          if (mode === 'upload-delete' && !PROTECTED_LOCAL_TYPES.has(row.folder_type) && row.local_path && fs.existsSync(row.local_path)) {
             try {
               fs.unlinkSync(row.local_path)
               removeLocalCache(row)
@@ -982,7 +1144,8 @@ async function downloadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: 
 async function uploadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
   const dir = resolveUserDir(entry, folderType, cfg)
   if (!dir) return
-  const mode = effectiveMode(entry, cfg)
+  // list 是歌单/不喜欢快照，属受保护类型：upload-delete 对其不生效，入库模式固定为 upload
+  const mode = folderType === 'list' ? 'upload' : effectiveMode(entry, cfg)
   for (const lp of walkLocal(dir, folderType)) {
     const rel = path.relative(dir, lp).replace(/\\/g, '/')
     const remotePath = cl.resolveRemotePath(entry.user + '/' + folderType + '/' + rel)
@@ -1064,6 +1227,55 @@ async function backupSystemConfigFile(cl: OpenListClient, _cfg: BackupConfig, su
     size: info?.size ?? null,
   })
   summary.uploaded++
+}
+
+/**
+ * 额外保留带时间戳的系统配置「时间点副本」，用于回溯历史配置。
+ * - 主镜像（_data/config.js 或 _system/config.js）文件名保持不变，恢复逻辑只扫 _data，
+ *   因此历史副本放在独立的 _system/config-history/ 下，不参与恢复、也不会被 backupType 识别。
+ * - 文件名含内容指纹（md5 前 8 位）：配置未变化时不会重复产生副本。
+ * - 仅当系统配置确实被云端备份时才触发（统一模型的 system 类型 / 旧模型 backupSystemConfig），
+ *   并按 configBackup.retentionDays 清理过期的历史副本。
+ */
+let lastConfigHistoryHash = ''
+async function backupSystemConfigHistory(cl: OpenListClient, cfg: BackupConfig, summary: SyncSummary): Promise<void> {
+  const lx: any = (globalThis as any).lx
+  const configPath: string = lx?.configPath || process.env.CONFIG_PATH || path.join(lx?.dataPath || '.', 'config.js')
+  if (!configPath || !fs.existsSync(configPath)) return
+  const selectedData = lx?.config?.['backup.openlist.types'] !== undefined
+  const shouldBackupSystem = selectedData
+    ? getBackupTypes('openlist', lx?.config as any).includes('system')
+    : cfg.backupSystemConfig
+  if (!shouldBackupSystem) return
+
+  const fingerprint = crypto.createHash('md5').update(fs.readFileSync(configPath)).digest('hex').slice(0, 8)
+  if (fingerprint === lastConfigHistoryHash) return
+
+  const historyDir = cl.resolveRemotePath('_system/config-history')
+  await cl.mkdir(historyDir)
+  let files: Awaited<ReturnType<OpenListClient['listFilesRecursive']>> = []
+  try { files = await cl.listFilesRecursive(historyDir) } catch { /* 空目录/列举失败按空处理 */ }
+  const historyNameRe = /^config-\d{4}-\d{2}-\d{2}_\d{6}-[0-9a-f]{8}\.js$/
+  // 进程重启后内存指纹丢失，用远端已有的同名指纹文件兜底去重
+  if (files.some(f => !f.isDir && f.name.endsWith(`-${fingerprint}.js`) && historyNameRe.test(f.name))) {
+    lastConfigHistoryHash = fingerprint
+    return
+  }
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`
+  await cl.upload(configPath, `${historyDir}/config-${stamp}-${fingerprint}.js`)
+  lastConfigHistoryHash = fingerprint
+  summary.uploaded++
+
+  const days = Number(lx?.config?.['configBackup.retentionDays'])
+  const cutoff = Date.now() - (Number.isFinite(days) && days > 0 ? days : 7) * 24 * 60 * 60 * 1000
+  for (const f of files) {
+    if (f.isDir || !historyNameRe.test(f.name)) continue
+    const modified = parseMod(f.modified)
+    if (modified == null || modified >= cutoff) continue
+    try { await cl.remove(f.path) } catch { /* ignore */ }
+  }
 }
 
 function dataBackupContext() {
@@ -1154,7 +1366,7 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
     if (!entry.enabled) continue
     if (opts.user && entry.user !== opts.user) continue
     const mode = effectiveMode(entry, cfg)
-    const folders: Array<'cache' | 'music' | 'list'> = opts.folder ? [opts.folder] : (selectedData ? ['cache'] : ['cache', 'music', 'list'])
+    const folders: Array<'cache' | 'music'> = opts.folder && opts.folder !== 'list' ? [opts.folder] : (selectedData ? ['cache'] : ['cache', 'music'])
     for (const ft of folders) {
       if (selectedData && ft !== 'cache') continue
       const dir = resolveUserDir(entry, ft, cfg)
@@ -1173,6 +1385,10 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
     }
   }
   if (selectedData && !opts.user && !opts.folder) await backupSelectedData(cl, summary)
+  // 歌单与不喜欢快照：对所有真实用户备份，不受 userBackups 用户勾选限制（传统模式默认走此路；统一数据模式仅手动 folder='list' 时补充）
+  if (!selectedData || opts.folder === 'list') {
+    await backupAllSnapshots(cl, cfg, summary, opts)
+  }
   while (activeUploads || uploadQueue.length) await sleep(20)
   for (const row of listBackupByStatus('failed')) {
     if (rowEnabled(row, cfg) && (!opts.user || row.user === opts.user) && (!opts.folder || row.folder_type === opts.folder)) summary.errors.push(row.user + '/' + row.name + ': ' + row.error)
@@ -1182,6 +1398,14 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
       await backupSystemConfigFile(cl, cfg, summary)
     } catch (e: any) {
       summary.errors.push('system-config: ' + (e?.message || e))
+    }
+  }
+  // 全量同步时额外留一份带时间戳的系统配置时间点副本（主镜像文件名不变）
+  if (!opts.user && !opts.folder) {
+    try {
+      await backupSystemConfigHistory(cl, cfg, summary)
+    } catch (e: any) {
+      summary.errors.push('system-config-history: ' + (e?.message || e))
     }
   }
   return summary
@@ -1203,7 +1427,13 @@ export function listBackups(): any[] {
     WHERE f.deleted_at IS NULL
     ORDER BY f.updated_at DESC
   `).all() as any[]
-  return files.map((f) => ({ ...f, local_exists: !!f.local_exists, attachments: listAttachments(f.id) }))
+  return files.map((f) => {
+    // 统一数据备份模式下，歌单/不喜欢快照等记录的 user 被记为 _system，但路径里含 users/<dirName>；
+    // 此处按路径映射回真实逻辑用户名，使前端按用户筛选时能正确归位（如 m_6f8f57 -> m）。
+    // 仅覆盖展示层 user 字段，不改写 DB，避免破坏 openlist_local_files 的 user 一致性与唯一约束。
+    const user = f.user === '_system' ? (resolveUsernameFromPath(f.local_path || f.remote_path) || '_system') : f.user
+    return { ...f, user, local_exists: !!f.local_exists, attachments: listAttachments(f.id) }
+  })
 }
 
 /**

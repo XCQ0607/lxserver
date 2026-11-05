@@ -138,7 +138,6 @@ const config: LX.Config = {
   'openlist.password': '', // OpenList 密码
   'openlist.token': '', // OpenList 用户令牌(与账号密码二选一)
   'openlist.root': '/lx_music', // OpenList 中 lx-music 备份根目录
-  'openlist.keepLocalAfterUpload': true, // 上传 OpenList 后是否保留本地文件
   'openlist.verifyInterval': 5, // 远端可用性校验周期(分钟)
   'openlist.syncInterval': 60, // 双向同步周期(分钟)
   'openlist.userBackups': '[]', // 各用户备份目录配置(JSON 数组)

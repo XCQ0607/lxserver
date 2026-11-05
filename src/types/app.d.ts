@@ -13,6 +13,11 @@ declare global {
     saveConfig: () => void
     backupConfigNow?: () => { success: boolean, filename?: string, error?: string }
     getConfigBackupDir?: () => string
+    backupSnapshotToLocal?: (srcPath: string, user: string, name: string) => void
+    removeSnapshotLocalBackups?: (user: string, name: string) => void
+    nextConfigBackupAt?: number
+    lastConfigBackupAt?: number
+    rescheduleConfigBackup?: () => void
     lastCpuSample?: { idle: number, total: number }
     lastProcessSample?: { cpu: NodeJS.CpuUsage, time: number }
     subsonicPortConflict?: {

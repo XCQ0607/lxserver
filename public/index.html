@@ -1196,6 +1196,20 @@
                                     </div>
                                 </div>
                                 <div class="config-divider"></div>
+                                <div class="config-field-row">
+                                    <div class="config-field">
+                                        <label class="config-label">备份周期（小时）</label>
+                                        <input type="number" name="configBackup.intervalHours"
+                                            class="form-input config-input" min="1" max="8760" placeholder="24" />
+                                        <small class="config-hint">每 N 小时自动备份一次</small>
+                                    </div>
+                                    <div class="config-field">
+                                        <label class="config-label">锚点时间</label>
+                                        <input type="time" name="configBackup.scheduleTime" class="form-input config-input" />
+                                        <small class="config-hint">留空=进程启动后每 N 小时；填 HH:MM 则在该时刻首次触发，之后每 N 小时循环</small>
+                                    </div>
+                                </div>
+                                <div class="config-divider"></div>
                                 <div class="config-field">
                                     <label class="config-label">歌单快照备份路径</label>
                                     <input type="text" name="snapshot.backupPath" class="form-input config-input"
@@ -2301,6 +2315,14 @@
                                     <div class="meta-value text-truncate" id="config-backup-dir-text" title="backups">
                                         backups</div>
                                 </div>
+                                <div class="config-backup-meta-item">
+                                    <div class="meta-label">下一次自动备份</div>
+                                    <div class="meta-value" id="config-backup-next-text">—</div>
+                                </div>
+                                <div class="config-backup-meta-item">
+                                    <div class="meta-label">上次自动备份</div>
+                                    <div class="meta-value" id="config-backup-last-text">—</div>
+                                </div>
                             </div>
                             <div class="config-backup-actions-wrap">
                                 <button type="button" class="btn-primary" id="btn-backup-config-now"
@@ -2412,7 +2434,7 @@
                                 </svg>
                                 <span>备份配置</span>
                             </button>
-                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-records" onclick="app.switchOpenlistTab('records')">
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-media" onclick="app.switchOpenlistTab('media')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <polyline points="14 2 14 8 20 8"></polyline>
@@ -2420,7 +2442,22 @@
                                     <line x1="16" y1="17" x2="8" y2="17"></line>
                                     <polyline points="10 9 9 9 8 9"></polyline>
                                 </svg>
-                                <span>文件记录</span>
+                                <span>媒体文件记录</span>
+                            </button>
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-system" onclick="app.switchOpenlistTab('system')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                                <span>系统配置记录</span>
+                            </button>
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-snapshot" onclick="app.switchOpenlistTab('snapshot')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <path d="M9 18V5l12-2v13"></path>
+                                    <circle cx="6" cy="18" r="3"></circle>
+                                    <circle cx="18" cy="16" r="3"></circle>
+                                </svg>
+                                <span>歌单快照记录</span>
                             </button>
                         </div>
                         <div id="openlist-pane-config" class="backup-tab-pane active">
@@ -2503,9 +2540,9 @@
                                             <div class="config-toggle-info">
                                                 <span class="config-toggle-label">
                                                     <span>播放缓存同时上传封面与歌词</span>
-                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词也会一并上传">?</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词会随歌曲一并上传；在「上传后删除本地」模式下，这些附件也会随歌曲一起从本地删除">?</span>
                                                 </span>
-                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本</span>
+                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本；「上传后删除本地」模式下会一并删除</span>
                                             </div>
                                             <label class="toggle-switch">
                                                 <input type="checkbox" name="openlist.includeNonAudio" />
@@ -2518,7 +2555,7 @@
                                                 <line x1="12" y1="16" x2="12" y2="12"></line>
                                                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                             </svg>
-                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地；如需恢复请使用下方恢复按钮。</span>
+                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地。「上传后删除本地」仅对下载 / 缓存目录中的歌曲及其歌词、封面等附件生效；系统配置、歌单与不喜欢快照、用户数据一律保留本地，不受该模式影响。如需恢复请使用下方恢复按钮。</span>
                                         </div>
                                         <div class="config-divider"></div>
                                         <div class="config-field">
@@ -2602,7 +2639,7 @@
                                 </div>
                                 <div>
                                     <h3 class="config-card-title">
-                                        <span>同步状态与文件记录</span>
+                                        <span>同步记录（媒体文件 / 系统配置 / 歌单快照）</span>
                                         <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="查看已备份文件与同步结果（含图片等附件计数）">?</span>
                                     </h3>
                                     <p class="config-card-desc">实时查看文件备份进度、验证状态及失败重试</p>
@@ -2619,6 +2656,13 @@
                                                 <line x1="12" y1="3" x2="12" y2="15"></line>
                                             </svg>
                                             立即全量同步
+                                        </button>
+                                        <button type="button" id="olb-bulkretry" class="btn-secondary" onclick="app.retrySelectedOpenlist()" disabled>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                                <polyline points="23 4 23 10 17 10"></polyline>
+                                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                            </svg>
+                                            批量重试
                                         </button>
                                         <button type="button" id="olb-bulkdel" class="btn-secondary btn-danger-soft" onclick="app.deleteSelectedOpenlist()" disabled>
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
@@ -2645,6 +2689,11 @@
                                             <option value="verified">已验证</option>
                                             <option value="failed">失败</option>
                                             <option value="deleted">已删除</option>
+                                        </select>
+                                        <select id="olb-filter-type" class="form-input config-input olb-select" onchange="app.applyOpenlistFilter()" title="按歌单快照类型筛选（仅歌单快照页生效）">
+                                            <option value="">全部类型</option>
+                                            <option value="list">我的歌单</option>
+                                            <option value="dislike">我不喜欢</option>
                                         </select>
                                         <input type="text" id="olb-filter-name" class="form-input config-input olb-input" placeholder="文件名搜索" oninput="app.scheduleOpenlistReload()" />
                                         <input type="text" id="olb-filter-path" class="form-input config-input olb-input" placeholder="路径包含搜索" oninput="app.scheduleOpenlistReload()" />

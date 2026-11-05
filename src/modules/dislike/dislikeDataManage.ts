@@ -77,6 +77,12 @@ export class DislikeDataManage {
       .join('\n')
   }
 
+  // 从指定快照内容恢复当前 dislike 数据（管理接口回滚用）
+  restore = async(data: LX.Dislike.DislikeRules) => {
+    this.dislikeRules = (data && Array.isArray(data.dislikeList)) ? { dislikeList: data.dislikeList } : { dislikeList: [] }
+    this.normalizeRules()
+  }
+
   addDislikeInfo = async(infos: LX.Dislike.DislikeSongInfo[]) => {
     // Check for duplicates
     const currentRules = new Set(this.dislikeRules.dislikeList.map(s => this.buildDislikeRule(s)))
