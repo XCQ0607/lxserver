@@ -92,7 +92,7 @@
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vue": "3.5.44",
-    "vuefinder": "4.7.6"
+    "vuefinder": "4.8.0"
   },
   "nodemonConfig": {
     "ext": "js,ts",
