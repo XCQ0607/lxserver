@@ -353,6 +353,14 @@ const margeConfig = (p: string) => {
     if (config[key] !== undefined) newConfig[key] = config[key]
   }
 
+  // [向后兼容] 旧版 Subsonic 独立端口靠 subsonic.port > 0 直接监听，无 standalone 开关概念。
+  // 升级到引入 subsonic.standalone（默认 false）的版本后，旧配置缺失该键会按默认值静默关闭独立端口，
+  // 造成「升级前已有端口值却被关掉」。故对「原始 config 缺开关键且有端口值(>0)」的旧配置默认视为开启；
+  // 仅当原始 config 未显式设置该键时生效（用户显式设为 false 则尊重其意图，不被覆盖）。
+  if (config['subsonic.standalone'] === undefined && (Number(config['subsonic.port']) || 0) > 0) {
+    newConfig['subsonic.standalone'] = true
+  }
+
   console.log('[配置] 加载配置文件: ' + p)
   if (newConfig.users.length) {
     const users: LX.UserConfig[] = []
