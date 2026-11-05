@@ -5388,7 +5388,7 @@ class App {
                 <div class="col-id" title="${item.id}">snapshot_${item.id}${item.kind === 'dislike' ? ' <span style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">不喜欢</span>' : ''}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
-                    <button class="btn-download" onclick="app.downloadSnapshot('${item.id}')">
+                    <button class="btn-download" onclick="app.downloadSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <!-- 下载图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -5538,7 +5538,7 @@ class App {
             showError('删除失败: ' + err.message);
         }
     }
-    async downloadSnapshot(id) {
+    async downloadSnapshot(id, kind) {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
             showInfo('请先选择用户');
@@ -5546,27 +5546,34 @@ class App {
         }
 
         try {
-            // 添加 user 参数
             const data = await this.request(`/api/data/snapshot?id=${id}&user=${encodeURIComponent(username)}`);
 
-            // 转换为 LX Music 备份格式
-            const defaultList = { id: 'default', name: 'list__name_default' };
-            const loveList = { id: 'love', name: 'list__name_love' };
+            let backupData, fname;
+            if (kind === 'dislike') {
+                // 不喜欢快照直接导出原始规则（{ dislikeList: [...] }），不要套 playList_v2（否则内容会被清空成空壳）
+                backupData = data;
+                fname = `lx_dislike_${username}_${id.substring(0, 8)}.json`;
+            } else {
+                // 转换为 LX Music 备份格式
+                const defaultList = { id: 'default', name: 'list__name_default' };
+                const loveList = { id: 'love', name: 'list__name_love' };
 
-            const backupData = {
-                type: 'playList_v2',
-                data: [
-                    { ...defaultList, list: data.defaultList || [] },
-                    { ...loveList, list: data.loveList || [] },
-                    ...(data.userList || []),
-                ],
-            };
+                backupData = {
+                    type: 'playList_v2',
+                    data: [
+                        { ...defaultList, list: data.defaultList || [] },
+                        { ...loveList, list: data.loveList || [] },
+                        ...(data.userList || []),
+                    ],
+                };
+                fname = `lx_backup_${username}_${id.substring(0, 8)}.json`;
+            }
 
             const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `lx_backup_${username}_${id.substring(0, 8)}.json`;
+            a.download = fname;
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {
