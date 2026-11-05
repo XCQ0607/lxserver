@@ -275,6 +275,31 @@ function getAllUserNames(): string[] {
   return names
 }
 
+/**
+ * 统一数据备份（selectedData）模式下，歌单/不喜欢快照等记录的 user 被记为 _system，
+ * 但本地路径形如 dataPath/users/<dirName>/...（如 users/m_6f8f57/list/snapshot/xxx），
+ * 其中 <dirName> 是用户的真实数据目录名（与逻辑用户名未必相同，m -> m_6f8f57）。
+ * 此函数从路径反推真实逻辑用户名，供展示层按用户归位使用。
+ */
+let dirNameToUserCache: Record<string, string> | null = null
+function buildDirNameToUserMap(): Record<string, string> {
+  const map: Record<string, string> = {}
+  for (const u of getAllUserNames()) {
+    try {
+      const d = getUserDirname(u)
+      if (d) map[d] = u
+    } catch { /* ignore */ }
+  }
+  return map
+}
+function resolveUsernameFromPath(p?: string | null): string | null {
+  if (!p) return null
+  const m = String(p).replace(/\\/g, '/').match(/\/users\/([^/]+)\//)
+  if (!m) return null
+  if (dirNameToUserCache === null) dirNameToUserCache = buildDirNameToUserMap()
+  return dirNameToUserCache[m[1]] || null
+}
+
 /** 解析某用户 dislike 快照目录（与歌单快照同一 snapshot.backupPath 体系，但使用独立的 dislike/snapshot 子目录，避免互相覆盖）。 */
 function resolveDislikeSnapshotDir(user: string): string {
   const backupPathConf = ((global.lx.config as any)['snapshot.backupPath'] || '').trim()
@@ -1402,7 +1427,13 @@ export function listBackups(): any[] {
     WHERE f.deleted_at IS NULL
     ORDER BY f.updated_at DESC
   `).all() as any[]
-  return files.map((f) => ({ ...f, local_exists: !!f.local_exists, attachments: listAttachments(f.id) }))
+  return files.map((f) => {
+    // 统一数据备份模式下，歌单/不喜欢快照等记录的 user 被记为 _system，但路径里含 users/<dirName>；
+    // 此处按路径映射回真实逻辑用户名，使前端按用户筛选时能正确归位（如 m_6f8f57 -> m）。
+    // 仅覆盖展示层 user 字段，不改写 DB，避免破坏 openlist_local_files 的 user 一致性与唯一约束。
+    const user = f.user === '_system' ? (resolveUsernameFromPath(f.local_path || f.remote_path) || '_system') : f.user
+    return { ...f, user, local_exists: !!f.local_exists, attachments: listAttachments(f.id) }
+  })
 }
 
 /**
