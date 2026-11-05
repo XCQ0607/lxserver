@@ -3924,8 +3924,14 @@ class App {
         try {
             const r = await this.request('/api/openlist/backups')
             let list = (r && r.list) || []
+            // 先按当前 tab 的 folder scope 过滤（媒体文件记录=cache,music；系统配置=system；歌单快照=list），统计卡与下方列表口径一致
+            const scope = this._olbFolderScope
+            if (scope) {
+                const allowed = scope.split(',')
+                list = list.filter(f => allowed.includes(f.folder_type))
+            }
             this._olbCurrentList = list
-            // 状态指标卡：基于全量列表统计各状态数量（deleted 不计入 list，通常为 0）
+            // 状态指标卡：基于当前页签过滤后的列表统计各状态数量（deleted 不计入 list，通常为 0）
             const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
             const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
             const statusOrder = ['pending', 'uploading', 'completed', 'verified', 'failed', 'deleted']
@@ -3965,12 +3971,6 @@ class App {
             const sv = fs2 ? fs2.value : ''
             const qn = (fn && fn.value ? fn.value : '').trim().toLowerCase()
             const qp = (fp && fp.value ? fp.value : '').trim().toLowerCase()
-            // 按当前 tab 的 folder scope 过滤（媒体文件记录=cache,music；系统配置=system；歌单快照=list）
-            const scope = this._olbFolderScope
-            if (scope) {
-                const allowed = scope.split(',')
-                list = list.filter(f => allowed.includes(f.folder_type))
-            }
             list = list.filter(f => {
                 if (uv && f.user !== uv) return false
                 if (fv && f.folder_type !== fv) return false
