@@ -1819,6 +1819,7 @@ function changeQualityPreference(quality) {
 
 // Tab Switching
 function switchTab(tabId) {
+    clearSearchDetailView();
     // Favorites entry opens the default favorite list (love / default) or guidance view
     if (tabId === 'favorites') {
         exitListSecondaryModes();
@@ -1904,8 +1905,6 @@ function switchTab(tabId) {
         document.getElementById('search-source').classList.remove('hidden');
         document.getElementById('search-type').classList.remove('hidden');
         document.getElementById('page-title').innerText = "搜索音乐";
-        if (typeof hideAlbumDetailHeader === 'function') hideAlbumDetailHeader();
-        if (typeof hideArtistDetailHeader === 'function') hideArtistDetailHeader();
 
         const searchInput = document.getElementById('search-input');
         const searchTypeEl = document.getElementById('search-type');
@@ -2125,7 +2124,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==================== 播放队列 (Queue) 逻辑 ====================
 let isQueueRendered = false;
 
-function toggleQueueDrawer() {
+function toggleQueueDrawer(targetIndex = null) {
     const drawer = document.getElementById('queue-drawer');
     if (!drawer) return;
 
@@ -2135,7 +2134,8 @@ function toggleQueueDrawer() {
         renderQueue();
         // 自动定位当前歌曲
         setTimeout(() => {
-            scrollToCurrentSongInQueue(false);
+            if (Number.isInteger(targetIndex)) scrollToSongInQueue(targetIndex);
+            else scrollToCurrentSongInQueue(false);
         }, 350); // 等待抽屉打开动画完成
 
         // Hide sidebar if open on mobile
@@ -2151,6 +2151,21 @@ function toggleQueueDrawer() {
     }
 }
 window.toggleQueueDrawer = toggleQueueDrawer;
+
+function scrollToSongInQueue(index) {
+    const item = document.getElementById('queue-list')?.children[index];
+    if (!item) return;
+    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    item.classList.add('ring-2', 'ring-emerald-500/50', 'ring-inset');
+    setTimeout(() => item.classList.remove('ring-2', 'ring-emerald-500/50', 'ring-inset'), 1000);
+}
+
+function revealSongInQueue(index) {
+    const drawer = document.getElementById('queue-drawer');
+    if (!drawer) return;
+    if (drawer.classList.contains('translate-x-full')) toggleQueueDrawer(index);
+    else scrollToSongInQueue(index);
+}
 
 /**
  * 定位播放队列中当前播放的歌曲
@@ -3158,10 +3173,12 @@ window.currentArtistSource = 'wy';
 window.currentArtistOrder = 'hot';
 
 async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBack = false) {
+    rememberSearchDetailOrigin();
     const typeEl = document.getElementById('search-type');
 
     // 记录返回状态 (仅当从非歌手列表进入 且 不是从子页面返回时)
-    if (!isBack && document.getElementById('artist-detail-header') === null) {
+    const existingArtistHeader = document.getElementById('artist-detail-header');
+    if (!isBack && (!existingArtistHeader || existingArtistHeader.classList.contains('hidden'))) {
         lastSearchType = typeEl ? typeEl.value : 'singer';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
         currentArtistInfo = null; // 重置缓存
@@ -4248,6 +4265,27 @@ function hideAlbumDetailHeader() {
 }
 window.hideAlbumDetailHeader = hideAlbumDetailHeader;
 
+// Sidebar destinations reuse the search view, including its sticky detail bars.
+function clearSearchDetailView() {
+    window.searchDetailOrigin = null;
+    hideAlbumDetailHeader();
+    hideArtistDetailHeader();
+    window.tempAlbumContext = null;
+    window.tempArtistContext = null;
+    const backBtn = document.getElementById('search-back-btn');
+    if (backBtn) backBtn.classList.add('hidden');
+}
+
+function rememberSearchDetailOrigin() {
+    if (window.searchDetailOrigin) return;
+    window.searchDetailOrigin = {
+        scope: currentSearchScope,
+        listId: window.currentViewingListId,
+        list: [...(window.viewingPlaylist || [])],
+        type: document.getElementById('search-type')?.value,
+    };
+}
+
 function updateAlbumHeaderFavButton(favorited) {
     // Hero Favorite Button
     const btn = document.getElementById('album-header-fav-btn');
@@ -4582,27 +4620,31 @@ async function navigateToAlbumArtist(singerName, source, artistId) {
 window.navigateToAlbumArtist = navigateToAlbumArtist;
 window.searchSingerByName = navigateToAlbumArtist;
 
-async function enterAlbum(id, source = 'wy', initialInfo = null) {
+async function enterAlbum(id, source = 'wy', initialInfo = null, isBack = false) {
+    rememberSearchDetailOrigin();
     // 保存进入专辑前的上下文，如果是从歌手页进入，则记录歌手 ID
     const artistHeader = document.getElementById('artist-detail-header');
-    if (artistHeader) {
+    const isArtistDetailVisible = artistHeader && !artistHeader.classList.contains('hidden');
+    if (isArtistDetailVisible) {
         window.tempArtistContext = {
             id: window.currentArtistId,
             source: window.currentArtistSource,
             tab: window.currentArtistTab || 'albums',
             order: window.currentArtistOrder || 'hot'
         };
-        artistHeader.remove(); // 进入专辑详情时移除歌手头部，保持界面整洁
     } else if (!window.tempAlbumContext) {
         window.tempArtistContext = null;
     }
 
     const typeEl = document.getElementById('search-type');
-    if (!artistHeader && !window.tempAlbumContext) {
+    if (!isArtistDetailVisible && !window.tempAlbumContext) {
         lastSearchType = typeEl ? typeEl.value : 'album';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
     }
-    window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
+    if (!isBack) window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
+
+    // This header is a permanent layout node required when reopening an artist.
+    hideArtistDetailHeader();
 
     const resultsContainer = document.getElementById('search-results');
     resultsContainer.innerHTML = '<div class="flex items-center justify-center h-full"><i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i></div>';
@@ -4689,6 +4731,7 @@ function goBackToSearch(fromPopState = false) {
     if (!fromPopState && window.history.state && window.history.state.page === 'search-detail') {
         try {
             window.history.back();
+            return; // Restore once, in popstate, after the history entry changes.
         } catch (e) {
             console.warn('history.back error:', e);
         }
@@ -4703,7 +4746,7 @@ function goBackToSearch(fromPopState = false) {
         const ctx = window.tempAlbumContext;
         window.tempAlbumContext = null;
         if (ctx.id) {
-            enterAlbum(ctx.id, ctx.source || 'wy', ctx.initialInfo);
+            enterAlbum(ctx.id, ctx.source || 'wy', ctx.initialInfo, true);
             return;
         }
     }
@@ -4718,6 +4761,20 @@ function goBackToSearch(fromPopState = false) {
 
     const backBtn = document.getElementById('search-back-btn');
     if (backBtn) backBtn.classList.add('hidden');
+
+    const origin = window.searchDetailOrigin;
+    window.searchDetailOrigin = null;
+    if (origin) {
+        currentSearchScope = origin.scope;
+        lastSearchResultList = origin.list;
+        lastSearchType = origin.type;
+        currentArtistId = null;
+        if (origin.scope === 'lib_artists') return handleArtistLibraryClick();
+        if (origin.scope === 'lib_albums') return handleAlbumLibraryClick();
+        if (origin.listId === 'dislike_artists') return handleDislikeArtistsClick();
+        if (origin.listId === 'dislike_albums') return handleDislikeAlbumsClick();
+        if (origin.scope === 'local_list' && origin.listId) return handleListClick(origin.listId, true, true);
+    }
 
     // 恢复搜索/收藏结果列表
     if (lastSearchResultList && lastSearchResultList.length > 0) {
@@ -6813,6 +6870,43 @@ window.showServerDirectories = showServerDirectories;
  */
 function enqueueSong(song, next = false) {
     if (!song) return;
+    // Default-list entries have source-prefixed IDs and provider IDs in meta.
+    // Normalize both sides exactly as addToDefaultList does.
+    const queueSongId = item => {
+        if (!item || !(item.meta?.songId || item.songId || item.songmid || item.id != null)) return null;
+        return cleanSongData(item).id;
+    };
+    const targetId = queueSongId(song);
+    const matchesSong = item => item === song || (
+        targetId != null && queueSongId(item) != null &&
+        String(queueSongId(item)) === String(targetId) && item.source === song.source
+    );
+    const existingIndex = currentPlaylist.findIndex(matchesSong);
+    if (existingIndex !== -1) {
+        if (!next) {
+            showInfo('该歌曲已在播放队列中');
+            revealSongInQueue(existingIndex);
+            return;
+        }
+        if (matchesSong(currentPlaylist[currentIndex])) {
+            showInfo('该歌曲正在播放');
+            revealSongInQueue(currentIndex);
+            return;
+        }
+        // Keep the playing song selected when moving an entry from before it.
+        const queuedSong = currentPlaylist[existingIndex];
+        for (let i = currentPlaylist.length - 1; i >= 0; i--) {
+            if (!matchesSong(currentPlaylist[i])) continue;
+            currentPlaylist.splice(i, 1);
+            if (i < currentIndex) currentIndex--;
+        }
+        currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
+        preSelectedNextIndex = null;
+        renderQueue();
+        savePlaybackState();
+        showSuccess('已移至下一首播放');
+        return;
+    }
     if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
     const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
     currentPlaylist.splice(position, 0, song);
@@ -8230,8 +8324,6 @@ async function restorePlaybackState() {
                 if (searchView && !searchView.classList.contains('hidden')) {
                     renderResults(currentPlaylist);
                 }
-            } else if (state.scope === 'local_list' || state.scope === 'local_all') {
-                window._pendingResumeListId = state.listId || 'default';
             }
 
             // 初始化音频源但不立即播放（除非设置了自动播放，当前 playSong handles resumeTime）
@@ -10287,7 +10379,9 @@ window.addEventListener('popstate', (e) => {
     const backBtn = document.getElementById('search-back-btn');
     const isBackBtnVisible = backBtn && !backBtn.classList.contains('hidden');
 
-    if (isAlbumOpen || artistHeader || isBackBtnVisible) {
+    const isArtistOpen = artistHeader && !artistHeader.classList.contains('hidden');
+    if (isAlbumOpen || isArtistOpen || isBackBtnVisible) {
+        e.searchDetailHandled = true;
         goBackToSearch(true);
     }
 });
@@ -11922,6 +12016,7 @@ window.renderLibraryAlbums = renderLibraryAlbums;
 
 /** 点击侧边栏"收藏歌手"，切换到展示视图 */
 function handleArtistLibraryClick() {
+    clearSearchDetailView();
     exitListSecondaryModes && exitListSecondaryModes();
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
     const activeView = document.getElementById('view-search');
@@ -11953,6 +12048,7 @@ window.handleArtistLibraryClick = handleArtistLibraryClick;
 
 /** 点击侧边栏"收藏专辑"，切换到展示视图 */
 function handleAlbumLibraryClick() {
+    clearSearchDetailView();
     exitListSecondaryModes && exitListSecondaryModes();
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
     const activeView = document.getElementById('view-search');
@@ -13330,15 +13426,9 @@ function renderMyLists(data) {
     initFavoriteSidebarSortable(container);
     refreshFavoritesChildrenHeight();
 
-    // [Resume] 处理本地列表的自动恢复跳转或默认入口自动打开
-    if (window._pendingResumeListId) {
-        const listId = window._pendingResumeListId;
-        delete window._pendingResumeListId;
-        delete window._pendingDefaultFavoriteEntry;
-        console.log('[Resume] 正在同步本地播放列表上下文:', listId);
-        // 调用 handleListClick 以加载真实的列表数据并应用高亮
-        handleListClick(listId);
-    } else if (window._pendingDefaultFavoriteEntry) {
+    // Only an explicitly requested favorites entry may navigate when data arrives.
+    // Playback restoration must not override a later user search.
+    if (window._pendingDefaultFavoriteEntry) {
         delete window._pendingDefaultFavoriteEntry;
         const targetListId = (Array.isArray(data.loveList) && data.loveList.length > 0)
             ? 'love'
@@ -13354,6 +13444,8 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     exitListSecondaryModes();
 
     if (!currentListData) return;
+
+    clearSearchDetailView();
 
     if (!skipAutoUpdate) {
         // Selections belong to the previously rendered list. Keeping them here makes
@@ -13573,7 +13665,7 @@ async function handleRefreshList(listId, event, silent = false) {
         await pushDataChange();
         renderMyLists(currentListData);
 
-        if (window.currentViewingListId === listId) {
+        if (currentSearchScope === 'local_list' && window.currentViewingListId === listId) {
             handleListClick(listId, true); // skipAutoUpdate=true 避免递归
         }
 
@@ -13645,6 +13737,7 @@ function handleDislikeSongsClick() {
 }
 
 function handleDislikeArtistsClick() {
+    clearSearchDetailView();
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_artists';
     currentSearchScope = 'local_list';
@@ -13684,6 +13777,7 @@ function handleDislikeArtistsClick() {
 }
 
 function handleDislikeAlbumsClick() {
+    clearSearchDetailView();
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_albums';
     currentSearchScope = 'local_list';
