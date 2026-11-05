@@ -7764,4 +7764,12 @@ class SubsonicHandler {
     }
 }
 
+/** 歌单/列表类内存缓存统一失效：回滚等修改权威歌单数据后调用，避免 Subsonic API 在 TTL 内返回陈旧数据 */
+export function invalidateSubsonicPlaylistCache(): void {
+  playlistDetailCache.clear()
+  playlistRadioCache = null
+  sharedPlaylistCoverCache.clear()
+  leaderboardCoverCache.clear()
+}
+
 export const subsonicHandler = new SubsonicHandler()

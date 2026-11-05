@@ -19,6 +19,7 @@ import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
+import { invalidateSubsonicPlaylistCache } from '@/server/integrations/subsonic'
 import { createMsg2call } from 'message2call'
 import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
@@ -2052,8 +2053,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
           if (kind === 'dislike' && userSpace.dislikeManage) {
             await userSpace.dislikeManage.restoreSnapshot(id)
+            invalidateDislikeCache(verifiedUser)
           } else {
             await userSpace.listManage.restoreSnapshot(id)
+            invalidateSubsonicPlaylistCache()
           }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
