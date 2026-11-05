@@ -158,7 +158,7 @@ const DEFAULT_SETTINGS = {
     detailVisualizerStyle: 'pulse',
     visualizerOpacity: 0.5,
     visualizerGlobalStyle: 'blocks',
-    vuMeterTheme: 'vintage-amber',
+    vuMeterTheme: 'study-nocturne',
     // Cache Settings
     enableServerCache: true, // 开启服务器缓存
     enableServerLyricCache: true, // 开启服务器歌词文件缓存
@@ -202,6 +202,10 @@ function normalizeStoredSettings(nextSettings) {
     nextSettings.serverCacheNamingPattern = validPatterns.includes(nextSettings.serverCacheNamingPattern)
         ? nextSettings.serverCacheNamingPattern
         : 'simple';
+    const vuThemes = ['study-nocturne', 'study-heritage', 'study-atelier', 'study-riviera', 'study-cobalt'];
+    if (!vuThemes.includes(nextSettings.vuMeterTheme)) {
+        nextSettings.vuMeterTheme = 'study-nocturne';
+    }
     return nextSettings;
 }
 

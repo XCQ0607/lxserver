@@ -4,25 +4,13 @@
  */
 
 /**
- * LX Studio Reference Dual VU Meter Animation
- * Bespoke audiophile stereo VU meter console designed for LX Music.
- * Features brushed dark titanium faceplate, ambient incandescent lamp glow,
- * high-precision dB scales, dynamic peak overload LEDs, and IEC ballistic needles.
- * Fully stretchable and responsive for mobile and desktop window resizing with zero clipping.
- */
-/**
- * LX Studio Reference Dual VU Meter Animation
- * Restrained modern audiophile stereo VU meter console designed for LX Music.
- * Features a broad shallow sweeping arc, hidden pivot below bezel, high-contrast ivory needle,
- * calibrated 0 VU = -18 dBFS ANSI C16.5 300ms ballistics, dedicated digital clip indicators,
- * and WCAG-compliant legible typography with zero channel/needle collisions.
- */
-/**
- * Per-profile dial & pointer designs.
- * Every colour profile (vuMeterTheme) owns a complete design: dial geometry,
- * scale style, tick style, typography, decorations, pointer shape and pivot cap.
+ * LX Studio dual VU meter.
+ * Each profile (vuMeterTheme) is a complete printed instrument ported from the approved
+ * industrial design study: machined frame, black well, printed face, glass, elliptical scale,
+ * typography, pointer and pivot hub. Geometry lives in a 620×326 design space.
+ * Calibration is shared: mapVuToNorm puts 0 VU at norm 0.80, -20 VU at 0.08 and +3 VU at 1.0,
+ * and every design maps -20 VU to its scale start and +3 VU to its scale end.
  * Add a new profile with LXStudioVUMeterAnimation.registerDesign(id, design).
- * The calibration is shared by all designs; each profile selects its own scale density.
  */
 const VU_NORM_ZERO = 0.8;
 const VU_SCALE_ANCHORS = [
@@ -52,134 +40,110 @@ const mapVuToNorm = vu => {
     }
     return 0;
 };
-const makeVuTicks = points => points.map(([vu, label, major]) => ({
-    label,
+
+// Printed scale position (0 = -20 VU at the scale start, 1 = +3 VU at the scale end).
+// The small overrun lets the pointer travel onto the stop pins.
+const VU_SCALE_NORM_MIN = mapVuToNorm(-20);
+const VU_SCALE_P_MIN = -0.03;
+const VU_SCALE_P_MAX = 1.03;
+const vuNormToScale = norm => Math.max(VU_SCALE_P_MIN, Math.min(VU_SCALE_P_MAX, (norm - VU_SCALE_NORM_MIN) / (1 - VU_SCALE_NORM_MIN)));
+const vuMarks = points => points.map(([vu, label]) => ({
+    vu,
+    label: label || null,
     norm: mapVuToNorm(vu),
-    major: !!major,
-    type: major || label ? 'med' : 'min',
-    isRed: vu >= 0
+    major: !!label,
+    hot: vu >= 0
 }));
-const VU_TICK_PROFILES = {
-    essential: {
-        compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-5, '-5', true], [0, '0', true], [3, '+3', true]]),
-        full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-5, '-5', true], [-3], [0, '0', true], [1], [2], [3, '+3', true]])
-    },
-    broadcast: {
-        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [0, '0', true], [1], [2], [3, '+3', true]]),
-        full: makeVuTicks([[-20, '-20', true], [-18], [-15, '-15', true], [-12], [-10, '-10', true], [-8], [-7, '-7'], [-6], [-5, '-5', true], [-4], [-3, '-3'], [-2], [-1], [0, '0', true], [1, '+1'], [2, '+2'], [3, '+3', true]])
-    },
-    precision: {
-        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [0, '0', true], [1], [2], [3, '+3', true]]),
-        full: makeVuTicks([[-20, '-20', true], [-18, '-18'], [-15, '-15', true], [-12, '-12'], [-10, '-10', true], [-8, '-8'], [-7], [-6, '-6'], [-5, '-5', true], [-4, '-4'], [-3, '-3'], [-2, '-2'], [-1], [0, '0', true], [0.5], [1, '+1'], [1.5], [2, '+2'], [2.5], [3, '+3', true]])
-    },
-    atelier: {
-        compact: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-5, '-5', true], [-3], [0, '0', true], [3, '+3', true]]),
-        full: makeVuTicks([[-20, '-20', true], [-15, '-15'], [-12], [-10, '-10', true], [-8], [-5, '-5', true], [-3, '-3'], [-1], [0, '0', true], [1, '+1'], [2], [3, '+3', true]])
-    },
-    studio: {
-        compact: makeVuTicks([[-20, '-20', true], [-10, '-10', true], [-5, '-5', true], [0, '0', true], [3, '+3', true]]),
-        full: makeVuTicks([[-20, '-20', true], [-15], [-10, '-10', true], [-7], [-5, '-5', true], [-3], [-1], [0, '0', true], [1], [2], [3, '+3', true]])
-    }
-};
+const vuPowerMarks = points => points.map(([vu, label]) => ({ vu, label, norm: mapVuToNorm(vu), hot: vu > 0 }));
+
+const LX_VU_FONT_SANS = '"Avenir Next", Avenir, "Segoe UI", "Helvetica Neue", Arial, sans-serif';
+const LX_VU_FONT_SERIF = 'Georgia, "Times New Roman", serif';
+const LX_VU_DEFAULT_THEME = 'study-nocturne';
 
 const LX_VU_DIAL_DESIGNS = {
-    // Classic broadcast meter: warm lamp-lit plate, serif numerals, double scale rail,
-    // tapered black blade with a red painted tip, brass corner screws, domed pivot hub.
-    'vintage-amber': {
-        name: 'Vintage Amber',
-        scaleProfile: 'broadcast',
-        geom: { span: 0.07, baseY: { c: 0.66, f: 0.61 }, sag: { c: 0.07, f: 0.08 }, curve: 2, pivot: { c: 1.95, f: 2.25 } },
-        font: { family: 'Georgia, "Times New Roman", serif', weight: '500', style: 'normal', scale: 1.0 },
-        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', tagAlign: 'center', mark: 'VU', markStyle: 'italic',
-        face: {
-            kind: 'radial', cy: 0.45,
-            light: [[0, '#fffdfa'], [0.40, '#fef8ea'], [0.80, '#fdecc4'], [1, '#fbd38d']],
-            dark: [[0, '#ffe8a3'], [0.35, '#f6c343'], [0.75, '#d99b1a'], [1, '#9c6600']],
-            vig: { light: ['rgba(180, 120, 20, 0.08)', 'rgba(160, 100, 10, 0.16)'], dark: ['rgba(80, 40, 10, 0.25)', 'rgba(60, 30, 5, 0.38)'], clear: 'rgba(80, 40, 10, 0)' }
-        },
-        arc: 'double', tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
-        needle: { type: 'blade', reach: 1.2, width: 1 }, cap: 'screw', peak: null, sheen: false, deco: 'vintage', lamp: ['255, 186, 96', 1],
-        light: { ink: '#2b2118', muted: 'rgba(60, 45, 25, 0.7)', arc: '#3a2d1e', red: '#c81e3a', needle: '#16120d', tip: '#c81e3a', glow: 'rgba(255, 200, 90, 0.5)', frame: 'rgba(90, 60, 20, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
-        dark: { ink: '#2b2118', muted: 'rgba(60, 45, 25, 0.7)', arc: '#3a2d1e', red: '#c81e3a', needle: '#16120d', tip: '#c81e3a', glow: 'rgba(255, 200, 90, 0.5)', frame: 'rgba(90, 60, 20, 0.45)', rim: '#bfa15f' }
+    // Smoked-titanium reference meter: wide shallow sweep, hairline nickel pointer, warm diffuser.
+    'study-nocturne': {
+        key: 'nocturne', name: 'Nocturne', scale: 'essential',
+        face: ['#323536', '#202425', '#15191a'], rim: ['#f1e4c8', '#706d66', '#171817'],
+        ink: '#e5ded0', softInk: '#9da09c', accent: '#c5a36d', hot: '#c9654f',
+        arc: 'double', tick: 'hair', pointer: 'hairline',
+        geometry: { start: -148, sweep: 116, radius: 185, pivotY: 257, scaleX: 1.72 },
+        type: LX_VU_FONT_SANS, weight: 600, diffuser: { color: '216, 196, 159', alpha: 0.12 },
+        caption: 'IEC 60268-17',
+        marks: vuMarks([[-20, '-20'], [-15], [-10, '-10'], [-7], [-5, '-5'], [-3], [-1], [0, '0'], [1], [2], [3, '+3']]),
+        secondary: null
     },
-    // Blue-lit hi-fi power meter: deep arc on a backlit blue card, translucent scale band,
-    // fine bar ticks and a slim pale blade pointer over a jewel hub.
-    'ocean-blue': {
-        name: 'Ocean Blue',
-        scaleProfile: 'precision',
-        geom: { span: 0.055, baseY: { c: 0.60, f: 0.57 }, sag: { c: 0.12, f: 0.14 }, curve: 1.6, pivot: { c: 1.75, f: 2.0 } },
-        font: { family: '"Avenir Next", "Inter", "Segoe UI", Roboto, sans-serif', weight: '600', style: 'normal', scale: 1.0 },
-        tag: ch => 'CH · ' + ch, tagAlign: 'center', mark: 'VU', markStyle: 'normal',
-        face: {
-            kind: 'radial', cy: 0.40,
-            light: [[0, '#f8fafc'], [0.45, '#e0f2fe'], [0.85, '#bae6fd'], [1, '#7dd3fc']],
-            dark: [[0, '#42d2ff'], [0.35, '#12a4df'], [0.75, '#0369a1'], [1, '#073b64']],
-            vig: { light: ['rgba(3, 105, 161, 0.08)', 'rgba(2, 132, 199, 0.15)'], dark: ['rgba(0, 30, 65, 0.30)', 'rgba(0, 20, 50, 0.45)'], clear: 'rgba(0, 30, 65, 0)' }
-        },
-        arc: 'band', arcBand: 3.6, tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
-        needle: { type: 'blade', reach: 1.0, width: 0.85 }, cap: 'jewel', peak: null, sheen: true, deco: 'ocean', lamp: ['160, 220, 255', 0.8],
-        light: { ink: '#0c4a6e', muted: 'rgba(12, 74, 110, 0.65)', arc: '#0369a1', red: '#e11d48', needle: '#075985', tip: '#0ea5e9', glow: 'rgba(14, 165, 233, 0.55)', wave: 'rgba(3, 105, 161, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
-        dark: { ink: '#f0f9ff', muted: 'rgba(224, 242, 254, 0.75)', arc: 'rgba(240, 249, 255, 0.9)', red: '#ff7a93', needle: '#f0f9ff', tip: '#ffffff', glow: 'rgba(186, 230, 253, 0.95)', wave: 'rgba(255, 255, 255, 0.45)', rim: '#0e5c8f' }
+    // Broadcast meter on lamp-lit ivory: double rail, serif numerals, tapered blade, watts sub-scale.
+    'study-heritage': {
+        key: 'heritage', name: 'Heritage', scale: 'broadcast',
+        face: ['#fffaf0', '#f0e2c5', '#d9c39d'], rim: ['#f5e1b5', '#b39765', '#4b3b24'],
+        ink: '#332a1e', softInk: '#75664f', accent: '#826843', hot: '#bf4436',
+        arc: 'double', tick: 'bar', pointer: 'blade',
+        geometry: { start: -155, sweep: 130, radius: 194, pivotY: 269, scaleX: 1.5 },
+        type: LX_VU_FONT_SERIF, weight: 500, diffuser: null,
+        caption: '8 Ω · 100 W REF @ 0 VU',
+        marks: vuMarks([[-20, '-20'], [-18], [-15, '-15'], [-12], [-10, '-10'], [-8], [-7, '-7'], [-6], [-5, '-5'], [-4], [-3, '-3'], [-2], [-1], [0, '0'], [1, '+1'], [2, '+2'], [3, '+3']]),
+        secondary: vuPowerMarks([[-20, '1'], [-10, '10'], [-5, '32'], [-3, '50'], [0, '100'], [3, '200']])
     },
-    // Modern reference meter: flat wide arc on a black card with cyan-lit printing,
-    // geometric sans type, translucent scale band and a hairline pointer.
-    'cyber-cyan': {
-        name: 'Cyber Cyan',
-        scaleProfile: 'essential',
-        geom: { span: 0.045, baseY: { c: 0.68, f: 0.64 }, sag: { c: 0.05, f: 0.06 }, curve: 4, pivot: { c: 2.2, f: 2.6 } },
-        font: { family: '"Futura", "Century Gothic", "Avenir Next", "Segoe UI", sans-serif', weight: '500', style: 'normal', scale: 1.0 },
-        tag: ch => ch === 'L' ? 'LEFT' : 'RIGHT', tagAlign: 'center', mark: 'VU', markStyle: 'normal',
-        face: {
-            kind: 'linear',
-            light: [[0, '#ffffff'], [0.60, '#f0fdfa'], [1, '#ccfbf1']],
-            dark: [[0, '#0c1015'], [0.5, '#070a0e'], [1, '#030508']],
-            glow: { color: '6, 182, 212', a0: 0.14, a1: 0.03 }
-        },
-        arc: 'band', arcBand: 2.4, tick: { style: 'bar', len: 1, lwMajor: 1.3, lwMinor: 0.8 },
-        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'ring', peak: null, sheen: true, deco: 'cyber', lamp: ['80, 230, 255', 0.6],
-        light: { ink: '#115e59', muted: 'rgba(17, 94, 89, 0.65)', arc: '#0f766e', red: '#e11d48', needle: '#0f766e', tip: '#06b6d4', glow: 'rgba(6, 182, 212, 0.5)', grid: 'rgba(15, 118, 110, 0.35)', rim: 'rgba(148, 163, 184, 0.55)' },
-        dark: { ink: '#22d3ee', muted: 'rgba(34, 211, 238, 0.6)', arc: 'rgba(34, 211, 238, 0.9)', red: '#ff2d6f', needle: '#7df9ff', tip: '#00f5ff', glow: '#00f5ff', grid: 'rgba(34, 211, 238, 0.5)', rim: '#1e3040' }
+    // Mastering meter in a champagne-brass frame: single rail, wedge graduations, counterweighted pointer.
+    'study-atelier': {
+        key: 'atelier', name: 'Atelier', scale: 'studio',
+        face: ['#292824', '#1a1b19', '#121311'], rim: ['#f2deb4', '#a7844b', '#28231b'],
+        ink: '#e7d3ae', softInk: '#a18f70', accent: '#d0ad73', hot: '#cf674f',
+        arc: 'single', tick: 'wedge', pointer: 'counterweight',
+        geometry: { start: -158, sweep: 136, radius: 191, pivotY: 270, scaleX: 1.48 },
+        type: LX_VU_FONT_SANS, weight: 600, diffuser: null,
+        caption: 'IEC 60268-17',
+        marks: vuMarks([[-20, '-20'], [-17], [-13, '-13'], [-10], [-8, '-8'], [-6], [-5, '-5'], [-4], [-3, '-3'], [-2], [-1], [0, '0'], [1, '+1'], [2, '+2'], [3, '+3']]),
+        secondary: null
     },
-    // Champagne-faced luxury meter: soft sunburst, double gold frame with corner lozenges,
-    // wedge ticks capped with pearls, radial serif numerals and a slim black blade with red tip.
-    'champagne-gold': {
-        name: 'Champagne Gold',
-        scaleProfile: 'atelier',
-        geom: { span: 0.09, baseY: { c: 0.64, f: 0.60 }, sag: { c: 0.10, f: 0.11 }, curve: 2.6, pivot: { c: 1.9, f: 2.2 } },
-        font: { family: '"Didot", "Bodoni 72", "Playfair Display", Georgia, serif', weight: '700', style: 'normal', scale: 1.0 },
-        tag: ch => '— ' + ch + ' —', tagAlign: 'center', mark: 'VU', markStyle: 'italic', rotateLabels: true,
-        face: {
-            kind: 'radial', cy: 0.45,
-            light: [[0, '#ffffff'], [0.40, '#fefce8'], [0.80, '#fef08a'], [1, '#fde047']],
-            dark: [[0, '#fff4cc'], [0.35, '#fae39b'], [0.70, '#dfba63'], [1, '#9b7625']],
-            vig: { light: ['rgba(113, 63, 18, 0.06)', 'rgba(113, 63, 18, 0.14)'], dark: ['rgba(60, 45, 20, 0.25)', 'rgba(50, 35, 10, 0.38)'], clear: 'rgba(60, 45, 20, 0)' }
-        },
-        arc: 'double', arcInset: 2.4, tick: { style: 'wedge', len: 1, lwMajor: 1.6, lwMinor: 0.9 },
-        needle: { type: 'blade', reach: 1.0, width: 0.9 }, cap: 'rosette', peak: null, sheen: true, deco: 'champagne', lamp: ['255, 228, 170', 0.9],
-        light: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#a61b1b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 230, 150, 0.22)', frame: '#9c7a2a', rim: 'rgba(180, 140, 60, 0.6)' },
-        dark: { ink: '#3b2a0c', muted: 'rgba(80, 58, 20, 0.7)', arc: '#5a4214', red: '#a61b1b', needle: '#2a1d06', tip: '#a61b1b', edge: '#7a5a12', glow: 'rgba(255, 240, 180, 0.6)', ray: 'rgba(255, 255, 255, 0.16)', frame: '#8a6a1f', rim: '#dab978' }
+    // Porcelain reference meter: open shallow sweep, fine charcoal indices, blue-steel hairline.
+    'study-riviera': {
+        key: 'riviera', name: 'Riviera', scale: 'open',
+        face: ['#f1f0e9', '#d9d9d1', '#c5c6c0'], rim: ['#fafaf5', '#a9aaa5', '#4b4d4a'],
+        ink: '#252923', softInk: '#777b75', accent: '#6d7771', hot: '#bd5947',
+        arc: 'double', tick: 'hair', pointer: 'hairline', pointerColors: ['#172128', '#26363f', '#10171b'],
+        geometry: { start: -152, sweep: 124, radius: 194, pivotY: 267, scaleX: 1.5 },
+        type: LX_VU_FONT_SANS, weight: 600, diffuser: null,
+        caption: 'IEC 60268-17',
+        marks: vuMarks([[-20, '-20'], [-15], [-10, '-10'], [-5], [-3], [0, '0'], [3, '+3']]),
+        secondary: null
     },
-    // Studio monitor meter: crisp white card, fine double rail, left-aligned channel letter,
-    // hairline rule, long thin ticks and a spear-tipped hairline pointer.
-    'studio-monochrome': {
-        name: 'Studio Monochrome',
-        scaleProfile: 'studio',
-        geom: { span: 0.10, baseY: { c: 0.67, f: 0.63 }, sag: { c: 0.035, f: 0.04 }, curve: 2, pivot: { c: 2.1, f: 2.4 } },
-        font: { family: '"Helvetica Neue", "Inter", Arial, sans-serif', weight: '600', style: 'normal', scale: 1.05 },
-        tag: ch => ch, tagAlign: 'left', mark: 'VU', markStyle: 'normal',
-        face: {
-            kind: 'radial', cy: 0.38,
-            light: [[0, '#ffffff'], [0.65, '#f8fafc'], [1, '#edf2f7']],
-            dark: [[0, '#191b22'], [0.60, '#101217'], [1, '#08090d']],
-            vig: { light: ['rgba(0, 0, 0, 0.03)', 'rgba(0, 0, 0, 0.08)'], dark: ['rgba(0, 0, 0, 0.35)', 'rgba(0, 0, 0, 0.50)'], clear: 'rgba(0, 0, 0, 0)' }
-        },
-        arc: 'double', arcInset: 1.6, tick: { style: 'bar', len: 1.15, lwMajor: 1.1, lwMinor: 0.7 },
-        needle: { type: 'hair', reach: 1.0, width: 1 }, cap: 'dot', peak: null, sheen: false, deco: 'mono', lamp: ['235, 240, 255', 0.3],
-        light: { ink: '#0f172a', muted: 'rgba(15, 23, 42, 0.55)', arc: '#334155', red: '#f43f5e', needle: '#0f172a', tip: '#f43f5e', rule: 'rgba(15, 23, 42, 0.25)', rim: 'rgba(148, 163, 184, 0.55)' },
-        dark: { ink: '#f8fafc', muted: 'rgba(226, 232, 240, 0.6)', arc: 'rgba(241, 245, 249, 0.85)', red: '#f43f5e', needle: '#e2e8f0', tip: '#f43f5e', rule: 'rgba(226, 232, 240, 0.25)', rim: '#334155' }
+    // Cobalt mastering instrument: dense dB scale, 8 Ω power arc, vermilion-tipped blade.
+    'study-cobalt': {
+        key: 'cobalt', name: 'Cobalt', scale: 'mastering',
+        face: ['#16345a', '#0c2343', '#08172d'], rim: ['#c9d6df', '#576d82', '#111923'],
+        ink: '#dce9ef', softInk: '#9cb6c5', accent: '#80bad1', hot: '#ff785f',
+        arc: 'single', tick: 'bar', pointer: 'blade',
+        geometry: { start: -158, sweep: 136, radius: 191, pivotY: 270, scaleX: 1.48 },
+        type: LX_VU_FONT_SANS, weight: 600, diffuser: { color: '83, 170, 255', alpha: 0.25 },
+        caption: '8 Ω · 100 W REF @ 0 VU',
+        marks: vuMarks([[-20, '-20'], [-18], [-15, '-15'], [-12, '-12'], [-10], [-9, '-9'], [-8], [-7], [-6, '-6'], [-5], [-4, '-4'], [-3, '-3'], [-2, '-2'], [-1], [0, '0'], [1, '+1'], [2, '+2'], [3, '+3']]),
+        secondary: vuPowerMarks([[-18, '1.6'], [-12, '6'], [-6, '25'], [-3, '50'], [0, '100'], [3, '200']])
     }
 };
 
+const LX_VU_RAD = Math.PI / 180;
+// Same projection as the design study: an ellipse around (cx, cy) stretched horizontally by scaleX.
+const vuDesignPoint = (deg, radius, cx, cy, scaleX) => [
+    cx + Math.cos(deg * LX_VU_RAD) * radius * scaleX,
+    cy + Math.sin(deg * LX_VU_RAD) * radius
+];
+
+const normalizeVuTheme = theme => {
+    if (theme && Object.prototype.hasOwnProperty.call(LX_VU_DIAL_DESIGNS, theme)) return theme;
+    return LX_VU_DEFAULT_THEME;
+};
+// Phones get no VU meter: the instrument needs desktop width to stay legible.
+const isVuMobileViewport = () => typeof window !== 'undefined' && typeof window.innerWidth === 'number' && window.innerWidth > 0 && window.innerWidth < 768;
+// Design-space window drawn per pod. The compact footer crops to the scale band and hides the pivot.
+const LX_VU_VIEWPORT = { full: { x: 0, y: 0, w: 620, h: 326 }, compact: { x: 0, y: 36, w: 620, h: 214 } };
+const vuHexA = (hex, a) => {
+    const v = parseInt(hex.slice(1), 16);
+    return `rgba(${(v >> 16) & 255}, ${(v >> 8) & 255}, ${v & 255}, ${a})`;
+};
+const vuLabelPriority = vu => (vu === 0 ? 0 : (vu === -20 || vu === 3) ? 1 : vu % 5 === 0 ? 2 : 3);
+const vuBoxesOverlap = (a, b) => a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
 
 class LXStudioVUMeterAnimation {
     constructor(options = {}) {
@@ -217,12 +181,6 @@ class LXStudioVUMeterAnimation {
 
     vuToNorm(vu) {
         return mapVuToNorm(vu);
-    }
-
-    getScaleTicks(theme, compactLike) {
-        const profile = this.getDesign(theme).scaleProfile || 'broadcast';
-        const ticks = VU_TICK_PROFILES[profile] || VU_TICK_PROFILES.broadcast;
-        return compactLike ? ticks.compact : ticks.full;
     }
 
     draw(data, ctx) {
@@ -360,14 +318,50 @@ class LXStudioVUMeterAnimation {
         this.renderConsole(ctx, width, height, this.needleNormL, this.needleNormR, this.isCompact);
     }
 
+    getDesign(theme) {
+        return LX_VU_DIAL_DESIGNS[normalizeVuTheme(theme)];
+    }
+
+    resolveTheme() {
+        const saved = typeof window !== 'undefined' && window.settings && window.settings.vuMeterTheme;
+        return normalizeVuTheme(saved || this.options.theme);
+    }
+
+    getScaleMarks(theme) {
+        return this.getDesign(theme).marks;
+    }
+
+    // Angle (design degrees) of a calibrated norm on the profile's printed scale
+    scaleAngle(theme, norm) {
+        const g = this.getDesign(theme).geometry;
+        return g.start + g.sweep * vuNormToScale(norm);
+    }
+
+    static registerDesign(id, design) {
+        if (id && design) LX_VU_DIAL_DESIGNS[id] = design;
+    }
+
+    static normalizeTheme(theme) {
+        return normalizeVuTheme(theme);
+    }
+
+    pixelRatio(ctx) {
+        const c = ctx && ctx.canvas;
+        if (c && c.clientWidth > 0 && c.width > 0) return Math.max(1, c.width / c.clientWidth);
+        return (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    }
+
     renderConsole(ctx, width, height, levelL, levelR, isCompact) {
         ctx.save();
-
-        // 1. 彻底清空并绘制 100% 实体防透光底板 (Solid Anti-bleed Baseplate)
         ctx.clearRect(0, 0, width, height);
+        if (isVuMobileViewport()) {
+            ctx.restore();
+            return;
+        }
 
-        const theme = (window.settings && window.settings.vuMeterTheme) || this.options.theme || 'vintage-amber';
+        const D = this.getDesign(this.resolveTheme());
         const isLight = this.isLightMode();
+        const dpr = this.pixelRatio(ctx);
 
         const marginX = isCompact ? 3 : 6;
         const marginY = isCompact ? 2 : 5;
@@ -375,15 +369,10 @@ class LXStudioVUMeterAnimation {
         const panelH = height - marginY * 2;
         const panelX = marginX;
         const panelY = marginY;
-
-        const isMobilePod = isCompact && (panelW < 440 || (typeof window !== 'undefined' && window.innerWidth < 768));
-        const scale = isMobilePod
-            ? Math.min(panelW / 320, panelH / 40)
-            : Math.min(panelW / (isCompact ? 500 : 840), panelH / (isCompact ? 68 : 210));
+        const scale = Math.min(panelW / (isCompact ? 500 : 840), panelH / (isCompact ? 68 : 210));
         const cornerR = (isCompact ? 10 : 12) * scale;
 
         if (isCompact) {
-            // 播放栏紧凑模式：柔和磨砂卡片，与播放栏融为一体，避免硬件外壳的突兀感
             ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.96)' : 'rgba(17, 20, 26, 0.96)';
             this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
             ctx.fill();
@@ -392,1015 +381,451 @@ class LXStudioVUMeterAnimation {
             this.roundRect(ctx, panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1, cornerR);
             ctx.stroke();
         } else {
-        // 100% 实体防穿透遮蔽基底
-        ctx.fillStyle = isLight ? '#f8fafc' : '#080a0f';
-        this.roundRect(ctx, panelX - 1, panelY - 1, panelW + 2, panelH + 2, cornerR);
-        ctx.fill();
-
-        // 2. 现代机架母带硬件外壳 (Precision Aircraft Aluminum / Obsidian Chassis)
-        if (isLight) {
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.08)';
-            ctx.shadowBlur = 8 * scale;
-            ctx.shadowOffsetY = 2 * scale;
-            const faceGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
-            faceGrad.addColorStop(0, '#ffffff');
-            faceGrad.addColorStop(0.35, '#f8fafc');
-            faceGrad.addColorStop(0.75, '#f1f5f9');
-            faceGrad.addColorStop(1, '#e2e8f0');
-            ctx.fillStyle = faceGrad;
+            const chassis = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
+            const stops = isLight ? ['#ffffff', '#f1f5f9', '#e2e8f0'] : ['#1a1d24', '#121419', '#090a0d'];
+            chassis.addColorStop(0, stops[0]);
+            chassis.addColorStop(0.5, stops[1]);
+            chassis.addColorStop(1, stops[2]);
+            ctx.fillStyle = chassis;
             this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
             ctx.fill();
-            ctx.shadowColor = 'transparent';
-
-            // Chamfer Inset Highlight
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-            ctx.lineWidth = 1 * scale;
+            ctx.strokeStyle = isLight ? 'rgba(148, 163, 184, 0.40)' : 'rgba(255, 255, 255, 0.09)';
+            ctx.lineWidth = 0.8 * scale;
             this.roundRect(ctx, panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1, cornerR);
             ctx.stroke();
-
-            // Precision Hairline Contour
-            ctx.strokeStyle = 'rgba(148, 163, 184, 0.40)';
-            ctx.lineWidth = 0.8 * scale;
-            this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
-            ctx.stroke();
-        } else {
-            const faceGrad = ctx.createLinearGradient(panelX, panelY, panelX, panelY + panelH);
-            if (theme === 'champagne-gold') {
-                faceGrad.addColorStop(0, '#2b251d');
-                faceGrad.addColorStop(0.5, '#1e1a14');
-                faceGrad.addColorStop(1, '#14110d');
-            } else {
-                faceGrad.addColorStop(0, '#1a1d24');
-                faceGrad.addColorStop(0.5, '#121419');
-                faceGrad.addColorStop(1, '#090a0d');
-            }
-            ctx.fillStyle = faceGrad;
-            this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
-            ctx.fill();
-
-            // Chamfer Edge
-            ctx.strokeStyle = theme === 'champagne-gold' ? 'rgba(218, 185, 120, 0.25)' : 'rgba(255, 255, 255, 0.09)';
-            ctx.lineWidth = 1 * scale;
-            this.roundRect(ctx, panelX + 0.5, panelY + 0.5, panelW - 1, panelH - 1, cornerR);
-            ctx.stroke();
-
-            // Outer Rim
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.65)';
-            ctx.lineWidth = 0.8 * scale;
-            this.roundRect(ctx, panelX, panelY, panelW, panelH, cornerR);
-            ctx.stroke();
-        }
         }
 
-        // 3. 黄金比例空间排版
-        const padX = (isCompact ? (isMobilePod ? 4 : 6) : 12) * scale;
-        const padY = (isCompact ? (isMobilePod ? 3 : 5) : 8) * scale;
+        const padX = (isCompact ? 4 : 12) * scale;
+        const padY = (isCompact ? 3 : 8) * scale;
         const innerX = panelX + padX;
         const innerY = panelY + padY;
         const innerW = panelW - padX * 2;
         const innerH = panelH - padY * 2;
+        const centerW = (isCompact ? 26 : 72) * scale;
+        const gap = (isCompact ? 3 : 10) * scale;
+        const meterW = (innerW - centerW - gap * 2) / 2;
+        const leftX = innerX;
+        const centerX = leftX + meterW + gap;
+        const rightX = centerX + centerW + gap;
+        const o = { compact: !!isCompact, dpr };
 
-        if (isMobilePod) {
-            // 手机移动端：自适应单表盘·同轴双指针 (Dual-Needle Studio VU)
-            this.drawSingleStereoPod(ctx, innerX, innerY, innerW, innerH, levelL, levelR, scale, theme, isLight);
-        } else {
-            // PC 紧凑端与详情页：双表头与中桥
-            const centerW = (isCompact ? 26 : 72) * scale;
-            const gap = (isCompact ? 3 : 10) * scale;
-            const meterW = (innerW - centerW - gap * 2) / 2;
-            const meterH = innerH;
-
-            const leftX = innerX;
-            const centerX = leftX + meterW + gap;
-            const rightX = centerX + centerW + gap;
-
-            this.drawMeterPod(ctx, leftX, innerY, meterW, meterH, levelL, scale, 'L', isCompact, theme, isLight);
-            this.drawCenterConsole(ctx, centerX, innerY, centerW, meterH, scale, isCompact, theme, isLight, levelL, levelR);
-            this.drawMeterPod(ctx, rightX, innerY, meterW, meterH, levelR, scale, 'R', isCompact, theme, isLight);
-        }
-
+        this.drawMeterPod(ctx, leftX, innerY, meterW, innerH, levelL, 'L', D, o);
+        this.drawCenterConsole(ctx, centerX, innerY, centerW, innerH, scale, isCompact, D, isLight, levelL, levelR);
+        this.drawMeterPod(ctx, rightX, innerY, meterW, innerH, levelR, 'R', D, o);
         ctx.restore();
     }
 
-    getDesign(theme) {
-        return LX_VU_DIAL_DESIGNS[theme] || LX_VU_DIAL_DESIGNS['vintage-amber'];
-    }
-
-    // Cached paper-grain pattern for printed dial cards (null when no offscreen canvas is available)
-    getGrain(ctx) {
-        if (this._grain !== undefined) return this._grain;
-        this._grain = null;
-        try {
-            if (typeof document === 'undefined' || typeof document.createElement !== 'function' || typeof ctx.createPattern !== 'function') return null;
-            const c = document.createElement('canvas');
-            c.width = c.height = 64;
-            const g = c.getContext && c.getContext('2d');
-            if (!g || typeof g.createImageData !== 'function') return null;
-            const img = g.createImageData(64, 64);
-            let seed = 1337;
-            for (let i = 0; i < img.data.length; i += 4) {
-                seed = (seed * 1664525 + 1013904223) >>> 0;
-                const v = (seed >>> 24) & 0xff;
-                img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
-                img.data[i + 3] = 255;
+    // Maps the 620×326 design space onto a pod. Horizontal stretch is limited so the dial keeps its wide look.
+    podLayout(D, x, y, w, h, compact) {
+        const vp = compact ? LX_VU_VIEWPORT.compact : LX_VU_VIEWPORT.full;
+        let kx = w / vp.w;
+        let ky = h / vp.h;
+        if (kx > ky * 1.3) kx = ky * 1.3;
+        if (ky > kx * 1.05) ky = kx * 1.05;
+        const rw = vp.w * kx;
+        const rh = vp.h * ky;
+        const rx = x + (w - rw) / 2;
+        const ry = y + (h - rh) / 2;
+        const k = Math.min(kx, ky);
+        const X = dx => rx + (dx - vp.x) * kx;
+        const Y = dy => ry + (dy - vp.y) * ky;
+        const g = D.geometry;
+        const inset = d => ({ x: rx + d * k, y: ry + d * k, w: rw - 2 * d * k, h: rh - 2 * d * k });
+        return {
+            compact, vp, rx, ry, rw, rh, kx, ky, k, X, Y, inset,
+            frame: inset(3), well: inset(9), face: inset(15), clip: inset(16),
+            pivot: [X(310), Y(g.pivotY)],
+            angleOf: p => g.start + g.sweep * p,
+            pt: (deg, r) => {
+                const [dx, dy] = vuDesignPoint(deg, r, 310, g.pivotY, g.scaleX);
+                return [X(dx), Y(dy)];
             }
-            g.putImageData(img, 0, 0);
-            this._grain = ctx.createPattern(c, 'repeat') || null;
-        } catch (_) {
-            this._grain = null;
-        }
-        return this._grain;
-    }
-
-    static registerDesign(id, design) {
-        if (id && design) LX_VU_DIAL_DESIGNS[id] = design;
-    }
-
-    // Single-channel pod (desktop / detail view)
-    drawMeterPod(ctx, x, y, w, h, level, scale, channelTitle, isCompact, theme, isLight) {
-        this.drawDialPod(ctx, x, y, w, h, {
-            needles: [{ level, key: channelTitle }],
-            scale, isCompact, theme, isLight, title: channelTitle, stereo: false
-        });
-    }
-
-    // Mobile single dial with coaxial L/R needles
-    drawSingleStereoPod(ctx, x, y, w, h, levelL, levelR, scale, theme, isLight) {
-        this.drawDialPod(ctx, x, y, w, h, {
-            needles: [{ level: levelL, key: 'L', channel: 'L' }, { level: levelR, key: 'R', channel: 'R' }],
-            scale, isCompact: true, theme, isLight, title: '', stereo: true
-        });
-    }
-
-    // Shared dial renderer: geometry, scale, ticks, pointer and decorations all come from the profile's design
-    drawDialPod(ctx, x, y, w, h, o) {
-        const D = this.getDesign(o.theme);
-        const P = o.isLight ? D.light : D.dark;
-        const { scale, isCompact, isLight, stereo } = o;
-        const compactLike = isCompact || stereo;
-        const k = compactLike ? 'c' : 'f';
-        const G = D.geom;
-        const podR = 8 * scale;
-        const nowMs = performance.now();
-        const t = nowMs / 1000;
-        const sz = stereo ? { maj: 5.5, med: 3.8, min: 2.2, font: 9.2, gap: 4.5, cap: 3.6, tag: 8.5, mark: 10 }
-            : isCompact ? { maj: 6, med: 4, min: 2.5, font: 9.8, gap: 5, cap: 3, tag: 8.5, mark: 10.5 }
-                : { maj: 11, med: 7, min: 4.5, font: 13, gap: 8, cap: 5, tag: 11, mark: 18.5 };
-        const tl = D.tick.len;
-        const majLen = sz.maj * scale * tl;
-        const medLen = sz.med * scale * tl;
-        const minLen = sz.min * scale * tl;
-        const fam = D.font.family;
-
-        // Scale geometry (arc shape differs per design)
-        const fontPx = Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale));
-        const labelInset = majLen + sz.gap * scale + fontPx * 1.1 + 2 * scale;
-        const spanX = Math.max(w * G.span, labelInset);
-        const sx = x + spanX;
-        const ex = x + w - spanX;
-        const sw = ex - sx;
-        const baseY = y + h * G.baseY[k];
-        const sag = h * G.sag[k];
-        const pivotX = x + w / 2;
-        const pivotY = y + h * G.pivot[k];
-        const getScalePoint = (norm, off = 0) => {
-            const bx = sx + norm * sw;
-            const u = Math.abs((norm - 0.5) * 2);
-            const by = baseY + Math.pow(u, G.curve) * sag;
-            const dx = bx - pivotX;
-            const dy = by - pivotY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const ux = dx / dist;
-            const uy = dy / dist;
-            return { bx: bx + ux * off, by: by + uy * off, ux, uy };
         };
+    }
+
+    frameGradient(ctx, D, x, y, w, h) {
+        const grad = ctx.createLinearGradient(x, y, x + w, y + h);
+        grad.addColorStop(0, D.rim[0]);
+        grad.addColorStop(0.18, D.rim[1]);
+        grad.addColorStop(0.49, D.rim[2]);
+        grad.addColorStop(0.77, D.rim[1]);
+        grad.addColorStop(1, D.rim[0]);
+        return grad;
+    }
+
+    setLetterSpacing(ctx, px) {
+        if ('letterSpacing' in ctx) ctx.letterSpacing = `${px}px`;
+    }
+
+    // Printed text: letter spacing trails the last glyph, so shift centred text back by half a space.
+    printText(ctx, text, x, y, font, color, spacing = 0) {
+        ctx.font = font;
+        ctx.fillStyle = color;
+        ctx.textAlign = 'center';
+        this.setLetterSpacing(ctx, spacing);
+        ctx.fillText(text, x + spacing / 2, y);
+        this.setLetterSpacing(ctx, 0);
+    }
+
+    // Places scale numerals radially inside the graduations; any numeral that would touch a
+    // neighbour or leave the face is dropped (important numerals are placed first).
+    layoutScaleLabels(ctx, D, L, dpr = 1, withSecondary = false) {
+        const g = D.geometry;
+        const k = L.k;
+        const minFont = (L.compact ? 8 : 9) * dpr;
+        const innerR = D.arc === 'single' ? g.radius - (D.tick === 'wedge' ? 12 : 7) : g.radius - 15;
+        const gap = Math.max(2 * dpr, 3 * k);
+        const pad = 1.5 * dpr;
+        const face = L.clip;
+        const placed = [];
+        const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+        const place = (mark, labelR, innerDist, size, color, group) => {
+            ctx.font = `${D.weight} ${size.toFixed(2)}px ${D.type}`;
+            const tw = ctx.measureText(mark.label).width;
+            const th = size * 0.74;
+            const deg = L.angleOf(vuNormToScale(mark.norm));
+            const base = L.pt(deg, g.radius);
+            const u0 = base[0] - L.pivot[0];
+            const u1 = base[1] - L.pivot[1];
+            const ul = Math.hypot(u0, u1) || 1;
+            const ux = u0 / ul;
+            const uy = u1 / ul;
+            const half = Math.abs(ux) * tw / 2 + Math.abs(uy) * th / 2;
+            const d = Math.max(dist(base, L.pt(deg, labelR)), innerDist(deg) + gap + half);
+            const lx = base[0] - ux * d;
+            const ly = base[1] - uy * d;
+            if (lx - tw / 2 < face.x || lx + tw / 2 > face.x + face.w || ly - th / 2 < face.y || ly + th / 2 > face.y + face.h) return;
+            const box = { x0: lx - tw / 2 - pad, x1: lx + tw / 2 + pad, y0: ly - th / 2 - pad, y1: ly + th / 2 + pad };
+            if (placed.some(p => vuBoxesOverlap(p.box, box))) return;
+            placed.push({ text: mark.label, vu: mark.vu, x: lx, y: ly, size, color, font: ctx.font, box, group });
+        };
+        const minTick = L.compact ? 4.5 * dpr : 0;
+        const main = D.marks.map((m, i) => ({ m, i })).filter(c => c.m.label)
+            .sort((a, b) => vuLabelPriority(a.m.vu) - vuLabelPriority(b.m.vu) || a.i - b.i);
+        for (const { m } of main) {
+            const size = Math.max(minFont, ((m.label === '-20' || m.label === '+3') ? 11 : 12) * k);
+            place(m, g.radius - 28, deg => Math.max(dist(L.pt(deg, g.radius), L.pt(deg, innerR)), minTick), size, m.hot ? D.hot : D.ink, 'main');
+        }
+        if (withSecondary && D.secondary) {
+            const size = Math.max(7 * dpr, 9 * k);
+            for (const m of D.secondary) {
+                place(m, g.radius - 101, deg => dist(L.pt(deg, g.radius), L.pt(deg, g.radius - 82)), size, m.hot ? D.hot : D.softInk, 'secondary');
+            }
+        }
+        return placed.sort((a, b) => (a.group === b.group ? a.vu - b.vu : a.group === 'main' ? -1 : 1));
+    }
+
+    drawMeterPod(ctx, x, y, w, h, level, channel, D, o = {}) {
+        const compact = !!o.compact;
+        const dpr = o.dpr || 1;
+        const L = this.podLayout(D, x, y, w, h, compact);
+        const { k, pt, angleOf } = L;
+        const g = D.geometry;
+        const showDetail = !compact && k >= 0.55 * dpr;
+        const lw = (v, min) => Math.max(v * k, min * dpr);
+        const rr = (r, rad) => this.roundRect(ctx, r.x, r.y, r.w, r.h, rad * k);
 
         ctx.save();
+        // Machined frame, black well and printed face
+        ctx.fillStyle = this.frameGradient(ctx, D, L.frame.x, L.frame.y, L.frame.w, L.frame.h);
+        rr(L.frame, 8);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
+        ctx.lineWidth = lw(1.2, 0.5);
+        ctx.stroke();
+        ctx.fillStyle = '#080909';
+        rr(L.well, 5);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.86)';
+        ctx.lineWidth = lw(2, 0.5);
+        ctx.stroke();
+        const F = L.face;
+        const faceGrad = ctx.createLinearGradient(F.x, F.y, F.x + F.w * 0.15, F.y + F.h);
+        faceGrad.addColorStop(0, D.face[0]);
+        faceGrad.addColorStop(0.56, D.face[1]);
+        faceGrad.addColorStop(1, D.face[2]);
+        ctx.fillStyle = faceGrad;
+        rr(F, 3);
+        ctx.fill();
+        ctx.strokeStyle = vuHexA(D.accent, 0.46);
+        ctx.lineWidth = lw(0.8, 0.5);
+        ctx.stroke();
+
+        // Glass reflection across the top of the window (bounding-box radial gradient)
+        {
+            const gx0 = F.x + 2 * k;
+            const gw = F.w - 4 * k;
+            const gy = d => F.y + (d - 15) * L.ky;
+            const top = gy(11.5);
+            const bh = gy(72) - top;
+            ctx.save();
+            ctx.globalAlpha = 0.8;
+            ctx.translate(gx0 + gw / 2, top);
+            ctx.scale(gw, bh);
+            const nx = px => (px - (gx0 + gw / 2)) / gw;
+            const ny = py => (py - top) / bh;
+            ctx.beginPath();
+            ctx.moveTo(-0.5, ny(gy(20)));
+            ctx.quadraticCurveTo(0, ny(gy(3)), 0.5, ny(gy(20)));
+            ctx.lineTo(0.5, ny(gy(72)));
+            ctx.quadraticCurveTo(0, ny(gy(45)), -0.5, ny(gy(72)));
+            ctx.closePath();
+            const glass = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+            glass.addColorStop(0, 'rgba(255, 255, 255, 0.13)');
+            glass.addColorStop(0.5, 'rgba(255, 255, 255, 0.025)');
+            glass.addColorStop(1, 'rgba(0, 0, 0, 0.15)');
+            ctx.fillStyle = glass;
+            ctx.fill();
+            ctx.restore();
+            void nx;
+        }
+
         ctx.save();
-        this.roundRect(ctx, x, y, w, h, podR);
+        rr(L.clip, 2);
         ctx.clip();
 
-        // 1. Dial face
-        const stops = isLight ? D.face.light : D.face.dark;
-        let faceFill;
-        if (D.face.kind === 'radial') {
-            const cy = y + h * D.face.cy;
-            faceFill = ctx.createRadialGradient(x + w / 2, cy, 12 * scale, x + w / 2, cy, Math.max(w * 0.65, h * 1.1));
-        } else {
-            faceFill = ctx.createLinearGradient(x, y, x, y + h);
-        }
-        stops.forEach(s => faceFill.addColorStop(s[0], s[1]));
-        ctx.fillStyle = faceFill;
-        ctx.fillRect(x, y, w, h);
-
-        if (D.face.vig) {
-            const v = isLight ? D.face.vig.light : D.face.vig.dark;
-            const vg = ctx.createLinearGradient(x, y, x, y + h);
-            vg.addColorStop(0, v[0]);
-            vg.addColorStop(0.3, D.face.vig.clear);
-            vg.addColorStop(0.7, D.face.vig.clear);
-            vg.addColorStop(1, v[1]);
-            ctx.fillStyle = vg;
-            ctx.fillRect(x, y, w, h);
-        }
-        if (D.face.glow && !isLight) {
-            const gl = ctx.createRadialGradient(x + w / 2, y + h * 0.5, 10 * scale, x + w / 2, y + h * 0.5, w * 0.65);
-            gl.addColorStop(0, `rgba(${D.face.glow.color}, ${D.face.glow.a0})`);
-            gl.addColorStop(0.6, `rgba(${D.face.glow.color}, ${D.face.glow.a1})`);
-            gl.addColorStop(1, 'rgba(0, 0, 0, 0)');
-            ctx.fillStyle = gl;
-            ctx.fillRect(x, y, w, h);
-        }
-
-        // 1b. Printed-card realism: paper grain, aged edges and a recessed window
-        const grain = this.getGrain(ctx);
-        if (grain) {
+        if (D.diffuser) {
+            // Ellipse cx 310, cy 20, 300×130 with its gradient centred on the top of its bounding box
             ctx.save();
-            ctx.globalAlpha = isLight ? 0.10 : 0.07;
-            ctx.fillStyle = grain;
-            ctx.fillRect(x, y, w, h);
-            ctx.restore();
-        }
-        const warm = D.deco === 'vintage' || D.deco === 'champagne';
-        const age = ctx.createRadialGradient(x + w / 2, y + h * 0.5, Math.min(w, h) * 0.2, x + w / 2, y + h * 0.5, Math.max(w * 0.62, h * 1.1));
-        age.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        age.addColorStop(1, warm ? 'rgba(90, 50, 10, 0.28)' : (isLight ? 'rgba(0, 0, 0, 0.10)' : 'rgba(0, 0, 0, 0.30)'));
-        ctx.fillStyle = age;
-        ctx.fillRect(x, y, w, h);
-        const rec = Math.min(10 * scale, h * 0.2);
-        const recTop = ctx.createLinearGradient(x, y, x, y + rec);
-        recTop.addColorStop(0, 'rgba(0, 0, 0, 0.38)');
-        recTop.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = recTop;
-        ctx.fillRect(x, y, w, rec);
-        const recLeft = ctx.createLinearGradient(x, y, x + rec, y);
-        recLeft.addColorStop(0, 'rgba(0, 0, 0, 0.28)');
-        recLeft.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = recLeft;
-        ctx.fillRect(x, y, rec, h);
-        const recRight = ctx.createLinearGradient(x + w, y, x + w - rec * 0.6, y);
-        recRight.addColorStop(0, 'rgba(0, 0, 0, 0.14)');
-        recRight.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        ctx.fillStyle = recRight;
-        ctx.fillRect(x + w - rec * 0.6, y, rec * 0.6, h);
-
-        // 1c. Lamp behind the translucent dial card
-        if (D.lamp) {
-            ctx.save();
-            const lx = x + w / 2;
-            const ly = y + h * 1.02;
-            const gain = D.lamp[1];
-            const lg = ctx.createRadialGradient(lx, ly, 2 * scale, lx, ly, Math.max(w * 0.6, h * 1.05));
-            lg.addColorStop(0, `rgba(${D.lamp[0]}, ${(isLight ? 0.30 : 0.55) * gain})`);
-            lg.addColorStop(0.45, `rgba(${D.lamp[0]}, ${(isLight ? 0.10 : 0.18) * gain})`);
-            lg.addColorStop(1, `rgba(${D.lamp[0]}, 0)`);
-            if (!isLight) ctx.globalCompositeOperation = 'screen';
-            ctx.fillStyle = lg;
-            ctx.fillRect(x, y, w, h);
+            ctx.translate(L.X(310), L.Y(-110));
+            ctx.scale(600 * L.kx, 260 * L.ky);
+            const dg = ctx.createRadialGradient(0, 0, 0, 0, 0, 1);
+            dg.addColorStop(0, `rgba(${D.diffuser.color}, ${D.diffuser.alpha})`);
+            dg.addColorStop(0.48, `rgba(${D.diffuser.color}, 0.055)`);
+            dg.addColorStop(1, `rgba(${D.diffuser.color}, 0)`);
+            ctx.fillStyle = dg;
+            ctx.beginPath();
+            ctx.arc(0, 0.5, 0.5, 0, Math.PI * 2);
+            ctx.fill();
             ctx.restore();
         }
 
-        this.drawDialFace(ctx, D, P, { x, y, w, h, scale, isLight, compactLike, gsp: getScalePoint, majLen, gap: sz.gap * scale, fontPx, baseY, pivotX, pivotY });
-
-        // 2. Profile-specific decorations
-        this.drawDialDeco(ctx, D, P, { x, y, w, h, scale, t, isLight, isCompact, stereo, pivotX, pivotY, sx, ex, o });
-
-        // 3. Channel tag / stereo legend
-        ctx.save();
-        const tagSize = Math.max(7.5, Math.round(sz.tag * scale * D.font.scale));
-        const tagY = y + (stereo ? 4.5 : (isCompact ? 4.5 : 7.5)) * scale;
-        ctx.font = `700 ${tagSize}px ${fam}`;
-        ctx.fillStyle = P.muted;
-        ctx.textBaseline = 'top';
-        ctx.letterSpacing = '1px';
-        if (stereo) {
-            ctx.textAlign = 'center';
-            ctx.fillText('DUAL VU · STEREO', x + w / 2, tagY);
-            ctx.textAlign = 'left';
-            ctx.fillStyle = '#10b981';
+        const strokeArc = (r, alpha, width) => {
             ctx.beginPath();
-            ctx.arc(sx, tagY + 4 * scale, 2 * scale, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.fillStyle = P.muted;
-            ctx.fillText('L', sx + 5 * scale, tagY);
-            ctx.textAlign = 'right';
-            ctx.fillText('R', ex - 5 * scale, tagY);
-            ctx.fillStyle = P.red;
-            ctx.beginPath();
-            ctx.arc(ex, tagY + 4 * scale, 2 * scale, 0, Math.PI * 2);
-            ctx.fill();
-        } else if (D.tagAlign === 'left') {
-            ctx.textAlign = 'left';
-            ctx.fillText(D.tag(o.title), sx, tagY);
-        } else {
-            ctx.textAlign = 'center';
-            ctx.fillText(D.tag(o.title), x + w / 2, tagY);
-        }
-        ctx.restore();
-
-        // 4. Scale rail
-        const normZero = VU_NORM_ZERO;
-        const maxLevel = Math.max(0, ...o.needles.map(n => Math.min(1, n.level || 0)));
-        const strokeRail = (n0, n1, off, color, lw, steps) => {
-            ctx.beginPath();
-            for (let i = 0; i <= steps; i++) {
-                const p = getScalePoint(n0 + (n1 - n0) * (i / steps), off);
-                if (i === 0) ctx.moveTo(p.bx, p.by);
-                else ctx.lineTo(p.bx, p.by);
+            const n = 72;
+            for (let i = 0; i <= n; i++) {
+                const [px, py] = pt(angleOf(i / n), r);
+                if (i) ctx.lineTo(px, py); else ctx.moveTo(px, py);
             }
-            ctx.strokeStyle = color;
-            ctx.lineWidth = lw;
+            ctx.strokeStyle = vuHexA(D.accent, alpha);
+            ctx.lineWidth = lw(width, 0.5);
             ctx.stroke();
         };
-        const railW = (compactLike ? 1.0 : 1.4) * scale;
-        const redW = (compactLike ? 1.6 : 2.2) * scale;
-        const peaks = this.peaks || (this.peaks = {});
-        const peakInfo = o.needles.map(n => {
-            const key = (stereo ? 'S' : 'P') + n.key + (compactLike ? 'c' : 'f');
-            const pk = peaks[key] || (peaks[key] = { v: 0, t: nowMs, last: nowMs });
-            const norm = Math.max(0, Math.min(1, n.level || 0));
-            const dt = Math.min(0.1, (nowMs - pk.last) / 1000);
-            pk.last = nowMs;
-            if (norm >= pk.v) { pk.v = norm; pk.t = nowMs; }
-            else if (nowMs - pk.t > 700) pk.v = Math.max(norm, pk.v - dt * 0.5);
-            return pk.v;
-        });
-
         if (D.arc === 'double') {
-            const off = (D.arcInset || 2.0) * scale;
-            strokeRail(0, normZero, 0, P.arc, railW, 40);
-            strokeRail(0, normZero, -off, P.arc, railW * 0.55, 40);
-            strokeRail(normZero, 1, 0, P.red, redW, 15);
-            strokeRail(normZero, 1, -off, P.red, railW * 0.55, 15);
-        } else if (D.arc === 'band') {
-            const bw = D.arcBand * scale;
-            const band = (n0, n1, color, alpha, steps) => {
-                ctx.beginPath();
-                for (let i = 0; i <= steps; i++) {
-                    const p = getScalePoint(n0 + (n1 - n0) * (i / steps), 0);
-                    if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
-                }
-                for (let i = steps; i >= 0; i--) {
-                    const p = getScalePoint(n0 + (n1 - n0) * (i / steps), -bw);
-                    ctx.lineTo(p.bx, p.by);
-                }
-                ctx.closePath();
-                ctx.globalAlpha = alpha;
-                ctx.fillStyle = color;
-                ctx.fill();
-                ctx.globalAlpha = 1;
-            };
-            band(0, normZero, P.arc, isLight ? 0.22 : 0.20, 40);
-            band(normZero, 1, P.red, 0.5, 15);
-            strokeRail(0, normZero, 0, P.arc, railW * 0.8, 40);
-            strokeRail(normZero, 1, 0, P.red, redW * 0.8, 15);
-        } else if (D.arc === 'segments') {
-            const N = compactLike ? 24 : 32;
-            const segW = (compactLike ? 1.9 : 2.6) * scale;
-            const peakSeg = Math.min(N - 1, Math.floor(Math.max(...peakInfo) * N));
-            ctx.lineCap = 'butt';
-            for (let i = 0; i < N; i++) {
-                const c = (i + 0.5) / N;
-                const lit = c <= maxLevel + 0.5 / N;
-                const hot = c > normZero;
-                ctx.save();
-                if (lit || i === peakSeg) {
-                    ctx.globalAlpha = 1;
-                    if (!isLight) { ctx.shadowColor = hot ? P.red : P.glow; ctx.shadowBlur = 4 * scale; }
-                } else {
-                    ctx.globalAlpha = 0.2;
-                }
-                const col = (i === peakSeg && maxLevel < c) ? P.needle : (hot ? P.red : P.tip);
-                strokeRail(i / N + 0.004, (i + 0.66) / N, 0, col, segW, 3);
-                ctx.restore();
-            }
-        } else if (D.arc === 'none') {
-            strokeRail(normZero, 1, 0, P.red, redW, 15);
-        }
-
-        // 5. Ticks
-        const ticks = this.getScaleTicks(o.theme, compactLike);
-        ticks.forEach(tk => {
-            const p = getScalePoint(tk.norm);
-            const len = tk.major ? majLen : (tk.type === 'med' ? medLen : minLen);
-            const col = tk.isRed ? P.red : P.arc;
-            const lw = (tk.major ? (tk.isRed ? D.tick.lwMajor * 1.15 : D.tick.lwMajor) : D.tick.lwMinor) * scale;
-            ctx.fillStyle = col;
-            ctx.strokeStyle = col;
-            if (D.tick.style === 'dots') {
-                const r = (tk.major ? 1.5 : 0.85) * scale * (compactLike ? 0.85 : 1);
-                const d = tk.major ? len : len * 0.6;
-                ctx.beginPath();
-                ctx.arc(p.bx + p.ux * d, p.by + p.uy * d, r, 0, Math.PI * 2);
-                ctx.fill();
-            } else if (D.tick.style === 'wedge') {
-                const hw = lw * (tk.major ? 0.9 : 0.6);
-                ctx.beginPath();
-                ctx.moveTo(p.bx - p.uy * hw, p.by + p.ux * hw);
-                ctx.lineTo(p.bx + p.uy * hw, p.by - p.ux * hw);
-                ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
-                ctx.closePath();
-                ctx.fill();
-                if (tk.major) {
-                    ctx.beginPath();
-                    ctx.arc(p.bx + p.ux * (len + 1.6 * scale), p.by + p.uy * (len + 1.6 * scale), 0.9 * scale, 0, Math.PI * 2);
-                    ctx.fill();
-                }
-            } else {
-                ctx.lineWidth = lw;
-                ctx.beginPath();
-                ctx.moveTo(p.bx, p.by);
-                ctx.lineTo(p.bx + p.ux * len, p.by + p.uy * len);
-                ctx.stroke();
-            }
-        });
-
-        // 6. Scale labels
-        const fontSize = Math.max(stereo ? 8.0 : 8.5, Math.round(sz.font * scale * D.font.scale));
-        ctx.font = `${D.font.style === 'italic' ? 'italic ' : ''}${D.font.weight} ${fontSize}px ${fam}`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const labelGap = sz.gap * scale + (D.tick.style === 'wedge' ? 2 * scale : 0);
-        ticks.forEach(tk => {
-            if (!tk.label) return;
-            const p = getScalePoint(tk.norm);
-            const lx = p.bx + p.ux * (majLen + labelGap);
-            const ly = p.by + p.uy * (majLen + labelGap);
-            ctx.fillStyle = tk.isRed ? P.red : P.ink;
-            if (D.rotateLabels) {
-                ctx.save();
-                ctx.translate(lx, ly);
-                ctx.rotate(Math.atan2(p.uy, p.ux) + Math.PI / 2);
-                ctx.fillText(tk.label, 0, 0);
-                ctx.restore();
-            } else {
-                ctx.fillText(tk.label, lx, ly);
-            }
-        });
-
-        // 7. Centre mark
-        ctx.save();
-        const markSize = Math.max(7.5, Math.round((compactLike ? 9.2 : 13.0) * scale * D.font.scale));
-        ctx.font = `${D.markStyle === 'italic' ? 'italic ' : ''}800 ${markSize}px ${fam}`;
-        ctx.fillStyle = P.muted;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.letterSpacing = '2px';
-        ctx.fillText(D.mark, x + w / 2, baseY + sz.mark * scale);
-        ctx.restore();
-
-        // 8. Peak-hold markers (designs that opt in)
-        if (D.peak === 'tick') {
-            o.needles.forEach((n, i) => {
-                const norm = Math.max(0, Math.min(1, n.level || 0));
-                if (peakInfo[i] <= norm + 0.02) return;
-                const p = getScalePoint(Math.min(1, peakInfo[i]));
-                ctx.strokeStyle = P.tip;
-                ctx.lineWidth = 1.8 * scale;
-                ctx.beginPath();
-                ctx.moveTo(p.bx - p.ux * 1.5 * scale, p.by - p.uy * 1.5 * scale);
-                ctx.lineTo(p.bx + p.ux * (majLen + 2 * scale), p.by + p.uy * (majLen + 2 * scale));
-                ctx.stroke();
-            });
-        }
-
-        // 9. Pointers
-        const baseNY = y + h + 2 * scale;
-        const drawNeedle = (norm, tipColor, shadowSide) => {
-            const tp = getScalePoint(norm);
-            const dx = tp.bx - pivotX;
-            const dy = tp.by - pivotY;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            const nux = dx / dist;
-            const nuy = dy / dist;
-            const npX = -nuy;
-            const npY = nux;
-            const reach = majLen + 1.2 * scale * D.needle.reach;
-            const tx = tp.bx + nux * reach;
-            const ty = tp.by + nuy * reach;
-            const tB = (baseNY - pivotY) / nuy;
-            const bx = pivotX + tB * nux;
-            const by = baseNY;
-            const pt = (r) => ({ x: bx + (tx - bx) * r, y: by + (ty - by) * r });
-            const poly = (r0, w0, r1, w1, fill) => {
-                const a = pt(r0);
-                const b = pt(r1);
-                ctx.beginPath();
-                ctx.moveTo(a.x - npX * w0, a.y - npY * w0);
-                ctx.lineTo(a.x + npX * w0, a.y + npY * w0);
-                ctx.lineTo(b.x + npX * w1, b.y + npY * w1);
-                ctx.lineTo(b.x - npX * w1, b.y - npY * w1);
-                ctx.closePath();
-                ctx.fillStyle = fill;
-                ctx.fill();
-            };
-            const bw = (compactLike ? 0.9 : 1.3) * scale * D.needle.width;
-            const tw = (compactLike ? 0.25 : 0.35) * scale;
-            const wAt = (r, b0, t0) => b0 + (t0 - b0) * r;
-            const type = D.needle.type;
-
-            ctx.save();
-            if (type === 'lumen' || type === 'neon') {
-                ctx.shadowColor = P.glow;
-                ctx.shadowBlur = (type === 'neon' ? 8 : 6) * scale;
-            } else {
-                // Pointer floats above the card: a crisp, offset cast shadow (lit from the upper left)
-                ctx.shadowColor = isLight ? 'rgba(30, 20, 10, 0.38)' : 'rgba(0, 0, 0, 0.60)';
-                ctx.shadowBlur = (compactLike ? 1.2 : 1.8) * scale;
-                ctx.shadowOffsetX = (stereo ? 1.6 + shadowSide * 0.6 : 2.2) * scale;
-                ctx.shadowOffsetY = (compactLike ? 1.8 : 2.6) * scale;
-            }
-
-            if (type === 'blade') {
-                const b0 = bw * 1.15;
-                const tipStart = 0.88;
-                poly(0, b0, tipStart, wAt(tipStart, b0, tw), P.needle);
-                poly(tipStart, wAt(tipStart, b0, tw), 1, tw, tipColor);
-            } else if (type === 'lumen') {
-                const a = pt(0);
-                const b = pt(0.94);
-                ctx.lineCap = 'round';
-                ctx.strokeStyle = P.needle;
-                ctx.lineWidth = (compactLike ? 1.3 : 1.9) * scale;
-                ctx.beginPath();
-                ctx.moveTo(a.x, a.y);
-                ctx.lineTo(b.x, b.y);
-                ctx.stroke();
-                ctx.shadowBlur = 0;
-                ctx.strokeStyle = isLight ? 'rgba(255,255,255,0.75)' : 'rgba(14,116,144,0.55)';
-                ctx.lineWidth = 0.5 * scale;
-                ctx.beginPath();
-                ctx.moveTo(a.x, a.y);
-                ctx.lineTo(b.x, b.y);
-                ctx.stroke();
-                ctx.shadowColor = P.glow;
-                ctx.shadowBlur = 7 * scale;
-                ctx.fillStyle = tipColor;
-                ctx.beginPath();
-                ctx.arc(b.x, b.y, (compactLike ? 1.9 : 2.8) * scale, 0, Math.PI * 2);
-                ctx.fill();
-            } else if (type === 'neon') {
-                const a = pt(0);
-                const b = pt(0.92);
-                ctx.lineCap = 'butt';
-                ctx.strokeStyle = P.needle;
-                ctx.lineWidth = (compactLike ? 0.9 : 1.2) * scale;
-                ctx.beginPath();
-                ctx.moveTo(a.x, a.y);
-                ctx.lineTo(b.x, b.y);
-                ctx.stroke();
-                const dz = (compactLike ? 2.4 : 3.4) * scale;
-                const c = pt(0.96);
-                ctx.fillStyle = tipColor;
-                ctx.beginPath();
-                ctx.moveTo(c.x + nux * dz, c.y + nuy * dz);
-                ctx.lineTo(c.x + npX * dz * 0.55, c.y + npY * dz * 0.55);
-                ctx.lineTo(c.x - nux * dz, c.y - nuy * dz);
-                ctx.lineTo(c.x - npX * dz * 0.55, c.y - npY * dz * 0.55);
-                ctx.closePath();
-                ctx.fill();
-            } else if (type === 'deco') {
-                const b0 = bw * 1.5;
-                poly(0, b0, 0.8, b0 * 0.32, P.needle);
-                poly(0.8, b0 * 0.32, 1, tw * 0.6, P.needle);
-                const c = pt(0.8);
-                const L = (compactLike ? 3.0 : 4.4) * scale;
-                const W = (compactLike ? 1.5 : 2.1) * scale;
-                ctx.beginPath();
-                ctx.moveTo(c.x + nux * L, c.y + nuy * L);
-                ctx.lineTo(c.x + npX * W, c.y + npY * W);
-                ctx.lineTo(c.x - nux * L, c.y - nuy * L);
-                ctx.lineTo(c.x - npX * W, c.y - npY * W);
-                ctx.closePath();
-                ctx.fillStyle = tipColor;
-                ctx.fill();
-                ctx.strokeStyle = P.edge;
-                ctx.lineWidth = 0.6 * scale;
-                ctx.stroke();
-            } else {
-                const hw = (compactLike ? 0.5 : 0.7) * scale;
-                poly(0, hw, 0.78, hw * 0.75, P.needle);
-                poly(0.78, (compactLike ? 1.0 : 1.4) * scale, 1, tw * 0.7, tipColor);
-            }
-            ctx.restore();
-            return { bx, by };
-        };
-
-        let lastBase = { bx: pivotX, by: baseNY };
-        o.needles.forEach((n) => {
-            const norm = Math.max(0, Math.min(1.0, n.level || 0));
-            const color = stereo ? (n.channel === 'L' ? '#10b981' : P.red) : P.tip;
-            lastBase = drawNeedle(norm, color, n.channel === 'L' ? -1 : 1);
-        });
-
-        // 10. Pivot cap
-        const capX = stereo ? pivotX : lastBase.bx;
-        const capY = baseNY;
-        const capR = sz.cap * scale;
-        ctx.save();
-        const disc = (r) => { ctx.beginPath(); ctx.arc(capX, capY, r, 0, Math.PI * 2); };
-        if (D.cap === 'screw' || D.cap === 'rosette' || D.cap === 'jewel') {
-            const cg = ctx.createRadialGradient(capX - 0.5, capY - 0.5, 0.5, capX, capY, capR);
-            if (D.cap === 'rosette') {
-                cg.addColorStop(0, '#fff3c4'); cg.addColorStop(0.5, '#d4a93c'); cg.addColorStop(1, '#6b4a0c');
-            } else if (D.cap === 'jewel') {
-                cg.addColorStop(0, '#e0f7ff'); cg.addColorStop(0.45, isLight ? '#38bdf8' : '#7dd3fc'); cg.addColorStop(1, '#075985');
-            } else if (isLight) {
-                cg.addColorStop(0, '#ffffff'); cg.addColorStop(0.5, '#cbd5e1'); cg.addColorStop(1, '#64748b');
-            } else {
-                cg.addColorStop(0, '#d9c28a'); cg.addColorStop(0.55, '#8a6b2c'); cg.addColorStop(1, '#3b2a0c');
-            }
-            ctx.fillStyle = cg;
-            disc(capR);
-            ctx.fill();
-            if (D.cap === 'screw') {
-                ctx.strokeStyle = 'rgba(30, 20, 5, 0.6)';
-                ctx.lineWidth = 0.7 * scale;
-                ctx.beginPath();
-                ctx.moveTo(capX - capR * 0.6, capY);
-                ctx.lineTo(capX + capR * 0.6, capY);
-                ctx.stroke();
-            } else if (D.cap === 'rosette') {
-                ctx.strokeStyle = P.edge;
-                ctx.lineWidth = 0.6 * scale;
-                disc(capR);
-                ctx.stroke();
-                ctx.fillStyle = P.edge;
-                disc(capR * 0.3);
-                ctx.fill();
-            }
-        } else if (D.cap === 'ring') {
-            ctx.shadowColor = P.glow;
-            ctx.shadowBlur = isLight ? 0 : 5 * scale;
-            ctx.strokeStyle = P.needle;
-            ctx.lineWidth = 1.1 * scale;
-            disc(capR);
-            ctx.stroke();
-            ctx.fillStyle = P.tip;
-            disc(capR * 0.35);
-            ctx.fill();
+            strokeArc(g.radius + 12, 0.62, 0.65);
+            strokeArc(g.radius - 15, 0.34, 0.6);
+        } else if (D.arc === 'single') {
+            strokeArc(g.radius + 10, 0.8, 1.15);
         } else {
-            ctx.fillStyle = P.needle;
-            disc(capR * 0.8);
+            strokeArc(g.radius + 9, 0.48, 0.8);
+            strokeArc(g.radius - 15, 0.28, 0.55);
+        }
+
+        // Graduations
+        ctx.lineCap = 'round';
+        for (const m of D.marks) {
+            const deg = angleOf(vuNormToScale(m.norm));
+            const outer = pt(deg, g.radius + (m.major ? 2 : 0));
+            const ref = pt(deg, g.radius - 7);
+            const u0 = outer[0] - L.pivot[0];
+            const u1 = outer[1] - L.pivot[1];
+            const ul = Math.hypot(u0, u1) || 1;
+            const ux = u0 / ul;
+            const uy = u1 / ul;
+            const len = Math.max(Math.hypot(outer[0] - ref[0], outer[1] - ref[1]), compact ? (m.major ? 4.5 : 3) * dpr : 0);
+            const inner = [outer[0] - ux * len, outer[1] - uy * len];
+            ctx.strokeStyle = m.hot ? D.hot : (m.major ? D.ink : D.softInk);
+            ctx.beginPath();
+            if (D.tick === 'wedge' && !m.major) {
+                const wl = Math.max(5 * k, 2.5 * dpr);
+                ctx.lineWidth = lw(1.15, 0.8);
+                ctx.moveTo(inner[0], inner[1]);
+                ctx.lineTo(inner[0] - ux * wl, inner[1] - uy * wl);
+            } else {
+                ctx.lineWidth = D.tick === 'hair' ? lw(m.major ? 1.35 : 0.65, m.major ? 0.9 : 0.6) : lw(m.major ? 1.7 : 0.9, m.major ? 1 : 0.7);
+                ctx.moveTo(inner[0], inner[1]);
+                ctx.lineTo(outer[0], outer[1]);
+            }
+            ctx.stroke();
+        }
+
+        // Secondary 8 Ω power arc (detail size only)
+        if (showDetail && D.secondary) {
+            strokeArc(g.radius - 77, 0.42, 0.7);
+            ctx.lineWidth = lw(0.8, 0.6);
+            for (const m of D.secondary) {
+                const deg = angleOf(vuNormToScale(m.norm));
+                const a = pt(deg, g.radius - 82);
+                const b = pt(deg, g.radius - 72);
+                ctx.strokeStyle = m.hot ? D.hot : D.softInk;
+                ctx.beginPath();
+                ctx.moveTo(a[0], a[1]);
+                ctx.lineTo(b[0], b[1]);
+                ctx.stroke();
+            }
+            ctx.textBaseline = 'alphabetic';
+            this.printText(ctx, 'WATTS · 8 Ω', L.X(310), L.Y(197), `400 ${Math.max(7 * k, 6 * dpr).toFixed(2)}px ${D.type}`, D.softInk, 1.6 * k);
+        }
+
+        // Numerals
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const lbl of this.layoutScaleLabels(ctx, D, L, dpr, showDetail)) {
+            ctx.font = lbl.font;
+            ctx.fillStyle = lbl.color;
+            ctx.fillText(lbl.text, lbl.x, lbl.y);
+        }
+
+        // Stop pins just beyond the needle's travel
+        for (const p of [VU_SCALE_P_MIN - 0.015, VU_SCALE_P_MAX + 0.015]) {
+            const [px, py] = pt(angleOf(p), g.radius - 11);
+            const r = lw(2.6, 1.6);
+            ctx.fillStyle = this.frameGradient(ctx, D, px - r, py - r, r * 2, r * 2);
+            ctx.strokeStyle = D.accent;
+            ctx.lineWidth = lw(0.65, 0.5);
+            ctx.beginPath();
+            ctx.arc(px, py, r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.stroke();
+            ctx.fillStyle = vuHexA(D.ink, 0.72);
+            ctx.beginPath();
+            ctx.arc(px, py - 0.45 * k, lw(0.7, 0.45), 0, Math.PI * 2);
             ctx.fill();
         }
+
+        if (!compact) {
+            ctx.textBaseline = 'alphabetic';
+            this.printText(ctx, 'VU', L.X(310), L.Y(241), `600 ${Math.max(12 * k, 8 * dpr).toFixed(2)}px ${D.type}`, D.ink, 3.2 * k);
+            if (showDetail) {
+                this.printText(ctx, D.caption, L.X(310), L.Y(300), `400 ${Math.max(7 * k, 6 * dpr).toFixed(2)}px ${D.type}`, D.softInk, 1.3 * k);
+            }
+        }
+
+        this.drawNeedle(ctx, D, L, level, dpr);
+        this.drawHub(ctx, D, L, dpr);
         ctx.restore();
 
-        // 10b. Lacquered movement shroud: hides the pivot like a real meter and carries the badge
-        if (!compactLike) {
-            const shTop = y + h * 0.84;
-            const shEdge = y + h * 0.94;
-            const warmShroud = D.deco === 'vintage' || D.deco === 'champagne';
-            const curve = (first) => {
-                for (let i = 0; i <= 24; i++) {
-                    const u = i / 24;
-                    const v = 2 * u - 1;
-                    const px = x + w * u;
-                    const py = shTop + (shEdge - shTop) * v * v;
-                    if (i === 0 && first) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-                }
-            };
-            ctx.save();
-            ctx.beginPath();
-            ctx.moveTo(x, y + h + 1);
-            curve(false);
-            ctx.lineTo(x + w, y + h + 1);
-            ctx.closePath();
-            const shg = ctx.createLinearGradient(x, shTop, x, y + h);
-            shg.addColorStop(0, warmShroud ? '#3a2a18' : '#2a2f38');
-            shg.addColorStop(0.35, warmShroud ? '#1c140b' : '#14171c');
-            shg.addColorStop(1, '#050505');
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-            ctx.shadowBlur = 3 * scale;
-            ctx.shadowOffsetY = -1 * scale;
-            ctx.fillStyle = shg;
-            ctx.fill();
-            ctx.shadowColor = 'transparent';
-            ctx.beginPath();
-            curve(true);
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-            ctx.lineWidth = 0.7 * scale;
-            ctx.stroke();
-            ctx.font = `600 ${Math.max(6, Math.round(7.5 * scale))}px ${fam}`;
-            ctx.fillStyle = warmShroud ? 'rgba(230, 200, 140, 0.75)' : 'rgba(220, 226, 235, 0.65)';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.letterSpacing = '3px';
-            ctx.fillText('LX AUDIO', x + w / 2, (shTop + y + h) / 2 + 1 * scale);
-            ctx.restore();
+        // Furniture outside the printed clip
+        const hiFont = Math.max(9 * k, 7 * dpr);
+        ctx.textBaseline = 'middle';
+        if (compact) {
+            ctx.font = `600 ${Math.max(9 * k, 7.5 * dpr).toFixed(2)}px ${D.type}`;
+            ctx.fillStyle = D.ink;
+            ctx.textAlign = 'left';
+            ctx.fillText(channel, L.X(40), L.Y(70));
+        } else {
+            for (const sx of [29, 591]) {
+                ctx.fillStyle = vuHexA(D.accent, 0.72);
+                ctx.beginPath();
+                ctx.arc(L.X(sx), L.Y(28), lw(1.7, 1), 0, Math.PI * 2);
+                ctx.fill();
+            }
+            this.printText(ctx, channel === 'L' ? 'LEFT' : 'RIGHT', L.X(310), L.Y(47), `600 ${hiFont.toFixed(2)}px ${D.type}`, D.ink, 3.6 * k);
         }
 
-        // 11. Glass reflection
-        const glass = ctx.createLinearGradient(x, y, x, y + h * 0.45);
-        glass.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.25)' : 'rgba(255, 255, 255, 0.08)');
-        glass.addColorStop(0.5, isLight ? 'rgba(255, 255, 255, 0.08)' : 'rgba(255, 255, 255, 0.02)');
-        glass.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = glass;
-        ctx.fillRect(x, y, w, h * 0.45);
-        if (D.sheen) {
-            const sg = ctx.createLinearGradient(x, y, x + w, y + h);
-            sg.addColorStop(0.28, 'rgba(255, 255, 255, 0)');
-            sg.addColorStop(0.42, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.10)');
-            sg.addColorStop(0.55, 'rgba(255, 255, 255, 0)');
-            ctx.fillStyle = sg;
-            ctx.fillRect(x, y, w, h);
-        }
-        // Curved crystal reflection across the upper glass
+        // Clip / peak lamp
+        const lampOn = vuNormToScale(level) > 0.94;
+        const [lx, ly] = compact ? [L.X(580), L.Y(70)] : [L.X(562), L.Y(47)];
         ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + w, y);
-        ctx.lineTo(x + w, y + h * 0.22);
-        for (let i = 1; i <= 24; i++) {
-            const u = 1 - i / 24;
-            const v = 2 * u - 1;
-            ctx.lineTo(x + w * u, y + h * (0.36 - 0.14 * v * v));
+        if (lampOn) {
+            ctx.shadowColor = D.hot;
+            ctx.shadowBlur = lw(6, 3);
         }
-        ctx.closePath();
-        const cr = ctx.createLinearGradient(x, y, x, y + h * 0.36);
-        cr.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.22)' : 'rgba(255, 255, 255, 0.09)');
-        cr.addColorStop(1, 'rgba(255, 255, 255, 0)');
-        ctx.fillStyle = cr;
+        ctx.globalAlpha = lampOn ? 0.95 : 0.22;
+        ctx.fillStyle = D.hot;
+        ctx.beginPath();
+        ctx.arc(lx, ly, lw(3, 1.6), 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-        ctx.restore(); // end clip
-
-        // 12. Bezel
-        if (isCompact || stereo) {
-            ctx.strokeStyle = isLight ? 'rgba(15, 23, 42, 0.08)' : 'rgba(255, 255, 255, 0.08)';
-            ctx.lineWidth = 1;
-            this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
-            ctx.stroke();
-        } else {
-            // Machined metal bezel: brushed gradient ring with inner shadow lip and a specular top edge
-            const warmMetal = D.deco === 'vintage' || D.deco === 'champagne';
-            const ringW = 3.2 * scale;
-            const mg = ctx.createLinearGradient(x, y - ringW, x, y + h + ringW);
-            if (warmMetal) {
-                mg.addColorStop(0, '#f4dfa4'); mg.addColorStop(0.25, '#b68a3a'); mg.addColorStop(0.55, '#6e4f17'); mg.addColorStop(0.8, '#c9a557'); mg.addColorStop(1, '#4a3410');
-            } else if (D.deco === 'mono') {
-                mg.addColorStop(0, '#f1f5f9'); mg.addColorStop(0.3, '#94a3b8'); mg.addColorStop(0.6, '#475569'); mg.addColorStop(1, '#1e293b');
-            } else {
-                mg.addColorStop(0, '#e2e8f0'); mg.addColorStop(0.3, '#7c8da3'); mg.addColorStop(0.6, '#3b4a5e'); mg.addColorStop(1, '#141c27');
-            }
-            ctx.strokeStyle = mg;
-            ctx.lineWidth = ringW;
-            this.roundRect(ctx, x - ringW / 2, y - ringW / 2, w + ringW, h + ringW, podR + ringW / 2);
-            ctx.stroke();
-            ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-            ctx.lineWidth = 0.6 * scale;
-            this.roundRect(ctx, x - ringW, y - ringW, w + ringW * 2, h + ringW * 2, podR + ringW);
-            ctx.stroke();
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
-            ctx.lineWidth = 1.0 * scale;
-            this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, podR);
-            ctx.stroke();
-            ctx.strokeStyle = P.rim;
-            ctx.lineWidth = 0.6 * scale;
-            this.roundRect(ctx, x - 0.5, y - 0.5, w + 1, h + 1, podR);
-            ctx.stroke();
-        }
         ctx.restore();
     }
 
-    // Per-profile dial face layout: scale window, printed zones and panel structure (under scale and pointer)
-    drawDialFace(ctx, D, P, c) {
-        const { x, y, w, h, scale, isLight, compactLike, gsp, majLen, gap, fontPx, baseY, pivotX, pivotY } = c;
-        const outer = majLen + gap + fontPx * 0.75;
-        const inner = -(compactLike ? 3 : 5) * scale;
-        const small = Math.max(6, Math.round(7 * scale));
-        const dash = (a) => { if (typeof ctx.setLineDash === 'function') ctx.setLineDash(a); };
-        const band = (n0, n1, a, b, steps = 36) => {
+    // Needle is drawn in pixel space from the pivot to the elliptical tip, so its width never deforms.
+    drawNeedle(ctx, D, L, level, dpr) {
+        const g = D.geometry;
+        const k = L.k;
+        const tip = L.pt(L.angleOf(vuNormToScale(level)), g.radius - 9);
+        const [cx, cy] = L.pivot;
+        const len = Math.hypot(tip[0] - cx, tip[1] - cy) || 1;
+        const ux = (tip[0] - cx) / len;
+        const uy = (tip[1] - cy) / len;
+        const nx = -uy;
+        const ny = ux;
+        const blade = D.pointer === 'blade';
+        const hw = (v, min) => Math.max(v * k, min * dpr);
+        const section = (from, to, w0, w1) => {
+            const at = (t, s) => [cx + ux * t + nx * s, cy + uy * t + ny * s];
+            const mid = (from + to) / 2;
+            const wm = (w0 + w1) / 2;
+            const pts = [at(from, w0), at(mid, wm), at(to, w1), at(to, -w1), at(mid, -wm), at(from, -w0)];
             ctx.beginPath();
-            for (let i = 0; i <= steps; i++) {
-                const p = gsp(n0 + (n1 - n0) * (i / steps), a);
-                if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
-            }
-            for (let i = steps; i >= 0; i--) {
-                const p = gsp(n0 + (n1 - n0) * (i / steps), b);
-                ctx.lineTo(p.bx, p.by);
-            }
+            pts.forEach(([px, py], i) => (i ? ctx.lineTo(px, py) : ctx.moveTo(px, py)));
             ctx.closePath();
+            ctx.fill();
         };
-        const lower = (n0, n1) => {
-            ctx.beginPath();
-            for (let i = 0; i <= 36; i++) {
-                const p = gsp(n0 + (n1 - n0) * (i / 36), inner);
-                if (i === 0) ctx.moveTo(p.bx, p.by); else ctx.lineTo(p.bx, p.by);
-            }
-            ctx.lineTo(x + w, y + h);
-            ctx.lineTo(x, y + h);
-            ctx.closePath();
-        };
+        const colors = D.pointerColors || (blade ? ['#41311f', '#171717', '#56442c'] : ['#596064', '#f3eee1', '#71777a']);
+        const w0 = hw(blade ? 2.15 : 1.15, blade ? 1.1 : 0.6);
+        const w1 = hw(blade ? 0.45 : 0.32, blade ? 0.35 : 0.3);
+        const grad = ctx.createLinearGradient(cx - nx * w0, cy - ny * w0, cx + nx * w0, cy + ny * w0);
+        grad.addColorStop(0, colors[0]);
+        grad.addColorStop(0.47, colors[1]);
+        grad.addColorStop(1, colors[2]);
+
         ctx.save();
-        if (D.deco === 'vintage') {
-            // Cream scale window set into a darker lacquered housing, red zone printed as a tint
-            lower(-0.045, 1.045);
-            ctx.fillStyle = isLight ? 'rgba(90, 55, 15, 0.12)' : 'rgba(50, 28, 5, 0.28)';
-            ctx.fill();
-            band(-0.045, 1.045, inner, outer);
-            const wg = ctx.createLinearGradient(x, y, x, y + h);
-            wg.addColorStop(0, isLight ? 'rgba(255, 253, 242, 0.80)' : 'rgba(255, 249, 228, 0.62)');
-            wg.addColorStop(1, isLight ? 'rgba(255, 244, 214, 0.40)' : 'rgba(255, 232, 165, 0.28)');
-            ctx.fillStyle = wg;
-            ctx.fill();
-            band(VU_NORM_ZERO, 1.045, inner, outer, 12);
-            ctx.fillStyle = 'rgba(200, 30, 58, 0.11)';
-            ctx.fill();
-            ctx.strokeStyle = P.frame;
-            ctx.lineWidth = 1.0 * scale;
-            band(-0.045, 1.045, inner, outer);
-            ctx.stroke();
-            ctx.lineWidth = 0.5 * scale;
-            band(-0.03, 1.03, inner + 1.6 * scale, outer - 1.6 * scale);
-            ctx.stroke();
-            if (!compactLike) {
-                ctx.font = `700 ${small}px ${D.font.family}`;
-                ctx.fillStyle = P.muted;
-                ctx.textBaseline = 'middle';
-                ctx.letterSpacing = '2px';
-                ctx.textAlign = 'left';
-                ctx.fillText('LX AUDIO', x + 12 * scale, y + h - 9 * scale);
-                ctx.textAlign = 'right';
-                ctx.fillText('PRECISION METER', x + w - 12 * scale, y + h - 9 * scale);
-            }
-        } else if (D.deco === 'ocean' || D.deco === 'cyber') {
-            // Backlit translucent scale window with a fine double rule and printed red zone
-            band(-0.035, 1.035, inner, outer);
-            const sg = ctx.createLinearGradient(x, y, x, y + h);
-            sg.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.45)' : 'rgba(255, 255, 255, 0.10)');
-            sg.addColorStop(1, isLight ? 'rgba(255, 255, 255, 0.12)' : 'rgba(255, 255, 255, 0.02)');
-            ctx.fillStyle = sg;
-            ctx.fill();
-            ctx.strokeStyle = P.arc;
-            ctx.globalAlpha = 0.5;
-            ctx.lineWidth = 0.8 * scale;
-            ctx.stroke();
-            ctx.lineWidth = 0.45 * scale;
-            band(-0.02, 1.02, inner + 1.6 * scale, outer - 1.6 * scale);
-            ctx.stroke();
-            ctx.globalAlpha = 0.12;
-            band(VU_NORM_ZERO, 1.035, inner, outer, 12);
-            ctx.fillStyle = P.red;
-            ctx.fill();
-            ctx.globalAlpha = 1;
-        } else if (D.deco === 'champagne') {
-            // Arched cartouche with pearl-studded border above a pinstriped gold pedestal
-            lower(-0.05, 1.05);
-            const pg = ctx.createLinearGradient(x, y + h * 0.6, x, y + h);
-            pg.addColorStop(0, isLight ? 'rgba(150, 105, 20, 0.10)' : 'rgba(110, 70, 10, 0.18)');
-            pg.addColorStop(1, isLight ? 'rgba(120, 80, 10, 0.26)' : 'rgba(70, 40, 5, 0.42)');
-            ctx.fillStyle = pg;
-            ctx.fill();
-            ctx.save();
-            lower(-0.05, 1.05);
-            ctx.clip();
-            ctx.strokeStyle = P.frame;
-            ctx.globalAlpha = 0.18;
-            ctx.lineWidth = 0.5 * scale;
-            const step = Math.max(2.5, 3 * scale);
-            ctx.beginPath();
-            for (let px = x; px <= x + w; px += step) { ctx.moveTo(px, y); ctx.lineTo(px, y + h); }
-            ctx.stroke();
-            ctx.restore();
-            band(-0.05, 1.05, inner, outer);
-            const cg = ctx.createLinearGradient(x, y, x, y + h);
-            cg.addColorStop(0, isLight ? 'rgba(255, 255, 250, 0.75)' : 'rgba(255, 252, 236, 0.60)');
-            cg.addColorStop(1, isLight ? 'rgba(255, 248, 215, 0.35)' : 'rgba(255, 236, 170, 0.25)');
-            ctx.fillStyle = cg;
-            ctx.fill();
-            ctx.strokeStyle = P.frame;
-            ctx.lineWidth = 1.1 * scale;
-            ctx.stroke();
-            ctx.lineWidth = 0.5 * scale;
-            band(-0.035, 1.035, inner + 1.8 * scale, outer - 1.8 * scale);
-            ctx.stroke();
-            ctx.fillStyle = P.frame;
-            const pearls = compactLike ? 14 : 22;
-            for (let i = 0; i <= pearls; i++) {
-                const p = gsp(-0.035 + 1.07 * (i / pearls), outer);
-                ctx.beginPath();
-                ctx.arc(p.bx, p.by, (compactLike ? 0.6 : 0.85) * scale, 0, Math.PI * 2);
-                ctx.fill();
-            }
-            if (!compactLike) {
-                ctx.font = `italic 700 ${small}px ${D.font.family}`;
-                ctx.fillStyle = P.muted;
-                ctx.textBaseline = 'middle';
-                ctx.letterSpacing = '3px';
-                ctx.textAlign = 'left';
-                ctx.fillText('LX AUDIO', x + 12 * scale, y + h - 9 * scale);
-                ctx.textAlign = 'right';
-                ctx.fillText('MASTER SERIES', x + w - 12 * scale, y + h - 9 * scale);
-            }
-        } else if (D.deco === 'mono') {
-            // Bauhaus layout: solid overload block, heavy top bar and a baseline rule
-            band(VU_NORM_ZERO, 1.03, inner, outer, 12);
-            ctx.fillStyle = P.red;
-            ctx.globalAlpha = isLight ? 0.10 : 0.16;
-            ctx.fill();
-            ctx.globalAlpha = 1;
-            ctx.fillStyle = P.ink;
-            ctx.fillRect(x, y, w, (compactLike ? 1.8 : 3) * scale);
-            const by = y + h - (compactLike ? 4 : 8) * scale;
-            ctx.strokeStyle = P.rule;
-            ctx.lineWidth = 0.6 * scale;
-            ctx.beginPath();
-            ctx.moveTo(x + 8 * scale, by);
-            ctx.lineTo(x + w - 8 * scale, by);
-            ctx.stroke();
-            if (!compactLike) {
-                ctx.font = `600 ${small}px ${D.font.family}`;
-                ctx.fillStyle = P.muted;
-                ctx.textBaseline = 'bottom';
-                ctx.letterSpacing = '2px';
-                ctx.textAlign = 'left';
-                ctx.fillText('dB', x + 10 * scale, by - 2 * scale);
-                ctx.textAlign = 'right';
-                ctx.fillText('LX / 01', x + w - 10 * scale, by - 2 * scale);
-            }
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.28)';
+        ctx.shadowBlur = Math.max(2.7 * k, 1.2 * dpr);
+        ctx.shadowOffsetX = 1.5 * k;
+        ctx.shadowOffsetY = 2 * k;
+        ctx.fillStyle = grad;
+        if (D.pointer === 'counterweight') section(-26 * k, -6 * k, hw(1.25, 0.8), hw(1.8, 1.1));
+        section(5 * k, len * (blade ? 0.88 : 1), w0, w1);
+        if (blade) {
+            ctx.fillStyle = D.hot;
+            section(len * 0.88, len, w1, hw(0.16, 0.2));
         }
+        ctx.restore();
+
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+        ctx.lineWidth = Math.max(0.55 * k, 0.4 * dpr);
+        ctx.lineCap = 'round';
+        const off = 0.35 * k;
+        const s1 = len * (blade ? 0.82 : 0.75);
+        ctx.beginPath();
+        ctx.moveTo(cx + ux * 13 * k + nx * off, cy + uy * 13 * k + ny * off);
+        ctx.lineTo(cx + ux * s1 + nx * off, cy + uy * s1 + ny * off);
+        ctx.stroke();
         ctx.restore();
     }
 
-    // Decorative layer unique to each profile (drawn on the face, under scale and pointer)
-    drawDialDeco(ctx, D, P, c) {
-        const { x, y, w, h, scale, t, isLight } = c;
-        ctx.save();
-        if (D.deco === 'vintage') {
-            const g = ctx.createRadialGradient(x + w / 2, y + h * 0.35, 4 * scale, x + w / 2, y + h * 0.35, w * 0.5);
-            g.addColorStop(0, P.glow);
-            g.addColorStop(1, 'rgba(255, 200, 90, 0)');
-            ctx.globalAlpha = isLight ? 0.35 : 0.55;
-            ctx.fillStyle = g;
-            ctx.fillRect(x, y, w, h);
-            ctx.globalAlpha = 1;
-            const inset = 2.5 * scale;
-            ctx.strokeStyle = P.frame;
-            ctx.lineWidth = 0.9 * scale;
-            this.roundRect(ctx, x + inset, y + inset, w - inset * 2, h - inset * 2, 5 * scale);
-            ctx.stroke();
-            const r = 1.4 * scale;
-            [[x + 6 * scale, y + 6 * scale], [x + w - 6 * scale, y + 6 * scale], [x + 6 * scale, y + h - 6 * scale], [x + w - 6 * scale, y + h - 6 * scale]].forEach(([px, py]) => {
-                ctx.fillStyle = '#b08d57';
-                ctx.beginPath();
-                ctx.arc(px, py, r, 0, Math.PI * 2);
-                ctx.fill();
-                ctx.strokeStyle = 'rgba(40, 25, 5, 0.7)';
-                ctx.lineWidth = 0.5 * scale;
-                ctx.beginPath();
-                ctx.moveTo(px - r * 0.7, py - r * 0.7);
-                ctx.lineTo(px + r * 0.7, py + r * 0.7);
-                ctx.stroke();
-            });
-        } else if (D.deco === 'champagne') {
-            const R = (c.pivotY - y) + h;
-            const half = Math.atan2(w * 0.6, c.pivotY - y);
-            const n = 18;
-            const step = (half * 2) / n;
-            ctx.fillStyle = P.ray;
-            for (let i = 0; i < n; i += 2) {
-                const a0 = -Math.PI / 2 - half + i * step;
-                const a1 = a0 + step;
-                ctx.beginPath();
-                ctx.moveTo(c.pivotX, c.pivotY);
-                ctx.lineTo(c.pivotX + R * Math.cos(a0), c.pivotY + R * Math.sin(a0));
-                ctx.lineTo(c.pivotX + R * Math.cos(a1), c.pivotY + R * Math.sin(a1));
-                ctx.closePath();
-                ctx.fill();
-            }
-            ctx.strokeStyle = P.frame;
-            ctx.lineWidth = 0.9 * scale;
-            this.roundRect(ctx, x + 2.2 * scale, y + 2.2 * scale, w - 4.4 * scale, h - 4.4 * scale, 5 * scale);
-            ctx.stroke();
-            ctx.lineWidth = 0.5 * scale;
-            this.roundRect(ctx, x + 4.2 * scale, y + 4.2 * scale, w - 8.4 * scale, h - 8.4 * scale, 4 * scale);
-            ctx.stroke();
-            const d = 2.6 * scale;
-            ctx.fillStyle = P.frame;
-            [[x + 8 * scale, y + 8 * scale], [x + w - 8 * scale, y + 8 * scale], [x + 8 * scale, y + h - 8 * scale], [x + w - 8 * scale, y + h - 8 * scale]].forEach(([px, py]) => {
-                ctx.beginPath();
-                ctx.moveTo(px, py - d);
-                ctx.lineTo(px + d, py);
-                ctx.lineTo(px, py + d);
-                ctx.lineTo(px - d, py);
-                ctx.closePath();
-                ctx.fill();
-            });
-        } else if (D.deco === 'mono') {
-            const ry = y + (c.isCompact || c.stereo ? 15 : 24) * scale;
-            ctx.strokeStyle = P.rule;
-            ctx.lineWidth = 0.6 * scale;
-            ctx.beginPath();
-            ctx.moveTo(c.sx, ry);
-            ctx.lineTo(c.ex, ry);
-            ctx.stroke();
-        }
-        ctx.restore();
+    drawHub(ctx, D, L, dpr) {
+        const k = L.k;
+        const [cx, cy] = L.pivot;
+        const blade = D.pointer === 'blade';
+        const r0 = Math.max((blade ? 11 : 9) * k, 4 * dpr);
+        const r1 = r0 * (blade ? 6.5 / 11 : 5.5 / 9);
+        const r2 = r0 * 2 / (blade ? 11 : 9);
+        ctx.beginPath();
+        ctx.arc(cx, cy, r0, 0, Math.PI * 2);
+        ctx.fillStyle = this.frameGradient(ctx, D, cx - r0, cy - r0, r0 * 2, r0 * 2);
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.85)';
+        ctx.lineWidth = Math.max(1.3 * k, 0.6 * dpr);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r1, 0, Math.PI * 2);
+        ctx.fillStyle = blade ? '#b4935c' : '#1d2020';
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.38)';
+        ctx.lineWidth = Math.max(0.8 * k, 0.5 * dpr);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, cy, r2, 0, Math.PI * 2);
+        ctx.fillStyle = blade ? '#312719' : D.accent;
+        ctx.fill();
     }
 
-
-    drawCenterConsole(ctx, x, y, w, h, scale, isCompact, theme, isLight, levelL, levelR) {
+    drawCenterConsole(ctx, x, y, w, h, scale, isCompact, D, isLight, levelL, levelR) {
         if (isCompact) {
             this.drawCompactBridge(ctx, x, y, w, h, scale, isLight, levelL, levelR);
             return;
@@ -1422,11 +847,11 @@ class LXStudioVUMeterAnimation {
             this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, cornerR);
             ctx.stroke();
         } else {
-            ctx.fillStyle = theme === 'champagne-gold' ? '#181510' : '#0e1014';
+            ctx.fillStyle = '#0e1014';
             this.roundRect(ctx, x, y, w, h, cornerR);
             ctx.fill();
 
-            ctx.strokeStyle = theme === 'champagne-gold' ? 'rgba(218, 185, 120, 0.18)' : 'rgba(255, 255, 255, 0.06)';
+            ctx.strokeStyle = vuHexA(D.accent, 0.18);
             ctx.lineWidth = 0.8 * scale;
             this.roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, cornerR);
             ctx.stroke();
@@ -1439,7 +864,7 @@ class LXStudioVUMeterAnimation {
         ctx.save();
         const logoSize = Math.max(7.5, Math.round((isCompact ? 8.8 : 12.0) * scale));
         ctx.font = `700 ${logoSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter", sans-serif`;
-        ctx.fillStyle = isLight ? '#059669' : ((theme === 'vintage-amber' || theme === 'champagne-gold') ? '#d4af37' : '#10b981');
+        ctx.fillStyle = isLight ? '#059669' : D.accent;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.letterSpacing = '1.5px';
@@ -1964,7 +1389,7 @@ const musicVisualizer = (function () {
         const isMobile = window.innerWidth < 1025;
         const style = s.footerVisualizerStyle || 'bars';
         const isVumeter = style === 'vumeter';
-        const shouldShow = !!s.showFooterVisualizer && !isVisualizerSuppressedByIOS();
+        const shouldShow = !!s.showFooterVisualizer && !isVisualizerSuppressedByIOS() && !(isVuMobileViewport() && s.footerVisualizerStyle === 'vumeter');
 
         playerFooter.classList.toggle('has-footer-visualizer', shouldShow);
         container.style.display = shouldShow ? 'flex' : 'none';
@@ -2028,8 +1453,8 @@ const musicVisualizer = (function () {
         const visualizerContainer = document.getElementById('visualizer-container');
         const progressRow = document.getElementById('player-progress-row');
 
-        const shouldShowFooter = !!s.showFooterVisualizer && !isVisualizerSuppressedByIOS();
-        const shouldShowDetail = !!s.showDetailVisualizer && !isVisualizerSuppressedByIOS();
+        const shouldShowFooter = !!s.showFooterVisualizer && !isVisualizerSuppressedByIOS() && !(isVuMobileViewport() && s.footerVisualizerStyle === 'vumeter');
+        const shouldShowDetail = !!s.showDetailVisualizer && !isVisualizerSuppressedByIOS() && !(isVuMobileViewport() && s.detailVisualizerStyle === 'vumeter');
 
         if (!isInitialized) {
             if (!shouldShowFooter && !shouldShowDetail) {
