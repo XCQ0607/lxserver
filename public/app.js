@@ -4019,7 +4019,7 @@ class App {
             const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             const fmtName = (f) => {
                 const nm = (f.name || '').toString().trim()
-                const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
+                const base = nm ? nm.split(/[\\/]/).pop() : ((f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)')
                 return esc(base)
             }
             const fmtSize = (n) => {
@@ -4057,7 +4057,7 @@ class App {
                     '<td style="text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
                     '<td><span class="olb-user-tag">' + esc(f.user || '') + '</span></td>' +
                     '<td style="white-space:nowrap;color:var(--text-secondary);">' + typeLabel + '</td>' +
-                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
+                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + esc(f.name || f.local_path || '') + '">' + fmtName(f) + '</td>' +
                     '<td style="text-align:center;white-space:nowrap;"><span class="olb-badge" style="--badge-color:' + color + ';"><span class="olb-badge-dot"></span>' + label + '</span></td>' +
                     '<td style="white-space:nowrap;font-family:monospace;font-size:0.8rem;">' + fmtSize(f.size) + '</td>' +
                     '<td style="text-align:center;">' + localMark + '</td>' +
@@ -4162,7 +4162,8 @@ class App {
         const title = document.getElementById('modal-title')
         const body = document.getElementById('modal-body')
         if (modal && title && body) {
-            title.textContent = '记录详情 #' + f.id + (f.name ? ' · ' + f.name : '')
+            const nmBase = String(f.name || '').trim().split(/[\\/]/).pop() || ''
+            title.textContent = '记录详情 #' + f.id + (nmBase ? ' · ' + nmBase : '')
             body.innerHTML = html
             modal.classList.remove('hidden')
         } else {

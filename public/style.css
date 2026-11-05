@@ -6902,6 +6902,31 @@ input:-webkit-autofill:active {
     background: var(--badge-color, currentColor);
 }
 
+.olb-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 0.85rem;
+}
+
+.olb-detail-table td {
+    padding: 0.45rem 0.6rem;
+    vertical-align: top;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.15);
+    word-break: break-all;
+}
+
+.olb-detail-key {
+    width: 96px;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+.olb-detail-val {
+    color: var(--text-primary);
+}
+
 .olb-user-tag {
     display: inline-block;
     padding: 1px 7px;
