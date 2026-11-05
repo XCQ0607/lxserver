@@ -5410,7 +5410,7 @@ class App {
             container.innerHTML = list.map(item => `
             <div class="snapshot-row">
                 <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-                <div class="col-id" title="${item.id}">snapshot_${item.id} ${item.kind === 'dislike' ? '<span style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">我不喜欢</span>' : '<span style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">我的歌单</span>'}</div>
+                <div class="col-id"><span class="col-id-text" title="snapshot_${item.id}">snapshot_${item.id}</span>${item.kind === 'dislike' ? '<span class="kind-tag" style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我不喜欢</span>' : '<span class="kind-tag" style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的歌单</span>'}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
                     <button class="btn-download" onclick="app.downloadSnapshot('${item.id}', '${item.kind || 'list'}')">

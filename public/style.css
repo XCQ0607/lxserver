@@ -4838,11 +4838,23 @@ input:-webkit-autofill:active {
     padding: 0.25rem 0.5rem;
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.06);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    min-width: 0;
+    overflow: hidden;
+}
+
+/* ID 文本单独截断，避免挤掉后面的类型标签 */
+.col-id .col-id-text {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    display: inline-block;
-    max-width: fit-content;
+    min-width: 0;
+}
+
+.col-id .kind-tag {
+    flex-shrink: 0;
 }
 
 .col-size {
@@ -4954,13 +4966,19 @@ input:-webkit-autofill:active {
 
     /* 快照ID显示优化 */
     .col-id {
-        display: block !important;
+        display: flex !important;
+        flex-wrap: wrap;
         font-family: monospace;
         font-size: 0.85rem;
         color: var(--text-secondary);
-        word-break: break-all;
-        white-space: normal;
         margin-top: -0.25rem;
+    }
+
+    .col-id .col-id-text {
+        overflow: visible;
+        text-overflow: unset;
+        white-space: normal;
+        word-break: break-all;
     }
 
     /* 操作按钮区域：使用网格布局，一行三个按钮 */
