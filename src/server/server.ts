@@ -1945,7 +1945,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         const userSpace = getUserSpace(verifiedUser)
         try {
-          const list = await userSpace.listManage.getSnapshotList()
+          const listSnaps = await userSpace.listManage.getSnapshotList()
+          const dislikeSnaps = userSpace.dislikeManage ? await userSpace.dislikeManage.snapshotDataManage.getSnapshotListWithMeta() : []
+          const list = [
+            ...listSnaps.map(s => ({ ...s, kind: 'list' })),
+            ...dislikeSnaps.map(s => ({ ...s, kind: 'dislike' })),
+          ].sort((a, b) => (b.time || 0) - (a.time || 0))
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
@@ -1992,7 +1997,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         try {
-          const data = await userSpace.listManage.getSnapshot(id)
+          let data: any = await userSpace.listManage.getSnapshot(id)
+          if (!data && userSpace.dislikeManage) {
+            data = await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)
+          }
           if (!data) {
             res.writeHead(404)
             res.end('Not Found')
@@ -2239,8 +2247,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const { id } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
 
-          // 调用刚刚在 ListManage 中添加的方法
-          await userSpace.listManage.removeSnapshot(id)
+          let removed = false
+          try { await userSpace.listManage.removeSnapshot(id); removed = true } catch { /* 尝试不喜欢快照 */ }
+          if (!removed && userSpace.dislikeManage) {
+            try { await userSpace.dislikeManage.snapshotDataManage.removeSnapshot(id); removed = true } catch { /* ignore */ }
+          }
+          if (!removed) throw new Error('快照不存在或删除失败')
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))

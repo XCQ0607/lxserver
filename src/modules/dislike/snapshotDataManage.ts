@@ -122,6 +122,26 @@ export class SnapshotDataManage {
     void (globalThis as any).lx?.removeSnapshotLocalBackups?.(this.userDataManage.userName, name)
   }
 
+  /** 列出不喜欢快照（与歌单快照 getSnapshotListWithMeta 同构，供 /api/data/snapshots 合并展示） */
+  getSnapshotListWithMeta = async () => {
+    const list: Array<{ id: string, time: number, size: number }> = []
+    try {
+      const files = await fs.promises.readdir(this.snapshotDir)
+      for (const file of files) {
+        if (!file.startsWith('snapshot_')) continue
+        const name = file.replace('snapshot_', '')
+        const filePath = path.join(this.snapshotDir, file)
+        try {
+          const stat = await fs.promises.stat(filePath)
+          list.push({ id: name, time: stat.mtimeMs, size: stat.size })
+        } catch { /* ignore missing files */ }
+      }
+    } catch (err) {
+      syncLog.error(err)
+    }
+    return list.sort((a, b) => b.time - a.time)
+  }
+
 
   /**
    * 动态更新快照目录并迁移历史数据（无需重启即时生效）

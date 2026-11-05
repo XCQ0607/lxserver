@@ -3928,7 +3928,12 @@ class App {
             const scope = this._olbFolderScope
             if (scope) {
                 const allowed = scope.split(',')
-                list = list.filter(f => allowed.includes(f.folder_type))
+                list = list.filter(f => {
+                    if (allowed.includes(f.folder_type)) return true
+                    // 歌单快照 tab：selectedData 模式下歌单/不喜欢快照记在 folder_type='data'，路径含 /(list|dislike)/snapshot，需纳入展示
+                    if (allowed.includes('list') && f.folder_type === 'data' && /(^|[\\/])(list|dislike)[\\/]snapshot([\\/]|$)/i.test(f.local_path || f.name || '')) return true
+                    return false
+                })
             }
             this._olbCurrentList = list
             // 状态指标卡：基于当前页签过滤后的列表统计各状态数量（deleted 不计入 list，通常为 0）
@@ -5386,6 +5391,7 @@ class App {
                         </svg>
                         下载备份
                     </button>
+                    ${item.kind !== 'dislike' ? `
                     <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}')">
                         <!-- 恢复图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
@@ -5393,7 +5399,7 @@ class App {
                             <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
                         </svg>
                         回滚
-                    </button>
+                    </button>` : ''}
                     <!-- [新增] 删除按钮 -->
                     <button class="btn-delete" onclick="app.deleteSnapshot('${item.id}')">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
