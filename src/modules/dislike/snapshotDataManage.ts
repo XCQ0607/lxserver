@@ -76,6 +76,19 @@ export class SnapshotDataManage {
     this.saveSnapshotInfoThrottle()
   }
 
+  // 回滚时清空客户端快照键，迫使其下次同步重新拉取最新数据
+  clearClients = () => {
+    this.snapshotInfo.clients = {}
+    this.clientSnapshotKeys = []
+    this.saveSnapshotInfoThrottle()
+  }
+
+  // 将指定快照标记为 latest，使「当前 dislike 数据」回滚到该快照
+  setLatest = (name: string) => {
+    this.snapshotInfo.latest = name
+    this.saveSnapshotInfoThrottle()
+  }
+
   getSnapshot = async(name: string) => {
     const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
     let listData: LX.Dislike.DislikeRules

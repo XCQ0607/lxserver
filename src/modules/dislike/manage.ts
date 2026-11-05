@@ -51,5 +51,14 @@ export class DislikeManage {
   getDislikeRules = async() => {
     return await this.dislikeDataManage.getDislikeRules()
   }
+
+  // 管理接口：将指定 dislike 快照恢复为当前数据（回滚）
+  restoreSnapshot = async(name: string) => {
+    const data = await this.snapshotDataManage.getSnapshot(name)
+    if (!data) throw new Error('Snapshot not found')
+    await this.dislikeDataManage.restore(data)
+    this.snapshotDataManage.clearClients()
+    this.snapshotDataManage.setLatest(name)
+  }
 }
 

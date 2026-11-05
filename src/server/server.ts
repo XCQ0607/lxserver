@@ -2047,10 +2047,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userSpace = getUserSpace(verifiedUser)
         try {
           const body = await readBody(req)
-          const { id } = JSON.parse(body)
+          const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
 
-          await userSpace.listManage.restoreSnapshot(id)
+          if (kind === 'dislike' && userSpace.dislikeManage) {
+            await userSpace.dislikeManage.restoreSnapshot(id)
+          } else {
+            await userSpace.listManage.restoreSnapshot(id)
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))

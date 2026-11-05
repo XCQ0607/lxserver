@@ -5422,15 +5422,14 @@ class App {
                         </svg>
                         下载备份
                     </button>
-                    ${item.kind !== 'dislike' ? `
-                    <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}')">
+                    <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <!-- 恢复图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="1 4 1 10 7 10"></polyline>
                             <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"></path>
                         </svg>
                         回滚
-                    </button>` : ''}
+                    </button>
                     <!-- [新增] 删除按钮 -->
                     <button class="btn-delete" onclick="app.deleteSnapshot('${item.id}')">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
@@ -5459,32 +5458,23 @@ class App {
         }
     }
 
-    // 在「歌单快照」面板顶部注入「全部 / 歌单快照 / 不喜欢」子页签，便于单独查看不喜欢快照
+    // 在「歌单快照」面板顶部注入「类型」下拉查询条件，便于按 我的歌单 / 我不喜欢 过滤
     ensureSnapshotKindTabs() {
-        if (document.getElementById('snapshot-kind-tabs')) return;
+        if (document.getElementById('snapshot-kind-filter')) return;
         const container = document.getElementById('snapshots-list');
         if (!container || !container.parentElement) return;
-        const bar = document.createElement('div');
-        bar.id = 'snapshot-kind-tabs';
-        bar.style.cssText = 'display:flex;gap:.5rem;margin:.25rem 0 .75rem;flex-wrap:wrap;';
+        const sel = document.createElement('select');
+        sel.id = 'snapshot-kind-filter';
+        sel.className = 'form-input config-input olb-select';
+        sel.style.cssText = 'margin:.25rem 0 .75rem;width:auto;';
         const cur = this._snapshotKind || 'all';
-        const tabs = [['all', '全部'], ['list', '歌单快照'], ['dislike', '不喜欢']];
-        bar.innerHTML = tabs.map(([k, t]) => {
-            const on = k === cur;
-            return `<button type="button" class="sk-tab" data-kind="${k}" style="padding:.35rem .8rem;border:1px solid var(--border,#3a3f4b);background:${on ? 'var(--accent,#3b82f6)' : 'transparent'};color:${on ? '#fff' : 'inherit'};border-radius:6px;cursor:pointer;font-size:.85rem;">${t}</button>`;
-        }).join('');
-        bar.querySelectorAll('.sk-tab').forEach(btn => {
-            btn.addEventListener('click', () => {
-                this._snapshotKind = btn.dataset.kind;
-                bar.querySelectorAll('.sk-tab').forEach(b => {
-                    const on = b.dataset.kind === this._snapshotKind;
-                    b.style.background = on ? 'var(--accent,#3b82f6)' : 'transparent';
-                    b.style.color = on ? '#fff' : 'inherit';
-                });
-                this.loadSnapshots();
-            });
+        sel.innerHTML = '<option value="all">全部类型</option><option value="list">我的歌单</option><option value="dislike">我不喜欢</option>';
+        sel.value = cur;
+        sel.addEventListener('change', () => {
+            this._snapshotKind = sel.value;
+            this.loadSnapshots();
         });
-        container.parentElement.insertBefore(bar, container);
+        container.parentElement.insertBefore(sel, container);
     }
 
     triggerUploadSnapshot() {
@@ -5690,7 +5680,7 @@ class App {
         }
     }
 
-    async restoreSnapshot(id) {
+    async restoreSnapshot(id, kind) {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
             showInfo('请先选择用户');
@@ -5702,10 +5692,10 @@ class App {
         }
 
         try {
-            // 添加 user 参数
+            // 通用回滚入口：list / dislike 共用，按 kind 分流到后端对应快照恢复
             await this.request(`/api/data/restore-snapshot?user=${encodeURIComponent(username)}`, {
                 method: 'POST',
-                body: JSON.stringify({ id })
+                body: JSON.stringify({ id, kind })
             });
             showSuccess('回滚成功！请重启客户端或重新连接同步服务。');
             this.loadDashboard(); // 刷新数据概览
