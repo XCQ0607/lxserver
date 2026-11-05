@@ -992,7 +992,7 @@ class WebDAVSync extends EventEmitter {
         return this.restoreBackupFile(options?.targetFilename)
     }
 
-    async testConnection(): Promise<{ success: boolean; message: string }> {
+    async testConnection(): Promise<{ success: boolean; message: string; checks?: Array<{ name: string; path: string; success: boolean; message: string }> }> {
         // 检查配置是否完整
         if (!this.config.enable) {
             return {
@@ -1013,17 +1013,42 @@ class WebDAVSync extends EventEmitter {
                 return { success: false, message: 'WebDAV客户端初始化失败，请检查配置是否正确' };
             }
 
-            // 增加 10 秒超时控制，避免请求无限挂起
-            const timeoutPromise = new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error('连接超时，请检查 WebDAV 地址及网络连接')), 10000)
-            )
-
-            await Promise.race([
-                this.client.getDirectoryContents('/'),
-                timeoutPromise
-            ])
-
-            return { success: true, message: '连接成功！WebDAV配置正确' };
+            // 根目录列举可能失败，而实际挂载的子目录仍可用。仅检查配置目录，不写入测试文件。
+            const checks = await Promise.all([
+                { name: '同步目录', path: this.syncPath || '/' },
+                { name: '备份目录', path: this.backupPath || '/' },
+            ].map(async target => {
+                const controller = new AbortController()
+                const timer = setTimeout(() => controller.abort(), 10000)
+                try {
+                    await this.client.getDirectoryContents(target.path, { deep: false, signal: controller.signal })
+                    return { ...target, success: true, message: '目录可读取' }
+                } catch (err: any) {
+                    const status = Number(err?.status || err?.response?.status)
+                    const detail = String(err?.code || err?.cause?.code || '') + ' ' + String(err?.message || '')
+                    let message = '目录读取失败，请检查 WebDAV 地址、服务端日志及网络连接'
+                    if (status === 401) message = '认证失败，请检查已保存的用户名、密码或应用专用密码'
+                    else if (status === 403) message = '没有列目录权限，请检查账号对该目录的访问权限'
+                    else if (status === 404) message = '目录不存在或 URL 路径不正确；首次上传可能会自动创建目录'
+                    else if (status === 405 || status === 501) message = '服务不支持列目录 (PROPFIND)，请检查 WebDAV 地址及代理的方法限制'
+                    else if ([502, 503, 504].includes(status)) message = '网关或上游服务异常，请检查反向代理和存储挂载；列目录失败不代表上传一定失败'
+                    else if (/timeout|timed out|aborted/i.test(detail)) message = '请求超时（每个目录最多等待 10 秒），请检查网络、代理和存储响应速度'
+                    else if (/ENOTFOUND|EAI_AGAIN/.test(detail)) message = '域名解析失败，请检查服务器地址及服务器的 DNS'
+                    else if (/ECONNREFUSED|ECONNRESET/.test(detail)) message = '连接被拒绝或中断，请检查端口、防火墙及服务状态'
+                    else if (/CERT|TLS|SSL|SELF_SIGNED/i.test(detail)) message = 'TLS 证书校验失败，请检查证书有效期、域名和证书链'
+                    // 不回显可能包含凭据、URL 或上游响应正文的原始错误。
+                    return { ...target, success: false, message: `${Number.isFinite(status) && status > 0 ? `HTTP ${status}：` : ''}${message}` }
+                } finally {
+                    clearTimeout(timer)
+                }
+            }))
+            const passed = checks.filter(check => check.success).length
+            const summary = passed === checks.length ? '配置目录均可读取。' : passed ? '部分目录检查未通过。' : '配置目录读取检查未通过。'
+            return {
+                success: passed === checks.length,
+                message: `${summary}本测试使用已保存配置，仅检查目录读取，不会创建或删除远端文件。上传、删除权限及完整恢复能力尚未验证；如已能正常备份，请结合各目录结果排查。`,
+                checks,
+            }
         } catch (err: any) {
             let errorMsg = '连接失败';
             if (err.message) {
