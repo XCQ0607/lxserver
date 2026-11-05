@@ -5363,15 +5363,21 @@ class App {
             return;
         }
 
+        // 确保「全部 / 歌单快照 / 不喜欢」子页签存在
+        this.ensureSnapshotKindTabs();
+        const kind = this._snapshotKind || 'all';
+
         // 添加加载状态
         container.classList.add('content-loading');
 
         try {
             // 添加 user 参数
-            const list = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
+            const all = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
+            const list = kind === 'all' ? all : all.filter(i => (i.kind || 'list') === kind);
 
             if (!list.length) {
-                container.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">暂无快照</div>';
+                const emptyText = kind === 'dislike' ? '该用户暂无「不喜欢」快照' : '暂无快照';
+                container.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">${emptyText}</div>`;
                 container.classList.remove('content-loading');
                 return;
             }
@@ -5379,7 +5385,7 @@ class App {
             container.innerHTML = list.map(item => `
             <div class="snapshot-row">
                 <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-                <div class="col-id" title="${item.id}">snapshot_${item.id}</div>
+                <div class="col-id" title="${item.id}">snapshot_${item.id}${item.kind === 'dislike' ? ' <span style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">不喜欢</span>' : ''}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
                     <button class="btn-download" onclick="app.downloadSnapshot('${item.id}')">
@@ -5427,6 +5433,35 @@ class App {
             container.classList.remove('content-loading');
         }
     }
+
+    // 在「歌单快照」面板顶部注入「全部 / 歌单快照 / 不喜欢」子页签，便于单独查看不喜欢快照
+    ensureSnapshotKindTabs() {
+        if (document.getElementById('snapshot-kind-tabs')) return;
+        const container = document.getElementById('snapshots-list');
+        if (!container || !container.parentElement) return;
+        const bar = document.createElement('div');
+        bar.id = 'snapshot-kind-tabs';
+        bar.style.cssText = 'display:flex;gap:.5rem;margin:.25rem 0 .75rem;flex-wrap:wrap;';
+        const cur = this._snapshotKind || 'all';
+        const tabs = [['all', '全部'], ['list', '歌单快照'], ['dislike', '不喜欢']];
+        bar.innerHTML = tabs.map(([k, t]) => {
+            const on = k === cur;
+            return `<button type="button" class="sk-tab" data-kind="${k}" style="padding:.35rem .8rem;border:1px solid var(--border,#3a3f4b);background:${on ? 'var(--accent,#3b82f6)' : 'transparent'};color:${on ? '#fff' : 'inherit'};border-radius:6px;cursor:pointer;font-size:.85rem;">${t}</button>`;
+        }).join('');
+        bar.querySelectorAll('.sk-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this._snapshotKind = btn.dataset.kind;
+                bar.querySelectorAll('.sk-tab').forEach(b => {
+                    const on = b.dataset.kind === this._snapshotKind;
+                    b.style.background = on ? 'var(--accent,#3b82f6)' : 'transparent';
+                    b.style.color = on ? '#fff' : 'inherit';
+                });
+                this.loadSnapshots();
+            });
+        });
+        container.parentElement.insertBefore(bar, container);
+    }
+
     triggerUploadSnapshot() {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
