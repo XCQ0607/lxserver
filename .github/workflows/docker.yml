@@ -3,12 +3,12 @@ name: Build and Push Docker Image
 on:
   workflow_call:
   workflow_dispatch:
-  push:
-    branches: [dev, main]
 env:
   REGISTRY: ghcr.io
   # 使用 github.repository_owner 获取用户名，并指定镜像名为 lxserver
   IMAGE_NAME: ${{ github.repository_owner }}/lxserver
+  # Docker Hub 仓库名
+  DOCKER_HUB_REPO: ${{ secrets.DOCKER_USERNAME }}/lxserver
 
 jobs:
   build_and_push:
@@ -33,7 +33,13 @@ jobs:
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
-          password: ${{ secrets.GHCR_TOKEN }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
       # Extract project version from package.json
       - name: Read version from config
@@ -43,7 +49,6 @@ jobs:
           echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Generate and Commit Build Hash
-        if: github.event_name != 'push'
         run: |
           node scripts/update-build-hash.js
           git config --global user.name "github-actions[bot]"
@@ -53,23 +58,15 @@ jobs:
           git diff --quiet && git diff --staged --quiet || (git commit -m "chore: update build hash [skip ci]" && git push)
         continue-on-error: true
 
-      - name: Determine image tag by branch
-        # dev 分支只生成 dev + 版本号标签；main 分支生成 latest + 版本号标签
-        run: |
-          if [ "${{ github.ref_name }}" = "dev" ]; then
-            echo "BRANCH_TAG=dev" >> "$GITHUB_ENV"
-          else
-            echo "BRANCH_TAG=latest" >> "$GITHUB_ENV"
-          fi
-
       - name: Extract metadata (tags, labels) for Docker
         id: meta
         uses: docker/metadata-action@v5
         with:
           images: |
             ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+            ${{ env.DOCKER_HUB_REPO }}
           tags: |
-            type=raw,value=${{ env.BRANCH_TAG }}
+            type=raw,value=latest
             type=raw,value=${{ env.PROJECT_VERSION }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
@@ -112,4 +109,5 @@ jobs:
           platforms: linux/amd64,linux/arm64,linux/arm/v7
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
-          no-cache: true
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
