@@ -123,19 +123,76 @@ export class SnapshotDataManage {
   }
 
 
+  /**
+   * 动态更新快照目录并迁移历史数据（无需重启即时生效）
+   * 与歌单快照（<base>/<user>/snapshot）区分，dislike 快照使用 <base>/<user>/dislike/snapshot
+   * @param targetBackupPath 新的 snapshot.backupPath 配置字符串
+   */
+  updateSnapshotDir = (targetBackupPath?: string) => {
+    const backupPathConf = (targetBackupPath !== undefined ? targetBackupPath : (global.lx.config['snapshot.backupPath'] || '')).trim()
+    const oldSnapshotDir = this.snapshotDir
+    let newSnapshotDir = ''
+
+    if (backupPathConf) {
+      try {
+        const base = path.isAbsolute(backupPathConf)
+          ? backupPathConf
+          : path.join(global.lx.dataPath, backupPathConf)
+        newSnapshotDir = path.join(base, this.userDataManage.userName, File.dislikeDir, File.dislikeSnapshotDir)
+        checkAndCreateDirSync(newSnapshotDir)
+      } catch (err) {
+        syncLog.warn(`[DislikeSnapshot] 无法创建自定义快照目录 (${backupPathConf})，已安全回退到默认目录:`, err)
+        newSnapshotDir = path.join(this.dislikeDir, File.dislikeSnapshotDir)
+      }
+    } else {
+      newSnapshotDir = path.join(this.dislikeDir, File.dislikeSnapshotDir)
+    }
+    checkAndCreateDirSync(newSnapshotDir)
+
+    // 迁移旧快照目录中的历史文件
+    const sourceDir = oldSnapshotDir || path.join(this.dislikeDir, File.dislikeSnapshotDir)
+    if (newSnapshotDir !== sourceDir && fs.existsSync(sourceDir)) {
+      try {
+        let count = 0
+        for (const name of fs.readdirSync(sourceDir)) {
+          const src = path.join(sourceDir, name)
+          const dst = path.join(newSnapshotDir, name)
+          if (!fs.existsSync(dst)) {
+            try {
+              fs.renameSync(src, dst)
+              count++
+            } catch (e) {
+              syncLog.error(`[DislikeSnapshot] 迁移快照文件失败 (${name}):`, e)
+            }
+          }
+        }
+        if (count > 0) {
+          syncLog.info(`[DislikeSnapshot] 用户 ${this.userDataManage.userName} 不喜欢快照迁移成功 (共 ${count} 个文件 -> ${newSnapshotDir})`)
+        }
+        if (fs.existsSync(sourceDir) && fs.readdirSync(sourceDir).length === 0) {
+          try { fs.rmdirSync(sourceDir) } catch { }
+        }
+      } catch (err) {
+        syncLog.error(`[DislikeSnapshot] 用户 ${this.userDataManage.userName} 不喜欢快照迁移失败:`, err)
+      }
+    }
+
+    this.snapshotDir = newSnapshotDir
+  }
+
   constructor(userDataManage: UserDataManage) {
     this.userDataManage = userDataManage
 
     this.dislikeDir = path.join(userDataManage.userDir, File.dislikeDir)
     checkAndCreateDirSync(this.dislikeDir)
 
-    this.snapshotDir = path.join(this.dislikeDir, File.dislikeSnapshotDir)
-    checkAndCreateDirSync(this.snapshotDir)
-
+    this.snapshotDir = ''
     this.snapshotInfoFilePath = path.join(this.dislikeDir, File.dislikeSnapshotInfoJSON)
     this.snapshotInfo = fs.existsSync(this.snapshotInfoFilePath)
       ? JSON.parse(fs.readFileSync(this.snapshotInfoFilePath).toString())
       : { latest: null, time: 0, list: [], clients: {} }
+
+    this.updateSnapshotDir()
 
     this.saveSnapshotInfoThrottle = throttle(() => {
       fs.writeFile(this.snapshotInfoFilePath, JSON.stringify(this.snapshotInfo), 'utf8', (err) => {

@@ -93,6 +93,11 @@ export const updateAllUserSnapshotDirs = (newBackupPath?: string) => {
     } catch (e) {
       console.error(`[Snapshot] Failed to hot-update snapshot dir for user ${name}:`, e)
     }
+    try {
+      space.dislikeManage.snapshotDataManage.updateSnapshotDir(newBackupPath)
+    } catch (e) {
+      console.error(`[DislikeSnapshot] Failed to hot-update snapshot dir for user ${name}:`, e)
+    }
   }
 }
 

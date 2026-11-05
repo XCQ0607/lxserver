@@ -266,6 +266,68 @@ function resolveUserDir(entry: UserBackupCfg, folderType: 'cache' | 'music' | 'l
   }
 }
 
+/** 所有真实用户（含系统用户 _open），用于快照类备份对所有用户生效，不受 userBackups 勾选限制。 */
+function getAllUserNames(): string[] {
+  const names: string[] = []
+  const users = (global.lx.config as any).users
+  if (Array.isArray(users)) for (const u of users) if (u && u.name) names.push(u.name)
+  if (!names.includes('_open')) names.push('_open')
+  return names
+}
+
+/** 解析某用户 dislike 快照目录（与歌单快照同一 snapshot.backupPath 体系，但使用独立的 dislike/snapshot 子目录，避免互相覆盖）。 */
+function resolveDislikeSnapshotDir(user: string): string {
+  const backupPathConf = ((global.lx.config as any)['snapshot.backupPath'] || '').trim()
+  let dir: string
+  if (backupPathConf) {
+    const base = path.isAbsolute(backupPathConf) ? backupPathConf : path.join(global.lx.dataPath, backupPathConf)
+    dir = path.join(base, user, File.dislikeDir, File.dislikeSnapshotDir)
+  } else {
+    const userDir = path.join(global.lx.userPath, getUserDirname(user))
+    dir = path.join(userDir, File.dislikeDir, File.dislikeSnapshotDir)
+  }
+  try { fs.mkdirSync(dir, { recursive: true }) } catch { /* ignore */ }
+  return dir
+}
+
+/** 上传单个用户某类快照目录（list 或 dislike）到 OpenList，folder_type 仍记 'list'（复用旧表字段，避免 schema 变更）。 */
+async function backupUserSnapshotKind(cl: OpenListClient, cfg: BackupConfig, summary: SyncSummary, user: string, kind: 'list' | 'dislike'): Promise<void> {
+  const dir = kind === 'list' ? resolveSnapshotDir(user) : resolveDislikeSnapshotDir(user)
+  if (!dir || !fs.existsSync(dir)) return
+  for (const lp of walkLocal(dir, 'list')) {
+    const rel = path.relative(dir, lp).replace(/\\/g, '/')
+    // 传统布局下 dislike 快照置于 user/list/dislike/ 子目录，与歌单快照区分；统一数据模式（selectedData）不走此路。
+    const remoteSub = kind === 'dislike' ? 'dislike/' : ''
+    const remotePath = cl.resolveRemotePath(`${user}/list/${remoteSub}${rel}`)
+    const existing = getBackupByLocalPath(user, 'list', lp)
+    if ((existing?.deleted_at || existing?.status === 'deleted') && !localChanged(existing)) continue
+    if (existing && (enqueuedIds.has(`f:${existing.id}`) || existing.status === 'completed' || existing.status === 'uploading')) continue
+    if (existing?.status === 'failed' && existing.retry_count >= MAX_AUTO_RETRIES) continue
+    if (existing?.status === 'verified' && existing.remote_path === remotePath && !localChanged(existing)) {
+      try {
+        const remote = await cl.getFileInfo(remotePath)
+        const modified = parseMod(remote.modified)
+        if (remote.size === existing.size && (modified == null || existing.remote_mtime == null || modified === existing.remote_mtime)) continue
+      } catch (e: any) {
+        if (!(e instanceof OpenListNotFoundError)) { summary.errors.push(rel + ': ' + (e?.message || e)); continue }
+      }
+    }
+    const row = upsertBackupFile({ user, folderType: 'list', localPath: lp, remotePath, name: rel, mode: 'upload', direction: 'upload', status: 'pending' })
+    enqueueUpload(row, cl, 'upload')
+    summary.uploaded++
+  }
+}
+
+/** 对所有真实用户备份歌单与不喜欢快照（传统模式下脱离 userBackups 用户勾选；统一数据模式下仅在手动 folder='list' 时补充）。 */
+async function backupAllSnapshots(cl: OpenListClient, cfg: BackupConfig, summary: SyncSummary, opts: { user?: string; folder?: 'cache' | 'music' | 'list' }): Promise<void> {
+  if (opts.folder && opts.folder !== 'list') return
+  for (const user of getAllUserNames()) {
+    if (opts.user && user !== opts.user) continue
+    await backupUserSnapshotKind(cl, cfg, summary, user, 'list')
+    await backupUserSnapshotKind(cl, cfg, summary, user, 'dislike')
+  }
+}
+
 function isSubPath(child: string, parent: string): boolean {
   const np = path.normalize(parent)
   const nc = path.normalize(child)
@@ -1279,7 +1341,7 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
     if (!entry.enabled) continue
     if (opts.user && entry.user !== opts.user) continue
     const mode = effectiveMode(entry, cfg)
-    const folders: Array<'cache' | 'music' | 'list'> = opts.folder ? [opts.folder] : (selectedData ? ['cache'] : ['cache', 'music', 'list'])
+    const folders: Array<'cache' | 'music'> = opts.folder && opts.folder !== 'list' ? [opts.folder] : (selectedData ? ['cache'] : ['cache', 'music'])
     for (const ft of folders) {
       if (selectedData && ft !== 'cache') continue
       const dir = resolveUserDir(entry, ft, cfg)
@@ -1298,6 +1360,10 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
     }
   }
   if (selectedData && !opts.user && !opts.folder) await backupSelectedData(cl, summary)
+  // 歌单与不喜欢快照：对所有真实用户备份，不受 userBackups 用户勾选限制（传统模式默认走此路；统一数据模式仅手动 folder='list' 时补充）
+  if (!selectedData || opts.folder === 'list') {
+    await backupAllSnapshots(cl, cfg, summary, opts)
+  }
   while (activeUploads || uploadQueue.length) await sleep(20)
   for (const row of listBackupByStatus('failed')) {
     if (rowEnabled(row, cfg) && (!opts.user || row.user === opts.user) && (!opts.folder || row.folder_type === opts.folder)) summary.errors.push(row.user + '/' + row.name + ': ' + row.error)
