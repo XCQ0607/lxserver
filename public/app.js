@@ -4341,15 +4341,35 @@ class App {
     // ========== WebDAV 功能 ==========
 
     async testWebDAV() {
+        const button = document.getElementById('test-webdav-btn');
+        if (button?.disabled) return;
+        let report = document.getElementById('webdav-test-result');
+        if (!report && button) {
+            report = document.createElement('div');
+            report.id = 'webdav-test-result';
+            report.setAttribute('role', 'status');
+            report.setAttribute('aria-live', 'polite');
+            report.style.cssText = 'grid-column:1/-1;flex-basis:100%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:14px;line-height:1.7;margin-top:12px;';
+            button.parentElement.appendChild(report);
+        }
+        if (button) { button.disabled = true; button.setAttribute('aria-busy', 'true'); }
+        if (report) report.textContent = '正在检查已保存的同步目录和备份目录，请稍候…';
         try {
             const result = await this.request('/api/webdav/test', { method: 'POST' });
+            const details = (result.checks || []).map(check =>
+                `${check.name} ${check.path}：${check.success ? '通过' : '未通过'}，${check.message}`
+            );
+            if (report) report.textContent = [result.message, ...details].join('\n');
             if (result.success) {
-                showSuccess('✅ WebDAV连接成功！\n' + result.message);
+                showSuccess('WebDAV 目录读取检查通过，详情见测试按钮下方');
             } else {
-                showError('❌ WebDAV连接失败\n' + result.message);
+                showError('WebDAV 检查有未通过项，详情见测试按钮下方');
             }
         } catch (err) {
-            showError('❌ 连接失败: ' + err.message);
+            if (report) report.textContent = '无法完成 WebDAV 检查：' + err.message;
+            showError('无法完成 WebDAV 检查，详情见测试按钮下方');
+        } finally {
+            if (button) { button.disabled = false; button.removeAttribute('aria-busy'); }
         }
     }
 

@@ -39,9 +39,12 @@ function refreshBatchUI() {
     // Check if song list detail is open
     const slDetail = document.getElementById('songlist-detail-view');
     const artistHeader = document.getElementById('artist-detail-header');
-    if (slDetail && !slDetail.classList.contains('hidden')) {
+    const leaderboard = document.getElementById('view-leaderboard');
+    if (leaderboard && !leaderboard.classList.contains('hidden')) {
+        if (window.LeaderboardManager) window.LeaderboardManager.renderSongs();
+    } else if (slDetail && !slDetail.classList.contains('hidden')) {
         if (window.SongListManager) window.SongListManager.renderDetail();
-    } else if (artistHeader) {
+    } else if (artistHeader && !artistHeader.classList.contains('hidden')) {
         // Artist Detail Mode
         if (window.currentArtistSongsCache) {
             renderArtistSongsUI(window.currentArtistSongsCache);
@@ -108,9 +111,6 @@ function clearSelection() {
 
     // 重新渲染UI
     refreshBatchUI();
-    if (window.LeaderboardManager && document.getElementById('view-leaderboard') && !document.getElementById('view-leaderboard').classList.contains('hidden')) {
-        window.LeaderboardManager.renderSongs();
-    }
     updateBatchToolbar();
 }
 
