@@ -3935,6 +3935,13 @@ class App {
                     return false
                 })
             }
+            // 歌单快照页：按「我的歌单 / 我不喜欢」类型下拉过滤
+            const inSnapshot = scope && scope.split(',').includes('list')
+            const tfEl = document.getElementById('olb-filter-type')
+            const tf = tfEl ? tfEl.value : ''
+            if (inSnapshot && tf) {
+                list = list.filter(f => this.olbSnapshotType(f) === tf)
+            }
             this._olbCurrentList = list
             // 状态指标卡：基于当前页签过滤后的列表统计各状态数量（deleted 不计入 list，通常为 0）
             const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
@@ -4026,7 +4033,13 @@ class App {
                 const d = new Date(f.updated_at || f.created_at || Date.now())
                 const color = badgeColor[f.status] || '#64748b'
                 const label = statusMap[f.status] || f.status || ''
-                const typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                let typeLabel
+                if (this._olbFolderScope && this._olbFolderScope.split(',').includes('list')) {
+                    const st = this.olbSnapshotType(f)
+                    typeLabel = st === 'dislike' ? '我不喜欢' : (st === 'list' ? '我的歌单' : (f.folder_type === 'list' ? '我的歌单' : '数据备份'))
+                } else {
+                    typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                }
                 const canRetry = f.status !== 'verified' && f.status !== 'deleted'
                 const retryBtn = canRetry
                     ? '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
@@ -4228,7 +4241,7 @@ class App {
     }
 
     clearOpenlistFilters() {
-        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
+        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-type', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
             const el = document.getElementById(id); if (el) el.value = ''
         })
         this._olbPage = 1
@@ -4247,6 +4260,17 @@ class App {
         el.value = (el.value === status) ? '' : status
         this._olbPage = 1
         this.loadOpenlistBackups()
+    }
+
+    // 判断 OpenList 同步记录属于「我的歌单」还是「我不喜欢」（仅歌单快照页有意义）
+    olbSnapshotType(f) {
+        if (f.folder_type === 'list') return 'list'
+        if (f.folder_type === 'data') {
+            const p = (f.local_path || f.name || '')
+            if (/(^|[\/])(dislike)[\/]snapshot([\/]|$)/i.test(p)) return 'dislike'
+            if (/(^|[\/])(list)[\/]snapshot([\/]|$)/i.test(p)) return 'list'
+        }
+        return ''
     }
 
     gotoOpenlistPage(n) {
@@ -5385,7 +5409,7 @@ class App {
             container.innerHTML = list.map(item => `
             <div class="snapshot-row">
                 <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-                <div class="col-id" title="${item.id}">snapshot_${item.id}${item.kind === 'dislike' ? ' <span style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">不喜欢</span>' : ''}</div>
+                <div class="col-id" title="${item.id}">snapshot_${item.id} ${item.kind === 'dislike' ? '<span style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">我不喜欢</span>' : '<span style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;margin-left:.3rem;vertical-align:middle;">我的歌单</span>'}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
                     <button class="btn-download" onclick="app.downloadSnapshot('${item.id}', '${item.kind || 'list'}')">

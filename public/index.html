@@ -2690,6 +2690,11 @@
                                             <option value="failed">失败</option>
                                             <option value="deleted">已删除</option>
                                         </select>
+                                        <select id="olb-filter-type" class="form-input config-input olb-select" onchange="app.applyOpenlistFilter()" title="按歌单快照类型筛选（仅歌单快照页生效）">
+                                            <option value="">全部类型</option>
+                                            <option value="list">我的歌单</option>
+                                            <option value="dislike">我不喜欢</option>
+                                        </select>
                                         <input type="text" id="olb-filter-name" class="form-input config-input olb-input" placeholder="文件名搜索" oninput="app.scheduleOpenlistReload()" />
                                         <input type="text" id="olb-filter-path" class="form-input config-input olb-input" placeholder="路径包含搜索" oninput="app.scheduleOpenlistReload()" />
                                         <div class="olb-filter-btns">
