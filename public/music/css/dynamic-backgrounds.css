@@ -1,0 +1,304 @@
+/* ============================================================
+   dynamic-backgrounds.css
+   动态背景引擎样式（登录页 + 播放页共用）+ 登录页动效选择器
+   ============================================================ */
+
+/* ── 登录页动效选择器（与播放器设置页 CustomSelectManager 风格一致） ── */
+.background-picker {
+    position: fixed;
+    top: 24px;
+    right: 24px;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 6px 5px 14px;
+    border: 1px solid #ffffff26;
+    border-radius: 9999px;
+    background: #121826bf;
+    color: #e2e8f0;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    box-shadow: 0 8px 24px -4px #00000080, inset 0 1px 0 #ffffff26;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.background-picker > i { color: #10b981; font-size: 12px; }
+
+.theme-light .background-picker {
+    background: #ffffffd9;
+    color: #334155;
+    border-color: #cbd5e1cc;
+    box-shadow: 0 8px 20px -4px #10b98126, inset 0 1px 0 #fff;
+}
+
+.background-picker .cs-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    min-width: 124px;
+    padding: 5px 12px;
+    border-radius: 9999px;
+    border: 1.5px solid #ffffff1f;
+    background: #1f2937d9;
+    color: #d1d5db;
+    font: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.theme-light .background-picker .cs-trigger { background: #fff; border-color: #e2e8f0; color: #475569; }
+.background-picker .cs-trigger:hover { border-color: #34d399; color: #10b981; }
+.background-picker .cs-trigger.highlight { background: #10b981; border-color: #10b981; color: #fff; font-weight: 700; box-shadow: 0 2px 8px #10b98155; }
+.background-picker .cs-trigger.highlight:hover { background: #059669; border-color: #059669; color: #fff; }
+.background-picker.open .cs-trigger { border-color: #10b981; box-shadow: 0 0 0 3px #10b98140; }
+.background-picker .cs-trigger-icon { font-size: 9px; margin-left: 8px; transition: transform 0.2s ease; }
+.background-picker.open .cs-trigger-icon { transform: rotate(180deg); }
+
+.background-picker .cs-dropdown {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 140px;
+    max-height: 280px;
+    margin: 0;
+    padding: 5px;
+    list-style: none;
+    background: #1f2937eb;
+    border: 1.5px solid #374151;
+    border-radius: 12px;
+    box-shadow: 0 15px 35px -5px #00000073;
+    backdrop-filter: blur(25px);
+    -webkit-backdrop-filter: blur(25px);
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+    pointer-events: none;
+    transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.15);
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+.background-picker .cs-dropdown::-webkit-scrollbar { display: none; }
+
+.theme-light .background-picker .cs-dropdown { background: #fffffffa; border-color: #e5e7eb; box-shadow: 0 15px 35px -5px #00000026; }
+.background-picker.open .cs-dropdown { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+
+.background-picker .cs-option {
+    padding: 8px 12px;
+    font-size: 11.5px;
+    font-weight: 500;
+    border-radius: 8px;
+    color: #d1d5db;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.theme-light .background-picker .cs-option { color: #4b5563; }
+.background-picker .cs-option:hover { background: #10b98124; color: #10b981; padding-left: 14px; }
+.background-picker .cs-option.selected { background: #10b981; color: #fff !important; font-weight: 700; }
+.background-picker .cs-option i { font-size: 9px; opacity: 0; }
+.background-picker .cs-option.selected i { opacity: 1; }
+
+/* ── 登录页宿主 ── */
+#login-scene { position: fixed; inset: 0; overflow: hidden; pointer-events: none; z-index: 0; }
+
+html:not([data-login-background="aurora"]) .bg-grid-mask,
+html:not([data-login-background="aurora"]) #cursor-glow { display: none; }
+
+/* ── 播放页宿主 ── */
+#player-dynamic-scene { overflow: hidden; }
+
+/* ── 引擎图层 ── */
+.dbg-layer,
+.dbg-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+.dbg-layer[data-mode="cosmos"] {
+    background:
+        radial-gradient(ellipse at 20% 30%, #6639b840, transparent 55%),
+        radial-gradient(ellipse at 80% 80%, #087ea444, transparent 60%);
+}
+
+.dbg-layer[data-mode="bubbles"] { background: radial-gradient(ellipse at bottom, #0891b220, transparent 70%); }
+.dbg-layer[data-mode="sakura"] { background: radial-gradient(ellipse at top right, #f472b61a, transparent 60%); }
+.dbg-layer[data-mode="fireflies"] { background: radial-gradient(ellipse at bottom, #65a30d1a, transparent 65%); }
+
+/* 极光光斑 */
+.dbg-blob {
+    position: absolute;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    filter: blur(80px);
+    opacity: 0.55;
+    mix-blend-mode: screen;
+    animation: dbg-aurora 18s ease-in-out infinite alternate;
+}
+
+.dbg-light .dbg-blob { opacity: 0.4; mix-blend-mode: normal; }
+
+.dbg-blob-1 {
+    width: min(520px, 70%);
+    top: -10%;
+    left: -5%;
+    background: radial-gradient(circle, #059669 0%, #10b98166 50%, transparent 70%);
+    animation-duration: 20s;
+}
+
+.dbg-blob-2 {
+    width: min(580px, 75%);
+    bottom: -15%;
+    right: -10%;
+    background: radial-gradient(circle, #0284c7 0%, #06b6d466 50%, transparent 70%);
+    animation-duration: 24s;
+    animation-delay: -5s;
+}
+
+.dbg-blob-3 {
+    width: min(420px, 60%);
+    top: 45%;
+    left: 35%;
+    background: radial-gradient(circle, #6366f1 0%, #6366f14d 50%, transparent 70%);
+    animation-duration: 16s;
+    animation-delay: -9s;
+}
+
+/* 漫游图标 / 泡泡 */
+.dbg-item {
+    position: absolute;
+    color: #67e8f9;
+    opacity: 0.26;
+    animation: dbg-drift var(--duration) ease-in-out infinite alternate;
+    animation-delay: var(--delay);
+}
+
+.dbg-light .dbg-item { color: #047857; }
+
+.dbg-icon {
+    width: 100%;
+    height: 100%;
+    fill: none;
+    stroke: currentcolor;
+    stroke-width: 1.2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.dbg-bubble {
+    border-radius: 50%;
+    border: 1px solid #a5f3fc55;
+    background:
+        radial-gradient(circle at 28% 24%, #fff5, transparent 22%),
+        radial-gradient(circle at 70% 80%, #a78bfa33, #22d3ee09 65%);
+    box-shadow: inset -4px -6px 18px #22d3ee22;
+    opacity: 0.7;
+}
+
+.dbg-light .dbg-bubble { border-color: #0891b244; }
+
+/* 音符升腾 */
+.dbg-note {
+    position: absolute;
+    bottom: -60px;
+    color: #6ee7b7;
+    opacity: 0;
+    filter: drop-shadow(0 0 6px #10b98166);
+    animation: dbg-rise var(--duration) cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    animation-delay: var(--delay);
+}
+
+.dbg-light .dbg-note { color: #059669; }
+
+/* 流动波纹 */
+.dbg-wave {
+    position: absolute;
+    width: 150%;
+    height: 75%;
+    left: -25%;
+    bottom: -50%;
+    border-radius: 43%;
+    border: 1px solid #67e8f944;
+    background: linear-gradient(140deg, #10b98128, #6366f122);
+    animation: dbg-spin 28s linear infinite;
+}
+
+.dbg-wave:nth-child(2) { bottom: -45%; animation-duration: 37s; animation-direction: reverse; }
+.dbg-wave:nth-child(3) { bottom: -40%; animation-duration: 46s; opacity: 0.5; }
+
+@keyframes dbg-aurora {
+    0% { transform: translate(0, 0) scale(1) rotate(0deg); }
+    50% { transform: translate(50px, 40px) scale(1.1) rotate(45deg); }
+    100% { transform: translate(-30px, -20px) scale(0.95) rotate(-30deg); }
+}
+
+@keyframes dbg-drift {
+    from { transform: translate3d(-12px, 35px, 0) rotate(-12deg); }
+    to { transform: translate3d(22px, -65px, 0) rotate(18deg); }
+}
+
+@keyframes dbg-rise {
+    0% { transform: translate3d(0, 0, 0) rotate(0deg) scale(0.6); opacity: 0; }
+    15% { opacity: 0.8; }
+    50% { transform: translate3d(var(--sway), -55vh, 0) rotate(160deg) scale(1); }
+    85% { opacity: 0.6; }
+    100% { transform: translate3d(0, -110vh, 0) rotate(340deg) scale(1.15); opacity: 0; }
+}
+
+@keyframes dbg-spin { to { transform: rotate(360deg); } }
+
+/* 页面隐藏 / 容器不可见时暂停 CSS 动画 */
+.dbg-paused * { animation-play-state: paused !important; }
+
+@media (prefers-reduced-motion: reduce) {
+    .dbg-layer *,
+    body:has(#login-scene) .logo-glow::after { animation: none !important; }
+
+    .dbg-note { opacity: 0.5; bottom: auto; top: 40%; }
+    #cursor-glow { display: none; }
+}
+
+/* ── 小屏适配 ── */
+@media (max-width: 600px) {
+    .background-picker { top: 16px; right: 12px; padding: 4px 4px 4px 10px; gap: 6px; }
+    .background-picker > span { display: none; }
+    .background-picker .cs-trigger { min-width: 110px; }
+    body:has(#login-scene) .theme-toggle-btn { top: 16px; left: 12px; }
+    .dbg-blob { filter: blur(45px); }
+}
+
+/* 仅登录页：矮屏允许滚动 */
+@media (max-height: 760px) {
+    body:has(#login-scene) { overflow-y: auto; padding-top: 88px; padding-bottom: 30px; }
+}
+
+/* ── 播放页明亮模式视觉适配 ── */
+#view-player-detail.detail-light-mode #btn-toggle-lyrics {
+    background-color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(0, 0, 0, 0.08);
+    color: #475569;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.06);
+}
+
+#view-player-detail.detail-light-mode #btn-toggle-lyrics:hover {
+    background-color: #fff;
+    color: #059669;
+}
+
+#view-player-detail.detail-light-mode #now-playing-header h2 {
+    color: #64748b;
+}
+
+#view-player-detail.detail-light-mode #mobile-player-cover-container {
+    border-color: rgba(255, 255, 255, 0.8);
+    box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.15);
+}

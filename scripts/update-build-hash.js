@@ -70,9 +70,9 @@ if (fs.existsSync(configPath)) {
     let configContent = fs.readFileSync(configPath, 'utf8');
 
     if (/\bversion['"]?\s*:/.test(configContent)) {
-        configContent = configContent.replace(/(\bversion['"]?\s*:)\s*['"][^'"]*['"]/, `$1 ${JSON.stringify(version)}`);
+        configContent = configContent.replace(/(\bversion['"]?\s*:)\s*['"][^'"]*['"]/, `$1 '${version}'`);
     } else {
-        configContent = configContent.replace(/(window\.CONFIG\s*=\s*\{)/, `$1\n    version: ${JSON.stringify(version)},`);
+        configContent = configContent.replace(/(window\.CONFIG\s*=\s*\{)/, `$1\n    version: '${version}',`);
     }
 
     if (/\bbuildHash['"]?\s*:/.test(configContent)) {

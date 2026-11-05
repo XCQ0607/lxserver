@@ -1,25 +1,112 @@
-/* Custom scrollbar */
+/* Fit theme cards to the settings panel's available width. */
+.settings-theme-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 6.5rem), 1fr));
+    gap: 0.75rem;
+}
+
+.settings-theme-grid > .theme-option {
+    min-width: 0;
+}
+
+.settings-theme-grid > .theme-option > div:first-child {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 3 / 2;
+    max-height: 6rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Keep the whole agreement reachable in short Safari landscape viewports. */
+#project-agreement-modal .project-agreement-panel {
+    max-height: calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - max(1rem, env(safe-area-inset-bottom, 0px)));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+/* Hide scrollbars while keeping wheel and swipe scrolling available. */
+#main-sidebar > nav,
+#search-results,
+.custom-scrollbar,
+.cs-dropdown {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+#main-sidebar > nav::-webkit-scrollbar,
+#search-results::-webkit-scrollbar,
+.custom-scrollbar::-webkit-scrollbar,
+.cs-dropdown::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+/* iOS zooms focused controls whose computed font size is below 16px. */
+@media (max-width: 1024px) {
+
+    /* Leave a usable song list below artist and album headers on short screens. */
+    #artist-detail-header:not(.artist-hero-collapsed),
+    #album-detail-header:not(.album-hero-collapsed) {
+        max-height: min(180px, 25dvh) !important;
+        overflow-y: auto !important;
+        overscroll-behavior: contain;
+    }
+
+    #play-mode-menu {
+        left: 0;
+        transform: none;
+        translate: none;
+    }
+
+    #playback-rate-menu {
+        left: auto;
+        right: 0;
+        transform: none;
+        translate: none;
+    }
+
+    input:not([type="range"], [type="checkbox"], [type="radio"]),
+    textarea,
+    select {
+        font-size: 16px !important;
+    }
+}
+
+/* Touch browsers must not consume the first tap to reveal hover-only controls. */
+@media (hover: none) {
+    #search-results [data-singer-id] > .pointer-events-none {
+        display: none !important;
+    }
+
+    #search-results button[id^="singer-fav-"],
+    #search-results button[id^="singer-dislike-"],
+    #search-results button[id^="album-fav-"],
+    #search-results button[id^="album-dislike-"] {
+        opacity: 1 !important;
+    }
+
+    #player-song-info .group > .group-hover\:flex {
+        display: none !important;
+    }
+
+}
+
+/* Hide global scrollbars while keeping scrolling available */
+* {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
 ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: #f1f1f1;
-}
-
-::-webkit-scrollbar-thumb {
-    background: #c1c1c1;
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background: #a8a8a8;
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 /* Glassmorphism utilities */
 .glass {
-    background: rgba(255, 255, 255, 0.7);
+    background: var(--bg-glass, rgba(255, 255, 255, 0.7));
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.18);
@@ -29,6 +116,13 @@
     background-color: var(--c-50);
     color: var(--c-600);
     border-right: 3px solid var(--c-600);
+}
+
+:root[data-appearance="dark"] .active-tab,
+.dark .active-tab {
+    background-color: color-mix(in srgb, var(--c-500) 15%, transparent);
+    color: var(--c-400);
+    border-right-color: var(--c-500);
 }
 
 .active-sub-item {
@@ -235,10 +329,16 @@
 /* ==========================================================================
    移动端专属紧凑布局：图标更靠近、间距缩小，充分留出歌单名称空间
    ========================================================================== */
-@media (max-width: 767px) {
+@media (max-width: 1024px), (hover: none) {
     .playlist-sidebar-item {
         margin: 2px !important;
         padding: 5px 6px !important;
+        transform: none !important;
+        box-shadow: none !important;
+    }
+
+    .playlist-sidebar-item:hover .sidebar-item-icon {
+        transform: none;
     }
 
     /* 左侧手柄与图标更靠近 */
@@ -265,16 +365,21 @@
     }
 
     /* 右侧操作按钮间距极大缩小、彼此紧密靠近 */
-    .playlist-sidebar-item .sidebar-item-actions {
+    .playlist-sidebar-item .sidebar-item-actions,
+    .playlist-sidebar-item:hover .sidebar-item-actions {
+        display: none;
         gap: 1px !important;
         max-width: 0;
         opacity: 0;
+        pointer-events: none;
     }
 
-    .playlist-sidebar-item:hover .sidebar-item-actions,
+    /* Touch hover can stick: only the currently viewed list exposes actions. */
     .playlist-sidebar-item.active-sub-item .sidebar-item-actions {
+        display: flex;
         max-width: 150px !important;
         opacity: 1 !important;
+        pointer-events: auto;
     }
 
     .playlist-sidebar-item .action-btn {
@@ -558,7 +663,7 @@
 }
 
 aside {
-    transition: transform 0.3s ease-in-out;
+    transition: transform 0.3s ease-in-out, translate 0.3s ease-in-out;
 }
 
 @keyframes marquee {
@@ -617,20 +722,20 @@ aside {
 /* Sleep Timer Styles */
 .timer-preset-btn {
     padding: 0.75rem 1rem;
-    background-color: #f9fafb;
-    color: #4b5563;
+    background-color: var(--bg-main, #f9fafb);
+    color: var(--text-muted, #4b5563);
     font-weight: 700;
     border-radius: 1rem;
     transition: all 0.2s;
-    border: 1px solid transparent;
+    border: 1px solid var(--border-main, transparent);
     font-size: 0.875rem;
     text-align: center;
 }
 
 .timer-preset-btn:hover {
-    background-color: #ecfdf5;
-    color: #059669;
-    border-color: #d1fae5;
+    background-color: color-mix(in srgb, var(--c-500) 12%, var(--bg-panel));
+    color: var(--c-500);
+    border-color: color-mix(in srgb, var(--c-500) 30%, transparent);
     transform: translateY(-1px);
 }
 
@@ -716,21 +821,24 @@ aside {
     background-color: rgba(255, 255, 255, 0.9) !important;
 }
 
+/* 移动端收起按钮不操作时完全隐藏并禁用触控 */
+@media (max-width: 1024px) {
+    #btn-toggle-lyrics.faint {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        transform: scale(0.9) !important;
+    }
+}
+
+.custom-scrollbar {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
 .custom-scrollbar::-webkit-scrollbar {
-    width: 5px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-track {
-    background: transparent;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb {
-    background: rgba(0, 0, 0, 0.1);
-    border-radius: 10px;
-}
-
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-    background: rgba(16, 185, 129, 0.3);
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 /* Detail Title multi-line support */
@@ -753,23 +861,23 @@ aside {
 .lc-layout-btn,
 .lc-color-btn,
 .lc-lines-btn {
-    color: #6b7280;
-    border-color: #e5e7eb;
-    background: #f9fafb;
+    color: var(--text-muted, #6b7280);
+    border-color: var(--border-dim, #e5e7eb);
+    background: var(--bg-main, #f9fafb);
 }
 
 .lc-layout-btn:hover,
 .lc-color-btn:hover,
 .lc-lines-btn:hover {
-    border-color: var(--c-300);
-    color: var(--c-600);
-    background: var(--c-50);
+    border-color: var(--c-400);
+    color: var(--c-500);
+    background: color-mix(in srgb, var(--c-500) 10%, var(--bg-panel));
 }
 
 .lc-btn-active {
     border-color: var(--c-500) !important;
-    color: var(--c-600) !important;
-    background: var(--c-50) !important;
+    color: var(--c-500) !important;
+    background: color-mix(in srgb, var(--c-500) 12%, var(--bg-panel)) !important;
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-500) 15%, transparent);
 }
 
@@ -804,8 +912,8 @@ aside {
 
 /* Silky Animation for Player Detail */
 #view-player-detail {
-    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease-out !important;
-    will-change: transform, opacity;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), translate 0.6s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.5s ease-out !important;
+    will-change: transform, translate, opacity;
 }
 
 #view-player-detail.translate-y-\[100\%\] #player-detail-container {
@@ -814,13 +922,157 @@ aside {
 }
 
 #player-detail-container {
-    transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease-out;
-    will-change: transform, opacity;
+    transition: transform 0.8s cubic-bezier(0.16, 1, 0.3, 1), translate 0.8s cubic-bezier(0.16, 1, 0.3, 1), scale 0.8s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.6s ease-out;
+    will-change: transform, translate, opacity;
 }
 
 #player-footer {
-    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1) !important;
-    will-change: transform;
+    transition: transform 0.6s cubic-bezier(0.16, 1, 0.3, 1), translate 0.6s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    will-change: transform, translate;
+}
+
+/* Reserve the meter's own row on phones instead of painting over song actions. */
+#player-transport { position: relative; }
+.mobile-player-menu > summary { display: none; }
+.mobile-player-menu-content { display: flex; align-items: center; gap: .375rem; }
+.queue-actions { position: relative; }
+.queue-actions > summary { cursor: pointer; list-style: none; padding: .5rem; }
+.queue-actions > summary::-webkit-details-marker,
+.mobile-player-menu > summary::-webkit-details-marker { display: none; }
+.queue-actions-menu { position: absolute; z-index: 40; right: 0; top: 100%; min-width: 10rem; border-radius: .75rem; box-shadow: 0 8px 24px #0002; }
+.queue-actions-menu[popover] { position: fixed; inset: auto; margin: 0; width: 11rem; color: var(--text-main); }
+.queue-actions-menu button { display: block; width: 100%; min-height: 44px; text-align: left; padding: .5rem 1rem; }
+.song-row-actions:focus-within { opacity: 1; }
+button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--c-500); outline-offset: 3px; }
+
+@media (max-width: 1024px) {
+    /* Compact mobile browsing controls to leave more height for song lists. */
+    main > header {
+        height: 48px;
+        flex-shrink: 0;
+    }
+    #music-search-toolbar,
+    #songlist-toolbar {
+        gap: 4px;
+        margin-bottom: 6px;
+        flex-shrink: 0;
+    }
+    #music-search-toolbar input,
+    #music-search-toolbar select,
+    #music-search-toolbar > div > button,
+    #songlist-toolbar input,
+    #songlist-toolbar select,
+    #songlist-toolbar > div > button {
+        height: 36px;
+        min-height: 36px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+        font-size: 12px;
+        line-height: 18px;
+        border-radius: 10px;
+    }
+    #music-search-toolbar button,
+    #songlist-toolbar button {
+        min-width: 36px;
+        font-size: 12px;
+        line-height: 18px;
+    }
+    #search-type,
+    #search-source,
+    #cs-w-search-type,
+    #cs-w-search-source,
+    #cs-w-songlist-source {
+        flex: 0 0 auto;
+        width: 84px;
+    }
+    #search-type,
+    #search-source {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+    /* CustomSelectManager hides the select and clones its Tailwind spacing
+       into inline styles on this visible trigger. Override those on mobile. */
+    #music-search-toolbar .cs-trigger,
+    #songlist-toolbar .cs-trigger {
+        height: 36px;
+        min-height: 36px;
+        padding: 4px 8px !important;
+        font-size: 12px !important;
+        line-height: 18px;
+        border-radius: 10px !important;
+    }
+    #music-search-toolbar .cs-trigger-text,
+    #songlist-toolbar .cs-trigger-text {
+        margin-right: 4px;
+    }
+    #music-search-toolbar .cs-trigger-icon,
+    #songlist-toolbar .cs-trigger-icon {
+        margin-left: 0;
+        font-size: 8px;
+    }
+    #music-search-toolbar i,
+    #songlist-toolbar i {
+        font-size: 12px;
+    }
+    #search-input,
+    #songlist-search-input {
+        padding-left: 32px;
+    }
+    #search-input-wrapper > .fa-search,
+    #songlist-toolbar .relative > .fa-search {
+        left: 12px;
+    }
+    #search-input-wrapper > .fa-search {
+        top: 50%;
+        transform: translateY(-50%);
+    }
+    #songlist-sort-container { padding: 2px; border-radius: 10px; }
+    #songlist-sort-container button {
+        min-height: 30px;
+        padding-top: 4px;
+        padding-bottom: 4px;
+    }
+    #search-status,
+    #songlist-search-status {
+        margin-top: 0;
+        margin-bottom: 6px;
+        padding-top: 2px;
+        padding-bottom: 2px;
+    }
+    /* The footer includes the visualizer, wrapped metadata and safe-area padding.
+       Override legacy fixed/inline reservations with its measured border box. */
+    #main-views > [id^="view-"],
+    #songlist-detail-view {
+        padding-bottom: var(--player-footer-inset, 11rem) !important;
+    }
+    #main-sidebar {
+        padding-bottom: var(--player-footer-inset, 11rem) !important;
+    }
+    #main-sidebar > nav { min-height: 0; }
+    #player-footer { height: auto !important; flex-shrink: 0; }
+    #player-transport { flex: none; }
+    #visualizer-container { position: static !important; width: 100% !important; margin: 0; flex: none; }
+    #player-song-info { align-items: center; min-height: 48px; margin-bottom: 0; }
+    #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: wrap; gap: 2px; }
+    #player-title { width: 100%; max-width: 100%; }
+    #player-mobile-actions { max-width: none; flex-wrap: nowrap; }
+    .mobile-player-menu { position: relative; }
+    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 6px; }
+    .mobile-player-menu > summary:hover { color: var(--c-500, #10b981); }
+    .mobile-player-menu-content { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; min-width: 110px; background: var(--bg-panel, #fff); border: 1px solid var(--c-200, #e5e7eb); border-radius: 12px; box-shadow: 0 8px 24px #0003; padding: 6px; flex-direction: column; gap: 4px; }
+    .mobile-player-menu[open] .mobile-player-menu-content { display: flex; }
+    .mobile-player-menu-content .mobile-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--text-main, #374151); text-align: left; background: transparent; border: none; }
+    .mobile-player-menu-content .mobile-menu-item:hover { background: var(--bg-item-hover, rgba(0, 0, 0, 0.05)); color: var(--c-500, #10b981); }
+    .mobile-player-menu-content .mobile-menu-item i { width: 14px; text-align: center; }
+    #player-controls button { min-height: 44px; }
+    /* Match the touch minimum height so the play button stays circular. */
+    #player-controls #btn-play { min-width: 44px; flex-shrink: 0; }
+    .song-row-actions button, .queue-actions > summary { min-width: 28px; min-height: 32px; }
+    #player-progress-row { margin: 0; padding: 0; }
+}
+
+@media (min-width: 1025px) {
+    .mobile-player-menu { display: none !important; }
 }
 
 /* Buffering status dots animation */
@@ -1346,7 +1598,7 @@ aside {
     }
 }
 
-/* 侧边窄长半透明圆角折叠按钮 (展开时常驻在侧边栏右边缘) */
+/* 侧边窄长圆角折叠按钮 (展开时常驻在侧边栏右边缘) */
 .sidebar-collapse-pill {
     position: absolute;
     right: -10px;
@@ -1356,16 +1608,14 @@ aside {
     width: 20px;
     height: 76px;
     border-radius: 9999px;
-    background: var(--bg-glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
     color: var(--text-muted);
     transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     outline: none;
     user-select: none;
-    opacity: 0.75;
+    opacity: 1;
 }
 
 .sidebar-collapse-pill:hover {
@@ -1391,9 +1641,7 @@ aside {
     width: 16px;
     height: 76px;
     border-radius: 0 10px 10px 0;
-    background: var(--bg-glass);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background: var(--bg-panel);
     border: 1px solid var(--border-dim);
     border-left: none;
     box-shadow: 3px 4px 14px rgba(0, 0, 0, 0.08);
@@ -1401,7 +1649,7 @@ aside {
     transition: all 0.22s cubic-bezier(0.16, 1, 0.3, 1);
     outline: none;
     user-select: none;
-    opacity: 0.75;
+    opacity: 1;
 }
 
 .sidebar-expand-pill:hover {
@@ -1722,4 +1970,309 @@ aside {
     gap: 1px;
 }
 
+/* 搜索框波浪流光动效条（从左到右淡入淡出） */
+.search-wave-bar {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    border-bottom-left-radius: 0.75rem;
+    border-bottom-right-radius: 0.75rem;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    z-index: 5;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, black 15%, black 85%, transparent 100%);
+}
 
+.search-wave-bar.is-active {
+    opacity: 1;
+}
+
+.search-wave-bar.is-active::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 45%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        color-mix(in srgb, var(--c-400, #34d399) 35%, transparent) 25%,
+        var(--c-500, #10b981) 50%,
+        color-mix(in srgb, var(--c-300, #6ee7b7) 35%, transparent) 75%,
+        transparent 100%
+    );
+    filter: drop-shadow(0 0 4px var(--c-500, #10b981));
+    animation: search-wave-sweep 2s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
+@keyframes search-wave-sweep {
+    0% {
+        transform: translateX(-100%);
+        opacity: 0;
+    }
+
+    25% {
+        opacity: 1;
+    }
+
+    75% {
+        opacity: 1;
+    }
+
+    100% {
+        transform: translateX(230%);
+        opacity: 0;
+    }
+}
+
+/* 搜索状态条与主题色匹配 */
+.search-status-text {
+    color: var(--c-600, #059669);
+    letter-spacing: 0.01em;
+}
+
+:root[data-appearance="dark"] .search-status-text,
+.dark .search-status-text {
+    color: var(--c-400, #34d399);
+}
+
+.search-cancel-btn {
+    color: var(--c-600, #059669);
+    border-color: var(--c-300, #a7f3d0);
+    background-color: var(--c-50, #ecfdf5);
+}
+
+.search-cancel-btn:hover {
+    color: #fff;
+    background-color: var(--c-500, #10b981);
+    border-color: var(--c-500, #10b981);
+}
+
+:root[data-appearance="dark"] .search-cancel-btn,
+.dark .search-cancel-btn {
+    color: var(--c-300, #6ee7b7);
+    border-color: var(--c-800, #065f46);
+    background-color: rgba(16, 185, 129, 0.1);
+}
+
+:root[data-appearance="dark"] .search-cancel-btn:hover,
+.dark .search-cancel-btn:hover {
+    color: #fff;
+    background-color: var(--c-600, #059669);
+    border-color: var(--c-500, #10b981);
+}
+
+.search-home-btn {
+    color: var(--text-muted, #9ca3af);
+    border-color: var(--c-200, #e5e7eb);
+    background-color: transparent;
+}
+
+.search-home-btn:hover {
+    color: var(--c-600, #059669);
+    border-color: var(--c-400, #34d399);
+    background-color: var(--c-50, #ecfdf5);
+}
+
+:root[data-appearance="dark"] .search-home-btn,
+.dark .search-home-btn {
+    color: var(--text-muted, #9ca3af);
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+:root[data-appearance="dark"] .search-home-btn:hover,
+.dark .search-home-btn:hover {
+    color: var(--c-300, #6ee7b7);
+    border-color: var(--c-600, #059669);
+    background-color: rgba(16, 185, 129, 0.15);
+}
+
+/* 详情页导航栏左右对称及 Now Playing 居中 */
+#player-detail-navbar .detail-nav-left,
+#player-detail-navbar .detail-nav-right {
+    flex: 1 1 0%;
+    display: flex;
+    align-items: center;
+}
+
+#player-detail-navbar .detail-nav-left {
+    justify-content: flex-start;
+}
+
+#player-detail-navbar .detail-nav-right {
+    justify-content: flex-end;
+}
+
+#player-detail-navbar .detail-nav-center {
+    flex: 0 0 auto;
+}
+
+/* 移动端收起封面时，标题上移至顶部，隐藏 Now Playing 避免与歌曲标题重叠 */
+@media (max-width: 1024px) {
+    #view-player-detail.cover-collapsed #now-playing-header {
+        opacity: 0 !important;
+        pointer-events: none !important;
+        visibility: hidden !important;
+    }
+}
+
+
+
+
+/* Player-local contrast palette, independent of the surrounding application. */
+#view-player-detail .lyric-line { color: var(--player-lyric, #b8c4d4); opacity: 1; }
+#view-player-detail .lyric-line.active,
+#view-player-detail .lyric-line.active .plain-lyric,
+#view-player-detail .lyric-line.active .extended { color: var(--player-active, #34d399); opacity: 1; }
+#view-player-detail .lyric-line .extended { opacity: 1; }
+#view-player-detail .lyric-line.active .word-item,
+#view-player-detail .lyric-line.has-words.active .extended .ext-item {
+    background-image: linear-gradient(to right, var(--player-active, #34d399) var(--word-progress, 0%), var(--player-lyric, #b8c4d4) var(--word-progress, 0%));
+}
+#view-player-detail .lyric-line.has-words.active .extended { color: var(--player-lyric, #b8c4d4); }
+#view-player-detail .lyric-line.scroll-target { color: var(--player-active, #34d399); }
+#view-player-detail #detail-visualizer { opacity: 0.12; }
+
+/* Compact sound controls; scoped to the existing dialog. */
+.effects-status-bar { position: sticky; top: -14px; z-index: 12; margin: -14px -18px 12px; padding: 10px 18px; background: var(--bg-panel); border-bottom: 1px solid var(--border-main); }
+.effects-status-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.effects-status-heading strong { font-size: 13px; font-weight: 700; }
+.effects-status-heading p { margin-top: 3px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.effects-status-bar #sound-effects-status:not(:empty) { margin-top: 6px; color: var(--text-dim); font-size: 11px; }
+.effects-section-actions { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+.effects-switch { position: relative; display: inline-flex; width: 36px; height: 20px; flex: 0 0 36px; cursor: pointer; }
+.effects-switch input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.effects-switch > span { width: 100%; border-radius: 20px; background: var(--text-dim); pointer-events: none; transition: background .18s; }
+.effects-switch > span::after { content: ''; display: block; width: 14px; height: 14px; margin: 3px; border-radius: 50%; background: white; transition: transform .18s; }
+.effects-switch input:checked + span { background: var(--c-500, #10b981); }
+.effects-switch input:checked + span::after { transform: translateX(16px); }
+.effects-switch:has(input:focus-visible) { outline: 2px solid var(--c-500, #10b981); outline-offset: 3px; border-radius: 20px; }
+
+/* Active Effect Tags in Status Bar */
+.effects-tags-wrapper { min-height: 24px; }
+.effects-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.3;
+    border-radius: 6px;
+    background: rgba(16, 185, 129, 0.12);
+    color: var(--c-500, #10b981);
+    border: 1px solid rgba(16, 185, 129, 0.3);
+    transition: all .15s ease;
+    user-select: none;
+}
+.effects-tag:hover {
+    background: rgba(16, 185, 129, 0.18);
+    border-color: rgba(16, 185, 129, 0.45);
+}
+.effects-tag.is-paused {
+    background: var(--bg-track, rgba(120, 120, 120, 0.1));
+    color: var(--text-muted);
+    border-color: var(--border-main);
+    border-style: dashed;
+}
+.effects-tag-icon { font-size: 10px; opacity: 0.8; }
+.effects-tag-text { white-space: nowrap; }
+.effects-tag-remove {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 15px;
+    height: 15px;
+    margin-left: 1px;
+    margin-right: -2px;
+    border-radius: 4px;
+    background: transparent;
+    color: currentColor;
+    opacity: 0.65;
+    border: none;
+    cursor: pointer;
+    font-size: 10px;
+    transition: all .15s ease;
+}
+.effects-tag:hover .effects-tag-remove,
+.effects-tag-remove:hover {
+    opacity: 1;
+    background: rgba(239, 68, 68, 0.16);
+    color: #ef4444;
+    transform: scale(1.15);
+}
+.effects-tag-reset-all {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 2px 7px;
+    font-size: 11px;
+    font-weight: 500;
+    border-radius: 6px;
+    background: var(--bg-track, rgba(120, 120, 120, 0.1));
+    color: var(--text-muted);
+    border: 1px dashed var(--border-main);
+    cursor: pointer;
+    transition: all .15s ease;
+}
+.effects-tag-reset-all:hover {
+    color: #ef4444;
+    border-color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+.effects-no-tags-tip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-dim);
+}
+
+#sound-effects-content { max-width: 1080px; border-radius: 16px; color: var(--text-main); }
+#sound-effects-content > :first-child { padding: 12px 18px; }
+#sound-effects-content > :first-child .bg-emerald-500 { background: var(--bg-item-hover); color: var(--text-main); }
+#sound-effects-content > :first-child i { color: inherit; }
+#sound-effects-content > .overflow-y-auto { padding: 14px 18px 16px; }
+#sound-effects-content h4 { color: var(--text-main); font-size: 12px; font-weight: 600; letter-spacing: 0; }
+#sound-effects-status { font-size: 11px; line-height: 1.5; }
+#sound-effects-content .md\:divide-x { gap: 18px; }
+#sound-effects-content .md\:divide-x > div { padding: 0; border: 0; min-width: 0; }
+#sound-effects-content section { padding: 10px 12px; background: var(--bg-main); border: 1px solid var(--border-main); border-radius: 10px; }
+#sound-effects-content .space-y-8 > :not([hidden]) ~ :not([hidden]) { margin-top: 10px; }
+#sound-effects-content .h-px { display: none; }
+#sound-effects-content .sticky { position: static; background: transparent; padding-bottom: 8px; }
+#sound-effects-content button { box-shadow: none; color: inherit; }
+#sound-effects-content button:focus-visible,
+#sound-effects-content label:focus-within { outline: 2px solid var(--c-500, #10b981); outline-offset: 3px; }
+#sound-effects-content button[onclick*="reset"] { padding: 2px 7px; font-size: 10px; border-radius: 5px; white-space: nowrap; font-weight: 500; }
+#sound-effects-content input[type="range"] { min-width: 0; height: 4px; accent-color: var(--c-500, #10b981); }
+#sound-effects-content input[type="checkbox"] { accent-color: var(--c-500, #10b981); }
+#sound-effects-content #reverb-list { gap: 4px; }
+#reverb-list > label { min-width: 0; padding: 3px 7px; font-size: 11px; border: 1px solid var(--border-main); border-radius: 6px; font-weight: 500; transition: all .15s; }
+#reverb-list > label { position: relative; }
+#reverb-list > label > div { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
+#reverb-list > label:hover { border-color: var(--c-500, #10b981); }
+#reverb-list > label:has(input:checked) { color: var(--c-500, #10b981); border-color: currentColor; background: rgba(16, 185, 129, 0.1); }
+#eq-sliders-container { min-height: 0; margin-bottom: 8px; }
+#eq-sliders-container > div { gap: 6px 14px; padding: 0; }
+#eq-sliders-container > div > div { gap: 8px; min-width: 0; }
+#eq-presets button { padding: 3px 8px; font-size: 11px; border-radius: 6px; font-weight: 500; }
+@media (pointer: coarse), (max-width: 767px) {
+    .effects-tag-remove { opacity: 0.85; width: 18px; height: 18px; font-size: 11px; margin-left: 3px; }
+}
+@media (max-width: 767px) {
+    .effects-status-bar { top: -14px; margin: -14px -14px 14px; padding: 12px; }
+    #sound-effects-modal { padding: 8px; }
+    #sound-effects-content { max-height: 94dvh; border-radius: 14px; }
+    #sound-effects-content > :first-child, #sound-effects-content > .overflow-y-auto { padding: 12px; }
+    #sound-effects-content section { padding: 10px; }
+    #sound-effects-content section > .grid { gap: 10px; padding: 0; }
+    #sound-effects-content section > .flex:first-child { flex-wrap: wrap; gap: 8px; }
+    #sound-effects-content h4 { flex: 1 1 50%; }
+}

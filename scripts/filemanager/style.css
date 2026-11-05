@@ -1,0 +1,30 @@
+:root { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; color: #243047; background: #f3f5f9; }
+* { box-sizing: border-box; }
+body { margin: 0; font-family: inherit; }
+.files-shell { height: 100dvh; display: flex; flex-direction: column; padding: 0 24px 24px; gap: 12px; }
+.files-header { display: flex; align-items: center; gap: 16px; min-height: 88px; flex-shrink: 0; }
+.back-link { display: grid; place-items: center; width: 38px; height: 38px; color: #526178; text-decoration: none; border: 1px solid #dde3ec; border-radius: 12px; background: white; font-size: 21px; }
+.back-link:hover { color: #5369ce; border-color: #a9b5ea; }
+.files-heading h1 { margin: 0 0 4px; font-size: 21px; font-weight: 650; letter-spacing: -.4px; }
+.files-heading span { font-size: 12px; color: #7a879b; }
+.quick-links { display: flex; gap: 6px; margin-left: auto; background: #e9edf4; padding: 4px; border-radius: 11px; }
+.quick-link { border: 0; background: transparent; color: #637188; border-radius: 8px; padding: 9px 16px; font: inherit; font-size: 13px; cursor: pointer; }
+.quick-link:hover { color: #3449a6; }
+.quick-link.active { background: white; color: #445bc2; box-shadow: 0 2px 6px #1d33500d; }
+.files-main { flex: 1; min-height: 0; overflow: hidden; border: 1px solid #dfe5ee; border-radius: 14px; background: white; box-shadow: 0 8px 28px #172a4810; }
+.files-main > .vuefinder { height: 100%; }
+.files-main .vuefinder { font-family: inherit; }
+.files-error { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-radius: 8px; background: #fff1f0; color: #a63838; font-size: 13px; }
+.files-error button { border: 0; color: inherit; background: transparent; cursor: pointer; }
+#loading { position: fixed; z-index: 100; inset: 0; display: grid; place-content: center; text-align: center; background: #f3f5f9; }
+#loading[hidden] { display: none; }
+#loading a { color: #445bc2; }
+
+@media (max-width: 767px) {
+  .files-shell { padding: 0 8px 8px; gap: 8px; }
+  .files-header { min-height: 72px; gap: 10px; }
+  .files-heading h1 { font-size: 17px; }
+  .files-heading span { display: none; }
+  .quick-link { padding: 8px 10px; font-size: 12px; }
+  .files-main { border-radius: 10px; }
+}

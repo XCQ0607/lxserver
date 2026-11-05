@@ -150,20 +150,15 @@
     --logo-filter: hue-rotate(190deg);
 }
 
-/* Utilities for transition */
-.transition-colors {
-    transition-property: background-color, border-color, color, fill, stroke;
-    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-    transition-duration: 300ms;
-}
-
-/* Apply transition to common elements that will change color */
-body,
-button,
-input,
-.active-tab,
-i {
-    transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease;
+/* Apply base color transition in @layer base so Tailwind v4 @layer utilities (transition-all, transition-transform, etc.) can override it */
+@layer base {
+    body,
+    button,
+    input,
+    .active-tab,
+    i {
+        transition: color 0.3s ease, background-color 0.3s ease, border-color 0.3s ease;
+    }
 }
 
 /* Dynamic Logo Filtering - Applies to placeholder SVG or when transitioning to real image */
@@ -173,65 +168,7 @@ i {
     transition: filter 0.3s ease;
 }
 
-/* Theme Utilities to replace hardcoded Tailwind classes */
-.t-bg-main {
-    background-color: var(--bg-main) !important;
-}
 
-.t-bg-panel {
-    background-color: var(--bg-panel) !important;
-}
-
-.t-bg-item-hover:hover {
-    background-color: var(--bg-item-hover) !important;
-}
-
-.t-bg-header {
-    background-color: var(--bg-header) !important;
-}
-
-.t-bg-glass {
-    background-color: var(--bg-glass) !important;
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
-}
-
-.t-text-main {
-    color: var(--text-main) !important;
-}
-
-.t-text-muted {
-    color: var(--text-muted) !important;
-}
-
-.t-text-dim {
-    color: var(--text-dim) !important;
-}
-
-.t-border-main {
-    border-color: var(--border-main) !important;
-}
-
-.t-border-dim {
-    border-color: var(--border-dim) !important;
-}
-
-.t-shadow {
-    box-shadow: var(--shadow-main) !important;
-}
-
-/* Global overrides for dark mode compatibility */
-[data-appearance='dark'] ::-webkit-scrollbar-track {
-    background: #1f2937;
-}
-
-[data-appearance='dark'] ::-webkit-scrollbar-thumb {
-    background: #4b5563;
-}
-
-[data-appearance='dark'] ::-webkit-scrollbar-thumb:hover {
-    background: #6b7280;
-}
 
 /* 强制适配文本类输入元素 (支持模式切换与自动跟随系统) */
 :root[data-appearance="dark"] input:not([type="range"], [type="checkbox"], [type="radio"], [type="button"], [type="submit"]),

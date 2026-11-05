@@ -1,13 +1,13 @@
 # About
 
-**LX Music Sync Server** is modified from the original [lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server), and integrates the extraction and improvement of various capabilities on the basis of the original version, making it go from a simple local data exchange transit station to a fully functional personal private cloud music platform.
+**LX Music Sync Server** builds on [lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server), adding a web player, local-library tools, an admin console, background downloads and Subsonic integration. It brings playlist synchronization and music playback into a self-hosted service.
 
 ## Project Information
 
 | Information | Details |
 | :--- | :--- |
 | **Latest Version** | ![Version](https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square) (Auto-detected from `package.json`) |
-| **Runtime Requirements** | Node.js >= 20 |
+| **Runtime Requirements** | Node.js >= 22 for direct server runs; Docker and desktop packages include their runtime |
 | **License** | Apache-2.0 License |
 | **Changelog** | [View Changelog](https://github.com/XCQ0607/lxserver/blob/main/changelog.md) |
 | **Repository** | [GitHub: XCQ0607/lxserver](https://github.com/XCQ0607/lxserver) |
@@ -15,9 +15,9 @@
 
 ## Development Intent
 
-The original intention is to manage and play collected music with a very low threshold when it's inconvenient to turn on a computer outside. This project is open source, built using Node.js and a large amount of Vanilla JS. Salutes to all original authors.
+The goal is to make a personal music collection accessible from a browser and compatible clients without keeping a desktop music application open. The backend uses Node.js and TypeScript; the player and console primarily use vanilla JavaScript, with VueFinder for file management. Thanks to the upstream projects and contributors who make this possible.
 
 ---
 
-If you encounter any software defects, welcome to GitHub for Feedback.
+Report reproducible issues on GitHub with your version, build fingerprint and relevant logs.
 This project is open-sourced under the Apache-2.0 license.

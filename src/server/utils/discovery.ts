@@ -28,7 +28,9 @@ export const fetchGenres = async () => {
             headers: commonHeaders
         }).promise
 
-        if (body.code !== 200) {
+        // [修复] 该接口成功时返回 code:0（腾讯约定；实测 body.code=0 且 data.categories 完整）。
+        // 旧实现按 code!==200 判定为异常 → fetchGenres 恒返回空数组，客户端「流派/语种」列表为空。
+        if (!(body?.code === 0 || body?.code === 200)) {
             console.error('[发现页] fetchGenres 接口异常:', body)
             return []
         }
@@ -44,8 +46,21 @@ export const fetchGenres = async () => {
             allItems.push(...group.items)
         }
 
+        // [修复] 上游 categoryName 含 HTML 数字实体（如 R&#38;B），直接回给客户端会显示成乱码
+        // 用 fromCodePoint 支持完整 Unicode（含超出 BMP 的表情等），并对非法码点保留原始实体文本
+        const decodeEntities = (s: string) =>
+          String(s).replace(/&#(\d+);/g, (_, n) => {
+            const cp = Number(n)
+            if (!Number.isInteger(cp) || cp < 0 || cp > 0x10ffff) return `&#${n};`
+            try {
+              return String.fromCodePoint(cp)
+            } catch {
+              return `&#${n};`
+            }
+          })
+
         return allItems.map((item: any) => ({
-            value: item.categoryName,
+            value: decodeEntities(item.categoryName),
             id: item.categoryId.toString(),
             songCount: 1000,
             albumCount: 100

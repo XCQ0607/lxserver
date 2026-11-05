@@ -3,7 +3,7 @@
   "version": "2.1.4",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/download-binary.js && node scripts/update-build-hash.js",
+    "prebuild": "npm run build:css && npm run build:files && node scripts/download-binary.js && node scripts/update-build-hash.js",
     "build": "rimraf server && tsc --project tsconfig.json && tsc-alias -p tsconfig.json",
     "test": "node --test test/*.test.cjs && npm run test:unit",
     "test:unit": "tsx --test test/*.test.ts",
@@ -19,10 +19,12 @@
     "publish": "node publish",
     "electron:build": "npm run build",
     "electron:dist": "npm run electron:build && electron-builder",
-    "prepare": "husky || true"
+    "prepare": "husky || true",
+    "build:css": "npx @tailwindcss/cli -i scripts/player-tailwind.css -o public/music/css/utilities.css --minify",
+    "build:files": "node scripts/build-filemanager.mjs"
   },
   "engines": {
-    "node": ">= 20",
+    "node": ">=22.13.0",
     "npm": ">= 8.5.2"
   },
   "repository": {
@@ -53,13 +55,14 @@
     "module-alias": "^2.3.4",
     "music-tag-native": "0.2.5",
     "needle": "^3.3.1",
+    "sharp": "0.35.5",
     "socks-proxy-agent": "^10.1.0",
     "tunnel": "^0.0.6",
     "unzipper": "^0.12.5",
     "utf-8-validate": "^6.0.6",
     "vm2": "^3.12.2",
     "webdav": "^5.11.0",
-    "ws": "8.22.0"
+    "ws": "8.22.1"
   },
   "devDependencies": {
     "@commitlint/cli": "^21.2.3",
@@ -73,20 +76,23 @@
     "@types/unzipper": "^0.10.11",
     "@types/ws": "8.18.2",
     "changelog-parser": "^4.1.0",
-    "electron": "^43.7.5",
-    "electron-builder": "^26.15.3",
+    "electron": "~43.8.3",
+    "electron-builder": "^26.18.0",
+    "esbuild": "^0.28.2",
     "husky": "^9.1.7",
     "nodemon": "^3.1.14",
     "rimraf": "^5.0.5",
-    "sharp": "^0.35.5",
     "stylelint": "^17.16.0",
     "stylelint-config-standard": "^40.0.0",
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3",
     "ts-node": "^10.9.2",
-    "tsc-alias": "^1.9.8",
+    "tsc-alias": "^1.9.10",
     "tsconfig-paths": "^4.2.0",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
-    "esbuild": "^0.28.2"
+    "vue": "3.5.44",
+    "vuefinder": "4.8.0"
   },
   "nodemonConfig": {
     "ext": "js,ts",

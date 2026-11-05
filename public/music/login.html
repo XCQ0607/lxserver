@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN" class="theme-dark">
 
 <head>
@@ -14,8 +14,7 @@
     </script>
     <link rel="icon" href="assets/logo.svg" type="image/svg+xml">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
-    <script src="assets/tailwindcss.js"></script>
-    <script src="js/tailwind_setup.js"></script>
+    <link rel="stylesheet" href="css/utilities.css">
     <style>
         :root {
             --primary: #10b981;
@@ -411,7 +410,7 @@
             width: 100%;
             border-radius: 14px;
             padding: 13px 44px 13px 46px;
-            font-size: 14.5px;
+            font-size: 16px;
             outline: none;
             transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
         }
@@ -504,6 +503,9 @@
                 transform: translateY(0);
             }
         }
+        input, select {
+            font-size: 16px;
+        }
 
         /* 抖动动画 */
         @keyframes shakeHard {
@@ -539,22 +541,20 @@
             100% { opacity: 0.8; transform: scale(1.04); }
         }
     </style>
+    <link rel="stylesheet" href="css/dynamic-backgrounds.css">
+
 </head>
 
 <body>
-
-    <!-- 动态氛围背景 -->
-    <div class="ambient-canvas">
-        <div class="aurora-blob aurora-1"></div>
-        <div class="aurora-blob aurora-2"></div>
-        <div class="aurora-blob aurora-3"></div>
+    <div id="login-scene" aria-hidden="true"></div>
+    <div class="background-picker">
+        <i class="fas fa-magic"></i>
+        <span>动效</span>
+        <!-- 选项由 DynamicBackground.fillOptions 自动填充，与播放页设置保持一致 -->
+        <select id="login-background" class="bg-picker-select" aria-label="选择登录页动态效果"></select>
     </div>
-    <div class="bg-grid-mask"></div>
-    
-    <!-- 从下往上升腾飘浮的音乐图标 -->
-    <div id="notes-container"></div>
 
-    <canvas id="particles-canvas"></canvas>
+    <div class="bg-grid-mask"></div>
     <div id="cursor-glow"></div>
 
     <!-- 左上方精美主题切换 Toggle -->
@@ -610,7 +610,7 @@
                 <!-- 账号输入框（无预填、无多余提示） -->
                 <div class="input-wrapper">
                     <input type="text" id="auth-username-input" placeholder="输入账号 / 用户名"
-                        class="modern-input" autocomplete="off" spellcheck="false">
+                        class="modern-input" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false">
                     <i class="fas fa-user input-icon"></i>
                 </div>
 
@@ -768,7 +768,7 @@
 
         (async () => {
             if (typeof initTheme === 'function') initTheme();
-            if (typeof initFloatingNotes === 'function') initFloatingNotes();
+
 
             const now = Date.now();
             const lastBounce = parseInt(sessionStorage.getItem('lx_login_bounce_time') || '0', 10);
@@ -969,90 +969,6 @@
             }
         }
 
-        function initFloatingNotes() {
-            if (typeof document?.getElementById !== 'function' || typeof document?.createElement !== 'function') return;
-            const container = document.getElementById('notes-container');
-            if (!container) return;
-            container.innerHTML = '';
-            const noteIcons = [
-                'fa-music', 'fa-headphones', 'fa-headphones-simple', 'fa-compact-disc', 'fa-record-vinyl',
-                'fa-guitar', 'fa-drum', 'fa-microphone', 'fa-microphone-lines', 'fa-wave-square',
-                'fa-sliders', 'fa-sliders-h', 'fa-volume-high', 'fa-volume-low', 'fa-podcast',
-                'fa-radio', 'fa-circle-play', 'fa-circle-pause', 'fa-forward-step', 'fa-heart'
-            ];
-            const count = 28;
-            for (let i = 0; i < count; i++) {
-                const note = document.createElement('i');
-                const icon = noteIcons[Math.floor(Math.random() * noteIcons.length)];
-                const sizeClass = ['text-xs', 'text-sm', 'text-base', 'text-lg', 'text-xl', 'text-2xl'][Math.floor(Math.random() * 6)];
-                note.className = 'fas ' + icon + ' floating-note ' + sizeClass;
-                note.style.left = (Math.random() * 96) + '%';
-                const duration = 12 + Math.random() * 12;
-                const delay = Math.random() * duration;
-                note.style.animationDuration = duration + 's';
-                note.style.animationDelay = '-' + delay + 's';
-                container.appendChild(note);
-            }
-        }
-
-        (function initCanvasParticles() {
-            if (typeof document?.getElementById !== 'function') return;
-            const canvas = document.getElementById('particles-canvas');
-            if (!canvas || !canvas.getContext) return;
-            const ctx = canvas.getContext('2d');
-            let width = (canvas.width = window.innerWidth);
-            let height = (canvas.height = window.innerHeight);
-
-            if (typeof window?.addEventListener === 'function') {
-                window.addEventListener('resize', () => {
-                    width = canvas.width = window.innerWidth;
-                    height = canvas.height = window.innerHeight;
-                });
-            }
-
-            const particles = [];
-            const particleCount = 28;
-
-            for (let i = 0; i < particleCount; i++) {
-                particles.push({
-                    x: Math.random() * width,
-                    y: Math.random() * height,
-                    radius: Math.random() * 2 + 0.8,
-                    color: Math.random() > 0.5 ? 'rgba(16, 185, 129, ' : 'rgba(6, 182, 212, ',
-                    alpha: Math.random() * 0.45 + 0.1,
-                    speedY: Math.random() * 0.4 + 0.15,
-                    speedX: (Math.random() - 0.5) * 0.2,
-                    pulse: Math.random() * Math.PI,
-                });
-            }
-
-            function animate() {
-                ctx.clearRect(0, 0, width, height);
-                for (const p of particles) {
-                    p.y -= p.speedY;
-                    p.x += p.speedX;
-                    p.pulse += 0.02;
-
-                    if (p.y < -10) {
-                        p.y = height + 10;
-                        p.x = Math.random() * width;
-                    }
-                    if (p.x < -10) p.x = width + 10;
-                    if (p.x > width + 10) p.x = -10;
-
-                    const currentAlpha = p.alpha * (0.6 + 0.4 * Math.sin(p.pulse));
-                    ctx.beginPath();
-                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-                    ctx.fillStyle = p.color + currentAlpha + ')';
-                    ctx.shadowBlur = 8;
-                    ctx.shadowColor = p.color + '0.5)';
-                    ctx.fill();
-                }
-                if (typeof requestAnimationFrame === 'function') requestAnimationFrame(animate);
-            }
-            animate();
-        })();
-
         if (typeof document?.addEventListener === 'function') {
             document.addEventListener('DOMContentLoaded', () => {
                 if (typeof document?.getElementById !== 'function') return;
@@ -1065,6 +981,8 @@
             });
         }
 </script>
+    <script src="js/ui/dynamic_backgrounds.js"></script>
+    
 </body>
 
 </html>

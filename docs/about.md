@@ -7,7 +7,7 @@
 | 项目信息 | 说明 |
 | :--- | :--- |
 | **最新版本** | ![Version](https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square) (动态识别 `package.json`) |
-| **运行时要求** | Node.js >= 20 |
+| **运行时要求** | Node.js >= 22（直接运行服务端时）；Docker 与桌面包自带对应运行环境 |
 | **开源协议** | Apache-2.0 License |
 | **更新日志** | [查看 Changelog](https://github.com/XCQ0607/lxserver/blob/main/changelog.md) |
 | **源码仓库** | [GitHub: XCQ0607/lxserver](https://github.com/XCQ0607/lxserver) |

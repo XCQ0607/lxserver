@@ -3,13 +3,9 @@
 ![lxserver](https://socialify.git.ci/XCQ0607/lxserver/image?description=1&forks=0&issues=0&logo=https://raw.githubusercontent.com/XCQ0607/lxserver/refs/heads/main/public/icon.svg&owner=1&pulls=0&stargazers=0&theme=Auto)
 
 <div align="center">
-  <!-- <img src="public/icon.svg" width="120" height="120" alt="Icon"> -->
-  <!-- <br>
-  <h1>LX Sync Server</h1> -->
   <p>
-    <img src="https://img.shields.io/badge/build-passing-brightgreen?style=flat-square" alt="Build Status">
     <img src="https://img.shields.io/github/package-json/v/XCQ0607/lxserver?style=flat-square" alt="Version">
-    <img src="https://img.shields.io/badge/node-%3E%3D20-green?style=flat-square" alt="Node Version">
+    <img src="https://img.shields.io/badge/node-%3E%3D22-green?style=flat-square" alt="Node Version">
     <img src="https://img.shields.io/github/license/XCQ0607/lxserver?style=flat-square" alt="License">
     <br>
     <br>
@@ -33,150 +29,45 @@
 
 [帮助文档 Documentation](https://xcq0607.github.io/lxserver/) | [同步服务器 SyncServer](md/lxserver.md) | [更新日志 Changelog](changelog.md) | [English](README_EN.md)
 
----
-
-本项目内置了一个功能强大的 **Web 播放器**，让你可以随时随地在浏览器中享受音乐。同时，它也是一个增强版的 [LX Music 数据同步服务端](md/lxserver.md)。
-
-## ✨ Web 播放器核心特性
-
-### 1. 现代化界面与全能播放控制
-
-采用清新现代的响应式 UI 设计，支持深浅色模式切换与沉浸式全屏歌词；底栏集成音质切换、倍速播放、睡眠定时等完整控制。
-
-播放器与关于页面显示实际软件版本和源码构建指纹（例如 `v2.1.3 · build 123abcd`），方便区分同一版本下的自定义修改。版本来自 `package.json`，构建/启动脚本会刷新指纹；配置不可用时不再显示虚构的 `v1.0.0`。
-
-<p align="center">
-  <img src="md/player.png" width="800" alt="Web 播放器主界面">
-</p>
-<p align="center">
-  <img src="md/controller.png" width="800" alt="播放控制栏">
-</p>
-
-### 2. 多源聚合搜索与歌手专辑
-
-聚合各大音乐平台在线资源，秒级检索歌曲、歌手与完整专辑，支持一键收藏与作品快速回溯。
-
-<p align="center">
-  <img src="md/search.png" width="800" alt="多源搜索">
-</p>
-<p align="center">
-  <img src="md/album.png" width="400" alt="专辑展示">
-  <img src="md/singer.png" width="400" alt="歌手展示">
-</p>
-
-### 3. 多平台歌单与播放队列管理
-
-支持同步浏览多平台热门网络歌单与详情；右侧便捷抽屉面板支持播放队列拖拽排序及自动化本地缓存管理。
-
-<p align="center">
-  <img src="md/musiclist.png" width="400" alt="歌单广场">
-  <img src="md/musiclist-detail.png" width="400" alt="歌单详情">
-</p>
-<p align="center">
-  <img src="md/playlist.png" width="280" alt="播放队列抽屉">
-  <img src="md/cache.png" width="280" alt="缓存管理抽屉">
-</p>
-
-### 4. 本地音乐库与共享收藏
-
-统一管理服务器本地存储、下载及缓存的音频文件，支持无损规格解析、布尔逻辑搜索（`&`、`|`、`!`）、状态查漏与批量操作；支持开启多用户公共共享曲库。
-
-<p align="center">
-  <img src="md/localmusic.png" width="800" alt="本地音乐库与高级检索">
-</p>
-<p align="center">
-  <img src="md/favorite.png" width="800" alt="收藏与共享曲库">
-</p>
-
-### 5. 个性化主题、歌词卡片与自定义源
-
-提供多套精美色彩主题与暗亮模式切换；支持一键生成多比例高清歌词分享卡片；支持导入自定义音源脚本扩展无限可能。
-
-<p align="center">
-  <img src="md/theme.png" width="400" alt="多套色彩主题">
-  <img src="md/settings.png" width="400" alt="全方位系统配置">
-</p>
-<p align="center">
-  <img src="md/share.png" width="380" alt="歌词卡片社交分享">
-  <img src="md/source.png" width="420" alt="自定义源管理">
-</p>
-
-### 6. Subsonic 协议与多端互联
-
-全面兼容 Subsonic API 协议，支持使用各类第三方客户端（音流、Feishin 等）连接播放，支持客户端内全网在线搜索与本地资源检索。
-
-<p align="center">
-  <img src="md/subsonic.png" width="500" alt="Subsonic 客户端连接">
-  <img src="md/subsonic-search.png" width="300" alt="Subsonic 在线全网搜索">
-</p>
-
-## 🔒 访问控制与安全
-
-为了保护你的隐私，Web 播放器支持开启访问密码。
-
-### 开启方式
-
-1. **环境变量配置**（推荐 Docker 用户使用）：
-   - `ENABLE_WEBPLAYER_AUTH=true`: 开启认证
-   - `WEBPLAYER_PASSWORD=yourpassword`: 设置访问密码
-2. **Web 界面配置**：
-   登录管理后台（默认端口 9527），进入 **"系统配置"**，勾选 **"启用 Web 播放器访问密码"** 并设置密码。
-
-### 权限与公开源限制矩阵 (当 `user.enablePublicRestriction` 开启时)
-
-| 用户类型             | 查看列表 | 使用/切换(仅个人) | 修改默认音质 | 上传/导入公开源 | 删除/修改公开源 |
-| :------------------- | :------- | :---------------- | :----------- | :-------------- | :-------------- |
-| **管理员**     | ✅ 允许  | ✅ 允许           | ✅ 允许      | ✅ 允许         | ✅ 允许         |
-| **已登录用户** | ✅ 允许  | ✅ 允许           | ✅ 允许      | ❌ 禁止         | ❌ 禁止         |
-| **未登录访客** | ❌ 隐藏  | ❌ 禁止           | ❌ 禁止      | ❌ 禁止         | ❌ 禁止         |
-
-## 📱 移动端适配
-
-Web 播放器针对移动端进行了深度优化，手机浏览器访问也能获得原生 App 般的体验。
 
 ---
 
-## 🚀 快速启动
+LX Music Sync Server 是一个可以自行部署的音乐同步服务。它在 [LX Music 同步服务端](https://github.com/lyswhut/lx-music-sync-server) 的基础上加入了 Web 播放器、本地音乐管理、服务端下载、Subsonic 接口和管理后台。
 
-本项目基于 **Node.js** 开发，支持多种部署方式。
+同一套服务可以供浏览器、LX Music 桌面端/移动端以及支持 Subsonic 的客户端使用。LX 客户端同步的是歌单等数据；服务器上的音频文件由本地音乐库管理，不会随歌单同步自动传到每台设备。
 
-### 方式一：桌面客户端
+## 文档导航
 
-可以通过桌面端更方便地运行 LX Music Sync Server，支持 Windows、macOS 和 Linux。
+- [部署与首次使用](#部署与首次使用)
+- [连接客户端](#连接客户端)
+- [播放器与音乐管理](#播放器与音乐管理)
+- [账号与权限](#账号与权限)
+- [数据目录与备份](#数据目录与备份)
+- [配置方式](#配置方式)
+- [常见问题](#常见问题)
+- [开发与接口](#开发与接口)
 
-- **📦 最新版本下载**: [GitHub Releases](https://github.com/XCQ0607/lxserver/releases/latest)
-- **✨ 桌面端优势**:
-  - **单窗口管理**: 服务器管理与 Web 播放器合二为一，界面更统一。
-  - **托盘常驻**: 窗口关闭后自动缩回托盘，服务在后台始终运行。
-  - **全架构支持**: 提供 Windows (x64/x86/ARM64 Setup 及 Portable)、macOS (Intel/Apple Silicon) 及 Linux (amd64/arm64/armv7l) 全家桶。
+完整文档见 [文档站](https://xcq0607.github.io/lxserver/)，接口说明见 [API 参考](docs/api/reference.md) 和 [路由索引](docs/api/routes.md)。英文介绍见 [README_EN.md](README_EN.md)。
 
-### 方式二：使用 Docker
+## 部署与首次使用
 
-本项目支持从 Docker Hub 或 GitHub Packages 拉取镜像：
+### 选择运行方式
 
-- **Docker Hub**: `xcq0607/lxserver:latest`
-- **GitHub Packages**: `ghcr.io/xcq0607/lxserver:latest`
+| 方式 | 适用情况 | 需要准备 |
+| --- | --- | --- |
+| Docker / Docker Compose | NAS、服务器、长期运行 | Docker，保存配置和音乐的宿主机目录 |
+| Node.js 源码运行 | 本地开发、自行修改或编译 | Node.js 22.13.0 或更高版本、npm、Git |
+| Release 服务端压缩包 | 使用已编译的服务端 | Node.js 22.13.0 或更高版本，包含编译产物的发行包 |
+| 桌面客户端 | 在桌面窗口中管理与使用服务 | 与操作系统、CPU 架构匹配的安装包 |
+| PM2 托管 | 已编译的 Node.js 服务长期运行 | 单独安装 PM2，先完成构建 |
 
-**Docker Run 示例：**
+默认主端口是 `9527`。启动后，播放器位于 `/`，管理后台位于 `/admin`，Subsonic 路径为 `/rest`。
 
-```bash
-docker run -d \
-  -p 9527:9527 \
-  -v $(pwd)/data:/server/data \
-  -v $(pwd)/logs:/server/logs \
-  -v $(pwd)/cache:/server/cache \
-  -v $(pwd)/music:/server/music \
-  --name lx-sync-server \
-  --restart unless-stopped \
-  xcq0607/lxserver:latest
-```
+### Docker Compose
 
-**Docker Compose 示例：**
-
-新建 `docker-compose.yml` 文件：
+在准备保存数据的目录中创建 `compose.yaml`：
 
 ```yaml
-version: '3'
 services:
   lx-sync-server:
     image: xcq0607/lxserver:latest
@@ -186,87 +77,365 @@ services:
       - "9527:9527"
     volumes:
       - ./data:/server/data
-      - ./logs:/server/logs
       - ./cache:/server/cache
       - ./music:/server/music
+      # 使用已有音乐目录时再添加挂载，例如：
+      # - /mnt/nas/music:/library:ro
     environment:
-      - NODE_ENV=production
-      # - ADMIN_PASSWORD=123456
-      # - ENABLE_WEBPLAYER_AUTH=true
-      # - WEBPLAYER_PASSWORD=yourpassword
-      # - ADMIN_PATH=/music
-      # - PLAYER_PATH=/
+      NODE_ENV: production
+      ADMIN_PASSWORD: "replace-with-your-admin-password"
+      ENABLE_WEBPLAYER_AUTH: "true"
+      WEBPLAYER_PASSWORD: "replace-with-your-player-password"
+      # 创建同步用户，也可以启动后在后台添加：
+      # LX_USER_user1: "replace-with-your-user-password"
 ```
 
-### 方式三：直接运行 (Git Clone)
+执行：
 
 ```bash
-# 1. 克隆项目
-git clone https://github.com/XCQ0607/lxserver.git && cd lxserver
+docker compose up -d
+docker compose logs -f --tail=100
+```
 
-# 2. 安装依赖并编译
-npm ci && npm run build
+也可以将镜像名换成 `ghcr.io/xcq0607/lxserver:latest`。固定版本部署时，把 `latest` 换成镜像仓库实际存在的版本标签。
 
-# 3. 启动服务
+镜像默认将日志写入 `/server/data/logs`，上述 `data` 挂载已包含日志。如需单独保存，增加 `./logs:/server/logs` 挂载，并同时设置 `LOG_PATH: /server/logs`。只挂载 `/server/logs` 不会改变默认日志位置。
+
+`cache` 和 `music` 挂载用于程序根目录存储模式；选择数据目录存储后，相应文件位于 `/server/data` 下。保留这三个挂载，可以在切换存储模式和更新容器时继续使用原文件。
+
+### Docker Run
+
+以下为 Bash 示例，路径相对于当前目录：
+
+```bash
+docker run -d \
+  --name lx-sync-server \
+  --restart unless-stopped \
+  -p 9527:9527 \
+  -v "$(pwd)/data:/server/data" \
+  -v "$(pwd)/cache:/server/cache" \
+  -v "$(pwd)/music:/server/music" \
+  -e ADMIN_PASSWORD="replace-with-your-admin-password" \
+  -e ENABLE_WEBPLAYER_AUTH=true \
+  -e WEBPLAYER_PASSWORD="replace-with-your-player-password" \
+  xcq0607/lxserver:latest
+```
+
+Windows PowerShell 用户可以使用上面的 Compose 文件，避免多行命令和路径语法的差异。
+
+### 从源码运行
+
+```bash
+git clone https://github.com/XCQ0607/lxserver.git
+cd lxserver
+npm ci
+npm run build
 npm start
 ```
 
-### 方式四：使用 Release 版本
+构建会生成服务端 JavaScript、播放器样式和文件管理器前端资源，并检查音频指纹工具。安装和首次构建需要访问依赖仓库及相关二进制下载地址。
 
-1. 在 GitHub Releases 下载压缩包。
-2. 解压后运行 `npm install --production`。
-3. 执行 `npm start` 启动。
+本地开发使用 `npm run dev`。修改 TypeScript 源码后，生产运行方式需要重新执行 `npm run build`；`npm start` 加载的是 `server/` 中的编译结果。
 
-### 3. 服务连接与客户端配置指南
+### Release 与桌面客户端
 
-#### ① Web 界面访问
+从 [GitHub Releases](https://github.com/XCQ0607/lxserver/releases) 下载对应文件。桌面版选择匹配系统与架构的安装包，具体提供哪些构建以该次发布的附件为准。
 
-- **Web 播放器**: `http://<服务器IP>:9527`（默认根路径，可通过 `PLAYER_PATH` 环境变量或后台配置自定义路径，如 `/music`）
-  - 若启用了播放器访问密码认证（`ENABLE_WEBPLAYER_AUTH`），首次访问需输入播放器密码（默认 `123456`）。
-- **管理后台**: `http://<服务器IP>:9527/admin`（默认路径为 `/admin`，可通过 `ADMIN_PATH` 自定义，默认管理员密码: `123456`）。
+服务端压缩包需要包含 `server/`、`public/`、`index.js` 和 `package.json` 等运行文件。解压后安装生产依赖并启动：
 
-#### ② LX Music 客户端同步配置（桌面端 / 移动端）
+```bash
+npm install --omit=dev
+node index.js
+```
 
-进入客户端「设置 → 同步设置」，选择自定义连接：
+GitHub 自动生成的 Source code 压缩包是源码，不能当作已编译的服务端包使用；使用源码包时按前面的源码步骤构建。
 
-- **模式一：用户路径模式（推荐，默认开启 `USER_ENABLE_PATH=true`）**
-  - **连接 URL**: `http://<服务器IP>:9527/<用户名>`（例如：`http://192.168.1.100:9527/user1`）
-  - **连接密码**: 对应用户的独立密码
-  - **特点**: 通过 URL 中的用户名精确路由到各用户独立存储空间，**允许多个不同用户使用相同密码**。
-- **模式二：根路径模式（需配置 `USER_ENABLE_ROOT=true`）**
-  - **连接 URL**: `http://<服务器IP>:9527`（例如：`http://192.168.1.100:9527`）
-  - **连接密码**: 对应用户的密码
-  - **特点**: URL 无需携带用户名，服务端通过鉴权密码自动匹配用户。**注意：此模式下所有用户的密码必须唯一，不允许不同用户使用相同密码**。
+`node index.js` 直接运行编译产物，不执行 npm 生命周期脚本；`npm start` 还会执行音频指纹工具检查和构建信息刷新。使用 npm 启动时需保留发行包中的 `scripts/`。桌面版使用独立的存储设置，端口被占用时会尝试其他端口，以应用实际显示的地址为准。
 
-#### ③ Subsonic 音乐客户端配置（音流 / Feishin / Symfonium 等）
+### PM2 托管与自行构建镜像
 
-全面兼容 Subsonic API 协议，客户端中填写：
+先完成依赖安装和构建，再在项目目录执行：
 
-- **服务器地址 (Server URL)**:
-  - **默认共享主端口**: `http://<服务器IP>:9527/rest`（子路径由 `SUBSONIC_PATH` 决定，默认 `/rest`）
-  - **独立监听端口模式**（若配置了 `SUBSONIC_PORT` > 0，例如 `4533`）: `http://<服务器IP>:4533/rest`
-- **用户名 & 密码**: 在后台“用户管理”中配置的用户名及其同步密码。
-- **在线搜索**: 支持在 Subsonic 客户端中直接全网搜索与播放，可使用 `wy:`、`tx:`、`kw:`、`kg:`、`mg:` 指定平台，或使用 `online:` / `local:` 强制在线/本地搜索。
+```bash
+npm install -g pm2
+npm run prd
+pm2 status
+pm2 logs lx-music-sync-server
+pm2 save
+```
 
----
+`npm run prd` 调用 `pm2 start ecosystem.config.js --env production`，不会自动构建。PM2 不在项目依赖内，需要单独安装；`pm2 save` 保存进程列表，系统开机自启还需按部署系统配置。
 
-## 🏗️ 项目架构
+如需使用自己修改的 Docker 镜像：
 
-本项目基于 Node.js 采用前后端分离架构：
+```bash
+docker build -t lxserver:local .
+```
 
-- **Backend (Express + WebSocket)**: 核心同步逻辑与 WebDAV 备份。
-- **WebPlayer (Vanilla JS)**: 负责音乐播放业务，默认访问路径为根路径 `/`。
-- **Console (Vanilla JS)**: 位于 `/admin` 路径，负责用户与数据管理。
+把 Compose 中的镜像改为 `lxserver:local` 后启动。桌面包构建命令为 `npm run electron:dist`，原生模块与打包环境要求取决于目标系统；它属于开发构建流程，不是普通服务端的启动命令。
 
----
+### 第一次启动后
 
-## 🛠️ 配置说明
+1. 打开 `http://服务器IP:9527/admin`，使用设置的管理员密码登录。未配置时，默认密码是 `123456`。
+2. 在“用户管理”中创建个人账号，设置用户名和同步密码。
+3. 打开 `http://服务器IP:9527/`。若启用了播放器访问认证，先输入播放器访问密码，再按需登录个人账号。
+4. 需要在线播放时，在自定义源管理中导入可用的音源脚本并启用。
+5. 需要管理本地歌曲时，检查存储位置、目录挂载和账号权限，再扫描音乐目录。
 
-系统配置文件已默认持久化在数据目录中的 `data/config.js`（Docker 部署只需挂载 `./data` 卷即可在容器更新、重启后永久保留配置，若根目录下存在旧 `config.js` 会自动平滑迁移）。环境变量优先级最高：
+管理员密码、播放器访问密码、个人账号密码用途不同，详见“账号与权限”。
+
+## 连接客户端
+
+### 浏览器
+
+| 入口 | 默认地址 | 用途 |
+| --- | --- | --- |
+| Web 播放器 | `http://服务器IP:9527/` | 搜索、播放、歌单和本地音乐管理 |
+| 管理后台 | `http://服务器IP:9527/admin` | 用户、系统配置、备份、日志和文件管理 |
+
+可以通过 `PLAYER_PATH` 和 `ADMIN_PATH` 改变路径。例如播放器设为 `/music` 后，访问 `http://服务器IP:9527/music`。两个路径不能相同，也不能占用 `/api` 路径；根路径使用 `/`。
+
+手机和电脑使用相同地址访问。音频自动播放、锁屏播放和媒体按键行为还受浏览器及系统权限影响。
+
+### LX Music 桌面端与移动端
+
+在 LX Music 的“设置 → 同步设置”中选择自定义服务器。
+
+| 模式 | 连接地址示例 | 密码 | 要求 |
+| --- | --- | --- | --- |
+| 用户路径模式，默认开启 | `http://192.168.1.100:9527/user1` | user1 的同步密码 | `USER_ENABLE_PATH=true`，按用户名区分用户，允许不同用户密码相同 |
+| 根路径模式，默认关闭 | `http://192.168.1.100:9527` | 对应用户的同步密码 | `USER_ENABLE_ROOT=true`，用户密码必须唯一 |
+
+这里填写个人账号的同步密码。连接同步服务不使用 `/admin`、`/rest` 或播放器访问密码。
+
+首次同步时留意客户端给出的合并、覆盖方向。已有歌单建议先备份，再决定哪一端的数据作为基准。同步协议和配置细节见 [同步服务说明](md/lxserver.md)。
+
+### Subsonic 客户端
+
+支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 状态](docs/subsonic-status.md)。
+
+默认连接信息：
+
+| 项目 | 填写内容 |
+| --- | --- |
+| 服务地址 | `http://服务器IP:9527/rest` |
+| 用户名 | 后台创建的个人账号 |
+| 密码 | 该账号的同步密码 |
+
+部分客户端会自动拼接 `/rest`；这类客户端按其提示填写主机地址，避免最终请求变成 `/rest/rest`。
+
+默认与主服务共用端口。需要独立端口时，在后台开启独立监听，或在配置中设置 `subsonic.standalone=true`，并设置 `subsonic.port`。端口默认值为 `4050`，**只设置 `SUBSONIC_PORT` 不会开启独立监听**。Docker 还需要额外映射对应端口；协议路径由 `subsonic.path` 决定。
+
+在线搜索由 `subsonic.onlineSearch` 和 `subsonic.onlineSearchMode` 控制：
+
+| 模式 | 行为 |
+| --- | --- |
+| `fallback` | 本地搜索不足时补充在线结果 |
+| `merge` | 合并本地与在线结果 |
+| `local_only` | 仅搜索本地内容 |
+
+搜索词还支持 `wy:`、`tx:`、`kw:`、`kg:`、`mg:` 指定平台，以及 `online:`、`local:` 前缀指定搜索范围。在线播放仍依赖可用的自定义音源。
+
+Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓存，并加入该账号已启用的自定义目录。网页中临时切换浏览目录，不会改变 Subsonic 的曲库范围。
+
+默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](docs/subsonic-local-library.md)。
+
+<p align="center">
+  <img src="md/subsonic.png" width="500" alt="Subsonic 客户端连接">
+  <img src="md/subsonic-search.png" width="300" alt="Subsonic 在线搜索">
+</p>
+
+## 播放器与音乐管理
+
+### 播放与界面
+
+播放器提供播放队列、音质切换、倍速、睡眠定时、全屏歌词和主题设置。桌面和手机使用响应式布局；可以按自己的使用习惯选择主题、播放器背景和歌词展示方式。
+
+页面会显示版本与构建指纹，例如 `v2.1.4 · build 123abcd`。版本来自 `package.json`，指纹由构建或启动脚本刷新，排查同一版本下的自定义改动时可以一并提供。
+
+<p align="center"><img src="md/player.png" width="800" alt="Web 播放器主界面"></p>
+<p align="center"><img src="md/controller.png" width="800" alt="播放控制栏"></p>
+
+### 搜索、歌手与专辑
+
+在线搜索使用酷我（`kw`）、酷狗（`kg`）、QQ 音乐（`tx`）、网易云（`wy`）和咪咕（`mg`）等平台数据。可以按单个平台搜索，也可以在支持的搜索类型中使用聚合模式。
+
+单源歌曲搜索由服务端连续获取结果，前端在收到的列表中分页。平台可能限制结果深度，服务端也设有页数和耗时预算，因此页面显示的结果数不一定等于平台自报总数。歌手、专辑和歌单等搜索类型的支持情况随平台而异。
+
+搜索到歌曲信息与取得可播放链接是两个步骤：前者来自音乐平台检索，后者由自定义音源解析。因此，能搜到歌曲但无法播放时，应先检查自定义源、音质和网络请求，而不是反复清空搜索结果。
+
+<p align="center"><img src="md/search.png" width="800" alt="多源搜索"></p>
+<p align="center">
+  <img src="md/album.png" width="400" alt="专辑详情">
+  <img src="md/singer.png" width="400" alt="歌手详情">
+</p>
+
+### 歌单、收藏与播放队列
+
+播放器支持个人歌单、收藏歌手与专辑、平台歌单、排行榜，以及播放队列调整。个人数据归属于登录账号；公开收藏是否显示和允许访问，由后台公共权限控制。
+
+平台歌单与用户自己的同步歌单用途不同。对个人歌单的增删会影响同步数据；浏览平台榜单不会把整个榜单自动写入个人歌单。
+
+<p align="center">
+  <img src="md/musiclist.png" width="400" alt="歌单广场">
+  <img src="md/musiclist-detail.png" width="400" alt="歌单详情">
+</p>
+<p align="center">
+  <img src="md/playlist.png" width="280" alt="播放队列">
+  <img src="md/cache.png" width="280" alt="缓存管理">
+</p>
+
+### 本地音乐与下载
+
+本地音乐页用于查看服务器上的音频文件，包括下载目录、缓存目录和已授权的自定义音乐目录。可查看音频规格、封面、歌词和关联状态，使用 `&`、`|`、`!` 组合条件筛选，并执行批量操作。
+
+| 操作 | 文件保存位置 / 影响 |
+| --- | --- |
+| 浏览器下载 | 由浏览器保存到访问设备，受浏览器下载权限控制 |
+| 服务端下载或缓存 | 保存到服务器目录，占用服务器磁盘和网络资源 |
+| 关联在线歌曲、更新元数据 | 将本地文件与平台歌曲信息关联，相关操作可能改写音频标签 |
+| 嵌入歌词 | 写入音频文件中的歌词标签，具体支持取决于格式 |
+| 洗版 | 解析并下载其他可用音质来替换已关联文件，自定义目录操作需要额外权限；与播放时的转码是两套机制 |
+
+服务端下载使用后台队列，支持查看进度、调整并发、恢复和移除任务。关闭网页与停止服务端任务不是同一件事；需要停止下载时应在任务界面操作。
+
+自动匹配针对选中的未关联文件识别、检索并关联平台歌曲，保留逐曲结果，可查看进度或取消。默认并发为 2，可设置 1–4；服务重启后未完成任务标记为中断，需要重新选择剩余歌曲。相同歌名、现场版和重录版仍可能匹配错误，批量改写前先抽查结果。
+
+洗版需要歌曲已有可用的平台来源与 ID。已是目标音质、目标文件已存在、没有获得符合方向的替换音质时会跳过；不能把它理解为把任意低码率文件转换成真正的无损音频。
+
+已有 NAS 音乐目录可以挂载后分配给用户。例如容器挂载 `/mnt/nas/music:/library:ro` 后，后台填写 `/library`，不是宿主机路径 `/mnt/nas/music`。只读挂载适合浏览播放；需要写入标签、删除或洗版时，还要同时满足容器文件权限和账号操作权限。
+
+<p align="center"><img src="md/localmusic.png" width="800" alt="本地音乐库与筛选"></p>
+<p align="center"><img src="md/favorite.png" width="800" alt="收藏与共享曲库"></p>
+
+### 自定义源、主题与歌词卡片
+
+自定义源脚本负责解析在线歌曲的音频链接。导入后检查源是否启用、是否支持目标平台和音质；不同脚本的可用性、返回速度及链接有效期可能不同。
+
+播放器还提供主题、深浅色模式、背景选择和歌词分享卡片。生成卡片时可以选择适合分享平台的比例，再保存图片。
+
+<p align="center">
+  <img src="md/theme.png" width="400" alt="主题设置">
+  <img src="md/settings.png" width="400" alt="播放器设置">
+</p>
+<p align="center">
+  <img src="md/share.png" width="380" alt="歌词分享卡片">
+  <img src="md/source.png" width="420" alt="自定义源管理">
+</p>
+
+### 音效、投屏与后台任务
+
+播放器有均衡器和变调控制，处理能力取决于浏览器音频接口及资源访问条件。如果启用音效后需要恢复原生播放或 AirPlay，可使用音效面板中的恢复入口。
+
+Chromecast 支持具备 Cast 能力的桌面/Android Chromium 浏览器，需要安全上下文，通常为 HTTPS。接收设备还必须能访问服务器和媒体资源；浏览器中的 `blob:` 或本地文件链接不能直接交给接收设备读取。投屏时由接收端播放，浏览器音效和倍速不会应用到接收端；iOS 保留原生 AirPlay 路径。
+
+网络歌单定时检查、同步下载和普通歌单同步分别配置。可以在任务界面检查上次执行、下次执行和结果；启用歌单同步不会自动开启音频下载。更多操作步骤见 [播放器指南](docs/guide/web-player.md)。
+
+## 账号与权限
+
+### 三种密码的用途
+
+| 凭据 | 配置位置 | 用途 |
+| --- | --- | --- |
+| 管理员密码 | `admin.password` / `ADMIN_PASSWORD` | 管理后台、系统配置和管理员操作 |
+| 播放器访问密码 | `player.password` / `WEBPLAYER_PASSWORD` | 开启 `player.enableAuth` 后进入 Web 播放器 |
+| 用户同步密码 | 后台用户管理或 `LX_USER_<用户名>` | 个人账号登录、LX Music 同步及 Subsonic 登录 |
+
+播放器访问密码控制进入播放器，不会自动建立个人账号或授予目录写入权限。
+
+### 公共访问与个人权限
+
+`user.enablePublicRestriction` 控制公共权限限制，默认开启。具体能力还由对应开关决定，不能仅凭“已经登录”判断某个操作一定可用。
+
+| 配置项 | 控制内容 |
+| --- | --- |
+| `user.enablePublicNonAdminLocalMusic` | 非管理员访问公共本地音乐 |
+| `user.enablePublicNonAdminBrowserDownload` | 非管理员浏览器下载 |
+| `user.enablePublicNonAdminServerCache` | 非管理员向服务器缓存或写入歌曲 |
+| `user.enablePublicFavorites`、`user.enablePublicNonAdminAccess` | 公开收藏的展示与访问 |
+| `user.enableLoginCacheRestriction` | 登录用户缓存设置限制 |
+| `user.enableCacheSizeLimit`、`user.cacheSizeLimit` | 缓存容量限制 |
+
+自定义音乐目录还需要给具体用户设置 `enableCustomMusicDir` 和 `customMusicDir`。`allowOperateCustomMusicDir` 控制删除、洗版等操作，`allowWriteCustomMusicDir` 控制关联、元数据和歌词写入。挂载目录可读不代表自动允许修改文件。
+
+需要脚本访问时，可在个人 Token 管理中创建持久化 API Token，设置名称、有效期并按需禁用或删除。用户 Token 不等于管理员密码；每个脚本单独分配 Token，后续可以单独撤销。接口鉴权方式见 [API 参考](docs/api/reference.md)。
+
+## 数据目录与备份
+
+### 目录分别保存什么
+
+| 位置 | 内容 | 迁移时的处理 |
+| --- | --- | --- |
+| `data/` 或 `DATA_PATH` | 配置、账号、歌单、用户状态及运行数据 | 整体保存，作为迁移的基础 |
+| `data/config.js` | 当前服务配置，除非显式设置 `CONFIG_PATH` | 与账号和其他数据一起备份 |
+| 程序根目录的 `cache/`、`music/` | 根目录存储模式下的音频及索引 | 使用该模式时单独保留 |
+| 数据目录下的 `cache/`、`music/` | 数据目录存储模式下的音频及索引 | 随数据目录一起保留 |
+| 自定义音乐目录 | 用户已有的外部音乐文件 | 单独备份，并保留容器挂载关系 |
+| 日志目录 | 启动、请求和后台任务日志 | 源码运行默认 `logs/`；Docker 默认 `data/logs/` |
+
+音频目录内还会按账号隔离文件，实际路径可在界面或目录接口中查看。网页临时浏览其他位置不会自动迁移文件，也不会更改账号持久化的存储选择。
+
+Subsonic 用户目录中的 `subsonic-local-registry.json` 和 `subsonic-local-state.json` 保存本地歌曲身份、收藏及歌单关系，迁移时应保留，不能当作可随意删除的临时缓存。
+
+### 快照、配置备份与云端备份
+
+歌单快照用于恢复歌单数据，配置备份用于恢复 `config.js`，它们都不能代替音频文件备份。
+
+配置备份默认开启，保留 7 天；默认位置为数据目录的 `backups/`。可以用 `CONFIG_BACKUP_DIR` 和 `SNAPSHOT_BACKUP_PATH` 自定义配置备份、歌单快照的存储位置。
+
+在「系统设置 → 云端备份范围」中，可分别选择 WebDAV 和 OpenList 备份的数据类型。两端默认都选中以下五类，但仍需单独启用对应服务并配置连接信息；同时启用会保存两份副本，不会在两个云端之间同步。
+
+| 类型 | 备份内容 |
+| --- | --- |
+| `music` 歌曲文件 | 仅数据目录内的 `music/`，包含歌曲、歌词、封面和音乐索引 |
+| `userFiles` 用户文件 | 源脚本、源相关状态及上传文件 |
+| `snapshots` 快照文件 | 歌单、屏蔽列表快照及索引，包括配置的外部快照目录 |
+| `userData` 用户数据 | 用户目录内其余持久化数据，如歌单、偏好及 Subsonic 本地关系数据 |
+| `system` 系统数据 | 当前生效的配置文件及数据目录根部的账号、服务信息等 JSON 文件 |
+
+这些设置属于系统配置，保存在当前生效的 `config.js`，没有对应环境变量：
+
+```js
+'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+'backup.webdav.mirrorDeletes': false,
+'backup.webdav.restoreOnStartup': false,
+```
+
+类型数组为空表示该端不备份任何数据类型。普通数据备份始终排除缓存、日志、临时文件、运行数据库和本地备份包；程序根目录的音乐和自定义外部音乐库需要另行备份。OpenList 的「永久播放缓存」单独配置，勾选歌曲文件不会自动开启缓存上传或删除本地歌曲。
+
+WebDAV 增量文件与 ZIP 备份采用相同范围，默认分别每 60 分钟、24 小时执行；OpenList 数据备份保存在其根目录的 `_data/` 下，默认每 60 分钟检查。普通备份保留本地文件。WebDAV 默认也保留云端已有文件，只有显式开启 `backup.webdav.mirrorDeletes` 才会向增量目录传播本地删除，历史 ZIP 不受影响。
+
+WebDAV 默认不在启动时恢复，需显式开启 `backup.webdav.restoreOnStartup`。手动恢复按该端当前勾选范围下载，覆盖本地同名文件并保留本地独有文件，不会反向上传。恢复不是整个目录的原子替换，完成后应重启服务，使配置、账号、歌单和音乐索引完整重新加载。部署新实例前确认云端目录和备份范围，具体步骤见 [备份与恢复](docs/guide/backup-recovery.md)。
+
+### 更新与迁移
+
+更新前保存数据目录、实际使用的音频目录以及外部配置文件。Docker Compose 部署可以执行：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose logs --tail=100
+```
+
+源码部署更新后重新安装依赖、构建并重启；不要只拉取源码就继续使用旧的 `server/`。迁移完成后检查账号登录、歌单数量、本地目录扫描和一首歌曲的实际播放。
+
+## 配置方式
+
+系统默认使用 `data/config.js`；`DATA_PATH` 改变数据目录，`CONFIG_PATH` 指定独立配置文件。首次启动时，若目标配置文件不存在，会尝试从程序根目录的旧配置初始化。
+
+普通启动按默认值、配置文件、环境变量的顺序合并配置。显式启用 WebDAV 启动恢复时，恢复过程还会重新加载远端配置和账号数据；手动恢复后需要重启服务。当前生效值和配置路径可在管理后台查看。
+
+环境变量在进程启动时读取。修改 Compose 中的环境变量后需要重建容器；后台配置是否即时生效取决于具体选项，监听端口和路径调整后应按提示重新连接或重启。
+
+### 环境变量参考
+
+以下列出常用环境变量。默认值以代码默认配置为基准；仓库自带配置、历史数据和后台保存值可能覆盖它们。`DATA_PATH`、`LOG_PATH` 在 Docker 镜像中另有默认设置，见部署章节。
 
 | 环境变量                                     | 对应配置项                                   | 说明                                                                                               | 默认值               |
 | -------------------------------------------- | -------------------------------------------- | -------------------------------------------------------------------------------------------------- | -------------------- |
 | `PORT`                                     | `port`                                     | 服务端口                                                                                           | `9527`             |
+| `BIND_IP` | `bindIP` | 服务监听地址 | `0.0.0.0` |
 | `ADMIN_PATH`                               | `admin.path`                               | 后台管理界面访问路径                                                                               | `/admin`           |
 | `PLAYER_PATH`                              | `player.path`                              | Web 播放器访问路径 (默认为根路径 `/`)                                                            | `/`                |
 | `ADMIN_PASSWORD`                           | `admin.password`                           | 管理员密码（用于登录控制台和音乐播放器管理员登录）                                                 | `123456`           |
@@ -277,7 +446,7 @@ npm start
 | `CONFIG_PATH`                              | -                                            | 指定外部配置文件的绝对路径 (默认使用 `data/config.js`)                                           | -                    |
 | `DATA_PATH`                                | -                                            | 指定数据存储目录的绝对路径                                                                         | `./data`           |
 | `LOG_PATH`                                 | -                                            | 指定日志输出目录的绝对路径                                                                         | `./logs`           |
-| `PROXY_HEADER`                             | `proxy.header`                             | 代理转发 IP 头 (如 `x-real-ip`)                                                                  | -                    |
+| `PROXY_HEADER` | `proxy.header` | 代理转发的原始 IP 头 | `x-real-ip` |
 | `USER_ENABLE_ROOT`                         | `user.enableRoot`                          | 启用根路径 (开启后连接URL即为 `ip:port`，不允许不同用户密码相同)                                 | `false`            |
 | `USER_ENABLE_PATH`                         | `user.enablePath`                          | 启用用户路径 (开启后连接URL需为 `ip:port/用户名`，允许密码相同)                                  | `true`             |
 | `WEBDAV_ENABLE`                            | `webdav.enable`                            | 是否启用 WebDAV 同步与备份                                                                         | `false`            |
@@ -288,8 +457,8 @@ npm start
 | `WEBDAV_BACKUP_PATH`                       | `webdav.backupPath`                        | WebDAV 全量备份远端路径                                                                            | `/lx-sync-backups` |
 | `SYNC_INTERVAL`                            | `sync.interval`                            | WebDAV 增量同步检测间隔(分钟)                                                                      | `60`               |
 | `BACKUP_INTERVAL`                          | `sync.backupInterval`                      | WebDAV 全量备份间隔(小时)                                                                          | `24`               |
-| `WEBDAV_EXCLUDE_CACHE`                     | `webdav.excludeCache`                      | 排除缓存目录同步 (`data/<用户>/cache`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
-| `WEBDAV_EXCLUDE_MUSIC`                     | `webdav.excludeMusic`                      | 排除下载目录同步 (`data/<用户>/music`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | 旧版兼容项；普通数据备份始终排除缓存 | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | 未配置显式备份类型时的旧版兼容项；以 `backup.webdav.types` 为准 | `false` |
 | `ENABLE_WEBPLAYER_AUTH`                    | `player.enableAuth`                        | 是否启用 Web 播放器访问密码                                                                        | `false`            |
 | `WEBPLAYER_PASSWORD`                       | `player.password`                          | Web 播放器访问密码                                                                                 | `123456`           |
 | `DISABLE_TELEMETRY`                        | `disableTelemetry`                         | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                                                 | `false`            |
@@ -305,7 +474,7 @@ npm start
 | `CACHE_SIZE_LIMIT`                         | `user.cacheSizeLimit`                      | 缓存空间限制大小 (单位: MB)                                                                        | `2000`             |
 | `CONFIG_BACKUP_ENABLE`                     | `configBackup.enable`                      | 是否启用配置文件自动备份功能 (每天生成一份历史配置副本)                                            | `true`             |
 | `CONFIG_BACKUP_RETENTION_DAYS`             | `configBackup.retentionDays`               | 配置文件备份保留天数 (自动清理过期备份)                                                            | `7`                |
-| `CONFIG_BACKUP_DIR`                        | `configBackup.dir`                         | 配置文件备份存储目录路径 (支持绝对路径或相对 `./data`)                                           | `backups`          |
+| `CONFIG_BACKUP_DIR` | `configBackup.dir` | 配置备份目录，相对路径基于数据目录 | 空，使用 `data/backups` |
 | `SNAPSHOT_BACKUP_PATH`                     | `snapshot.backupPath`                      | 歌单快照自定义存储路径 (支持绝对路径或相对 `./data`，各用户独立隔离)                             | -                    |
 | `LIST_ADD_MUSIC_LOCATION_TYPE`             | `list.addMusicLocationType`                | 添加歌曲到列表时的位置 (`top` / `bottom`)                                                      | `top`              |
 | `PROXY_ALL_ENABLED`                        | `proxy.all.enabled`                        | 是否启用外发请求代理 (针对 Music SDK)                                                              | `false`            |
@@ -313,44 +482,124 @@ npm start
 | `SINGER_SOURCE_PRIORITY`                   | `singer.sourcePriority`                    | 歌手信息获取来源优先级 (如 `tx,wy` 或 `wy,tx`)                                                 | `tx,wy`            |
 | `SUBSONIC_ENABLE`                          | `subsonic.enable`                          | 是否启用 Subsonic 协议支持                                                                         | `true`             |
 | `SUBSONIC_PATH`                            | `subsonic.path`                            | Subsonic 接口访问路径 (默认为 `/rest`)                                                           | `/rest`            |
-| `SUBSONIC_PORT`                            | `subsonic.port`                            | Subsonic 独立监听端口 (`0` 为关闭独立端口，与主服务共用端口)                                     | `0`                |
+| `SUBSONIC_PORT` | `subsonic.port` | 独立监听端口；需要另行启用 `subsonic.standalone` | `4050` |
 | `SUBSONIC_ENABLE_DEBUG`                    | `subsonic.enableDebug`                     | 是否开启 Subsonic 调试日志模式                                                                     | `false`            |
 | `SUBSONIC_ONLINE_SEARCH`                   | `subsonic.onlineSearch`                    | 是否开启 Subsonic 在线全网搜索                                                                     | `true`             |
 | `SUBSONIC_ONLINE_SEARCH_MODE`              | `subsonic.onlineSearchMode`                | Subsonic 在线搜索模式 (`fallback` / `merge` / `local_only`)                                  | `fallback`         |
 | `SUBSONIC_ONLINE_SEARCH_SOURCES`           | `subsonic.onlineSearchSources`             | Subsonic 在线搜索默认音源列表                                                                      | `wy,tx,kw,kg,mg`   |
-| `SUBSONIC_PUBLIC_LEADERBOARDS`             | `subsonic.publicLeaderboards`              | 是否开启 Subsonic 公开排行榜 (将在线排行榜映射为只读歌单)                                          | `true`             |
+| `SUBSONIC_PUBLIC_LEADERBOARDS` | `subsonic.publicLeaderboards` | 是否返回在线排行榜等共享歌单 | `false` |
 | `SUBSONIC_LEADERBOARD_SOURCE`              | `subsonic.leaderboardSource`               | Subsonic 公开排行榜默认音源平台 (仅支持单选, 如 `tx`, `wy` 等)                                 | `tx`               |
 | `SUBSONIC_LYRIC_TRANSLATION`               | `subsonic.lyricTranslation`                | Subsonic 歌词中是否包含翻译                                                                        | `true`             |
 | `SUBSONIC_CACHE_ON_PLAY`                   | `subsonic.cacheOnPlay`                     | Subsonic 播放时是否触发服务器自动缓存保存 (落盘到用户目录)                                         | `false`            |
 | `SUBSONIC_PLAY_CACHE_FIRST`                | `subsonic.playCacheFirst`                  | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输(默认关闭,避免服务器自担出向流量) | `false`            |
 | `SUBSONIC_QUALITY_ENABLED`                 | `subsonic.quality.enabled`                 | Subsonic 是否开启音质优选                                                                          | `true`             |
 | `SUBSONIC_QUALITY_PRIORITY`                | `subsonic.quality.priority`                | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                                                | `flac,320k,128k`   |
+| `SUBSONIC_SOURCE_PRIORITY`                 | `subsonic.source.priority`                 | 跨平台优选顺序                                                                                     | `kw,tx,wy,mg,kg`   |
+| `SUBSONIC_SOURCE_CROSS_PLATFORM`           | `subsonic.source.crossPlatform`            | 跨平台查找候选                                                                                     | `true`             |
+| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM`        | `subsonic.source.autoSwitchCustom`         | 同平台解析失败时是否尝试其他自定义源脚本                                                           | `true`             |
 | `ARTIST_MAX_FETCH_PAGES`                   | `artist.maxFetchPages`                     | 歌手歌曲最大抓取页数                                                                               | `20`               |
-| `CACHE_NAMING_PATTERN`                     | `cache.namingPattern`                      | 缓存文件命名规则 (`simple` / `custom`)                                                         | `simple`           |
+| `CACHE_NAMING_PATTERN` | `cache.namingPattern` | `simple`、`standard`、`singer_name_quality_album`、`singer_name`、`name_singer` | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM`                   | `system.allowUnsafeVM`                     | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                                                  | `false`            |
 | `LX_USER_<用户名>`                         | `users` 数组                               | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)                                           | -                    |
 
-> **高级用户配置说明**：环境变量 `LX_USER_<用户名>` 仅用于快速添加用户及设置密码。若需为特定用户配置独立的高级选项（如开启个人自定义音乐目录、分配操作权限 `allowOperateCustomMusicDir` 或写入权限 `allowWriteCustomMusicDir`、调整快照数量等），请直接在 `config.js` 的 `users` 数组中手动配置对应字段，或者在后台管理界面的“用户管理”面板中通过图形界面修改。
+布尔值不区分大小写，开启可用 `true/1/yes/y/on`，关闭可用 `false/0/no/n/off`。
 
-> **布尔类型环境变量说明**：所有布尔类型的环境变量支持灵活的写法（不区分大小写），开启支持 `true` / `1` / `yes` / `y` / `on`；关闭支持 `false` / `0` / `no` / `n` / `off`。
+`LX_USER_<用户名>` 的值作为该用户密码使用，例如 `LX_USER_user1=your-password`。自定义目录、写入权限和账号禁用等高级设置请通过后台用户管理维护，不要把 JSON 当作该环境变量的高级配置格式。
 
-> **提示**：目前服务支持 `启用根路径` (URL配置为 `ip:port`) 和 `启用用户路径` (URL配置为 `ip:port/username`) 两种数据同步连接方式。如果没有启用用户路径，则必须保证每一个同步用户的鉴权密码不重复。
+### 通过配置文件设置的选项
 
----
+部分选项没有对应环境变量，可在后台或配置文件中设置：
 
-## 🛡️ 数据收集与隐私说明
+| 配置项 | 说明 |
+| --- | --- |
+| `subsonic.standalone` | 是否启用 Subsonic 独立监听，默认 false |
+| `subsonic.localPlaylist` | 是否返回本地歌曲只读歌单，默认 true |
+| `subsonic.customPlaylist` | 是否单独返回自定义目录歌单，默认 true，依赖本地歌单开关及账号目录权限 |
+| `proxy.music.*` | 音乐平台请求代理 |
+| `proxy.customSource.*` | 自定义源请求代理 |
+| `proxy.app.*` | 应用功能请求代理 |
 
-本项目集成了 PostHog 匿名数据统计，主要用于：
+分类代理的 `enabled` 未设置时沿用统一代理开关，显式设为 false 时该类请求直连，设为 true 时启用代理；独立地址留空时沿用统一地址。完整配置项还可参考 [配置说明](docs/guide/configuration.md) 和 [默认配置](src/defaultConfig.ts)。
 
-1. **Bug 追踪**: 收集版本号、环境类型。
-2. **通知推送**: 弹出 **版本更新提醒** 与 **紧急维护公告**。
+## 常见问题
 
-- **绝对匿名**: 绝不收集 IP、用户名或具体歌单内容。
-- **关闭方法**: 环境变量设置 `DISABLE_TELEMETRY=true`。**注意：关闭后将无法收到新版本通知。**
+### 能打开页面，但歌曲无法播放
 
----
+先检查是否导入并启用了可用自定义源，再尝试该源支持的平台和音质。检查服务日志中的解析错误；如果已经得到链接但音频请求失败，再看链接是否过期、服务器和访问设备是否能连接目标地址，以及代理设置是否影响请求。
+
+### 本地音乐目录为空
+
+确认当前账号、持久化存储选择与正在浏览的位置一致。Docker 中确认宿主机目录已挂载，后台填写的是容器内路径，运行服务的用户具有读取权限。添加或修改文件后重新扫描，并查看扫描日志。
+
+### 网页可以看到本地歌曲，Subsonic 看不到
+
+确认两端登录的是同一账号。Subsonic 使用账号保存的存储设置，而不是网页临时浏览位置；同时检查自定义目录是否启用、本地歌单开关和客户端是否需要刷新曲库。
+
+### 后台改了配置，重启后又变回去
+
+检查实际使用的配置路径、容器环境变量和 WebDAV 恢复日志。环境变量可能在启动时重新写入配置，远端恢复也可能重新加载旧配置；应修改真正提供该值的来源，而不是反复修改页面显示。
+
+### 更新后界面还是旧版
+
+先核对实际运行的容器或进程及页面显示的构建指纹，再刷新浏览器。源码部署还要确认已重新构建。不要只依据磁盘上的源码判断当前服务已经加载新版本。
+
+### 反向代理后同步或播放异常
+
+检查代理是否保留请求路径，是否支持 WebSocket 升级，以及长连接和流式响应是否被过早关闭。使用 HTTPS 页面时，播放器访问的后端与音频资源也要满足浏览器的协议要求。修改 `ADMIN_PATH`、`PLAYER_PATH` 或 Subsonic 路径后，同时检查代理转发规则。
+
+反馈问题时可提供版本与构建指纹、部署方式、相关客户端、操作步骤，以及已隐去密码和 Token 的错误日志。
+
+## 开发与接口
+
+后端使用 Node.js 原生 HTTP 服务与 `ws` 实现同步和接口处理，主体使用 TypeScript。播放器与管理后台主要使用原生 JavaScript，文件管理器使用 VueFinder。
+
+| 目录 | 内容 |
+| --- | --- |
+| `src/index.ts` | 启动、配置加载与初始化 |
+| `src/server/server.ts` | HTTP 路由和服务入口 |
+| `src/server/auth/` | 身份验证与访问控制 |
+| `src/server/integrations/` | Subsonic、文件管理及投屏集成 |
+| `src/server/music/` | 音乐文件、缓存与本地目录 |
+| `src/server/sources/` | 自定义音源加载与调用 |
+| `src/server/sync/` | WebSocket 同步协议 |
+| `src/server/task/` | 下载队列、自动匹配、洗版与定时任务 |
+| `public/music/` | Web 播放器资源 |
+| `scripts/` | 构建、资源生成和维护脚本 |
+| `docs/` | VitePress 文档 |
+
+常用命令：
+
+```bash
+npm run dev          # 开发运行
+npm run build        # 构建服务端及前端生成资源
+npm run build:css    # 单独生成播放器样式
+npm run build:files  # 单独构建文件管理器
+npm test             # 运行仓库测试
+```
+
+构建文档：
+
+```bash
+npm ci --prefix docs
+npm run docs:build --prefix docs
+```
+
+调用接口前应区分管理员凭据与用户 Token。管理员接口通常使用 `x-frontend-auth`，个人数据接口通常使用 `x-user-token`，播放器另有会话 Cookie；不能把它们互换。
+
+`GET /api/music/search` 当前返回 `{ list, total, ... }` 对象，脚本应读取 `data.list`，而不是按裸数组解析。单页获取需显式传入正数 `limit`；字段和分页边界见 [API 参考](docs/api/reference.md)。
+
+## 数据收集与通知
+
+项目集成了 PostHog 统计及版本、公告通知相关逻辑。可通过 `DISABLE_TELEMETRY=true` 关闭；关闭后也不会收到相应的新版本和公告提示。
+
+部署更新和功能变化可手动查看 [更新日志](changelog.md) 与 [Releases](https://github.com/XCQ0607/lxserver/releases)。
+
 
 ## 🤝 贡献与致谢
+
+想一起维护服务端、播放器、Subsonic、测试或文档，可以看看 [贡献者招募](RECRUITING.md)。不要求长期投入，从一个小问题开始也可以。
+
+日常开发基于 `dev`，普通 PR 提交到 `dev`；正式发布时再由维护者合入 `main`。参与前请阅读 [贡献指南](CONTRIBUTING.md)、[维护与发布约定](GOVERNANCE.md) 和 [行为准则](CODE_OF_CONDUCT.md)。
 
 - 修改自 [lyswhut/lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server)。
 - Web 播放器逻辑参考 [lx-music-desktop](https://github.com/lyswhut/lx-music-desktop)。

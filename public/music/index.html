@@ -35,14 +35,15 @@
     <link rel="apple-touch-icon" href="assets/logo.png">
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="css/theme_variables.css">
-    <script src="assets/tailwindcss.js"></script>
-    <script src="js/tailwind_setup.js"></script>
+    <link rel="stylesheet" href="css/utilities.css">
     <link rel="stylesheet" href="assets/fontawesome/css/all.min.css">
-    <script src="js/crypto-js.min.js"></script>
-    <script src="js/marked.min.js"></script>
-    <script src="js/Sortable.min.js"></script>
+    <script src="js/vendor/crypto-js.min.js"></script>
+    <script src="js/vendor/marked.min.js"></script>
+    <script src="js/vendor/Sortable.min.js"></script>
     <script src="/js/notification-engine.js"></script>
     <link rel="stylesheet" href="css/app.css">
+    <link rel="stylesheet" href="css/dynamic-backgrounds.css">
+
 </head>
 
 <body class="t-bg-main flex flex-col overflow-hidden t-text-main font-sans" style="height: 100dvh;">
@@ -58,7 +59,7 @@
         <!-- Sidebar -->
         <aside id="main-sidebar"
             class="w-72 md:w-72 t-bg-panel shadow-lg flex flex-col z-[60] fixed left-0 top-0 transform -translate-x-full md:relative md:translate-x-0 md:z-30 transition-all duration-300" style="height: 100dvh; padding-bottom: calc(7rem + env(safe-area-inset-bottom, 0px));">
-            <!-- 电脑版侧边栏折叠按钮 (窄长半透明圆角手柄) -->
+            <!-- 电脑版侧边栏折叠按钮 (窄长圆角手柄) -->
             <button id="sidebar-collapse-btn" onclick="toggleDesktopSidebar(false)"
                 class="sidebar-collapse-pill hidden md:flex items-center justify-center cursor-pointer group"
                 title="折叠侧边栏 (Alt+B)" aria-label="折叠侧边栏">
@@ -211,7 +212,8 @@
                             <div id="custom-dir-switch-container" class="hidden items-center ml-2" title="自定义歌曲目录开关"
                                 onclick="event.stopPropagation()">
                                 <label class="relative inline-flex items-center cursor-pointer scale-75 origin-right">
-                                    <input type="checkbox" id="user-custom-dir-switch" class="sr-only peer">
+                                    <input type="checkbox" id="user-custom-dir-switch" class="sr-only peer"
+                                        onchange="window.CustomDirManager ? window.CustomDirManager.setActive(this.checked) : (window.LocalMusicManager && window.LocalMusicManager.toggleCustomDirMode(this.checked))">
                                     <div
                                         class="w-9 h-5 bg-gray-300 dark:bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500">
                                     </div>
@@ -350,21 +352,22 @@
             </header>
 
             <!-- Views Container -->
-            <div class="flex-1 overflow-hidden relative">
+            <div id="main-views" class="flex-1 overflow-hidden relative">
 
                 <!-- Search View -->
                 <div id="view-search"
                     class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 overflow-hidden transition-all duration-300">
                     <!-- Search Input Area -->
-                    <div class="flex flex-col md:flex-row gap-2 md:gap-4 mb-4 md:mb-6">
+                    <div id="music-search-toolbar" class="flex flex-col md:flex-row gap-2 md:gap-4 mb-2">
                         <!-- Search Input -->
-                        <div class="flex-1 relative">
-                            <i class="fas fa-search absolute left-4 top-3.5 t-text-muted"></i>
-                            <input type="text" id="search-input" name="lx_music_search_query"
+                        <form role="search" onsubmit="event.preventDefault(); doSearch();" class="flex-1 relative rounded-xl" id="search-input-wrapper" autocomplete="off">
+                            <i class="fas fa-search absolute left-4 top-3.5 t-text-muted pointer-events-none"></i>
+                            <input type="search" id="search-input" name="lx_music_search_query"
                                 class="w-full pl-10 pr-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm text-sm md:text-base"
-                                placeholder="搜索歌曲、歌手..." onkeypress="handleSearchKeyPress(event)"
-                                autocomplete="one-time-code" readonly onfocus="this.removeAttribute('readonly');"
-                                spellcheck="false">
+                                placeholder="搜索歌曲、歌手..."
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                            <!-- 搜索波浪流光动效条（搜索中从头到尾波动） -->
+                            <div id="search-progress-wave" class="search-wave-bar"></div>
                             <!-- Search Suggestions Dropdown -->
                             <div id="search-suggestions"
                                 class="absolute top-full left-0 w-full mt-2 t-bg-panel border t-border-main rounded-xl shadow-xl z-50 hidden overflow-hidden animate-fade-in">
@@ -372,7 +375,7 @@
                                     <!-- Suggestions appear here -->
                                 </div>
                             </div>
-                        </div>
+                        </form>
 
                         <!-- Source Selector & Manage Button -->
                         <div class="flex items-center gap-2 justify-end">
@@ -408,10 +411,23 @@
                         </div>
                     </div>
 
-
-
-
-                    <!-- Search Results Container -->
+                    <!-- Search Status Below Input (配合主题色与平滑动画) -->
+                    <div id="search-status" class="hidden text-xs md:text-sm flex items-center justify-between gap-3 px-1 py-1 mb-3 transition-all duration-300" role="status" aria-live="polite">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span id="search-status-spinner" class="search-status-spinner text-emerald-500 animate-spin" style="display: none;"><i class="fas fa-circle-notch text-xs"></i></span>
+                            <span id="search-status-text" class="search-status-text font-medium truncate"></span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="search-cancel" type="button" onclick="cancelMusicSearch()" hidden
+                                class="search-cancel-btn text-xs px-2.5 py-0.5 rounded-full border transition-all">
+                                取消搜索
+                            </button>
+                            <button id="search-home-btn" type="button" onclick="returnSearchHome()" hidden
+                                class="search-home-btn text-xs px-2.5 py-0.5 rounded-full border transition-all flex items-center gap-1">
+                                <i class="fas fa-home text-[10px]"></i><span>返回主页</span>
+                            </button>
+                        </div>
+                    </div>
                     <div
                         class="flex-1 t-bg-panel rounded-2xl shadow-sm border t-border-main overflow-hidden flex flex-col">
                         <!-- Batch Toolbar (Hidden by default) 搜索/我的收藏批量操作 -->
@@ -522,14 +538,15 @@
                             class="hidden p-3 t-bg-main border-b t-border-main animate-fade-in">
                             <div class="flex items-center gap-2 sm:gap-3">
                                 <!-- Search Input -->
-                                <div class="relative flex-1 min-w-[24px]">
-                                    <input type="text" id="gl-local-search-input"
+                                <form role="search" onsubmit="event.preventDefault();" class="relative flex-1 min-w-[24px]" autocomplete="off">
+                                    <input type="search" id="gl-local-search-input"
                                         class="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main transition-all"
                                         placeholder="搜索当前页结果 (歌曲、歌手)..." oninput="window.ListSearch.handleSearch()"
-                                        onkeydown="window.ListSearch.handleKeydown(event)">
+                                        onkeydown="window.ListSearch.handleKeydown(event)"
+                                        autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                     <i
                                         class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                </div>
+                                </form>
 
                                 <div id="gl-local-search-nav"
                                     class="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 opacity-0 pointer-events-none transition-opacity">
@@ -602,7 +619,8 @@
                                     class="flex items-center gap-1.5 bg-gray-500/5 px-2 py-0.5 rounded-lg border t-border-main">
                                     <input id="jump-page-input" type="number" min="1"
                                         class="w-10 h-6 text-xs text-center bg-transparent focus:outline-none t-text-main"
-                                        placeholder="页" onkeydown="if(event.key==='Enter') jumpToPage()">
+                                        placeholder="页" onkeydown="if(event.key==='Enter') jumpToPage()"
+                                        autocomplete="off">
                                     <span class="w-[1px] h-3 bg-gray-300 dark:bg-gray-700"></span>
                                     <button onclick="jumpToPage()"
                                         class="text-[10px] font-bold text-emerald-600 hover:text-emerald-500 transition-colors">
@@ -632,21 +650,23 @@
                     class="absolute inset-0 flex flex-col px-2 pt-2 md:px-6 md:pt-6 pb-44 md:pb-32 hidden opacity-0 transition-all duration-300 overflow-hidden">
 
                     <!-- Song List Toolbar -->
-                    <div class="flex flex-col md:flex-row gap-3 mb-4 md:mb-6">
+                    <div id="songlist-toolbar" class="flex flex-col md:flex-row gap-3 mb-4 md:mb-6">
                         <!-- Search & Categories -->
                         <div class="flex flex-[2] gap-2 items-center">
-                            <div class="relative flex-1 group">
+                            <form role="search" onsubmit="event.preventDefault(); window.SongListManager.search();" class="relative flex-1 group" autocomplete="off">
                                 <i
                                     class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 t-text-muted group-focus-within:text-emerald-500 transition-colors"></i>
-                                <input type="text" id="songlist-search-input"
+                                <input type="search" id="songlist-search-input"
                                     class="w-full pl-10 pr-12 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm text-sm md:text-base"
-                                    placeholder="搜索歌单..." onkeypress="handleSongListSearchKeyPress(event)">
-                                <button onclick="window.SongListManager.search()"
+                                    placeholder="搜索歌单..."
+                                    autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                <div id="songlist-search-progress-wave" class="search-wave-bar pointer-events-none" aria-hidden="true"></div>
+                                <button type="submit"
                                     class="absolute right-2 top-1/2 -translate-y-1/2 p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all"
                                     title="开始搜索">
                                     <i class="fas fa-arrow-right text-xs"></i>
                                 </button>
-                            </div>
+                            </form>
                             <button onclick="toggleTagSelector()" id="tag-selector-btn"
                                 class="px-4 py-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-main flex items-center gap-2 shadow-sm transition-all whitespace-nowrap text-sm md:text-base">
                                 <span id="current-tag-name">全部分类</span>
@@ -675,7 +695,7 @@
 
                             <button id="songlist-view-mode-btn" onclick="window.SongListManager.toggleViewMode()"
                                 class="flex-shrink-0 p-3 t-bg-panel border t-border-main rounded-xl hover:t-bg-main t-text-muted hover:text-emerald-500 transition-colors shadow-sm flex items-center justify-center"
-                                title="切换显示方式 (方块/行列)">
+                                title="切换显示方式 (圆点/行列)">
                                 <i class="fas fa-th-large" id="songlist-view-mode-icon"></i>
                             </button>
 
@@ -684,6 +704,18 @@
                                 title="打开外部歌单">
                                 <i class="fas fa-link"></i>
                             </button>
+                        </div>
+                    </div>
+
+                    <!-- Songlist Search Status Below Input (配合主题色与平滑动画) -->
+                    <div id="songlist-search-status" class="hidden text-xs md:text-sm flex items-center justify-between gap-3 px-1 py-1 -mt-2 mb-3 transition-all duration-300" role="status" aria-live="polite">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span id="songlist-search-status-spinner" class="search-status-spinner text-emerald-500 animate-spin" style="display: none;"><i class="fas fa-circle-notch text-xs"></i></span>
+                            <span id="songlist-search-status-text" class="truncate text-emerald-600 dark:text-emerald-400 font-medium"></span>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="songlist-search-cancel" type="button" onclick="window.SongListManager.cancelSearch()" class="search-cancel-btn hidden px-2.5 py-0.5 text-xs rounded-full border border-red-500/30 text-red-500 hover:bg-red-500/10 transition-colors">取消搜索</button>
+                            <button id="songlist-search-home-btn" type="button" onclick="window.SongListManager.returnHome()" class="search-home-btn hidden px-2.5 py-0.5 text-xs rounded-full border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:text-emerald-600 dark:hover:text-emerald-400 hover:border-emerald-500/50 transition-colors"><i class="fas fa-home text-[10px] mr-1"></i>返回歌单主页</button>
                         </div>
                     </div>
 
@@ -1028,14 +1060,15 @@
                                     class="hidden p-3 t-bg-main border-b t-border-main animate-fade-in">
                                     <div class="flex items-center gap-2 sm:gap-3">
                                         <!-- Search Input -->
-                                        <div class="relative flex-1 min-w-[24px]">
-                                            <input type="text" id="sl-local-search-input"
+                                        <form role="search" onsubmit="event.preventDefault();" class="relative flex-1 min-w-[24px]" autocomplete="off">
+                                            <input type="search" id="sl-local-search-input"
                                                 class="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main transition-all"
                                                 placeholder="搜索歌曲名、歌手..." oninput="window.ListSearch.handleSearch()"
-                                                onkeydown="window.ListSearch.handleKeydown(event)">
+                                                onkeydown="window.ListSearch.handleKeydown(event)"
+                                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                             <i
                                                 class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                        </div>
+                                        </form>
 
                                         <div id="sl-local-search-nav"
                                             class="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 opacity-0 pointer-events-none transition-opacity">
@@ -1196,14 +1229,15 @@
                                 class="hidden p-3 t-bg-main border-b t-border-main animate-fade-in flex-shrink-0">
                                 <div class="flex items-center gap-2 sm:gap-3">
                                     <!-- Search Input -->
-                                    <div class="relative flex-1 min-w-[24px]">
-                                        <input type="text" id="lb-local-search-input"
+                                    <form role="search" onsubmit="event.preventDefault();" class="relative flex-1 min-w-[24px]" autocomplete="off">
+                                        <input type="search" id="lb-local-search-input"
                                             class="w-full pl-9 pr-4 py-2 bg-gray-100 dark:bg-gray-800 border t-border-main rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main transition-all"
                                             placeholder="搜索歌曲名、歌手..." oninput="window.ListSearch.handleSearch()"
-                                            onkeydown="window.ListSearch.handleKeydown(event)">
+                                            onkeydown="window.ListSearch.handleKeydown(event)"
+                                            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
                                         <i
                                             class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-xs"></i>
-                                    </div>
+                                    </form>
 
                                     <div id="lb-local-search-nav"
                                         class="flex flex-col sm:flex-row items-center gap-0.5 sm:gap-2 opacity-0 pointer-events-none transition-opacity">
@@ -1323,7 +1357,7 @@
                     <div class="flex-1 flex flex-col items-center justify-center t-text-muted">
                         <div class="relative mb-8">
                             <div
-                                class="w-32 h-32 bg-emerald-50 rounded-full flex items-center justify-center animate-pulse">
+                                class="w-32 h-32 bg-emerald-50 dark:bg-emerald-500/10 rounded-full flex items-center justify-center animate-pulse">
                                 <i class="fas fa-heart text-6xl text-emerald-500/20"></i>
                             </div>
                             <div
@@ -1337,7 +1371,7 @@
                         </p>
                         <button
                             onclick="switchTab('settings'); setTimeout(() => { document.getElementById('btn-mode-local').scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);"
-                            class="px-10 py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-xl shadow-emerald-200 transition-all transform hover:-translate-y-1 active:translate-y-0 flex items-center gap-3 group">
+                            class="px-10 py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-xl shadow-emerald-500/20 transition-all transform hover:-translate-y-1 active:translate-y-0 flex items-center gap-3 group">
                             <i class="fas fa-sign-in-alt group-hover:translate-x-1 transition-transform"></i>
                             立即去登录 (Go to Login)
                         </button>
@@ -1413,13 +1447,13 @@
                                 </div>
                                 <button id="lm-sync-download-btn"
                                     onclick="window.LocalMusicManager.openSyncDownloadModal()"
-                                    class="hidden text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500 hover:text-white transition-all inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit"
+                                    class="hidden text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg bg-emerald-500/10 dark:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 hover:bg-emerald-500 hover:text-white transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit"
                                     title="同步下载当前分类下的歌单内容到本地">
                                     <i class="fas fa-cloud-download-alt text-[10px]"></i>
                                     <span>同步下载</span>
                                 </button>
                                 <button id="lm-public-songs-btn" onclick="window.LocalMusicManager.togglePublicSongs()"
-                                    class="hidden text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500 transition-all inline-flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit"
+                                    class="hidden text-[9px] md:text-[10px] font-bold px-1.5 md:px-2 py-0.5 rounded-lg bg-gray-100/50 dark:bg-gray-700/30 text-gray-600 dark:text-gray-300 border t-border-main hover:text-emerald-500 transition-all flex items-center gap-1 cursor-pointer shrink-0 whitespace-nowrap w-auto self-center h-fit"
                                     title="切换显示公开用户的本地歌曲">
                                     <i class="fas fa-globe text-[10px]"></i>
                                     <span class="hidden sm:inline md:hidden 2xl:inline">公开歌曲</span>
@@ -1856,15 +1890,15 @@
                                         <div id="settings-source-scope-tag" class="hidden flex items-center gap-1">
                                         </div>
                                         <span id="settings-admin-tag"
-                                            class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 text-orange-500 whitespace-nowrap hidden">管理员</span>
+                                            class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-orange-50 dark:bg-orange-500/15 text-orange-500 dark:text-orange-400 whitespace-nowrap hidden">管理员</span>
                                         <button id="btn-admin-logout" onclick="handleAdminLogout()"
-                                            class="text-[10px] px-3 py-1 bg-red-50 text-red-500 rounded-full hover:bg-red-100 transition-all border border-red-100 hidden">退出管理员</button>
+                                            class="text-[10px] px-3 py-1 bg-red-50 dark:bg-red-500/15 text-red-500 dark:text-red-400 rounded-full hover:bg-red-100 dark:hover:bg-red-500/25 transition-all border border-red-100 dark:border-red-500/30 hidden">退出管理员</button>
                                         <button id="btn-admin-login" onclick="handleAdminLogin()"
-                                            class="text-[10px] px-3 py-1 bg-emerald-50 text-emerald-600 rounded-full hover:bg-emerald-100 transition-all border border-emerald-100 flex items-center gap-1.5 hidden">
+                                            class="text-[10px] px-3 py-1 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 rounded-full hover:bg-emerald-100 dark:hover:bg-emerald-500/25 transition-all border border-emerald-100 dark:border-emerald-500/30 flex items-center gap-1.5 hidden">
                                             <i class="fas fa-user-shield"></i> 管理员登录
                                         </button>
                                         <button id="btn-custom-source-manage" onclick="openCustomSourceModal()"
-                                            class="ml-auto flex-shrink-0 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-lg shadow shadow-emerald-200/50 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
+                                            class="ml-auto flex-shrink-0 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-xs rounded-lg shadow shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 flex items-center gap-1.5">
                                             <i class="fas fa-plus-circle"></i> 管理 / 添加
                                         </button>
                                         <button id="btn-settings-source-batch"
@@ -2084,7 +2118,7 @@
                                     <!-- 自定义代理URL输入框 (动态显示) -->
                                     <div id="custom-proxy-url-row" class="hidden">
                                         <input type="url" id="custom-proxy-url-input"
-                                            placeholder="https://proxy.example.com/{url}"
+                                            placeholder="https://proxy.example.com/{url}" autocomplete="off"
                                             class="w-full px-3 py-2 border t-border-main rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-bg-main t-text-main"
                                             onchange="updateSetting('customProxyUrl', this.value.trim())"
                                             oninput="updateSetting('customProxyUrl', this.value.trim())">
@@ -2131,25 +2165,25 @@
                                 </div>
 
                                 <!-- Local Mode Form -->
-                                <div id="sync-form-local" class="space-y-4">
-                                    <input type="text" id="sync-local-user" placeholder="用户名"
+                                <form id="sync-form-local" class="space-y-4" onsubmit="event.preventDefault(); handleLocalLogin();" autocomplete="on">
+                                    <input type="text" id="sync-local-user" name="username" placeholder="用户名" autocomplete="username"
                                         class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm">
-                                    <input type="password" id="sync-local-pass" placeholder="密码"
+                                    <input type="password" id="sync-local-pass" name="password" placeholder="密码" autocomplete="current-password"
                                         class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm">
-                                    <button onclick="handleLocalLogin()"
+                                    <button type="submit"
                                         class="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg transition-colors shadow-md">登录并同步</button>
-                                </div>
+                                </form>
 
                                 <!-- Remote Mode Form (Hidden) -->
-                                <div id="sync-form-remote" class="space-y-4 hidden">
+                                <form id="sync-form-remote" class="space-y-4 hidden" onsubmit="event.preventDefault();" autocomplete="off">
                                     <p class="text-xs text-gray-500">请输入 LX Music 桌面端或移动端的连接信息</p>
 
                                     <!-- Step 1: URL -->
                                     <div id="sync-remote-step1">
                                         <label class="block text-xs font-bold t-text-muted mb-1">链接</label>
-                                        <input type="text" id="sync-remote-url" placeholder="ws://192.168.x.x:xxx"
+                                        <input type="text" id="sync-remote-url" placeholder="ws://192.168.x.x:xxx" autocomplete="off"
                                             class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm mb-2">
-                                        <button onclick="handleRemoteStep1()"
+                                        <button type="button" onclick="handleRemoteStep1()"
                                             class="w-full py-2 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-lg transition-colors shadow-md">
                                             下一步
                                         </button>
@@ -2158,20 +2192,20 @@
                                     <!-- Step 2: Code (Hidden) -->
                                     <div id="sync-remote-step2" class="hidden">
                                         <label class="block text-xs font-bold t-text-muted mb-1">连接码</label>
-                                        <input type="text" id="sync-remote-code" placeholder="输入连接码"
+                                        <input type="text" id="sync-remote-code" placeholder="输入连接码" autocomplete="off"
                                             class="w-full px-4 py-2 border t-border-main rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-400 text-sm mb-2">
                                         <div class="flex gap-2">
-                                            <button onclick="handleRemoteBack()"
+                                            <button type="button" onclick="handleRemoteBack()"
                                                 class="flex-1 py-2 bg-gray-200 hover:bg-gray-300 t-text-muted font-bold rounded-lg transition-colors">
                                                 上一步
                                             </button>
-                                            <button onclick="handleRemoteConnect()"
+                                            <button type="button" onclick="handleRemoteConnect()"
                                                 class="flex-[2] py-2 bg-blue-500 hover:bg-blue-600 text-white font-bold rounded-lg transition-colors shadow-md">
                                                 连接
                                             </button>
                                         </div>
                                     </div>
-                                </div>
+                                </form>
 
                                 <div id="sync-status" class="mt-3 text-sm text-gray-500 flex items-center gap-2">
                                     <i class="fas fa-circle text-[8px] text-gray-300"></i> 状态: 未连接
@@ -2713,8 +2747,8 @@
                                     </div>
 
                                     <div
-                                        class="text-xs text-gray-500 italic mt-1 mb-2 p-2 bg-yellow-50 rounded border border-yellow-100 flex items-start gap-1">
-                                        <i class="fas fa-info-circle mt-0.5 text-yellow-600"></i>
+                                        class="text-xs text-gray-500 dark:text-gray-400 italic mt-1 mb-2 p-2 bg-yellow-50 dark:bg-yellow-500/10 rounded border border-yellow-100 dark:border-yellow-500/20 flex items-start gap-1">
+                                        <i class="fas fa-info-circle mt-0.5 text-yellow-600 dark:text-yellow-500"></i>
                                         <span>优先级: 本地文件 > 链接缓存 > 在线获取 (自动缓存)</span>
                                     </div>
 
@@ -2731,7 +2765,7 @@
                                             </span>
                                         </div>
                                         <span id="storage-usage-info"
-                                            class="text-sm font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">0
+                                            class="text-sm font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 px-2 py-1 rounded">0
                                             KB</span>
                                     </div>
 
@@ -2748,10 +2782,10 @@
                                         </div>
                                         <div class="flex flex-col gap-1 text-right">
                                             <div id="server-music-info" title="仅下载模式目录 (/music)"
-                                                class="text-[10px] md:text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">
+                                                class="text-[10px] md:text-xs font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/15 px-2 py-0.5 rounded border border-emerald-100 dark:border-emerald-500/30">
                                                 正在统计音乐...</div>
                                             <div id="server-cache-info" title="标准缓存目录 (/cache)"
-                                                class="text-[10px] md:text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                                                class="text-[10px] md:text-xs font-bold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/15 px-2 py-0.5 rounded border border-blue-100 dark:border-blue-500/30">
                                                 正在统计缓存...</div>
                                         </div>
                                     </div>
@@ -2777,13 +2811,13 @@
                                     </div>
 
                                     <button onclick="resetAllSettings()"
-                                        class="w-full py-2.5 px-4 bg-red-50 text-red-500 hover:bg-red-500 hover:text-white font-bold rounded-lg transition-all duration-300 border border-red-100 flex items-center justify-center gap-3 text-center mt-1">
+                                        class="w-full py-2.5 px-4 bg-red-50 dark:bg-red-500/10 text-red-500 dark:text-red-400 hover:bg-red-500 dark:hover:bg-red-500 hover:text-white dark:hover:text-white font-bold rounded-lg transition-all duration-300 border border-red-100 dark:border-red-500/30 flex items-center justify-center gap-3 text-center mt-1">
                                         <i class="fas fa-undo-alt flex-shrink-0"></i>
                                         <span class="leading-tight">重置所有设置</span>
                                     </button>
 
                                     <button onclick="goToAdmin()"
-                                        class="w-full py-2.5 px-4 bg-emerald-50 text-emerald-600 hover:bg-emerald-500 hover:text-white font-bold rounded-lg transition-all duration-300 border border-emerald-100 flex items-center justify-center gap-3 text-center mt-3">
+                                        class="w-full py-2.5 px-4 bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500 dark:hover:bg-emerald-500 hover:text-white dark:hover:text-white font-bold rounded-lg transition-all duration-300 border border-emerald-100 dark:border-emerald-500/30 flex items-center justify-center gap-3 text-center mt-3">
                                         <i class="fas fa-tasks flex-shrink-0"></i>
                                         <span class="leading-tight">后台管理</span>
                                     </button>
@@ -2830,7 +2864,7 @@
                                 <h3 class="font-bold t-text-main text-lg mb-4 flex items-center">
                                     <i class="fas fa-palette mr-2 text-emerald-500"></i> 主题风格
                                 </h3>
-                                <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                <div class="settings-theme-grid">
                                     <!-- Emerald -->
                                     <button onclick="setTheme('emerald')"
                                         class="theme-option group relative rounded-xl border t-border-main p-2 hover:shadow-md transition-all text-left overflow-hidden ring-2 ring-transparent ring-offset-2 data-[active=true]:ring-emerald-500"
@@ -3009,7 +3043,7 @@
                                                 <i class="fas fa-image mr-2 text-emerald-500"></i> 歌曲播放页背景
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">设置歌曲播放详情页背景的显示风格</span>
+                                                    <span class="setting-tooltip-content">选择封面虚化、极光渐变、午夜渐变、暖雾纸感、纯色或黑色背景。自动检查歌词与背景的对比度，颜色接近时调整歌词颜色，并尽量保留主题色；普通歌词、逐字歌词及翻译同步适配。封面虚化附加柔和遮罩，避免亮色封面影响阅读。</span>
                                                 </span>
                                             </h4>
                                         </div>
@@ -3017,9 +3051,34 @@
                                             onchange="updateSetting('playerBackground', this.value)"
                                             class="lm-select !w-full !py-2">
                                             <option value="blur">封面虚化</option>
+                                            <option value="aurora">极光渐变</option>
+                                            <option value="midnight">午夜渐变</option>
+                                            <option value="paper">暖雾纸感</option>
                                             <option value="solid">纯色背景</option>
                                             <option value="dark">黑色背景</option>
                                         </select>
+                                        <!-- 动态效果选择器 -->
+                                        <div class="flex flex-col gap-1">
+                                            <label class="text-xs t-text-muted font-medium" for="setting-player-dynamic-effect">
+                                                <i class="fas fa-magic mr-1 text-emerald-500"></i>动态效果
+                                            </label>
+                                            <select id="setting-player-dynamic-effect"
+                                                onchange="updateSetting('playerDynamicEffect', this.value)"
+                                                class="lm-select !w-full !py-2">
+                                                <option value="none">无</option>
+                                                <option value="aurora">极光流光</option>
+                                                <option value="cosmos">宇宙星海</option>
+                                                <option value="icons">SVG 音乐漫游</option>
+                                                <option value="notes">音符升腾</option>
+                                                <option value="bubbles">梦幻泡泡</option>
+                                                <option value="waves">流动波纹</option>
+                                                <option value="fireflies">萤火虫</option>
+                                                <option value="meteors">流星雨</option>
+                                                <option value="snow">冬日飘雪</option>
+                                                <option value="sakura">樱花飘落</option>
+                                                <option value="constellation">粒子星座</option>
+                                            </select>
+                                        </div>
                                     </div>
 
                                     <!-- Footer Visualizer -->
@@ -3030,7 +3089,7 @@
                                                 <i class="fas fa-wave-square mr-2 text-emerald-500"></i> 底部播放栏
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">控制播放栏上方的实时波形显示。<br><span class="text-amber-500 font-semibold">注：iOS 设备受系统限制，开启波形将导致锁屏或退至后台时暂停播放。</span></span>
+                                                    <span class="setting-tooltip-content">控制播放栏上方的实时波形显示。<br><span class="text-amber-500 font-semibold">注：苹果 (iOS) 手机开启后会显示真实音频波形；但因 iOS 系统限制，接管音频将导致锁屏或退至后台时暂停播放且可能影响 AirPlay。建议配合开启下方的【iOS 设备自适应】。</span></span>
                                                 </span>
                                             </h4>
                                             <label class="relative inline-flex items-center cursor-pointer">
@@ -3044,7 +3103,7 @@
                                         </div>
                                         <p class="text-[11px] text-amber-500 dark:text-amber-400 leading-tight flex items-start gap-1">
                                             <i class="fas fa-info-circle mt-0.5 flex-shrink-0 text-[10px]"></i>
-                                            <span>提示：iOS 设备因系统后台限制，开启波形将导致锁屏或退至后台时暂停播放。</span>
+                                            <span>提示：苹果手机开启后会显示正确波形。但受系统限制可能导致锁屏/后台暂停或 AirPlay 异常；建议开启【iOS 设备自适应】。</span>
                                         </p>
                                         <select id="setting-footer-visualizer-style"
                                             onchange="updateSetting('footerVisualizerStyle', this.value)"
@@ -3063,7 +3122,7 @@
                                                 <i class="fas fa-film mr-2 text-emerald-500"></i> 详情页背景
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
-                                                    <span class="setting-tooltip-content">歌词详情页（全屏模式）下的背景视觉特效，支持高保真立体声双表头。</span>
+                                                    <span class="setting-tooltip-content">歌词详情页（全屏模式）下的背景视觉特效。</span>
                                                 </span>
                                             </h4>
                                             <label class="relative inline-flex items-center cursor-pointer">
@@ -3081,7 +3140,6 @@
                                             <option value="pulse">频率脉冲</option>
                                             <option value="dots">点阵频谱</option>
                                             <option value="flower">灵动莲花</option>
-                                            <option value="vumeter">双表头</option>
                                         </select>
                                     </div>
 
@@ -3102,7 +3160,7 @@
                                         <select id="setting-visualizer-global-style"
                                             onchange="updateSetting('visualizerGlobalStyle', this.value)"
                                             class="lm-select !w-full !py-2">
-                                            <option value="blocks">方块样式</option>
+                                            <option value="blocks">圆点样式</option>
                                             <option value="connected">连体样式</option>
                                         </select>
                                     </div>
@@ -3128,6 +3186,34 @@
                                             <option value="study-riviera">里维埃拉缎银 · Riviera</option>
                                             <option value="study-cobalt">钴蓝母带 · Cobalt</option>
                                         </select>
+                                    </div>
+
+                                    <!-- iOS Adaptive Visualizer -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow flex flex-col gap-3">
+                                        <div class="flex items-center justify-between">
+                                            <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                <i class="fab fa-apple mr-2 text-emerald-500"></i> iOS 设备自适应
+                                                <span class="setting-tooltip-trigger ml-1">
+                                                    <i class="fas fa-question-circle text-[10px]"></i>
+                                                    <span class="setting-tooltip-content">
+                                                        开启后，当检测到访问设备为 iOS (iPhone/iPad) 时自动停用波形显示（底部播放栏设置失效），以保证原生音频直出、锁屏后台播放及 AirPlay 投送完全正常。
+                                                    </span>
+                                                </span>
+                                            </h4>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" id="setting-ios-adaptive-visualizer"
+                                                    class="sr-only peer"
+                                                    onchange="updateSetting('iosAdaptiveVisualizer', this.checked)">
+                                                <div
+                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                </div>
+                                            </label>
+                                        </div>
+                                        <p class="text-[11px] text-amber-500 dark:text-amber-400 leading-tight flex items-start gap-1">
+                                            <i class="fas fa-info-circle mt-0.5 flex-shrink-0 text-[10px]"></i>
+                                            <span>默认开启。检测到访问设备为 iOS 时不显示波形（底部播放栏设置失效），保持原生音频直出、锁屏后台播放及 AirPlay 正常。若关闭此项，iOS 设备将强制启用真实音频管线展示波形。</span>
+                                        </p>
                                     </div>
 
                                     <!-- Global Opacity -->
@@ -3935,7 +4021,7 @@
                         <!-- Check for Updates Button -->
                         <div class="mt-8 pt-8 border-t t-border-main flex flex-col items-center gap-4">
                             <button onclick="checkForUpdates()"
-                                class="flex items-center gap-2 px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl shadow-lg shadow-emerald-100 transition-all hover:scale-105 active:scale-95 text-sm font-bold group">
+                                class="flex items-center gap-2 px-8 py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-2xl shadow-lg shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95 text-sm font-bold group">
                                 <i class="fas fa-sync-alt group-hover:rotate-180 transition-transform duration-500"></i>
                                 检查版本更新
                             </button>
@@ -3955,26 +4041,28 @@
             <img id="detail-bg-cover" src=""
                 class="w-full h-full object-cover filter blur-[60px] opacity-40 scale-125 transition-opacity duration-1000">
             <div id="player-detail-bg-overlay" class="absolute inset-0 t-bg-panel/30 backdrop-blur-3xl"></div>
+            <!-- Dynamic Effect Layer -->
+            <div id="player-dynamic-scene" class="absolute inset-0 pointer-events-none" aria-hidden="true"></div>
             <!-- Detail Visualizer Canvas (Raised to avoid being blocked by footer) -->
             <canvas id="detail-visualizer"
                 class="absolute bottom-24 left-0 w-full h-[calc(100vh-6rem)] pointer-events-none"></canvas>
         </div>
 
         <!-- Navbar / Controls -->
-        <div onclick="event.stopPropagation()"
+        <div id="player-detail-navbar" onclick="event.stopPropagation()"
             class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-4 md:px-6 h-16 md:h-20 pt-[env(safe-area-inset-top,0px)] pointer-events-none transition-all duration-300">
-            <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
-                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full px-3.5 py-1.5 h-10 flex items-center justify-center gap-1.5 transition-all shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
-                <i class="fas fa-chevron-down text-base"></i>
-                <span class="text-xs font-semibold md:hidden">收起</span>
-            </button>
-            <div class="flex-col items-center flex">
+            <div class="detail-nav-left flex items-center justify-start flex-1 pointer-events-none">
+                <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
+                    class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all duration-300 shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
+                    <i class="fas fa-chevron-down text-base"></i>
+                </button>
+            </div>
+            <div id="now-playing-header" class="detail-nav-center flex flex-col items-center flex-shrink-0 pointer-events-none transition-all duration-300">
                 <h2 class="text-xs md:text-sm font-bold text-gray-400 tracking-widest uppercase">Now Playing</h2>
             </div>
-            <button onclick="toggleLyrics()" id="btn-close-lyrics" title="关闭歌词 / 返回"
-                class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
-                <i class="fas fa-times text-base"></i>
-            </button>
+            <div class="detail-nav-right flex items-center justify-end flex-1 pointer-events-none">
+                <!-- 右侧占位保持 Now Playing 绝对水平居中 -->
+            </div>
         </div>
 
         <!-- Main Content -->
@@ -4070,46 +4158,50 @@
                     <div id="player-status" class="text-xs text-emerald-600 font-medium whitespace-nowrap"></div>
                 </div>
             </div>
-            <!-- Action Buttons (Mobile Compact) -->
-            <div
-                class="flex flex-wrap items-center justify-end max-[440px]:justify-center gap-1.5 ml-auto flex-shrink-0 max-[440px]:max-w-[80px] max-w-[200px] md:max-w-none">
+            <!-- Action Buttons (Mobile Compact / Responsive Overflow) -->
+            <div id="player-mobile-actions"
+                class="flex items-center justify-end gap-1.5 ml-auto flex-shrink-0">
                 <!-- Like button -->
-                <button id="player-like-btn" class="text-gray-300 hover:text-red-500 transition-colors">
+                <button aria-label="添加到歌单" id="player-like-btn" class="text-gray-300 hover:text-red-500 transition-colors p-1" data-action="like">
                     <i class="fas fa-heart text-base md:text-lg"></i>
                 </button>
-                <!-- Download Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="handleDownloadClick(event)" title="下载/缓存">
-                    <i class="fas fa-download text-[10px]"></i>
-                </button>
-                <!-- Sound Effects Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
-                    <i class="fas fa-sliders-h text-[10px]"></i>
-                </button>
-                <!-- Comment button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="toggleCommentModal()">评</button>
-                <!-- Share Card button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
-                    onclick="window.lyricCard && window.lyricCard.open()" title="分享歌词卡片">
-                    <i class="fas fa-image text-[10px]"></i>
-                </button>
-                <!-- Queue Button (Mobile) -->
-                <button
-                    class="md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1 py-0"
+                <!-- Mobile Action Buttons (Visible when space permits) -->
+                <button aria-label="播放队列" data-mobile-btn="queue"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
                     onclick="toggleQueueDrawer()" title="播放队列">
                     <i class="fas fa-list text-[10px]"></i>
                 </button>
+                <button aria-label="音效与均衡器" data-mobile-btn="effects"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="window.soundEffects && window.soundEffects.toggle()" title="均衡器 & 音效">
+                    <i class="fas fa-sliders-h text-[10px]"></i>
+                </button>
+                <button aria-label="下载/缓存" data-mobile-btn="download"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="handleDownloadClick(event)" title="下载/缓存">
+                    <i class="fas fa-download text-[10px]"></i>
+                </button>
+                <button aria-label="歌曲评论" data-mobile-btn="comment"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="toggleCommentModal()" title="歌曲评论">评</button>
+                <button aria-label="分享歌词卡片" data-mobile-btn="share"
+                    class="mobile-action-btn md:hidden text-gray-500 hover:text-emerald-600 text-[10px] font-bold border border-gray-300 rounded px-1.5 py-0.5 transition-colors"
+                    onclick="window.lyricCard && window.lyricCard.open()" title="分享歌词卡片">
+                    <i class="fas fa-image text-[10px]"></i>
+                </button>
+
+                <!-- Three dots fold panel for items that don't fit -->
+                <details class="mobile-player-menu" id="player-mobile-overflow-menu">
+                    <summary aria-label="更多操作" title="更多操作">
+                        <i class="fas fa-ellipsis-h" aria-hidden="true"></i>
+                    </summary>
+                    <div class="mobile-player-menu-content t-bg-panel" id="player-mobile-overflow-content"></div>
+                </details>
             </div>
         </div>
 
         <!-- Controls & Progress -->
-        <div
+        <div id="player-transport"
             class="flex-1 flex flex-col items-center justify-center max-w-2xl mx-auto w-full px-0 md:px-4 order-last md:order-none">
 
             <!-- Progress Bar (Moved up for better mobile layout) -->
@@ -4180,14 +4272,14 @@
                 <!-- Keep the main transport centered regardless of wireless availability. -->
                 <div class="flex items-center justify-center gap-2 md:gap-6">
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
-                    onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
-                <button id="btn-play"
-                    class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-200 hover:bg-emerald-600 hover:scale-105 transition-all flex items-center justify-center"
+                    aria-label="上一首" onclick="playPrev()"><i class="fas fa-step-backward"></i></button>
+                <button aria-label="播放" id="btn-play"
+                    class="w-10 h-10 md:w-12 md:h-12 rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/25 hover:bg-emerald-600 hover:scale-105 transition-all flex items-center justify-center"
                     onclick="togglePlay()">
                     <i class="fas fa-play ml-1 text-lg"></i>
                 </button>
                 <button class="t-text-muted hover:text-emerald-600 text-lg transition-colors p-2"
-                    onclick="playNext()"><i class="fas fa-step-forward"></i></button>
+                    aria-label="下一首" onclick="playNext()"><i class="fas fa-step-forward"></i></button>
                 </div>
 
                 <!-- Secondary controls align to the right without shifting the transport. -->
@@ -4287,7 +4379,7 @@
         </div>
 
         <!-- Collapse Panel Button -->
-        <button id="btn-collapse-panel"
+        <button aria-label="收起播放器" id="btn-collapse-panel"
             class="absolute right-2 md:right-6 top-2 md:top-1/2 md:-translate-y-1/2 t-text-muted p-2 hover:t-text-muted transition-all z-10"
             onclick="togglePlayerPanel()">
             <i class="fas fa-chevron-down text-lg"></i>
@@ -4295,7 +4387,7 @@
     </footer>
 
     <!-- Expand Panel Button (Hidden by default, shown when panel is collapsed) -->
-    <button id="btn-expand-panel" onclick="togglePlayerPanel()"
+    <button aria-label="展开播放器" id="btn-expand-panel" onclick="togglePlayerPanel()"
         class="fixed bottom-24 right-6 z-40 w-12 h-12 flex items-center justify-center t-bg-panel/80 backdrop-blur-md rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] text-gray-500 hover:text-emerald-500 transform transition-all duration-300 translate-y-20 opacity-0 border border-white/50">
         <i class="fas fa-chevron-up text-lg"></i>
     </button>
@@ -4331,7 +4423,7 @@
                         <option value="kw">酷我音乐</option>
                         <option value="mg">咪咕音乐</option>
                     </select>
-                    <input type="text" id="external-list-input" placeholder="输入歌单链接或歌单 ID"
+                    <input type="text" id="external-list-input" placeholder="输入歌单链接或歌单 ID" autocomplete="off"
                         class="flex-1 p-3 border t-border-main rounded-xl t-bg-main text-sm focus:ring-2 focus:ring-emerald-400 focus:outline-none">
                 </div>
 
@@ -4359,7 +4451,7 @@
 
                 <div class="flex justify-center">
                     <button onclick="handleOpenExternalList()"
-                        class="px-12 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-100 transition-all hover:scale-105 active:scale-95">
+                        class="px-12 py-3 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all hover:scale-105 active:scale-95">
                         立即打开
                     </button>
                 </div>
@@ -4380,7 +4472,7 @@
                 </button>
             </div>
             <div class="p-6 space-y-4">
-                <input type="text" id="qq-input-field" placeholder="请输入 QQ 号"
+                <input type="text" id="qq-input-field" placeholder="请输入 QQ 号" autocomplete="off"
                     class="w-full p-3 border t-border-main rounded-xl t-bg-main text-sm focus:ring-2 focus:ring-emerald-400 focus:outline-none">
                 <button onclick="window.SongListManager.handleQQSubmit()"
                     class="w-full py-3 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl font-bold transition-all shadow-lg active:scale-95">
@@ -4416,7 +4508,7 @@
     </div>
 
     <!-- Sync Auth Modal -->
-    <div id="sync-auth-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-[70]">
+    <div id="sync-auth-modal" class="fixed inset-0 bg-black/50 hidden items-center justify-center z-[70]">
         <div class="t-bg-panel rounded-lg shadow-xl w-96 p-6 relative">
             <button onclick="closeSyncModal()" class="absolute top-2 right-2 t-text-muted hover:t-text-muted">
                 <i class="fas fa-times"></i>
@@ -4460,35 +4552,35 @@
                 </div>
             </div>
 
-            <div id="sync-connect-form">
+            <form id="sync-connect-form" onsubmit="event.preventDefault(); handleRemoteConnect('modal');" autocomplete="off">
                 <div class="mb-4">
                     <label class="block t-text-main text-sm font-bold mb-2">服务地址</label>
-                    <input type="text" id="sync-url" placeholder="ws://your-server:9527"
+                    <input type="text" id="sync-url" placeholder="ws://your-server:9527" autocomplete="off"
                         class="shadow appearance-none border rounded w-full py-2 px-3 t-text-main leading-tight focus:outline-none focus:shadow-outline">
                 </div>
                 <div class="mb-4">
                     <label class="block t-text-main text-sm font-bold mb-2">连接码 (Connection Code)</label>
-                    <input type="password" id="sync-code" placeholder="输入连接码"
+                    <input type="password" id="sync-code" placeholder="输入连接码" autocomplete="new-password" data-lpignore="true" data-1p-ignore
                         class="shadow appearance-none border rounded w-full py-2 px-3 t-text-main leading-tight focus:outline-none focus:shadow-outline">
                 </div>
                 <div id="sync-modal-status" class="mb-4 text-xs text-gray-500"></div>
                 <div class="flex justify-between">
-                    <button onclick="closeSyncModal()"
+                    <button type="button" onclick="closeSyncModal()"
                         class="bg-gray-300 hover:bg-gray-400 t-text-main font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         取消
                     </button>
-                    <button onclick="handleRemoteConnect('modal')"
+                    <button type="submit"
                         class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
                         连接 (Connect)
                     </button>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 
     <!-- Custom Source Modal -->
     <div id="custom-source-modal"
-        class="fixed inset-0 bg-black bg-opacity-50 z-[70] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
+        class="fixed inset-0 bg-black/50 z-[70] hidden flex items-center justify-center backdrop-blur-sm transition-opacity duration-300">
         <div class="t-bg-panel rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-2xl transform transition-transform duration-300 scale-95 opacity-0 overflow-hidden"
             id="custom-source-modal-content">
             <!-- Header -->
@@ -4508,11 +4600,11 @@
             <div id="custom-source-toolbar" class="p-4 border-b t-border-main flex gap-3 t-bg-panel flex-wrap">
                 <input type="file" id="script-file" accept=".js" class="hidden" onchange="handleFileUpload(this)">
                 <button onclick="document.getElementById('script-file').click()"
-                    class="flex-1 flex items-center justify-center px-4 py-2.5 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-100 transition-colors font-medium">
+                    class="flex-1 flex items-center justify-center px-4 py-2.5 bg-emerald-50 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border border-emerald-100 dark:border-emerald-500/30 rounded-xl hover:bg-emerald-100 dark:hover:bg-emerald-500/25 transition-colors font-medium">
                     <i class="fas fa-upload mr-2"></i>上传脚本文件
                 </button>
                 <button onclick="handleUrlImport()"
-                    class="flex-1 flex items-center justify-center px-4 py-2.5 bg-blue-50 text-blue-600 border border-blue-100 rounded-xl hover:bg-blue-100 transition-colors font-medium">
+                    class="flex-1 flex items-center justify-center px-4 py-2.5 bg-blue-50 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400 border border-blue-100 dark:border-blue-500/30 rounded-xl hover:bg-blue-100 dark:hover:bg-blue-500/25 transition-colors font-medium">
                     <i class="fas fa-link mr-2"></i>从 URL 导入
                 </button>
                 <button onclick="enterSourceBatchMode('modal')" id="btn-modal-source-batch"
@@ -4626,7 +4718,7 @@
         <div class="t-bg-panel rounded-xl w-full max-w-2xl flex flex-col shadow-2xl transform transition-transform duration-300 scale-95 opacity-0 overflow-hidden"
             id="playlist-add-modal-content">
             <!-- Header -->
-            <div class="p-4 border-b border-emerald-50 flex justify-between items-center bg-emerald-50/30">
+            <div class="p-4 border-b border-emerald-50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/30 dark:bg-emerald-950/20">
                 <div class="flex-1 text-center">
                     <h3 class="t-text-main font-medium">
                         添加 <span id="playlist-add-song-name" class="text-emerald-500 font-bold">Song Name</span> 到...
@@ -4654,7 +4746,7 @@
         <div class="t-bg-panel rounded-xl w-full max-w-2xl flex flex-col shadow-2xl transform transition-transform duration-300 scale-95 opacity-0 overflow-hidden"
             id="subpath-select-modal-content">
             <!-- Header -->
-            <div class="p-4 border-b border-emerald-50 flex justify-between items-center bg-emerald-50/30">
+            <div class="p-4 border-b border-emerald-50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/30 dark:bg-emerald-950/20">
                 <div class="flex-1 text-center">
                     <h3 class="t-text-main font-bold">选择子目录</h3>
                 </div>
@@ -4673,7 +4765,7 @@
 
             <!-- Footer for New Folder -->
             <div class="p-4 border-t t-border-main bg-gray-50/50 dark:bg-gray-800/30 flex gap-2">
-                <input type="text" id="new-subfolder-input" placeholder="新文件夹名称..."
+                <input type="text" id="new-subfolder-input" placeholder="新文件夹名称..." autocomplete="off"
                     class="flex-1 bg-white dark:bg-gray-900 border t-border-main rounded-xl px-4 py-2 text-sm outline-none focus:ring-2 focus:ring-emerald-500/50">
                 <button onclick="window.LocalMusicManager.createSubFolder()"
                     class="px-4 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-xl text-sm font-bold shadow-sm transition-all whitespace-nowrap">
@@ -4843,10 +4935,10 @@
 
                 <!-- Active Timer Status -->
                 <div id="active-timer-status"
-                    class="hidden mb-6 p-4 bg-emerald-50 rounded-2xl border border-emerald-100 flex items-center justify-between">
+                    class="hidden mb-6 p-4 bg-emerald-50 dark:bg-emerald-500/15 rounded-2xl border border-emerald-100 dark:border-emerald-500/30 flex items-center justify-between">
                     <div>
-                        <div class="text-[10px] text-emerald-600 font-bold uppercase tracking-wider">倒计时中</div>
-                        <div id="status-countdown" class="text-2xl font-black text-emerald-700 font-mono">30:00</div>
+                        <div class="text-[10px] text-emerald-600 dark:text-emerald-400 font-bold uppercase tracking-wider">倒计时中</div>
+                        <div id="status-countdown" class="text-2xl font-black text-emerald-700 dark:text-emerald-300 font-mono">30:00</div>
                     </div>
                     <button onclick="cancelSleepTimer()"
                         class="px-4 py-2 t-bg-panel text-red-500 text-xs font-bold rounded-xl shadow-sm hover:shadow-md transition-all">停止</button>
@@ -4868,7 +4960,7 @@
                         <input type="number" id="custom-minutes" placeholder="分钟" min="1" max="1440"
                             class="flex-1 px-4 py-3 t-bg-main border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 transition-all font-bold text-sm">
                         <button onclick="applyCustomTimer()"
-                            class="px-5 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-100 text-sm hover:bg-emerald-600 transition-all">确定</button>
+                            class="px-5 py-3 bg-emerald-500 text-white font-bold rounded-xl shadow-lg shadow-emerald-500/20 text-sm hover:bg-emerald-600 transition-all">确定</button>
                     </div>
                 </div>
 
@@ -4912,7 +5004,7 @@
                         <i class="fas fa-sync-alt text-sm"></i>
                     </button>
                     <button onclick="window.lyricCard && window.lyricCard.close()"
-                        class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-red-500 transition-colors rounded-xl hover:bg-red-50">
+                        class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-red-500 transition-colors rounded-xl hover:bg-red-50 dark:hover:bg-red-500/15">
                         <i class="fas fa-times text-lg"></i>
                     </button>
                 </div>
@@ -5140,7 +5232,7 @@
             <div class="p-4 md:p-6 border-b t-border-main/50 flex items-center justify-between">
                 <div class="flex items-center gap-3">
                     <div
-                        class="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-100">
+                        class="w-10 h-10 md:w-12 md:h-12 rounded-2xl bg-emerald-500 flex items-center justify-center shadow-lg shadow-emerald-500/20">
                         <i class="fas fa-comments text-white text-lg md:text-xl"></i>
                     </div>
                     <div>
@@ -5151,11 +5243,11 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="refreshComments()"
-                        class="w-8 h-8 md:w-10 md:h-10 flex items-center justify-center t-text-muted hover:text-emerald-500 transition-colors rounded-xl hover:bg-emerald-50">
+                        class="w-8 h-8 md:w-10 md:h-10 flex items-center justify-center t-text-muted hover:text-emerald-500 transition-colors rounded-xl hover:bg-emerald-50 dark:hover:bg-emerald-500/15">
                         <i class="fas fa-sync-alt"></i>
                     </button>
                     <button onclick="toggleCommentModal()"
-                        class="w-8 h-8 md:w-10 md:h-10 flex items-center justify-center t-text-muted hover:text-red-500 transition-colors rounded-xl hover:bg-red-50">
+                        class="w-8 h-8 md:w-10 md:h-10 flex items-center justify-center t-text-muted hover:text-red-500 transition-colors rounded-xl hover:bg-red-50 dark:hover:bg-red-500/15">
                         <i class="fas fa-times text-lg"></i>
                     </button>
                 </div>
@@ -5182,7 +5274,7 @@
                 class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-6 space-y-6 md:space-y-8 pb-12">
                 <!-- Loading State -->
                 <div id="comment-loader" class="flex flex-col items-center justify-center py-20 space-y-4">
-                    <div class="w-12 h-12 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin">
+                    <div class="w-12 h-12 border-4 border-emerald-100 dark:border-emerald-900/40 border-t-emerald-500 dark:border-t-emerald-500 rounded-full animate-spin">
                     </div>
                     <p class="text-xs font-bold t-text-muted uppercase tracking-widest">正在加载评论...</p>
                 </div>
@@ -5194,7 +5286,7 @@
             <div class="px-6 py-3 t-bg-main/50 border-t t-border-main/30 flex items-center justify-between">
                 <div class="flex items-center gap-2">
                     <button onclick="changeCommentPage(-1)"
-                        class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
+                        class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
                         id="btn-comment-prev">
                         <i class="fas fa-chevron-left text-xs"></i>
                     </button>
@@ -5203,7 +5295,7 @@
                         PAGE 1 / 1
                     </span>
                     <button onclick="changeCommentPage(1)"
-                        class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-emerald-500 hover:bg-emerald-50 rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
+                        class="w-8 h-8 flex items-center justify-center t-text-muted hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg transition-all disabled:opacity-20 disabled:pointer-events-none"
                         id="btn-comment-next">
                         <i class="fas fa-chevron-right text-xs"></i>
                     </button>
@@ -5216,7 +5308,7 @@
     </div>
 
     <!-- Queue Drawer (播放队列) -->
-    <div id="queue-drawer"
+    <div id="queue-drawer" inert aria-hidden="true"
         class="fixed inset-y-0 right-0 w-full md:w-96 t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
@@ -5248,7 +5340,7 @@
 
         <!-- Toolbar (Optional, e.g., Filter or Sort Tip) -->
         <div id="queue-tip"
-            class="px-6 py-2 bg-emerald-50/30 text-[10px] text-emerald-600 font-bold border-b border-emerald-100 hidden">
+            class="px-6 py-2 bg-emerald-50/30 dark:bg-emerald-950/30 text-[10px] text-emerald-600 dark:text-emerald-400 font-bold border-b border-emerald-100 dark:border-emerald-900/30 hidden">
             <i class="fas fa-info-circle mr-1"></i> 提示：拖动歌曲可以调整播放顺序
         </div>
 
@@ -5259,7 +5351,7 @@
     </div>
 
     <!-- Cache Management Drawer (服务器缓存管理) -->
-    <div id="cache-drawer"
+    <div id="cache-drawer" inert aria-hidden="true"
         class="fixed inset-y-0 right-0 w-full md:w-96 t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
@@ -5346,7 +5438,7 @@
     </div>
 
     <!-- Download Management Drawer (下载管理) -->
-    <div id="download-drawer"
+    <div id="download-drawer" inert aria-hidden="true"
         class="fixed inset-y-0 right-0 w-full md:w-[450px] t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
@@ -5389,7 +5481,7 @@
             <div class="flex gap-2">
                 <button onclick="window.SystemDownloadManager && window.SystemDownloadManager.retryAllFailed()"
                     title="全部重试"
-                    class="px-3 py-1.5 text-xs font-bold text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                    class="px-3 py-1.5 text-xs font-bold text-blue-500 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/15 hover:bg-blue-100 dark:hover:bg-blue-500/25 rounded-lg shadow-sm transition-all flex items-center gap-1.5">
                     <i class="fas fa-redo text-[10px]"></i>
                     <span class="hidden md:inline">全部重试</span>
                 </button>
@@ -5400,7 +5492,7 @@
                     <span class="hidden md:inline">清空已完成</span>
                 </button>
                 <button onclick="window.SystemDownloadManager && window.SystemDownloadManager.clearAll()" title="清空全部"
-                    class="px-3 py-1.5 text-xs font-bold text-red-500 bg-red-50 hover:bg-red-100 rounded-lg shadow-sm transition-all flex items-center gap-1.5">
+                    class="px-3 py-1.5 text-xs font-bold text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-500/15 hover:bg-red-100 dark:hover:bg-red-500/25 rounded-lg shadow-sm transition-all flex items-center gap-1.5">
                     <i class="fas fa-trash text-[10px]"></i>
                     <span class="hidden md:inline">清空全部</span>
                 </button>
@@ -5439,30 +5531,60 @@
             </div>
 
             <!-- Body -->
-            <div class="flex-1 overflow-y-auto custom-scrollbar p-6">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-8 md:divide-x t-border-main">
+            <div class="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-5">
+                <div class="effects-status-bar">
+                    <div class="effects-status-heading">
+                        <div class="min-w-0 flex-1">
+                            <div class="flex items-center gap-2 flex-wrap">
+                                <strong id="sound-effects-state" class="text-sm font-bold t-text-main">音效已开启</strong>
+                                <span id="sound-effects-status" role="status" class="text-xs t-text-dim"></span>
+                            </div>
+                            <p id="sound-effects-summary" class="hidden"></p>
+                            <!-- Active Effect Tags List -->
+                            <div id="sound-effects-tags" class="effects-tags-wrapper mt-2 flex flex-wrap items-center gap-1.5">
+                                <!-- Injected by JS -->
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2.5 shrink-0 ml-2">
+                            <span class="text-xs font-medium t-text-muted hidden sm:inline" id="sound-effects-switch-label">音效总开关</span>
+                            <label class="effects-switch" aria-label="整体音效总开关" title="开启/暂停全部音效">
+                                <input id="sound-effects-enable" type="checkbox" role="switch" checked onchange="window.soundEffects.setEnabled(this.checked)">
+                                <span></span>
+                            </label>
+                        </div>
+                    </div>
+                    <button id="sound-effects-native" hidden type="button"
+                        class="mt-2 px-3 py-1.5 text-xs rounded-lg t-bg-track t-text-main hover:t-bg-item-hover transition-colors"
+                        onclick="window.soundEffects.restoreNativePlayback()">刷新并恢复原生播放 / AirPlay</button>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 md:divide-x t-border-main">
 
                     <!-- Left Column -->
-                    <div class="space-y-8 pr-0 md:pr-6">
+                    <div class="space-y-3.5 pr-0 md:pr-4">
                         <!-- Environment Reverb -->
-                        <section class="space-y-4">
-                            <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">环境混响音效</h4>
-                            <div id="reverb-list" class="flex flex-wrap gap-x-4 gap-y-3">
+                        <section class="space-y-2.5">
+                            <div class="flex items-center justify-between">
+                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">环境混响音效</h4>
+                                <button onclick="window.soundEffects && window.soundEffects.resetReverb()"
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">关闭混响</button>
+                            </div>
+                            <div id="reverb-list" class="flex flex-wrap gap-1">
                                 <!-- Radio options -->
                             </div>
-                            <div class="space-y-5 pt-2">
-                                <div class="space-y-2">
+                            <!-- Side-by-side DRY / WET Sliders for compact vertical layout -->
+                            <div class="grid grid-cols-2 gap-3 pt-1.5 border-t t-border-main/60">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[11px] font-bold t-text-muted">
-                                        <span>原始音量增益 (DRY)</span>
-                                        <span id="reverb-main-gain-val" class="font-mono">100%</span>
+                                        <span>原声音量 (DRY)</span>
+                                        <span id="reverb-main-gain-val" class="font-mono text-emerald-500">100%</span>
                                     </div>
                                     <input type="range" id="reverb-main-gain" min="0" max="300" value="100"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
                                 </div>
-                                <div class="space-y-2">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[11px] font-bold t-text-muted">
-                                        <span>环境音效增益 (WET)</span>
-                                        <span id="reverb-send-gain-val" class="font-mono">80%</span>
+                                        <span>空间混响 (WET)</span>
+                                        <span id="reverb-send-gain-val" class="font-mono text-emerald-500">80%</span>
                                     </div>
                                     <input type="range" id="reverb-send-gain" min="0" max="300" value="80"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
@@ -5473,16 +5595,16 @@
                         <div class="h-px bg-t-border-main"></div>
 
                         <!-- Pitch Shift -->
-                        <section class="space-y-4">
+                        <section class="space-y-2">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">
                                     音调升降调节
                                 </h4>
                                 <button onclick="window.soundEffects && window.soundEffects.resetPitch()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置</button>
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置原调</button>
                             </div>
-                            <div class="flex items-center gap-4 px-2">
-                                <span class="w-10 text-center text-xs font-mono font-bold t-text-main"
+                            <div class="flex items-center gap-3 px-1">
+                                <span class="w-12 text-center text-xs font-mono font-bold text-emerald-500 bg-emerald-500/10 py-0.5 rounded border border-emerald-500/20"
                                     id="pitch-val">1.00x</span>
                                 <input type="range" id="pitch-slider" min="0.5" max="2.0" step="0.01" value="1.0"
                                     class="flex-1 h-1.5 rounded-full lc-range-input cursor-pointer">
@@ -5492,29 +5614,31 @@
                         <div class="h-px bg-t-border-main"></div>
 
                         <!-- 3D Panner -->
-                        <section class="space-y-4">
+                        <section class="space-y-2">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">3D 立体环绕 (需使用耳机)
                                 </h4>
-                                <label
-                                    class="flex items-center gap-2 cursor-pointer group text-[11px] font-bold t-text-muted">
-                                    <input type="checkbox" id="panner-enable" class="w-3.5 h-3.5 accent-emerald-500">
-                                    启用
-                                </label>
+                                <div class="effects-section-actions">
+                                    <button type="button" onclick="window.soundEffects && window.soundEffects.resetPanner()"
+                                        class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold">恢复默认</button>
+                                    <label class="effects-switch" aria-label="启用 3D 环绕">
+                                        <input type="checkbox" role="switch" id="panner-enable"><span></span>
+                                    </label>
+                                </div>
                             </div>
-                            <div class="grid grid-cols-2 gap-8 px-2">
-                                <div class="space-y-2">
+                            <div class="grid grid-cols-2 gap-4 px-1">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[10px] font-bold t-text-muted">
                                         <span>环绕速度</span>
-                                        <span id="panner-speed-val" class="font-mono">25</span>
+                                        <span id="panner-speed-val" class="font-mono text-emerald-500">25</span>
                                     </div>
                                     <input type="range" id="panner-speed" min="1" max="50" value="25"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
                                 </div>
-                                <div class="space-y-2">
+                                <div class="space-y-1">
                                     <div class="flex justify-between text-[10px] font-bold t-text-muted">
                                         <span>声音距离</span>
-                                        <span id="panner-distance-val" class="font-mono">5</span>
+                                        <span id="panner-distance-val" class="font-mono text-emerald-500">5</span>
                                     </div>
                                     <input type="range" id="panner-distance" min="1" max="30" value="5"
                                         class="w-full h-1.5 rounded-full lc-range-input cursor-pointer">
@@ -5524,26 +5648,25 @@
                     </div>
 
                     <!-- Right Column -->
-                    <div class="pl-0 md:pl-8">
-                        <div class="sticky top-0 t-bg-panel z-10 space-y-4 pb-4">
+                    <div class="pl-0 md:pl-4 space-y-3.5">
+                        <section class="space-y-2.5">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">均衡器调节</h4>
                                 <button onclick="window.soundEffects && window.soundEffects.resetEQ()"
-                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置</button>
+                                    class="text-[10px] px-2 py-0.5 t-bg-track rounded hover:text-emerald-500 transition-colors font-bold uppercase">重置 0dB</button>
                             </div>
-                        </div>
-
-                        <!-- EQ Sliders Grid -->
-                        <div id="eq-sliders-container" class="min-h-[300px]">
-                            <!-- Injected by JS: 2 columns of horizontal sliders -->
-                        </div>
-
-                        <div class="h-px bg-t-border-main my-8"></div>
+                            <!-- EQ Sliders Grid -->
+                            <div id="eq-sliders-container" class="min-h-0">
+                                <!-- Injected by JS: 2 columns of horizontal sliders -->
+                            </div>
+                        </section>
 
                         <!-- Presets -->
-                        <section class="space-y-4">
-                            <p class="text-[10px] font-black t-text-muted uppercase tracking-widest">快速预设</p>
-                            <div id="eq-presets" class="flex flex-wrap gap-2">
+                        <section class="space-y-2">
+                            <div class="flex items-center justify-between">
+                                <h4 class="text-xs font-black t-text-muted uppercase tracking-widest">快速预设</h4>
+                            </div>
+                            <div id="eq-presets" class="flex flex-wrap gap-1.5">
                                 <!-- Injected by JS -->
                             </div>
                         </section>
@@ -5575,7 +5698,7 @@
                         <label
                             class="block text-[11px] uppercase tracking-[0.1em] font-bold t-text-muted mb-2 ml-1 opacity-80">Token
                             名称 (识别用)</label>
-                        <input type="text" id="new-token-name" placeholder="如：Python 脚本、工作电脑"
+                        <input type="text" id="new-token-name" placeholder="如：Python 脚本、工作电脑" autocomplete="off"
                             class="w-full px-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/50 t-text-main transition-all placeholder:opacity-30">
                     </div>
                     <div class="space-y-3">
@@ -5677,20 +5800,20 @@
                         <i class="fas fa-times t-text-muted"></i>
                     </button>
                 </div>
-                <div id="remote-overwrite-step1" class="space-y-4">
+                <form id="remote-overwrite-step1" class="space-y-4" onsubmit="event.preventDefault(); handleRemoteOverwriteConnect();" autocomplete="off">
                     <p class="text-xs t-text-muted leading-relaxed">连接 LX Music 远程服务器，连接成功后可选择数据同步方向。</p>
                     <div>
                         <label
                             class="block text-[11px] uppercase tracking-[0.1em] font-bold t-text-muted mb-2 ml-1 opacity-80">服务器地址
                             (WS/HTTP)</label>
-                        <input type="text" id="remote-overwrite-url" placeholder="ws://192.168.1.1:9527"
+                        <input type="text" id="remote-overwrite-url" placeholder="ws://192.168.1.1:9527" autocomplete="off"
                             class="w-full px-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/50 t-text-main transition-all placeholder:opacity-30">
                     </div>
                     <div>
                         <label
                             class="block text-[11px] uppercase tracking-[0.1em] font-bold t-text-muted mb-2 ml-1 opacity-80">连接码
                             (Code)</label>
-                        <input type="password" id="remote-overwrite-code" placeholder="输入连接码"
+                        <input type="password" id="remote-overwrite-code" placeholder="输入连接码" autocomplete="new-password" data-lpignore="true" data-1p-ignore
                             class="w-full px-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400/50 t-text-main transition-all placeholder:opacity-30">
                     </div>
                     <div class="flex items-center justify-between px-1">
@@ -5709,11 +5832,11 @@
                         </div>
                     </div>
                     <div id="remote-overwrite-status" class="text-xs text-center min-h-[1.5rem] t-text-muted"></div>
-                    <button onclick="handleRemoteOverwriteConnect()"
+                    <button type="submit"
                         class="w-full py-4 bg-emerald-500 hover:bg-emerald-600 text-white font-bold rounded-2xl shadow-lg shadow-emerald-500/20 transition-all active:scale-[0.98]">
                         连接远程服务器
                     </button>
-                </div>
+                </form>
                 <div id="remote-overwrite-mode-selection" class="hidden space-y-3">
                     <p class="text-xs t-text-muted mb-1 text-center font-medium">连接成功！请选择同步方向：</p>
                     <div class="grid grid-cols-2 gap-2">
@@ -5742,7 +5865,7 @@
                 <div id="remote-overwrite-step2" class="hidden space-y-6 text-center py-4">
                     <div class="flex justify-center">
                         <div
-                            class="w-16 h-16 border-4 border-emerald-100 border-t-emerald-500 rounded-full animate-spin">
+                            class="w-16 h-16 border-4 border-emerald-100 dark:border-emerald-900/40 border-t-emerald-500 dark:border-t-emerald-500 rounded-full animate-spin">
                         </div>
                     </div>
                     <div>
@@ -5753,7 +5876,7 @@
                 <div id="remote-overwrite-result" class="hidden space-y-6 text-center py-4">
                     <div class="flex justify-center">
                         <div
-                            class="w-16 h-16 bg-emerald-500 text-white rounded-full flex items-center justify-center text-3xl shadow-lg shadow-emerald-200">
+                            class="w-16 h-16 bg-emerald-500 text-white rounded-full flex items-center justify-center text-3xl shadow-lg shadow-emerald-500/20">
                             <i class="fas fa-check"></i>
                         </div>
                     </div>
@@ -5784,12 +5907,12 @@
                 <div class="flex flex-col gap-3">
                     <!-- 第一行：输入与来源 -->
                     <div class="flex gap-2">
-                        <div class="relative flex-1">
+                        <form role="search" onsubmit="event.preventDefault(); LocalMusicManager.doManualSearch();" class="relative flex-1" autocomplete="off">
                             <i class="fas fa-search absolute left-4 top-1/2 -translate-y-1/2 t-text-muted text-sm"></i>
-                            <input type="text" id="manual-index-search-input" placeholder="输入歌曲名、歌手、专辑搜索..."
+                            <input type="search" id="manual-index-search-input" placeholder="输入歌曲名、歌手、专辑搜索..."
                                 class="w-full pl-11 pr-4 py-3.5 t-bg-track border t-border-main rounded-2xl text-sm focus:outline-none focus:ring-2 focus:ring-emerald-400 t-text-main t-bg-main"
-                                onkeyup="if(event.key==='Enter') LocalMusicManager.doManualSearch()">
-                        </div>
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                        </form>
                         <select id="manual-index-source-select" class="lm-select !w-24 md:!w-32 !py-2">
                             <option value="tx" selected>腾讯音乐</option>
                             <option value="wy">网易音乐</option>
@@ -5841,7 +5964,7 @@
             onclick="LocalMusicManager.closeRemasterModal()">
         </div>
         <div
-            class="relative t-bg-panel border t-border-main rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:h-[86vh] md:max-h-[780px] flex flex-col overflow-hidden backdrop-blur-xl bg-opacity-95">
+            class="relative t-bg-panel/95 border t-border-main rounded-2xl shadow-2xl w-full max-w-5xl max-h-[92vh] md:h-[86vh] md:max-h-[780px] flex flex-col overflow-hidden backdrop-blur-xl">
             <!-- Modal Header -->
             <div
                 class="px-5 py-3.5 border-b t-border-main flex items-center justify-between shrink-0 bg-gray-50/50 dark:bg-white/[0.02]">
@@ -6096,16 +6219,16 @@
         class="fixed inset-0 z-[100] flex items-center justify-center hidden transition-opacity duration-300">
         <div class="absolute inset-0 bg-black/60 backdrop-blur-md"></div>
         <div
-            class="relative w-full max-w-lg mx-4 t-bg-panel rounded-3xl shadow-2xl border t-border-main p-8 overflow-hidden animate-slide-up">
+            class="project-agreement-panel relative w-full max-w-lg mx-4 t-bg-panel rounded-3xl shadow-2xl border t-border-main p-8 animate-slide-up">
             <div class="flex justify-center mb-6">
                 <div
-                    class="w-16 h-16 bg-emerald-500 text-white rounded-2xl flex items-center justify-center text-3xl shadow-lg shadow-emerald-200">
+                    class="w-16 h-16 bg-emerald-500 text-white rounded-2xl flex items-center justify-center text-3xl shadow-lg shadow-emerald-500/20">
                     <i class="fas fa-file-contract"></i>
                 </div>
             </div>
             <h2 class="text-2xl font-black t-text-main text-center mb-4">项目使用声明</h2>
             <div
-                class="t-text-muted text-sm space-y-4 mb-8 leading-relaxed max-h-[40vh] overflow-y-auto pr-2 custom-scrollbar">
+                class="t-text-muted text-sm space-y-4 mb-8 leading-relaxed pr-2 custom-scrollbar">
                 <p>欢迎使用 LX Music Web 播放器。本项目是一个 <a href="https://github.com/XCQ0607/lxserver" target="_blank"
                         class="t-text-main hover:text-emerald-500 underline decoration-dotted transition-colors">开源</a>
                     的音乐同步管理辅助工具，在您开始使用之前，请知晓以下声明：</p>
@@ -6131,37 +6254,39 @@
 
     <!-- External Scripts Section (Placed at the end for performance) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
-    <script src="js/NoSleep.min.js"></script>
-    <script src="js/log_viewer.js"></script>
-    <script src="js/lyric-utils.js"></script>
-    <script src="js/lyric-parser.js"></script>
-    <script src="js/quality.js"></script>
-    <script src="js/idb_store.js"></script>
-    <script src="js/user_sync.js"></script>
-    <script src="js/batch_pagination.js"></script>
-    <script src="js/server_file_state.js"></script>
-    <script src="js/single_song_ops.js"></script>
-    <script src="js/theme_manager.js"></script>
-    <script src="js/list_search.js"></script>
-    <script src="js/songlist_manager.js"></script>
-    <script src="js/leaderboard_manager.js"></script>
-    <script src="js/dislike_manager.js"></script>
-    <script src="js/wave.js"></script>
-    <script src="js/visualizer.js"></script>
-    <script src="js/pwa.js"></script>
-    <script src="js/lyric-card.js"></script>
-    <script src="js/ios-background-audio.js"></script>
-    <script src="js/sound-effects.js"></script>
-    <script src="js/airplay.js"></script>
-    <script src="js/download_manager.js"></script>
-    <script src="js/local_music.js"></script>
-    <script src="js/auto_link.js"></script>
-    <script src="js/customDir.js"></script>
-    <script src="js/common_ui.js"></script>
-    <script src="js/sync_download.js"></script>
-    <script src="js/playback.js"></script>
+    <script src="js/vendor/NoSleep.min.js"></script>
+    <script src="js/ui/log_viewer.js"></script>
+    <script src="js/lyrics/lyric-utils.js"></script>
+    <script src="js/lyrics/lyric-parser.js"></script>
+    <script src="js/player/quality.js"></script>
+    <script src="js/core/idb_store.js"></script>
+    <script src="js/sync/user_sync.js"></script>
+    <script src="js/ui/batch_pagination.js"></script>
+    <script src="js/local/server_file_state.js"></script>
+    <script src="js/library/single_song_ops.js"></script>
+    <script src="js/ui/theme_manager.js"></script>
+    <script src="js/library/list_search.js"></script>
+    <script src="js/library/songlist_manager.js"></script>
+    <script src="js/library/leaderboard_manager.js"></script>
+    <script src="js/library/dislike_manager.js"></script>
+    <script src="js/vendor/wave.js"></script>
+    <script src="js/player/visualizer.js"></script>
+    <script src="js/core/pwa.js"></script>
+    <script src="js/player/ios-background-audio.js"></script>
+    <script src="js/player/sound-effects.js"></script>
+    <script src="js/player/airplay.js"></script>
+    <script src="js/download/download_manager.js"></script>
+    <script src="js/local/local_music.js"></script>
+    <script src="js/local/auto_link.js"></script>
+    <script src="js/local/customDir.js"></script>
+    <script src="js/ui/common_ui.js"></script>
+    <script src="js/download/sync_download.js"></script>
+    <script src="js/player/playback.js"></script>
+    <script src="js/library/search_requests.js"></script>
+    <script src="js/ui/ui_accessibility.js"></script>
+    <script src="js/ui/dynamic_backgrounds.js"></script>
     <script src="app.js"></script>
-    <script src="js/chromecast.js"></script>
+    <script src="js/player/chromecast.js"></script>
 </body>
 
 <!-- 同步下载面板 Modal -->
@@ -6326,7 +6451,7 @@
                     </div>
                 </div>
                 <div id="sd-last-result"
-                    class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl inline-flex items-center gap-1.5 mt-2 hidden">
+                    class="text-[10px] font-medium text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl flex items-center gap-1.5 mt-2 hidden">
                 </div>
             </div>
 

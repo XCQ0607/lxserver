@@ -16,10 +16,10 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Get version from config
+      - name: Get version from package.json
         id: get_version
         run: |
-          VERSION=$(grep "version:" public/js/config.js | sed "s/.*'\(.*\)'.*/\1/")
+          VERSION=$(node -p "'v' + require('./package.json').version.replace(/^v/i, '')")
           echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
           echo "Detected version: $VERSION"
 
@@ -58,7 +58,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install Linux system deps
@@ -194,7 +194,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'npm'
 
       - name: Install and Build

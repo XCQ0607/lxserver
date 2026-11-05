@@ -152,6 +152,7 @@ const DEFAULT_SETTINGS = {
     enableSmtcLyric: true, // SMTC 歌词显示 (默认开启)
     // Visualizer Settings (Refactored)
     showFooterVisualizer: true,
+    iosAdaptiveVisualizer: true, // iOS 设备自适应 (默认开启)
     footerVisualizerStyle: 'bars',
     showDetailVisualizer: false,
     detailVisualizerStyle: 'pulse',
@@ -170,6 +171,7 @@ const DEFAULT_SETTINGS = {
     enableLyricGlow: true, // 歌词荧光效果 (默认开启)
     enablePersistentToken: false, // 启用持久化 Token 验证
     playerBackground: 'blur', // 播放页背景: 'blur', 'solid', 'dark'
+    playerDynamicEffect: 'none', // 播放页动态效果: 'none','aurora','icons','bubbles','cosmos','waves'
     saveAccountSettingsToFile: true, // 同步账号设置到文件 (默认开启)
     autoUpdateNetworkList: false, // 自动更新网络歌单 (默认关闭)
     networkListAutoCheckInterval: '6h', // 网络歌单自动检测间隔
@@ -463,6 +465,7 @@ try {
 window.settings = settings; // 显式挂载到 window
 window.networkListUpdateMap = new Set();
 let networkListAutoCheckTimer = null;
+let networkListAutoCheckPeriod = null;
 
 function escapeHtmlText(value) {
     return String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -720,20 +723,24 @@ document.addEventListener('click', (e) => {
 });
 
 function setupNetworkListAutoCheck() {
+    const intervalMs = settings.autoUpdateNetworkList
+        ? parseNetworkListAutoCheckInterval(settings.networkListAutoCheckInterval) : null;
+    if (networkListAutoCheckTimer && intervalMs > 0 && networkListAutoCheckPeriod === intervalMs) return;
     if (networkListAutoCheckTimer) {
         clearInterval(networkListAutoCheckTimer);
         networkListAutoCheckTimer = null;
     }
+    networkListAutoCheckPeriod = null;
     if (!settings.autoUpdateNetworkList) {
         return;
     }
-    const intervalMs = parseNetworkListAutoCheckInterval(settings.networkListAutoCheckInterval);
     if (intervalMs === null || intervalMs <= 0) {
         return;
     }
     networkListAutoCheckTimer = setInterval(() => {
         checkNetworkListUpdates().catch(err => console.error('[AutoCheck] 网络歌单检测失败:', err));
     }, intervalMs);
+    networkListAutoCheckPeriod = intervalMs;
     console.log('[AutoCheck] 已设置网络歌单自动检测间隔：', settings.networkListAutoCheckInterval, '(', intervalMs, 'ms )');
 }
 
@@ -1306,6 +1313,7 @@ async function checkAndUpdateCustomDirUI() {
             } else {
                 userEnableCustomDir = !!vData.enableCustomMusicDir;
                 window.userAllowOperateCustomDir = !!vData.allowOperateCustomMusicDir;
+                window.userAllowWriteCustomDir = !!vData.allowWriteCustomMusicDir;
                 window.userEnableAutoDownload = !!vData.enableAutoDownload;
             }
         } catch (e) {
@@ -1456,21 +1464,8 @@ window.handleHeaderLogout = handleHeaderLogout;
         // 更新自定义目录开关显示状态
         await checkAndUpdateCustomDirUI();
 
-        const customDirSwitch = document.getElementById('user-custom-dir-switch');
-
-        if (customDirSwitch) {
-            customDirSwitch.addEventListener('change', (e) => {
-                const isChecked = e.target.checked;
-                if (window.CustomDirManager && typeof window.CustomDirManager.setActive === 'function') {
-                    window.CustomDirManager.setActive(isChecked);
-                } else if (window.LocalMusicManager && typeof window.LocalMusicManager.toggleCustomDirMode === 'function') {
-                    window.LocalMusicManager.toggleCustomDirMode(isChecked);
-                }
-            });
-        }
-
         // [新增] 公开受限用户自动尝试从服务器拉取配置 (_open)
-        if (config['user.enablePublicRestriction']) {
+        if (config['user.enablePublicRestriction'] && !localStorage.getItem('lx_sync_user')) {
             console.log('[Auth] 检测到公开限制已开启，尝试拉取公共配置...');
             if (typeof fetchSettingsFromServer === 'function') {
                 await fetchSettingsFromServer();
@@ -1542,6 +1537,7 @@ async function handleLogout() {
 
 // 音质选择器初始化
 document.addEventListener('DOMContentLoaded', () => {
+    loadSettings();
     // 音质选择器初始化
     const qualitySelect = document.getElementById('quality-select');
     if (qualitySelect && settings.preferredQuality) {
@@ -1622,8 +1618,7 @@ document.addEventListener('DOMContentLoaded', () => {
     window.addEventListener('mouseup', stopDragging);
     window.addEventListener('touchend', stopDragging);
 
-    // 同步所有设置 UI
-    syncSettingsUI();
+    // 设置已由 loadSettings 同步。
     updateUserUI();
 });
 
@@ -1824,10 +1819,24 @@ function changeQualityPreference(quality) {
 
 // Tab Switching
 function switchTab(tabId) {
-    // Favorites is a sidebar group toggle, not a main content view.
+    // Favorites entry opens the default favorite list (love / default) or guidance view
     if (tabId === 'favorites') {
-        handleFavoritesClick();
-        return;
+        exitListSecondaryModes();
+        const favList = document.getElementById('favorites-children');
+        if (favList && (favList.style.height === '0px' || favList.style.height === '')) {
+            toggleFavorites();
+        }
+        if (currentListData) {
+            const targetListId = (Array.isArray(currentListData.loveList) && currentListData.loveList.length > 0)
+                ? 'love'
+                : (Array.isArray(currentListData.defaultList) ? 'default' : 'love');
+            handleListClick(targetListId);
+            return;
+        } else {
+            window._pendingDefaultFavoriteEntry = true;
+        }
+    } else {
+        delete window._pendingDefaultFavoriteEntry;
     }
 
     document.querySelectorAll('[id^="view-"]').forEach(el => {
@@ -1838,6 +1847,8 @@ function switchTab(tabId) {
 
     const activeView = document.getElementById(`view-${tabId}`);
     if (!activeView) return;
+    window.PlayerNavigation?.record({ tab: tabId });
+    if (tabId !== 'search') window.SearchRequests?.cancel();
 
     activeView.classList.remove('hidden');
     // small delay to allow display block to apply before opacity transition
@@ -1942,7 +1953,8 @@ function switchTab(tabId) {
     }
 
     if (tabId === 'localmusic') {
-        document.getElementById('page-title').innerText = "本地音乐";
+        const isCustomActive = !!(window.CustomDirManager && window.CustomDirManager.isActive);
+        document.getElementById('page-title').innerText = isCustomActive ? "自定义目录" : "本地音乐";
     }
 
     // Collapse Favorites if leaving
@@ -1953,6 +1965,8 @@ function switchTab(tabId) {
             favList.style.height = '0px';
             if (arrow) arrow.style.transform = 'rotate(-90deg)';
         }
+    } else {
+        document.getElementById('page-title').innerText = '我的收藏';
     }
 
     // Title update (handled above for search, others here)
@@ -2007,8 +2021,7 @@ function getPlayerBuildInfo() {
         ? config.version.trim() : 'unknown';
     const buildHash = typeof config.buildHash === 'string' && /^[a-f0-9]{7,64}$/i.test(config.buildHash)
         ? config.buildHash : 'unknown';
-    const label = version === 'unknown' ? '版本信息不可用'
-        : version + (buildHash === 'unknown' ? '' : ' · build ' + buildHash);
+    const label = version === 'unknown' ? '版本信息不可用' : version;
     return { version, buildHash, label };
 }
 
@@ -2045,7 +2058,11 @@ async function loadAboutContent() {
 document.addEventListener('DOMContentLoaded', () => {
     const versionEl = document.getElementById('app-version');
     if (versionEl) {
-        versionEl.innerText = getPlayerBuildInfo().label + ' Web';
+        const { version, buildHash } = getPlayerBuildInfo();
+        versionEl.innerText = version === 'unknown' ? '版本信息不可用' : `${version} Web`;
+        if (buildHash !== 'unknown') {
+            versionEl.title = `build ${buildHash}`;
+        }
     }
 
     // 恢复搜索来源缓存
@@ -2070,7 +2087,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // 为歌词按钮添加悬停恢复逻辑
+    // 为歌词收起按钮添加交互恢复逻辑（支持桌面端悬停与移动端触屏操作唤醒）
     const toggleLyricsBtn = document.getElementById('btn-toggle-lyrics');
     if (toggleLyricsBtn) {
         toggleLyricsBtn.addEventListener('mouseenter', () => {
@@ -2084,6 +2101,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
     }
+
+    // 移动端/桌面端屏幕操作时唤醒收起按钮并重置自动隐藏倒计时
+    const viewPlayerDetail = document.getElementById('view-player-detail');
+    if (viewPlayerDetail) {
+        const wakeUpLyricsBtn = () => {
+            if (!isLyricViewOpen) return;
+            const toggleBtn = document.getElementById('btn-toggle-lyrics');
+            if (toggleBtn) {
+                if (toggleBtn.classList.contains('faint')) {
+                    toggleBtn.classList.remove('faint');
+                }
+                startToggleLyricsBtnTimer();
+            }
+        };
+
+        ['touchstart', 'touchmove', 'click', 'mousemove'].forEach(evt => {
+            viewPlayerDetail.addEventListener(evt, wakeUpLyricsBtn, { passive: true });
+        });
+    }
 });
 
 // ==================== 播放队列 (Queue) 逻辑 ====================
@@ -2095,8 +2131,8 @@ function toggleQueueDrawer() {
 
     const isHidden = drawer.classList.contains('translate-x-full');
     if (isHidden) {
-        renderQueue();
         drawer.classList.remove('translate-x-full');
+        renderQueue();
         // 自动定位当前歌曲
         setTimeout(() => {
             scrollToCurrentSongInQueue(false);
@@ -2111,6 +2147,7 @@ function toggleQueueDrawer() {
         }
     } else {
         drawer.classList.add('translate-x-full');
+        document.getElementById('queue-list')?.replaceChildren();
     }
 }
 window.toggleQueueDrawer = toggleQueueDrawer;
@@ -2130,9 +2167,9 @@ function scrollToCurrentSongInQueue(flash = true) {
 
         if (flash) {
             // 闪烁高亮提醒
-            activeItem.classList.add('ring-2', 'ring-emerald-500', 'ring-inset', 'ring-opacity-50');
+            activeItem.classList.add('ring-2', 'ring-emerald-500/50', 'ring-inset');
             setTimeout(() => {
-                activeItem.classList.remove('ring-2', 'ring-emerald-500', 'ring-inset', 'ring-opacity-50');
+                activeItem.classList.remove('ring-2', 'ring-emerald-500/50', 'ring-inset');
             }, 1000);
         }
     } else if (flash) {
@@ -2146,6 +2183,11 @@ function renderQueue() {
     const listContainer = document.getElementById('queue-list');
     const countEl = document.getElementById('queue-count');
     if (!listContainer) return;
+    if (countEl) countEl.innerText = `${currentPlaylist.length} SONGS`;
+    if (document.getElementById('queue-drawer')?.classList.contains('translate-x-full')) {
+        listContainer.replaceChildren();
+        return;
+    }
 
     if (!currentPlaylist || currentPlaylist.length === 0) {
         listContainer.innerHTML = `
@@ -2167,7 +2209,7 @@ function renderQueue() {
                  onclick="playSongFromQueue(${index})">
                 
                 <div class="w-10 h-10 rounded-lg overflow-hidden flex-shrink-0 relative">
-                    <img src="${getImgUrl(song)}" 
+                    <img src="${getThumbnailUrl(song)}"
                          onerror="this.src='/music/assets/logo.svg'" 
                          loading="lazy" fetchpriority="low"
                          class="w-full h-full object-cover">
@@ -2187,7 +2229,7 @@ function renderQueue() {
                     <button onclick="event.stopPropagation(); openPlaylistAddModalForSongObject(currentPlaylist[${index}])" class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>
-                    <button onclick="event.stopPropagation(); removeFromQueue(${index})" class="p-2 text-gray-400 hover:text-red-500 transition-colors">
+                    <button aria-label="从队列移除" title="从队列移除" onclick="event.stopPropagation(); removeFromQueue(${index})" class="p-2 text-gray-400 hover:text-red-500 transition-colors">
                         <i class="fas fa-trash-alt text-xs"></i>
                     </button>
                     <div class="p-2 text-gray-400 cursor-grab active:cursor-grabbing queue-drag-handle">
@@ -2384,6 +2426,13 @@ const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
 //搜索歌曲
 async function doSearch(page = 1, append = false) {
+    const input = document.getElementById('search-input')?.value.trim() || '';
+    if (!input) {
+        // 搜索框为空时不进行任何操作，不回到主页
+        return;
+    }
+    const request = window.SearchRequests.begin();
+    window.setSearchStatus();
     const typeEl = document.getElementById('search-type');
     const type = typeEl ? typeEl.value : 'song';
 
@@ -2399,7 +2448,6 @@ async function doSearch(page = 1, append = false) {
     // 只有在开启全新搜索（第一页且非追加模式）时才重置局部过滤状态
     if (window.ListSearch && page === 1 && !append) window.ListSearch.resetState();
 
-    const input = document.getElementById('search-input').value.trim();
     const resultsContainer = document.getElementById('search-results');
 
     // Local Search Logic
@@ -2477,6 +2525,13 @@ async function doSearch(page = 1, append = false) {
         window.currentNetworkPage = page;
     }
 
+    const sourceName = typeof getSourceName === 'function' ? getSourceName(source) : source;
+    if (source === 'all') {
+        window.setSearchStatus(`已完成 0/${SOURCES.length} 个音源，找到 0 条结果`, true);
+    } else {
+        window.setSearchStatus(`正在搜索 ${sourceName}...`, true);
+    }
+    const failures = [];
     try {
         const headers = {};
         if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
@@ -2488,19 +2543,33 @@ async function doSearch(page = 1, append = false) {
             // Aggregate Search (Only supported for songs)
             if (pageInfoEl) pageInfoEl.innerText = '聚合搜索 (各源并发取全量)...';
 
-            const promises = SOURCES.map(s =>
-                fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${s}&page=1&type=${type}`, { headers })
-                    .then(res => res.json())
-                    .then(data => {
-                        const arr = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : []);
-                        return arr.map(item => ({ ...item, source: s }));
-                    })
-                    .catch(e => {
-                        console.warn(`[聚合搜索] ${s} 源失败:`, e);
-                        return [];
-                    })
-            );
+            const partial = [];
+            let completed = 0;
+            const promises = SOURCES.map(async provider => {
+                try {
+                    const data = await request.json(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${provider}&page=1&type=${type}`, headers);
+                    const arr = Array.isArray(data) ? data : (Array.isArray(data?.list) ? data.list : null);
+                    if (!arr || data?.error) throw new Error('音源返回错误');
+                    const songs = arr.map(item => ({ ...item, source: provider }));
+                    partial.push(...songs);
+                    if (request.current() && partial.length) {
+                        const visible = window.sortSearchResults ? window.sortSearchResults(partial, input, type === 'song') : partial;
+                        renderResults(visible);
+                    }
+                    return songs;
+                } catch (error) {
+                    failures.push(provider);
+                    return [];
+                } finally {
+                    completed++;
+                    if (request.current()) {
+                        window.setSearchStatus(`已完成 ${completed}/${SOURCES.length} 个音源，找到 ${partial.length} 条结果`, true);
+                    }
+                }
+            });
             const results = await Promise.all(promises);
+            if (!request.current()) return;
+            if (failures.length === SOURCES.length) throw new Error('所有音源请求失败或超时，请重试或切换音源');
             const flatList = results.flat();
             if (typeof window.sortSearchResults === 'function') {
                 list = window.sortSearchResults(flatList, input, type === 'song');
@@ -2508,14 +2577,9 @@ async function doSearch(page = 1, append = false) {
                 list = flatList;
             }
         } else {
-            if (pageInfoEl && type === 'song') pageInfoEl.innerText = '正在取该平台全部结果...';
-            const res = await fetch(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, { headers });
-
-            if (!res.ok) {
-                throw new Error(`搜索请求失败: ${res.status} ${res.statusText}`);
-            }
-
-            const data = await res.json();
+            if (pageInfoEl && type === 'song') pageInfoEl.innerText = `正在取${sourceName}全部结果...`;
+            const data = await request.json(`${API_BASE}/search?name=${encodeURIComponent(input)}&source=${source}&type=${type}&page=${page}`, headers);
+            if (!request.current()) return;
 
             const songList = Array.isArray(data) ? data : (data && Array.isArray(data.list) ? data.list : null);
 
@@ -2535,6 +2599,21 @@ async function doSearch(page = 1, append = false) {
             }
         }
 
+        if (!request.current()) return;
+        const totalCount = list ? list.length : 0;
+        let completionMsg = '';
+        if (source === 'all') {
+            const successCount = SOURCES.length - failures.length;
+            if (failures.length === 0) {
+                completionMsg = `全部 ${SOURCES.length}/${SOURCES.length} 个音源成功，找到 ${totalCount} 条结果`;
+            } else {
+                const failedNames = failures.map(s => (typeof getSourceName === 'function' ? getSourceName(s) : s)).join('、');
+                completionMsg = `已完成 ${successCount}/${SOURCES.length} 个音源，找到 ${totalCount} 条结果，${failedNames}源失败`;
+            }
+        } else {
+            completionMsg = `找到 ${totalCount} 条结果`;
+        }
+        window.setSearchStatus(completionMsg, false);
         // 歌手/专辑/歌单仍支持 append 追加翻页
         if (append && appendableServerSearch && (type === 'singer' || type === 'album')) {
             if (list && list.length > 0) {
@@ -2583,6 +2662,8 @@ async function doSearch(page = 1, append = false) {
             };
         }
     } catch (e) {
+        if (!request.current()) return;
+        window.setSearchStatus(e.message || '搜索失败，请重试或切换音源', false);
         console.error('[Search] 搜索失败:', e);
         if (append) {
             try {
@@ -2591,7 +2672,10 @@ async function doSearch(page = 1, append = false) {
                 showError(`搜索追加出错: ${e.message}`);
             }
         } else {
-            resultsContainer.innerHTML = `<div class="text-center text-red-500 p-8">搜索出错: ${e.message}</div>`;
+            const hasExistingRows = resultsContainer.querySelector('table, tbody tr, .grid');
+            if (!hasExistingRows) {
+                resultsContainer.innerHTML = `<div class="text-center text-red-500 p-8">搜索出错: ${escapeHtmlText(e.message)}</div>`;
+            }
         }
     }
 }
@@ -2761,6 +2845,8 @@ function renderHotSearch(data) {
 }
 
 function switchHotSearchTab(source) {
+    const request = window.SearchRequests?.begin();
+    window.setSearchStatus?.();
     const container = document.getElementById('search-results');
     if (container) {
         container.innerHTML = `
@@ -2771,7 +2857,11 @@ function switchHotSearchTab(source) {
         `;
     }
     fetchHotSearch(source).then(data => {
+        if (request && !request.current()) return;
         renderHotSearch(data);
+    }).catch(() => {
+        if (request && !request.current()) return;
+        if (container) container.textContent = '热门搜索加载失败，请重试';
     });
 }
 window.switchHotSearchTab = switchHotSearchTab;
@@ -2785,6 +2875,10 @@ function handleHotSearchClick(keyword) {
 }
 
 function showInitialSearchState() {
+    window.showInitialSearchState = showInitialSearchState;
+    const initialRequest = window.SearchRequests?.begin();
+    window.setSearchStatus?.();
+    document.getElementById('search-pagination-bar')?.classList.add('hidden');
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
 
@@ -2806,8 +2900,10 @@ function showInitialSearchState() {
     const source = sourceSelect ? sourceSelect.value : 'all';
 
     fetchHotSearch(source).then(data => {
+        if (initialRequest && !initialRequest.current()) return;
         renderHotSearch(data);
     }).catch(err => {
+        if (initialRequest && !initialRequest.current()) return;
         console.error('[HotSearch] 显示热搜失败:', err);
         // 失败时显示默认状态
         container.innerHTML = `
@@ -3069,7 +3165,7 @@ async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBa
         lastSearchType = typeEl ? typeEl.value : 'singer';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
         currentArtistInfo = null; // 重置缓存
-        window.history.pushState({ page: 'search-detail' }, '');
+        window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
     }
 
     const previousArtistOrder = window.currentArtistOrder || 'hot';
@@ -3302,7 +3398,7 @@ window.updateArtistFavButtons = updateArtistFavButtons;
 function updateArtistDislikeButtons(disd) {
     const mainBtn = document.getElementById('artist-header-dislike-btn');
     if (mainBtn) {
-        const base = 'absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
+        const base = 'absolute top-2 right-24 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full transition-all z-30 shadow-sm active:scale-90';
         mainBtn.className = base + ' ' + (disd ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main');
         mainBtn.title = disd ? '取消不喜欢' : '不喜欢';
     }
@@ -3447,7 +3543,7 @@ function renderArtistHeader(info, activeTab, order) {
     let headerHtml = `
         <div class="relative p-6 md:p-8 t-bg-panel/50 border-b t-border-main overflow-hidden group/header">
             <!-- Small Absolute Back Button -->
-            <button onclick="goBackToSearch()" class="absolute top-2 left-2 md:top-4 md:left-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-emerald-500/80 hover:bg-emerald-500 text-white transition-all z-30 shadow-md active:scale-90" title="返回搜索">
+            <button onclick="goBackToSearch()" class="absolute top-2 left-2 md:top-4 md:left-4 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full bg-emerald-500 hover:bg-emerald-600 text-white transition-all z-30 shadow-md active:scale-90" title="返回搜索">
                 <i class="fas fa-arrow-left"></i>
             </button>
             <!-- Favorite Button (Artist) -->
@@ -3467,7 +3563,7 @@ function renderArtistHeader(info, activeTab, order) {
                     const disd = await toggleArtistDislike('${info.id}', '${info.source}', '${info.name.replace(/'/g, "\\'")}', '${(info.avatar || '').replace(/'/g, "\\'")}'); 
                     updateArtistDislikeButtons(disd);
                 })()"
-                class="absolute top-2 right-22 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistDisliked(info.id, info.source) ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
+                class="absolute top-2 right-24 md:top-4 md:right-28 w-8 h-8 md:w-10 md:h-10 flex items-center justify-center rounded-full ${isArtistDisliked(info.id, info.source) ? 'bg-gray-800 text-white' : 'bg-black/10 hover:bg-black/20 dark:bg-white/10 dark:hover:bg-white/20 t-text-main'} transition-all z-30 shadow-sm active:scale-90"
                 title="${isArtistDisliked(info.id, info.source) ? '取消不喜欢' : '不喜欢'}">
                 <i class="fas fa-ban"></i>
             </button>
@@ -3691,19 +3787,19 @@ function renderArtistSongsUI(list, page) {
 
                     <!-- Actions -->
                     <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
-                            <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
+                            <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
-                        <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                            <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg text-blue-600 dark:text-blue-400 transition-colors inline-flex items-center justify-center" title="下载" onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
+                            <i class="fas fa-download w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
-                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
-                            <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
+                        <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-500 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="添加到歌单" onclick="event.stopPropagation(); openPlaylistAddModalForSong(${index})">
+                            <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
-                        <button class="p-0.5 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                        <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                                 title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
                                 onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                            <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
+                            <i class="fas fa-thumbs-down w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
                     </div>
                 </div>
@@ -4506,7 +4602,7 @@ async function enterAlbum(id, source = 'wy', initialInfo = null) {
         lastSearchType = typeEl ? typeEl.value : 'album';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
     }
-    window.history.pushState({ page: 'search-detail' }, '');
+    window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
 
     const resultsContainer = document.getElementById('search-results');
     resultsContainer.innerHTML = '<div class="flex items-center justify-center h-full"><i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i></div>';
@@ -4719,6 +4815,23 @@ function getImgUrl(item) {
     return authorizeMediaUrl(rawUrl) || '/music/assets/logo.svg';
 }
 window.getImgUrl = getImgUrl;
+function getThumbnailUrl(song, size = 96) {
+    const url = getImgUrl(song);
+    try {
+        const parsed = new URL(url, window.location.href);
+        if (parsed.origin === window.location.origin && ['/api/music/cache/cover', '/api/music/custom/cover'].includes(parsed.pathname)) {
+            parsed.searchParams.set('size', String(size));
+            return parsed.pathname + parsed.search;
+        }
+        if (/\.music\.126\.net$/.test(parsed.hostname)) parsed.searchParams.set('param', `${size}y${size}`);
+        // QQ CDN does not serve arbitrary dimensions (96x96 returns 404).
+        if (parsed.hostname === 'y.gtimg.cn' && size <= 150) {
+            parsed.pathname = parsed.pathname.replace(/(T\d{3}R)\d+x\d+(M)/, (_, prefix, suffix) => `${prefix}150x150${suffix}`);
+        }
+        return parsed.href;
+    } catch { return url; }
+}
+window.getThumbnailUrl = getThumbnailUrl;
 
 // Removed duplicate toggleDislikeSong
 
@@ -4957,7 +5070,7 @@ function renderResults(list) {
         };
 
         // Image
-        const imgUrl = getImgUrl(item);
+        const imgUrl = getThumbnailUrl(item);
 
         row.innerHTML = `
             <!-- Index / Drag Handle -->
@@ -4986,7 +5099,7 @@ function renderResults(list) {
             <!-- Title (Image + Text) -->
             <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center overflow-hidden pr-2 min-w-0">
                 <div class="relative w-10 h-10 md:w-12 md:h-12 mr-3 md:mr-4 flex-shrink-0 group cursor-pointer">
-                     <img data-src="${imgUrl}" src="/music/assets/logo.svg" 
+                     <img data-src="${escapeHtmlText(imgUrl)}" data-original-src="${escapeHtmlText(getImgUrl(item))}" src="/music/assets/logo.svg"
                           loading="lazy" fetchpriority="low"
                           class="lazy-image w-full h-full rounded-lg object-cover shadow-sm group-hover:shadow-md transition-all group-hover:scale-105 duration-300 dynamic-logo is-placeholder" 
                           alt="${item.name}"
@@ -5028,35 +5141,67 @@ function renderResults(list) {
             </div>
 
             <!-- Actions -->
-            <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                <button class="p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-600 transition-colors" 
+            <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <button class="p-1 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" 
                         title="播放" 
                         onclick="event.stopPropagation(); playFromView(${actualIndexInOriginal})">
-                    <i class="fas fa-play w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
-                <button class="p-1 sm:p-1.5 hover:bg-blue-50 rounded-lg text-blue-600 transition-colors" 
+                <button class="p-1 sm:p-1.5 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg text-blue-600 dark:text-blue-400 transition-colors inline-flex items-center justify-center" 
                         title="下载" 
                         onclick="event.stopPropagation(); downloadSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                    <i class="fas fa-download w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-download w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
-                <button class="add-to-playlist-btn p-1 sm:p-1.5 hover:bg-emerald-50 rounded-lg text-emerald-500 transition-colors"
+                <button class="add-to-playlist-btn p-1 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-500 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                         title="添加到歌单">
-                    <i class="fas fa-plus w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
-                <button class="p-1 sm:p-1.5 hover:bg-red-50 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors"
+                <button class="p-1 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(isDisliked) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                         title="${(isDisliked) ? '取消不喜欢' : '不喜欢'}"
                         onclick="event.stopPropagation(); toggleDislikeSong(${JSON.stringify(item).replace(/"/g, '&quot;')})">
-                    <i class="fas fa-thumbs-down w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-thumbs-down w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
                 ${currentSearchScope !== 'network' && window.currentViewingListId !== 'dislike_songs' ? `
-                <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 rounded-lg text-red-600 transition-colors"
+                <button class="delete-song-btn p-1 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg text-red-600 dark:text-red-400 transition-colors inline-flex items-center justify-center"
                         title="删除">
-                    <i class="fas fa-trash w-3.5 h-3.5 flex items-center justify-center"></i>
+                    <i class="fas fa-trash w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                 </button>
                 ` : ''}
             </div>
         `;
 
+        const actions = row.querySelector('.song-row-actions');
+        if (actions) {
+            const menu = document.createElement('details');
+            menu.className = 'queue-actions';
+            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            menu.addEventListener('click', event => event.stopPropagation());
+            menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
+            menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
+            const popup = menu.querySelector('.queue-actions-menu');
+            if (typeof popup.showPopover === 'function') {
+                popup.setAttribute('popover', 'auto');
+                menu.addEventListener('toggle', () => {
+                    if (!menu.open) { if (popup.matches(':popover-open')) popup.hidePopover(); return; }
+                    popup.showPopover();
+                    const anchor = menu.querySelector('summary').getBoundingClientRect();
+                    const bounds = popup.getBoundingClientRect();
+                    const footerTop = document.getElementById('player-footer').getBoundingClientRect().top;
+                    const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
+                    popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+                    popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
+                });
+                popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
+            }
+            for (const button of [...actions.querySelectorAll('button')]) {
+                if (!['下载', '不喜欢', '取消不喜欢', '删除'].includes(button.title)) continue;
+                const label = document.createElement('span');
+                label.textContent = ' ' + button.title;
+                button.appendChild(label);
+                popup.appendChild(button);
+            }
+            actions.appendChild(menu);
+        }
         const addToPlaylistBtn = row.querySelector('.add-to-playlist-btn');
         if (addToPlaylistBtn) {
             addToPlaylistBtn.onclick = (event) => {
@@ -5234,16 +5379,24 @@ function lazyLoadImages(root = document) {
         if (img.src && img.src.includes('logo.svg')) {
             img.classList.add('is-placeholder');
         }
-        img.src = src;
         img.onload = () => {
             img.classList.remove('is-placeholder', 'opacity-0');
             img.removeAttribute('data-src');
         };
         img.onerror = () => {
+            const original = img.getAttribute('data-original-src');
+            img.removeAttribute('data-original-src');
+            if (original && original !== src) {
+                img.src = original;
+                return;
+            }
+            img.onerror = null;
+            img.onload = null;
             img.src = '/music/assets/logo.svg';
             img.classList.add('is-placeholder');
             img.removeAttribute('data-src');
         };
+        img.src = src;
     };
 
     if ('IntersectionObserver' in window) {
@@ -6526,7 +6679,7 @@ async function showServerDirectories() {
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
                 <!-- Header -->
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <div class="flex items-center gap-2">
                         <div class="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-500 flex items-center justify-center">
                             <i class="fas fa-folder-open text-base"></i>
@@ -6658,6 +6811,18 @@ window.showServerDirectories = showServerDirectories;
  * playFromView handles user click on a song in the search/list view.
  * It ensures the playback queue is updated to match the viewed list.
  */
+function enqueueSong(song, next = false) {
+    if (!song) return;
+    if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
+    const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
+    currentPlaylist.splice(position, 0, song);
+    preSelectedNextIndex = null;
+    renderQueue();
+    savePlaybackState();
+    showSuccess(next ? '已加入下一首播放' : '已加入播放队列');
+}
+window.enqueueSong = enqueueSong;
+
 function playFromView(index) {
     if (!viewingPlaylist || !viewingPlaylist[index]) return;
     // Update playlist and scope when user explicitly clicks a song to play
@@ -7110,7 +7275,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
         // [Sync] 确定了最终播放音质后，若当前已就绪的歌词确实属于本歌曲，才以正确音质重写服务器端歌词缓存文件名
         // 关键防护：必须校验 lastLyricSongId 匹配当前歌曲，防止切歌时旧歌词异步残留写入新歌缓存文件
-        const playbackSongKey = `${playbackSong.source || playbackSong.meta?.source || ''}_${playbackSong.songmid || playbackSong.songId || playbackSong.id || playbackSong.meta?.songmid || playbackSong.meta?.songId || ''}`;
+        const playbackSongKey = getLyricSongKey(playbackSong);
         if (settings.enableServerLyricCache !== false && currentRawLrc && lastLyricSongId === playbackSongKey) {
             try {
                 const _lyricHeaders = { 'Content-Type': 'application/json' };
@@ -7616,6 +7781,9 @@ function updatePlayerInfo(song, actualQuality) {
 
     // 触发滚动检测
     applyMarqueeChecks();
+    if (window.adjustMobilePlayerActions) {
+        window.adjustMobilePlayerActions();
+    }
 
     const imgUrl = getImgUrl(song);
 
@@ -7722,6 +7890,10 @@ async function togglePlay() {
         return;
     }
 
+    if (!currentPlayingSong && currentPlaylist.length) {
+        playSongFromQueue(0);
+        return;
+    }
     if (audio.paused) {
         try {
             // [Crossfade] 如果开启了淡入淡出，先将进度置为 0，播放后再淡入
@@ -7760,6 +7932,7 @@ async function togglePlay() {
 
 function updatePlayButton(isPlaying) {
     const btn = document.getElementById('btn-play');
+    btn.setAttribute('aria-label', isPlaying ? '暂停' : '播放');
     btn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play ml-1"></i>';
 }
 
@@ -7968,7 +8141,7 @@ audio.addEventListener('pause', () => {
 // ========================================
 
 function savePlaybackState() {
-    if (!currentPlayingSong) return;
+    if (!currentPlayingSong && !currentPlaylist?.length) return;
     try {
         const state = {
             song: currentPlayingSong,
@@ -7991,7 +8164,9 @@ function savePlaybackState() {
 
 async function restorePlaybackState() {
     if (audio.isRemote) return;
-    if (!settings.autoResume) {
+    const nativeAudioRestore = sessionStorage.getItem('lx_native_audio_restore') === '1';
+    sessionStorage.removeItem('lx_native_audio_restore');
+    if (!settings.autoResume && !nativeAudioRestore) {
         return;
     }
 
@@ -8002,7 +8177,13 @@ async function restorePlaybackState() {
         }
 
         const state = JSON.parse(saved);
-        if (!state || !state.song) {
+        if (!state) return;
+        if (!state.song) {
+            if (Array.isArray(state.playlist) && state.playlist.length) {
+                currentPlaylist = state.playlist.slice(0, 1000);
+                currentIndex = -1;
+                renderQueue();
+            }
             return;
         }
 
@@ -8044,8 +8225,11 @@ async function restorePlaybackState() {
         // 5. 延迟加载播放源（静默模式）但不强制切换 Tab 破坏默认入口设置
         setTimeout(() => {
             if (audio.isRemote) return;
-            if (state.scope === 'network') {
-                renderResults(currentPlaylist);
+            if (state.scope === 'network' && currentSearchScope === 'network') {
+                const searchView = document.getElementById('view-search');
+                if (searchView && !searchView.classList.contains('hidden')) {
+                    renderResults(currentPlaylist);
+                }
             } else if (state.scope === 'local_list' || state.scope === 'local_all') {
                 window._pendingResumeListId = state.listId || 'default';
             }
@@ -8247,12 +8431,14 @@ let mediaSessionArtworkRequest = 0;
 function resolveMediaSessionArtwork(imgUrl) {
     const fallback = { src: new URL('/music/assets/logo.png', window.location.href).href, sizes: '512x512', type: 'image/png' };
     let sourceUrl;
+    let proxyUrl;
     try {
         const url = new URL(imgUrl, window.location.href);
         if (url.protocol === 'http:' || url.protocol === 'https:') {
-            // 使用已有下载代理，避免跨域图片令 canvas 污染，亦避免系统媒体进程直接访问 CDN。
-            sourceUrl = url.origin === window.location.origin ? url.href :
-                `/api/music/download?url=${encodeURIComponent(url.href)}&filename=cover.jpg&inline=1`;
+            sourceUrl = url.href;
+            if (url.origin !== window.location.origin) {
+                proxyUrl = `/api/music/download?url=${encodeURIComponent(url.href)}&filename=cover.jpg&inline=1`;
+            }
         } else if (url.protocol === 'data:' && /^data:image\/(png|jpeg|webp|gif);/i.test(imgUrl)) {
             sourceUrl = imgUrl;
         } else {
@@ -8260,51 +8446,65 @@ function resolveMediaSessionArtwork(imgUrl) {
         }
     } catch (_) { return Promise.resolve(fallback); }
 
-    if (mediaSessionArtworkCache.has(sourceUrl)) return mediaSessionArtworkCache.get(sourceUrl);
-    const result = new Promise(resolve => {
-        const image = new Image();
+    const cached = mediaSessionArtworkCache.get(sourceUrl);
+    if (cached && Date.now() < cached.retryAfter) return cached.promise;
+    const entry = { promise: null, retryAfter: Infinity };
+    entry.promise = new Promise(resolve => {
+        let image;
+        let timer;
+        let usingProxy = false;
         let settled = false;
         const finish = artwork => {
             if (settled) return;
             settled = true;
             clearTimeout(timer);
             image.onload = image.onerror = null;
+            // 失败后保留一分钟，避免每次系统媒体信息刷新都再次请求。
+            entry.retryAfter = artwork === fallback ? Date.now() + 60000 : Infinity;
             resolve(artwork);
         };
-        const timer = setTimeout(() => {
-            finish(fallback);
+        const failed = () => {
+            clearTimeout(timer);
+            image.onload = image.onerror = null;
             if (typeof image.removeAttribute === 'function') image.removeAttribute('src');
-        }, 10000);
-        image.onload = () => {
-            try {
-                const width = image.naturalWidth;
-                const height = image.naturalHeight;
-                if (!(width > 0 && height > 0)) throw new Error('Empty artwork');
-                const canvas = document.createElement('canvas');
-                canvas.width = canvas.height = 512;
-                const context = canvas.getContext('2d');
-                if (!context) throw new Error('Canvas unavailable');
-                context.fillStyle = '#ffffff';
-                context.fillRect(0, 0, 512, 512);
-                const scale = Math.min(512 / width, 512 / height);
-                const w = width * scale;
-                const h = height * scale;
-                context.drawImage(image, (512 - w) / 2, (512 - h) / 2, w, h);
-                const src = canvas.toDataURL('image/jpeg', 0.85);
-                if (!src.startsWith('data:image/jpeg;')) throw new Error('JPEG conversion unavailable');
-                finish({ src, sizes: '512x512', type: 'image/jpeg' });
-            } catch (_) { finish(fallback); }
+            if (proxyUrl && !usingProxy) {
+                usingProxy = true;
+                load(proxyUrl);
+            } else finish(fallback);
         };
-        image.onerror = () => finish(fallback);
-        image.src = sourceUrl;
+        const load = src => {
+            image = new Image();
+            // 外部图片必须通过 CORS 加载，才能安全导出 canvas。
+            if (proxyUrl && !usingProxy) image.crossOrigin = 'anonymous';
+            timer = setTimeout(failed, 10000);
+            image.onload = () => {
+                try {
+                    const width = image.naturalWidth;
+                    const height = image.naturalHeight;
+                    if (!(width > 0 && height > 0)) throw new Error('Empty artwork');
+                    const canvas = document.createElement('canvas');
+                    canvas.width = canvas.height = 512;
+                    const context = canvas.getContext('2d');
+                    if (!context) throw new Error('Canvas unavailable');
+                    context.fillStyle = '#ffffff';
+                    context.fillRect(0, 0, 512, 512);
+                    const scale = Math.min(512 / width, 512 / height);
+                    const w = width * scale;
+                    const h = height * scale;
+                    context.drawImage(image, (512 - w) / 2, (512 - h) / 2, w, h);
+                    const src = canvas.toDataURL('image/jpeg', 0.85);
+                    if (!src.startsWith('data:image/jpeg;')) throw new Error('JPEG conversion unavailable');
+                    finish({ src, sizes: '512x512', type: 'image/jpeg' });
+                } catch (_) { failed(); }
+            };
+            image.onerror = failed;
+            image.src = src;
+        };
+        load(sourceUrl);
     });
-    mediaSessionArtworkCache.set(sourceUrl, result);
+    mediaSessionArtworkCache.set(sourceUrl, entry);
     if (mediaSessionArtworkCache.size > 32) mediaSessionArtworkCache.delete(mediaSessionArtworkCache.keys().next().value);
-    // 临时失败不能永久缓存；下一次元数据刷新应允许重试。
-    result.then(artwork => {
-        if (artwork === fallback && mediaSessionArtworkCache.get(sourceUrl) === result) mediaSessionArtworkCache.delete(sourceUrl);
-    });
-    return result;
+    return entry.promise;
 }
 
 function updateMediaSessionMetadata(song) {
@@ -8404,8 +8604,15 @@ let isMuted = false;
 // 初始化音量
 audio.volume = currentVolume;
 updateVolumeUI();
+let volumeFollowsRemote = false;
 audio.addEventListener('volumechange', () => {
-    if (!audio.isRemote) return;
+    // Ignore ordinary native volume events (including crossfade automation).
+    if (audio.isRemote) volumeFollowsRemote = true;
+    else if (volumeFollowsRemote) {
+        volumeFollowsRemote = false;
+        try { localStorage.setItem('lx_volume', audio.volume.toString()); } catch (_) { }
+    }
+    else return;
     currentVolume = audio.volume;
     isMuted = audio.muted;
     updateVolumeUI();
@@ -8690,7 +8897,7 @@ function changeVolume(delta) {
 
 // 注册全局键盘监听
 document.addEventListener('keydown', (e) => {
-    if (!settings.enableKeyboardShortcuts) return;
+    if (!settings.enableKeyboardShortcuts || e.target.closest?.('[role="dialog"]')) return;
 
     // 如果焦点在输入框中，忽略快捷键
     const target = e.target;
@@ -8768,7 +8975,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('keyup', (e) => {
-    if (!settings.enableKeyboardShortcuts) return;
+    if (!settings.enableKeyboardShortcuts || e.target.closest?.('[role="dialog"]')) return;
     if (e.code === 'ArrowLeft') handleSeekKey('backward', 'up');
     if (e.code === 'ArrowRight') handleSeekKey('forward', 'up');
 });
@@ -8870,6 +9077,10 @@ async function updateSetting(key, value) {
         applyPlayerBackground(value);
     }
 
+    if (key === 'playerDynamicEffect') {
+        applyPlayerDynamicEffect(value);
+    }
+
     if (key === 'enablePublicSources') {
         if (typeof updateSourceScopeUI === 'function') updateSourceScopeUI();
         if (typeof renderCustomSources === 'function') renderCustomSources();
@@ -8911,7 +9122,7 @@ const SETTINGS_UI_MAP = {
         type: 'value',
         normalize: normalizeDownloadConcurrency,
         action: (v) => {
-            if (window.SystemDownloadManager) {
+            if (window.SystemDownloadManager && window.SystemDownloadManager.maxConcurrent !== v) {
                 window.SystemDownloadManager.updateMaxConcurrent(v);
             }
         }
@@ -9000,6 +9211,11 @@ const SETTINGS_UI_MAP = {
         type: 'value',
         action: (v) => applyPlayerBackground(v)
     },
+    playerDynamicEffect: {
+        id: 'setting-player-dynamic-effect',
+        type: 'value',
+        action: (v) => applyPlayerDynamicEffect(v)
+    },
     lyricFontSize: {
         id: 'lyric-font-size-slider',
         type: 'value',
@@ -9017,6 +9233,7 @@ const SETTINGS_UI_MAP = {
 
     // 视觉效果 (Visualizer)
     showFooterVisualizer: { id: 'setting-show-footer-visualizer', type: 'checkbox' },
+    iosAdaptiveVisualizer: { id: 'setting-ios-adaptive-visualizer', type: 'checkbox' },
     footerVisualizerStyle: { id: 'setting-footer-visualizer-style', type: 'value' },
     showDetailVisualizer: { id: 'setting-show-detail-visualizer', type: 'checkbox' },
     detailVisualizerStyle: { id: 'setting-detail-visualizer-style', type: 'value' },
@@ -9081,7 +9298,7 @@ const SETTINGS_UI_MAP = {
     hotSearchLimit: {
         id: 'hot-search-limit-input',
         type: 'value',
-        action: () => document.getElementById('search-results-header')?.classList.contains('hidden') && showInitialSearchState()
+        action: () => currentSearchScope === 'network' && document.getElementById('search-results-header')?.classList.contains('hidden') && showInitialSearchState()
     },
     itemsPerPage: { id: 'items-per-page-select', type: 'value' },
     enableClientModeSync: { id: 'setting-client-mode-sync', type: 'checkbox' }
@@ -9156,36 +9373,140 @@ function syncSettingsUI(key = null, value = null) {
  * 应用播放页背景样式
  * @param {string} mode - 'blur', 'solid', 'dark'
  */
+function playerLuminance(rgb) {
+    return rgb.map(v => { v /= 255; return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; })
+        .reduce((sum, v, i) => sum + v * [0.2126, 0.7152, 0.0722][i], 0);
+}
+function playerContrastColor(color, backgrounds) {
+    const source = (/^#[0-9a-f]{6}$/i.test(color) ? color : '#10b981').slice(1).match(/.{2}/g).map(v => parseInt(v, 16));
+    const bg = backgrounds.map(playerLuminance);
+    const target = bg.reduce((a, b) => a + b, 0) / bg.length > 0.4 ? 0 : 255;
+    for (let step = 0; step <= 100; step++) {
+        const rgb = source.map(v => Math.round(v + (target - v) * step / 100));
+        const lum = playerLuminance(rgb);
+        if (bg.every(v => (Math.max(lum, v) + 0.05) / (Math.min(lum, v) + 0.05) >= 4.5)) {
+            return '#' + rgb.map(v => v.toString(16).padStart(2, '0')).join('');
+        }
+    }
+    return target ? '#ffffff' : '#000000';
+}
+function isAppThemeLight() {
+    const root = document.documentElement;
+    if (root.classList.contains('theme-light')) return true;
+    const appearance = root.getAttribute('data-appearance');
+    if (appearance === 'light') return true;
+    if (appearance === 'dark') return false;
+    return !root.classList.contains('dark');
+}
+
 function applyPlayerBackground(mode) {
     const detailBg = document.getElementById('view-player-detail');
     const bgCover = document.getElementById('detail-bg-cover');
     const bgOverlay = document.getElementById('player-detail-bg-overlay');
     if (!detailBg || !bgCover || !bgOverlay) return;
+    if (!['blur', 'solid', 'dark', 'aurora', 'midnight', 'paper'].includes(mode)) mode = 'blur';
+    detailBg.dataset.appliedBackground = mode;
 
-    console.log(`[PlayerBackground] Applying style: ${mode}`);
+    const isLight = isAppThemeLight();
+    const root = document.documentElement;
+    const rootStyle = getComputedStyle(root);
+    const panel = rootStyle.getPropertyValue('--bg-panel').trim() || (isLight ? '#ffffff' : '#1f2937');
+    const parse = hex => hex.replace('#', '').match(/.{2}/g).map(v => parseInt(v, 16));
 
-    // 重置默认状态
-    bgCover.style.display = 'block';
-    bgOverlay.className = 'absolute inset-0 t-bg-panel/30 backdrop-blur-3xl';
-    bgOverlay.style.backgroundColor = '';
-    bgOverlay.style.backdropFilter = '';
-    detailBg.style.backgroundColor = '';
+    // 根据明暗主题定制不同背景色谱（黑色背景保持纯黑不变）
+    const styles = {
+        // 1. 黑色背景：无论明亮还是暗黑，始终保持纯黑
+        dark: ['#000000', [[0, 0, 0], [31, 31, 31]]],
 
+        // 2. 封面虚化：明亮模式采用通透纯净白磨砂，暗黑模式采用深邃暗夜磨砂
+        blur: isLight
+            ? ['rgba(255, 255, 255, 0.74)', [[255, 255, 255], [235, 240, 248]]]
+            : ['rgba(12, 18, 28, 0.74)', [[9, 13, 20], [66, 70, 76]]],
+
+        // 3. 极光渐变：明亮模式薄荷晨曦浅色流光，暗黑模式深邃极光流光
+        aurora: isLight
+            ? ['linear-gradient(135deg, #dcfce7 0%, #e0e7ff 50%, #ccfbf1 100%)', [[220, 252, 231], [224, 231, 255]]]
+            : ['linear-gradient(135deg, #123c42 0%, #24264d 50%, #101827 100%)', [[16, 24, 39], [63, 84, 99]]],
+
+        // 4. 午夜渐变：明亮模式晴空蓝灰晨风，暗黑模式午夜深海幽蓝
+        midnight: isLight
+            ? ['linear-gradient(155deg, #e0f2fe 0%, #e2e8f0 55%, #f1f5f9 100%)', [[224, 242, 254], [226, 232, 240]]]
+            : ['linear-gradient(155deg, #253551 0%, #121826 60%, #080c14 100%)', [[8, 12, 20], [64, 78, 102]]],
+
+        // 5. 暖雾纸感：明亮模式温暖素雅羊皮纸，暗黑模式复古暗调古卷
+        paper: isLight
+            ? ['linear-gradient(135deg, #fdfbf7 0%, #f4ece1 100%)', [[253, 251, 247], [244, 236, 225]]]
+            : ['linear-gradient(135deg, #2d2621 0%, #1c1714 100%)', [[45, 38, 33], [28, 23, 20]]],
+
+        // 6. 纯色背景：跟随主题面板色自适应明亮/暗黑
+        solid: [panel, [parse(panel.startsWith('#') ? panel : (isLight ? '#ffffff' : '#1f2937'))]]
+    };
+
+    const [background, samples] = styles[mode];
     if (mode === 'solid') {
-        bgCover.style.display = 'none';
-        bgOverlay.className = 'absolute inset-0 t-bg-panel';
-        bgOverlay.style.backdropFilter = 'none';
-    } else if (mode === 'dark') {
-        bgCover.style.display = 'none';
-        bgOverlay.className = 'absolute inset-0';
-        bgOverlay.style.backgroundColor = '#000000';
-        bgOverlay.style.backdropFilter = 'none';
+        const base = samples[0];
+        samples.push(base.map(v => Math.round(v * 0.88)), base.map(v => Math.round(v * 0.88 + 31)));
     }
-    // 'blur' 模式由上面的重置逻辑处理
-}
 
+    bgCover.style.display = mode === 'blur' ? 'block' : 'none';
+    bgCover.style.opacity = isLight ? '0.45' : '0.4';
+    bgOverlay.className = 'absolute inset-0';
+    bgOverlay.style.background = background;
+    bgOverlay.style.backdropFilter = mode === 'blur' ? 'blur(60px)' : 'none';
+
+    // 浅色模式判断：黑色背景绝不走浅色，其余模式在明亮模式下均自适应为浅色
+    const isLightBg = mode !== 'dark' && (isLight || playerLuminance(samples[0]) > 0.4);
+    
+    // 动态调整底色
+    if (mode === 'dark') {
+        detailBg.style.backgroundColor = '#000000';
+    } else if (isLightBg) {
+        detailBg.style.backgroundColor = mode === 'paper' ? '#fdfbf7' : (mode === 'aurora' ? '#f0fdf4' : '#ffffff');
+    } else {
+        detailBg.style.backgroundColor = mode === 'paper' ? '#1c1714' : '#0c121c';
+    }
+
+    detailBg.classList.toggle('detail-light-mode', isLightBg);
+
+    const normal = playerContrastColor(isLightBg ? '#475569' : '#b8c4d4', samples);
+    const active = playerContrastColor(rootStyle.getPropertyValue('--c-500').trim(), samples);
+    detailBg.style.setProperty('--player-lyric', normal);
+    detailBg.style.setProperty('--player-active', active);
+    detailBg.style.setProperty('--text-main', isLightBg ? '#0f172a' : '#f8fafc');
+    detailBg.style.setProperty('--text-muted', normal);
+    detailBg.style.setProperty('--text-dim', normal);
+
+    if (!detailBg._backgroundObserver) {
+        detailBg._backgroundObserver = new MutationObserver(() => {
+            applyPlayerBackground(detailBg.dataset.appliedBackground);
+            if (_playerDynamicFx) _playerDynamicFx.refresh();
+        });
+        detailBg._backgroundObserver.observe(document.documentElement, {
+            attributes: true,
+            attributeFilter: ['data-theme', 'data-appearance', 'class']
+        });
+    }
+}
 // ========== 缓存统计与重置逻辑 ==========
 
+// ========== 播放页动态效果 (引擎见 js/ui/dynamic_backgrounds.js) ==========
+let _playerDynamicFx = null;
+function applyPlayerDynamicEffect(mode) {
+    const host = document.getElementById('player-dynamic-scene');
+    if (!host || !window.DynamicBackground) return;
+    if (!_playerDynamicFx) {
+        const detail = document.getElementById('view-player-detail');
+        _playerDynamicFx = window.DynamicBackground.create(host, {
+            isLight: () => {
+                const bg = detail?.dataset.appliedBackground;
+                if (bg === 'dark') return false;
+                return isAppThemeLight() || bg === 'paper';
+            },
+            watch: detail
+        });
+    }
+    _playerDynamicFx.setMode(mode);
+}
 async function calcStorageUsage() {
     try {
         // 1. 优先使用原生 API 获取包含 IndexedDB 的准确占用
@@ -9894,7 +10215,7 @@ function toggleLyrics(fromPopState = false) {
         }
     }
     if (!fromPopState && !isLyricViewOpen) {
-        window.history.pushState({ page: 'player-detail' }, '');
+        window.history.pushState({ ...window.history.state, page: 'player-detail' }, '');
     }
 
     isLyricViewOpen = !isLyricViewOpen;
@@ -9934,6 +10255,10 @@ function toggleLyrics(fromPopState = false) {
         }
     } else {
         view.classList.add('translate-y-[100%]', 'opacity-0');
+        if (toggleLyricsBtnTimeout) clearTimeout(toggleLyricsBtnTimeout);
+        const toggleBtn = document.getElementById('btn-toggle-lyrics');
+        if (toggleBtn) toggleBtn.classList.remove('faint');
+
         setTimeout(() => {
             view.classList.add('hidden');
             // Notify visualizer to switch back to footer
@@ -9983,7 +10308,13 @@ function updateDetailInfo(song) {
  * @param {boolean} [silent=false] 是否静默模式（为 true 时若无内嵌歌词不覆盖 UI 为暂无歌词）
  * @returns {Promise<boolean>} 是否成功获取并应用了内嵌歌词
  */
-async function fetchEmbedLyricForLocalSong(song, silent = false) {
+let lyricRequestVersion = 0;
+
+function getLyricSongKey(song) {
+    return `${song?.source || song?.meta?.source || ''}_${song?.songmid || song?.songId || song?.meta?.songmid || song?.meta?.songId || ''}`;
+}
+
+async function fetchEmbedLyricForLocalSong(song, silent = false, isCurrent = () => currentPlayingSong === song) {
     const filename = song._localFilename;
     const username = song._localUsername || '';
     const isCustomDir = !!song._isCustomDir;
@@ -10014,6 +10345,8 @@ async function fetchEmbedLyricForLocalSong(song, silent = false) {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
 
+        if (!isCurrent()) return false;
+
         const lrc = data.lrc || '';
         if (!data.success || !lrc || lrc.trim().length < 5) {
             console.log('[Lyric] 内嵌歌词为空，无歌词展示');
@@ -10036,6 +10369,7 @@ async function fetchEmbedLyricForLocalSong(song, silent = false) {
         applyLyricUpdate();
         return true;
     } catch (e) {
+        if (!isCurrent()) return false;
         console.warn('[Lyric] 读取内嵌歌词失败:', e);
         if (!silent) {
             renderLyric([], '暂无歌词');
@@ -10048,6 +10382,9 @@ async function fetchLyric(song, quality = null) {
     if (!song) {
         return;
     }
+    const requestVersion = ++lyricRequestVersion;
+    const isCurrent = () => requestVersion === lyricRequestVersion &&
+        getLyricSongKey(currentPlayingSong) === getLyricSongKey(song);
 
     // 支持两种数据结构:
     // 1. 搜索结果: song.songmid, song.source 在顶层
@@ -10069,7 +10406,7 @@ async function fetchLyric(song, quality = null) {
         // [新增] 本地未关联歌曲：优先尝试读取音频文件内嵌歌词
         if (song.isLocal && song._localFilename) {
             console.log('[Lyric] 本地未关联歌曲，尝试读取内嵌歌词:', song._localFilename);
-            await fetchEmbedLyricForLocalSong(song);
+            await fetchEmbedLyricForLocalSong(song, false, isCurrent);
         } else {
             console.warn('[Lyric] 歌曲缺少必要的字段 songmid/songId 或 source:', song);
         }
@@ -10077,7 +10414,7 @@ async function fetchLyric(song, quality = null) {
     }
 
     // [Optimize] 如果歌曲未变化且已有歌词，跳过完整加载流程逻辑
-    const currentLyricKey = `${source}_${songmid}`;
+    const currentLyricKey = getLyricSongKey(song);
     if (lastLyricSongId === currentLyricKey && currentLyricLines.length > 0) {
         console.log(`[Lyric] 歌词已就绪(${currentLyricKey})，同步播放状态`);
         if (lyricPlayer) {
@@ -10127,8 +10464,10 @@ async function fetchLyric(song, quality = null) {
         try {
             const serverCacheUrl = `${API_BASE}/cache/lyric?source=${source}&songmid=${songmid}&songId=${encodeURIComponent(song.id || '')}&name=${encodeURIComponent(song.name || '')}&singer=${encodeURIComponent(song.singer || '')}`;
             const scRes = await fetch(serverCacheUrl, { headers });
+            if (!isCurrent()) return;
             if (scRes.ok) {
                 const scData = await scRes.json();
+                if (!isCurrent()) return;
                 if (scData.success && scData.data) {
                     currentRawLrc = scData.data.lyric || scData.data.lrc || '';
                     currentRawTlrc = scData.data.tlyric || '';
@@ -10151,6 +10490,7 @@ async function fetchLyric(song, quality = null) {
                 }
             }
         } catch (e) {
+            if (!isCurrent()) return;
             console.warn('[Lyric] 读取服务器端缓存失败:', e);
         }
     }
@@ -10231,9 +10571,7 @@ async function fetchLyric(song, quality = null) {
         }
 
         // 校验当前活跃歌曲是否仍匹配，避免切歌过快导致前一首的异步返回污染当前歌曲播放器
-        const currentActiveSongmid = currentPlayingSong?.songmid || currentPlayingSong?.songId || currentPlayingSong?.id || currentPlayingSong?.meta?.songmid || currentPlayingSong?.meta?.songId;
-        const currentActiveSource = currentPlayingSong?.source || currentPlayingSong?.meta?.source;
-        if (currentActiveSongmid && currentActiveSource && (String(currentActiveSongmid) !== String(songmid) || String(currentActiveSource) !== String(source))) {
+        if (!isCurrent()) {
             console.log(`[Lyric] 忽略过期的网络歌词渲染: ${source}_${songmid}`);
             return;
         }
@@ -10248,7 +10586,8 @@ async function fetchLyric(song, quality = null) {
             // [兜底] 若获取到的歌词为空，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
             if (song.isLocal && song._localFilename) {
                 console.log('[Lyric] 网络/缓存歌词为空，尝试使用本地内嵌歌词兜底:', song._localFilename);
-                const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+                const embedSuccess = await fetchEmbedLyricForLocalSong(song, true, isCurrent);
+                if (!isCurrent()) return;
                 if (embedSuccess) return;
             }
             renderLyric([]);
@@ -10260,12 +10599,14 @@ async function fetchLyric(song, quality = null) {
         applyLyricUpdate();
 
     } catch (e) {
+        if (!isCurrent()) return;
         console.error(`[Lyric] Failed (${source}_${songmid}):`, e);
 
         // [兜底] 若网络获取歌词抛错，且该歌曲是本地文件，尝试读取其内嵌歌词兜底
         if (song.isLocal && song._localFilename) {
             console.log('[Lyric] 网络获取歌词异常，尝试使用本地内嵌歌词兜底:', song._localFilename);
-            const embedSuccess = await fetchEmbedLyricForLocalSong(song, true);
+            const embedSuccess = await fetchEmbedLyricForLocalSong(song, true, isCurrent);
+            if (!isCurrent()) return;
             if (embedSuccess) return;
         }
 
@@ -11853,13 +12194,13 @@ function switchSyncMode(mode) {
     const formRemote = document.getElementById('sync-form-remote');
 
     if (mode === 'local') {
-        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-emerald-100 text-emerald-700 ring-2 ring-emerald-500 transition-all";
-        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 t-text-muted hover:bg-gray-200 transition-all";
+        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 ring-2 ring-emerald-500 transition-all";
+        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted hover:bg-gray-200 dark:hover:bg-gray-700 transition-all";
         formLocal.classList.remove('hidden');
         formRemote.classList.add('hidden');
     } else {
-        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 t-text-muted hover:bg-gray-200 transition-all";
-        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-blue-100 text-blue-700 ring-2 ring-blue-500 transition-all";
+        btnLocal.className = "px-4 py-2 rounded-lg text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted hover:bg-gray-200 dark:hover:bg-gray-700 transition-all";
+        btnRemote.className = "px-4 py-2 rounded-lg text-sm font-medium bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-400 ring-2 ring-blue-500 transition-all";
         formLocal.classList.add('hidden');
         formRemote.classList.remove('hidden');
         // Reset Remote Flow
@@ -12210,6 +12551,7 @@ async function handleLocalLogin() {
             if (pass) {
                 localStorage.setItem('lx_sync_pass', pass);
             }
+            if (passInput) passInput.value = '';
 
             // [新增] 成功登录后立即更新顶部栏 UI
             if (typeof updateUserUI === 'function') updateUserUI();
@@ -12988,17 +13330,27 @@ function renderMyLists(data) {
     initFavoriteSidebarSortable(container);
     refreshFavoritesChildrenHeight();
 
-    // [Resume] 处理本地列表的自动恢复跳转
+    // [Resume] 处理本地列表的自动恢复跳转或默认入口自动打开
     if (window._pendingResumeListId) {
         const listId = window._pendingResumeListId;
         delete window._pendingResumeListId;
+        delete window._pendingDefaultFavoriteEntry;
         console.log('[Resume] 正在同步本地播放列表上下文:', listId);
         // 调用 handleListClick 以加载真实的列表数据并应用高亮
         handleListClick(listId);
+    } else if (window._pendingDefaultFavoriteEntry) {
+        delete window._pendingDefaultFavoriteEntry;
+        const targetListId = (Array.isArray(data.loveList) && data.loveList.length > 0)
+            ? 'love'
+            : (Array.isArray(data.defaultList) ? 'default' : 'love');
+        handleListClick(targetListId);
     }
 }
 
 function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
+    delete window._pendingDefaultFavoriteEntry;
+    if (!skipAutoUpdate) window.PlayerNavigation?.record({ tab: 'search', listId });
+    window.SearchRequests?.cancel();
     exitListSecondaryModes();
 
     if (!currentListData) return;
@@ -13671,8 +14023,7 @@ async function handleJumpToOriginalList(listId, event) {
 
 // Auto-restore on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    // 0. Load settings first
-    loadSettings();
+    // 本地设置已在前面的 UI 初始化入口加载。
 
     // Checkbox State
     const pubToggle = document.getElementById('toggle-public-sources');
@@ -13944,12 +14295,12 @@ function switchCustomSourceMode(mode) {
 
     // 更新按钮样式
     document.getElementById('btn-source-file').className = mode === 'file'
-        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 text-emerald-700 rounded-lg'
-        : 'px-4 py-2 text-sm font-medium bg-gray-100 t-text-muted rounded-lg hover:bg-gray-200';
+        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg'
+        : 'px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700';
 
     document.getElementById('btn-source-url').className = mode === 'url'
-        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 text-emerald-700 rounded-lg'
-        : 'px-4 py-2 text-sm font-medium bg-gray-100 t-text-muted rounded-lg hover:bg-gray-200';
+        ? 'px-4 py-2 text-sm font-medium bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 rounded-lg'
+        : 'px-4 py-2 text-sm font-medium bg-gray-100 dark:bg-gray-800 t-text-muted rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700';
 
     // 切换显示
     document.getElementById('custom-source-file').classList.toggle('hidden', mode !== 'file');
@@ -14305,12 +14656,12 @@ function updateSourceScopeUI() {
     // Tag Content Logic
     let tagHtml = '';
     if (isPublic) {
-        tagHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-500 whitespace-nowrap inline-block">公开</span>`;
+        tagHtml = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-500 dark:text-blue-400 whitespace-nowrap inline-block">公开</span>`;
     } else {
         // User logged in
-        let userTag = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 text-purple-600 whitespace-nowrap inline-block">${username}</span>`;
+        let userTag = `<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-50 dark:bg-purple-500/20 text-purple-600 dark:text-purple-400 whitespace-nowrap inline-block">${username}</span>`;
         if (showPublic) {
-            userTag += `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 text-blue-500 whitespace-nowrap inline-block">公开</span>`
+            userTag += `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-50 dark:bg-blue-500/20 text-blue-500 dark:text-blue-400 whitespace-nowrap inline-block">公开</span>`
         }
         tagHtml = userTag;
     }
@@ -14319,8 +14670,8 @@ function updateSourceScopeUI() {
 
     if (modalTag) {
         modalTag.innerHTML = isPublic
-            ? `<div class="flex items-center gap-2 text-xs text-blue-600 bg-blue-50 px-3 py-1.5 rounded-lg border border-blue-100 w-fit mb-2"><i class="fas fa-globe"></i> 上传到: 公开</div>`
-            : `<div class="flex items-center gap-2 text-xs text-purple-600 bg-purple-50 px-3 py-1.5 rounded-lg border border-purple-100 w-fit mb-2"><i class="fas fa-user-circle"></i> 上传到: ${username}</div>`;
+            ? `<div class="flex items-center gap-2 text-xs text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/15 px-3 py-1.5 rounded-lg border border-blue-100 dark:border-blue-500/30 w-fit mb-2"><i class="fas fa-globe"></i> 上传到: 公开</div>`
+            : `<div class="flex items-center gap-2 text-xs text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-500/15 px-3 py-1.5 rounded-lg border border-purple-100 dark:border-purple-500/30 w-fit mb-2"><i class="fas fa-user-circle"></i> 上传到: ${username}</div>`;
     }
 }
 
@@ -14371,12 +14722,12 @@ async function renderCustomSources() {
         if (shouldShowHidden) {
             container.innerHTML = `
                 <div class="flex flex-col items-center justify-center p-8 t-text-muted">
-                    <div class="w-16 h-16 bg-emerald-50 rounded-2xl flex items-center justify-center mb-4">
+                    <div class="w-16 h-16 bg-emerald-50 dark:bg-emerald-500/10 rounded-2xl flex items-center justify-center mb-4">
                         <i class="fas fa-lock text-3xl text-emerald-500/50"></i>
                     </div>
                     <p class="text-base font-bold t-text-main mb-2">列表内容已隐藏</p>
                     <p class="text-xs text-center max-w-[240px] leading-relaxed">当前系统已开启公开访问限制，请登录管理员账号后再管理或查看自定义源列表。</p>
-                    <button onclick="handleAdminLogin()" class="mt-6 px-6 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-100 hover:bg-emerald-600 transition-all active:scale-95">前往登录</button>
+                    <button onclick="handleAdminLogin()" class="mt-6 px-6 py-2.5 bg-emerald-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-500/20 hover:bg-emerald-600 transition-all active:scale-95">前往登录</button>
                 </div>
             `;
             return;
@@ -15215,9 +15566,9 @@ function renderPlaylistAddGrid() {
 
         // Active/Inactive styles (Highlight only in single-song mode)
         if (!isBatch && isIncluded) {
-            className += "bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200";
+            className += "bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200 dark:ring-red-500/40";
         } else {
-            className += "bg-emerald-50 text-emerald-500 hover:bg-emerald-100 hover:shadow";
+            className += "bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 hover:shadow";
         }
 
         btn.className = className;
@@ -15233,6 +15584,8 @@ function renderPlaylistAddGrid() {
     const activeListData = isUserLoggedIn() ? (window.myPersonalListData || currentListData) : currentListData;
 
     // 1. My Love
+    const defaultList = activeListData.defaultList || [];
+    listContainer.appendChild(createGridItem('default', '默认列表', defaultList.length, !isBatch && targetId && defaultList.some(s => s.id === targetId)));
     const loveList = activeListData.loveList || [];
     const isLoved = !isBatch && targetId && loveList.some(s => s.id === targetId);
     listContainer.appendChild(createGridItem('love', '我的喜爱', loveList.length, isLoved));
@@ -15499,7 +15852,8 @@ async function handleTogglePlaylist(listId, btnElement) {
 
         // 1. Find target list in memory (Optimistic Update)
         let targetListArray = null;
-        if (listId === 'love') targetListArray = activeListData.loveList;
+        if (listId === 'default') targetListArray = activeListData.defaultList;
+        else if (listId === 'love') targetListArray = activeListData.loveList;
         else targetListArray = activeListData.userList.find(l => l.id === listId)?.list;
 
         if (!targetListArray) {
@@ -15578,7 +15932,9 @@ async function handleTogglePlaylist(listId, btnElement) {
     // --- Single Song Mode Logic (Existing) ---
     const song = songs[0];
     let targetListArray;
-    if (listId === 'love') {
+    if (listId === 'default') {
+        targetListArray = activeListData.defaultList;
+    } else if (listId === 'love') {
         targetListArray = activeListData.loveList;
     } else {
         const uList = activeListData.userList.find(l => l.id === listId);
@@ -15615,7 +15971,7 @@ async function handleTogglePlaylist(listId, btnElement) {
 
 function updateGridItemVisuals(btn, isIncluded) {
     if (isIncluded) {
-        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200";
+        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-red-500 text-white shadow-md scale-[1.02] ring-2 ring-red-200 dark:ring-red-500/40";
         // Update icon if needed, though innerHTML replacement is easiest
         const textSpan = btn.querySelector('span'); // Assuming first span is text
         const text = textSpan ? textSpan.innerText : btn.innerText;
@@ -15624,7 +15980,7 @@ function updateGridItemVisuals(btn, isIncluded) {
             <i class="fas fa-check text-xs ml-1 opacity-80"></i>
         `;
     } else {
-        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-emerald-50 text-emerald-500 hover:bg-emerald-100 hover:shadow";
+        btn.className = "relative h-14 rounded-lg text-sm font-bold transition-all duration-200 flex items-center justify-center gap-1 shadow-sm overflow-hidden bg-emerald-50 dark:bg-emerald-500/15 text-emerald-500 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/25 hover:shadow";
         const textSpan = btn.querySelector('span');
         const text = textSpan ? textSpan.innerText : btn.innerText;
         btn.innerHTML = `<span class="truncate max-w-[80%]">${text}</span>`;
@@ -16060,12 +16416,13 @@ function showInput(title, message, options = {}) {
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
+        modal.dataset.playerDialog = '';
         modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
                 <!-- Header -->
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <h3 class="text-sm font-bold t-text-main">${title}</h3>
                     <button id="modal-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
                         <i class="fas fa-times text-lg"></i>
@@ -16074,7 +16431,7 @@ function showInput(title, message, options = {}) {
                 <!-- Body -->
                 <div class="p-6">
                     <div class="flex items-start gap-4 mb-4">
-                        <div class="w-10 h-10 rounded-full bg-emerald-50 text-emerald-500 flex items-center justify-center shrink-0">
+                        <div class="w-10 h-10 rounded-full bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500 flex items-center justify-center shrink-0">
                             <i class="fas fa-edit text-lg"></i>
                         </div>
                         <div class="flex-1">
@@ -16137,16 +16494,17 @@ function showSelect(title, message, options = {}) {
         danger = false
     } = options;
 
-    const btnColor = danger ? 'bg-red-500 hover:bg-red-600 shadow-red-100' : `${confirmColor} hover:opacity-90 shadow-emerald-100`;
+    const btnColor = danger ? 'bg-red-500 hover:bg-red-600 shadow-red-500/20' : `${confirmColor} hover:opacity-90 shadow-emerald-500/20`;
 
     return new Promise((resolve) => {
         const modal = document.createElement('div');
-        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.dataset.playerDialog = '';
+        modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
                 <!-- Header -->
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <h3 class="text-sm font-bold t-text-main">${title}</h3>
                     <button id="modal-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
                         <i class="fas fa-times text-lg"></i>
@@ -16155,7 +16513,7 @@ function showSelect(title, message, options = {}) {
                 <!-- Body -->
                 <div class="p-6">
                     <div class="flex items-start gap-4">
-                        <div class="w-10 h-10 rounded-full ${danger ? 'bg-red-50 text-red-500' : 'bg-emerald-50 text-emerald-500'} flex items-center justify-center shrink-0">
+                        <div class="w-10 h-10 rounded-full ${danger ? 'bg-red-50 dark:bg-red-500/10 text-red-500' : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-500'} flex items-center justify-center shrink-0">
                             <i class="fas ${danger ? 'fa-exclamation-triangle' : 'fa-question-circle'} text-lg"></i>
                         </div>
                         <div class="flex-1">
@@ -16202,7 +16560,8 @@ function showSelect(title, message, options = {}) {
 function showOptions(title, message, options = []) {
     return new Promise((resolve) => {
         const modal = document.createElement('div');
-        modal.className = "fixed inset-0 z-[200] flex items-center justify-center p-4 animate-fade-in";
+        modal.dataset.playerDialog = '';
+        modal.className = "fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in";
 
         const optionsHtml = options.map((opt, idx) => {
             const entry = typeof opt === 'string' ? { label: opt } : (opt || { label: '' });
@@ -16220,7 +16579,7 @@ function showOptions(title, message, options = []) {
         modal.innerHTML = `
             <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
             <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
-                <div class="px-5 py-4 border-b border-emerald-100/50 flex justify-between items-center bg-emerald-50/50">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
                     <h3 class="text-sm font-bold t-text-main">${title}</h3>
                     <button id="opt-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
                         <i class="fas fa-times text-lg"></i>
@@ -16698,9 +17057,11 @@ function showLoading(message = '正在处理...') {
     overlay.innerHTML = `
         <div class="absolute inset-0 bg-black/40 backdrop-blur-[2px] transition-opacity duration-300"></div>
         <div class="t-bg-panel rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4 relative z-[210] border t-border-main animate-slide-up">
-            <div class="relative">
-                <div class="w-12 h-12 rounded-full border-4 border-emerald-100 border-t-emerald-500 animate-spin"></div>
-                <i class="fas fa-music text-emerald-500 absolute inset-0 flex items-center justify-center text-xs"></i>
+            <div class="relative w-12 h-12 flex items-center justify-center">
+                <div class="w-12 h-12 rounded-full border-4 border-emerald-100 dark:border-emerald-900/40 border-t-emerald-500 dark:border-t-emerald-500 animate-spin"></div>
+                <span class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                    <i class="fas fa-music text-emerald-500 text-xs"></i>
+                </span>
             </div>
             <p class="text-sm font-bold t-text-main animate-pulse">${message}</p>
         </div>
@@ -16937,12 +17298,15 @@ document.addEventListener('DOMContentLoaded', () => {
     // 允许浏览器先完成主要的渲染和 load 事件，释放 PWA 安装按钮并显示刷新图标
     setTimeout(() => {
         console.log('[Init] 启动后台初始化任务...');
-        loadSettings();
         restorePlaybackState();
 
-        // [新增] 延迟显示热搜，避免启动请求堆积
-        if (typeof showInitialSearchState === 'function') {
-            showInitialSearchState();
+        // [新增] 延迟显示热搜，避免启动请求堆积（仅在当前处于网络搜索视图时触发，防止覆盖默认入口列表）
+        if (typeof showInitialSearchState === 'function' && currentSearchScope === 'network') {
+            const searchView = document.getElementById('view-search');
+            const searchInput = document.getElementById('search-input');
+            if (searchView && !searchView.classList.contains('hidden') && (!searchInput || !searchInput.value.trim())) {
+                showInitialSearchState();
+            }
         }
 
         // 监听源切换，自动刷新热搜
@@ -16950,51 +17314,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if (searchSourceSelect) {
             searchSourceSelect.addEventListener('change', () => {
                 const searchInput = document.getElementById('search-input');
-                // 仅当搜索框为空（即处于显示热搜状态）时刷新
-                if (!searchInput || !searchInput.value.trim()) {
+                // 仅当处于网络搜索模式且搜索框为空（即处于显示热搜状态）时刷新
+                if (currentSearchScope === 'network' && (!searchInput || !searchInput.value.trim())) {
                     showInitialSearchState();
                 }
             });
         }
 
-        // [Fix] Auto-Login logic (Restore Session)
-        const savedMode = localStorage.getItem('lx_sync_mode');
-        if (savedMode === 'local') {
-            const u = localStorage.getItem('lx_sync_user');
-            const p = localStorage.getItem('lx_sync_pass');
-            const t = localStorage.getItem('lx_user_token');
-            if (u && (p || t)) {
-                // Fill UI
-                const uInput = document.getElementById('sync-local-user');
-                const pInput = document.getElementById('sync-local-pass');
-                if (uInput && !uInput.value) uInput.value = u;
-                if (pInput && p && !pInput.value) pInput.value = p;
-                // If not yet synced, trigger login
-                if (!currentListData) {
-                    console.log('[AutoLogin] 检测到本地账户或有效 Token，正在确保同步连接...');
-                    handleLocalLogin();
-                }
-            }
-        } else if (savedMode === 'remote') {
-            const url = localStorage.getItem('lx_sync_url');
-            const code = localStorage.getItem('lx_sync_code');
-            if (url && code) {
-                console.log('[AutoLogin] 检测到远程同步设置，正在自动连接...');
-                // Fill UI
-                const remoteUrlInput = document.getElementById('sync-remote-url');
-                const remoteStep1 = document.getElementById('sync-remote-step1');
-                const remoteStep2 = document.getElementById('sync-remote-step2');
-                const remoteCodeInput = document.getElementById('sync-remote-code');
-
-                if (remoteUrlInput) remoteUrlInput.value = url;
-                if (remoteStep1) remoteStep1.classList.add('hidden');
-                if (remoteStep2) remoteStep2.classList.remove('hidden');
-                if (remoteCodeInput) remoteCodeInput.value = code;
-
-                // Trigger connect
-                handleRemoteConnect();
-            }
-        }
+        // 自动连接由缓存恢复入口统一负责，避免并发登录和重复拉取账号设置。
     }, 100);
 
     // [New] 全局精简播放栏控制函数
@@ -17196,6 +17523,8 @@ function toggleDetailCover() {
     const lyricsWrapper = document.getElementById('lyrics-wrapper');
     const lyricContent = document.getElementById('lyric-content');
     const detailTitle = document.getElementById('detail-title');
+    const viewPlayer = document.getElementById('view-player-detail');
+    const nowPlayingHeader = document.getElementById('now-playing-header');
 
     // 获取标题区域父容器
     const titleParent = lyricsWrapper ? lyricsWrapper.querySelector('div:first-child') : null;
@@ -17209,6 +17538,10 @@ function toggleDetailCover() {
         // --- 隐藏封面 ---
         cover.style.display = 'none'; // 彻底移除渲染占位
         cover.classList.add('opacity-0', 'scale-90', 'border-0');
+        if (viewPlayer) viewPlayer.classList.add('cover-collapsed');
+        if (nowPlayingHeader && window.innerWidth <= 1024) {
+            nowPlayingHeader.classList.add('opacity-0', 'pointer-events-none');
+        }
 
         // 隐藏封面时，不再需要那么大的 pt-8/md:pt-32。
         // 保留 md:pt-10 左右以避开顶部 Now Playing 即可，让歌词有更多纵向空间
@@ -17243,6 +17576,10 @@ function toggleDetailCover() {
         // --- 显示封面 ---
         cover.style.display = 'block'; // 恢复显示
         cover.classList.remove('opacity-0', 'scale-90', 'border-0');
+        if (viewPlayer) viewPlayer.classList.remove('cover-collapsed');
+        if (nowPlayingHeader) {
+            nowPlayingHeader.classList.remove('opacity-0', 'pointer-events-none');
+        }
 
         container.classList.remove('has-centered-lyrics');
 
@@ -17294,7 +17631,7 @@ function startExpandBtnTimer() {
     }, 3000);
 }
 
-// 启动歌词按钮淡化计时器
+// 启动歌词收起按钮淡化/隐藏计时器
 function startToggleLyricsBtnTimer() {
     const toggleBtn = document.getElementById('btn-toggle-lyrics');
     if (!toggleBtn) return;
@@ -17302,16 +17639,13 @@ function startToggleLyricsBtnTimer() {
     if (toggleLyricsBtnTimeout) clearTimeout(toggleLyricsBtnTimeout);
     toggleBtn.classList.remove('faint');
 
-    // 移动端/触摸屏永远不淡化退出按钮，保持绝对清晰可用
-    if (window.innerWidth < 1024) return;
-
     toggleLyricsBtnTimeout = setTimeout(() => {
-        // 只有当歌词页面处于显示状态且在桌面端才淡化
+        // 只有当歌词页面处于显示状态才淡化/隐藏
         const view = document.getElementById('view-player-detail');
         if (view && !view.classList.contains('translate-y-[100%]')) {
             toggleBtn.classList.add('faint');
         }
-    }, 4000);
+    }, 3500);
 }
 
 // 页面可见性恢复守护：防止切至后台重开后音调异常与 AudioContext 挂起

@@ -1,12 +1,12 @@
 import http, { type IncomingMessage } from 'node:http'
-import { resolveCollectionUser } from './collectionAccess'
+import { resolveCollectionUser } from './auth/collectionAccess'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import url from 'node:url'
 import { WebSocketServer, WebSocket } from 'ws'
 import { registerLocalSyncEvent, callObj, sync } from './sync'
-import { authCode, authConnect } from './auth'
+import { authCode, authConnect } from './auth/auth'
 import { getAddress, sendStatus, decryptMsg, encryptMsg, getIP } from '@/utils/tools'
 import { accessLog, startupLog, syncLog, loginLog, tokenLog } from '@/utils/log4js'
 import {
@@ -20,20 +20,69 @@ import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
 import { createMsg2call } from 'message2call'
-import { ElFinderConnector, getSystemRoot } from './elfinderConnector'
+import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
-import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './userApi'
-import * as customSourceHandlers from './customSourceHandlers'
-import * as fileCache from './fileCache'
-import { withCacheBrowseLocation } from './cacheBrowseLocation'
-import { remasterStaging } from './remasterStaging'
-import * as customMusicManager from './customMusicManager'
-import * as serverDownloadQueue from './serverDownloadQueue'
-import * as remasterQueue from './remasterQueue'
-import { AutoLinkQueue } from './autoLinkQueue'
+import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
+import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData } from '@/server/openlistBackup'
+import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes } from '@/utils/backupPolicy'
+import { OpenListClient } from '@/server/openlistClient'
+
+async function validateOpenListConfig(newConfig: any): Promise<void> {
+  const c: any = global.lx.config
+  const enable = newConfig['openlist.enable'] !== undefined ? !!newConfig['openlist.enable'] : !!c['openlist.enable']
+  if (!enable) return
+  const endpoint = newConfig['openlist.endpoint'] !== undefined ? newConfig['openlist.endpoint'] : (c['openlist.endpoint'] || '')
+  const username = newConfig['openlist.username'] !== undefined ? newConfig['openlist.username'] : (c['openlist.username'] || '')
+  const password = newConfig['openlist.password'] !== undefined ? newConfig['openlist.password'] : (c['openlist.password'] || '')
+  const token = newConfig['openlist.token'] !== undefined ? newConfig['openlist.token'] : (c['openlist.token'] || '')
+  const root = newConfig['openlist.root'] !== undefined ? newConfig['openlist.root'] : (c['openlist.root'] || '/lx_music')
+  if (!endpoint) throw new Error('OpenList 地址(endpoint)不能为空')
+  const cl = new OpenListClient({ endpoint, username, password, token, root })
+  try {
+    await cl.testConnection()
+  } catch (e: any) {
+    throw new Error('OpenList 账号校验失败：' + (e?.message || e))
+  }
+  const rawUB = newConfig['openlist.userBackups'] !== undefined ? newConfig['openlist.userBackups'] : c['openlist.userBackups']
+  let ub: any[] = []
+  if (rawUB) {
+    try { ub = typeof rawUB === 'string' ? JSON.parse(rawUB) : rawUB } catch { ub = [] }
+  }
+  const users: any[] = c.users || []
+  for (const e of ub) {
+    if (!e || !e.enabled) continue
+    if (!users.find((u: any) => u.name === e.user)) throw new Error(`OpenList 同步配置中的用户「${e.user}」不存在`)
+    for (const d of [e.downloadDir, e.cacheDir]) {
+      if (!d) continue
+      if (!fs.existsSync(d) || !fs.statSync(d).isDirectory()) throw new Error(`OpenList 同步目录不存在或无权限：${d}`)
+      fs.accessSync(d, fs.constants.R_OK)
+    }
+  }
+}
+
+/** 配置保存/文件生成后，防抖触发一次 OpenList 同步（后台执行，不阻塞请求响应） */
+let pendingOpenlistSyncTimer: NodeJS.Timeout | null = null
+function scheduleOpenlistSync(): void {
+  if (pendingOpenlistSyncTimer) clearTimeout(pendingOpenlistSyncTimer)
+  pendingOpenlistSyncTimer = setTimeout(() => {
+    pendingOpenlistSyncTimer = null
+    if (!global.lx.config['openlist.enable']) return
+    void runSyncNow({}).catch((e: any) => {
+      console.warn('[OpenList] 自动同步失败:', e?.message || e)
+    })
+  }, 8000)
+}
+import * as customSourceHandlers from './sources/customSourceHandlers'
+import * as fileCache from './music/fileCache'
+import { withCacheBrowseLocation } from './music/cacheBrowseLocation'
+import { remasterStaging } from './task/remasterStaging'
+import * as customMusicManager from './music/customMusicManager'
+import * as serverDownloadQueue from './task/serverDownloadQueue'
+import * as remasterQueue from './task/remasterQueue'
+import { AutoLinkQueue } from './task/autoLinkQueue'
 import { identifyLocalSong } from './utils/identify'
 
 const autoLinkQueue = new AutoLinkQueue(() => path.join(global.lx.dataPath, 'runtime'), {
@@ -61,14 +110,15 @@ const autoLinkQueue = new AutoLinkQueue(() => path.join(global.lx.dataPath, 'run
     return await fileCache.linkLocalFile(item.filename, match, username, item.folder)
   },
 })
-import * as scheduler from './scheduler'
+import * as scheduler from './task/scheduler'
 import { getUpdatedListIds, removeUpdatedListId } from './task/networkListTask'
 import { setSongResolver, getSyncDownloadData, saveSyncDownloadData, getUserSyncProgress, triggerUserSync, cancelUserSync, getUserSyncStorageLocation, isUserSyncRunning, migrateSyncStorage } from './task/syncDownloadTask'
-import { getDownloadQualityCandidates } from './downloadQuality'
+import { getDownloadQualityCandidates } from './music/downloadQuality'
 import crypto from 'node:crypto'
-import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './security'
-import { createCastHandler } from './castAccess'
-import { getBuildInfo } from './buildInfo'
+import { parseCookies, resolveContainedPath, resolvePublicUrl, fetchPublicBuffer } from './auth/security'
+import { createCastHandler } from './integrations/castAccess'
+import { getBuildInfo } from './utils/buildInfo'
+import { coverThumbnail } from './media/coverThumbnail'
 import needle from 'needle'
 import { getProxyAgent } from '../modules/utils/proxy.js'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
@@ -735,6 +785,7 @@ const saveUsers = () => {
       allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
       allowWriteCustomMusicDir: u.allowWriteCustomMusicDir,
       enableAutoDownload: u.enableAutoDownload,
+      disabled: u.disabled,
     })), null, 2))
     if (typeof global.lx.saveConfig === 'function') {
       global.lx.saveConfig()
@@ -774,6 +825,8 @@ const reloadServerData = async () => {
           backupPath: global.lx.config['webdav.backupPath'],
           interval: global.lx.config['sync.interval'],
           backupInterval: global.lx.config['sync.backupInterval'],
+          types: getBackupTypes('webdav', global.lx.config as any),
+          mirrorDeletes: global.lx.config['backup.webdav.mirrorDeletes'],
         })
       }
       // 刷新缓存位置映射，使 _open 等未自定义位置的用户回退到最新的全局 serverCacheLocation
@@ -817,6 +870,7 @@ const reloadServerData = async () => {
     startupLog.error('Failed to re-init user APIs:', err.message)
   }
 
+  startVerifyScheduler()
   return true
 }
 
@@ -1095,14 +1149,13 @@ const isPathInside = (child: string, parent: string): boolean => {
   return resolvedChild.startsWith(withSep)
 }
 
-const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: string) => {
+const serveStatic = (req: IncomingMessage, res: http.ServerResponse, filePath: string, contentType = getMime(filePath)) => {
   // Prevent path traversal: ensure the resolved file path stays within staticPath
   if (!isPathInside(filePath, global.lx.staticPath)) {
     res.writeHead(403)
     res.end('Forbidden')
     return
   }
-  const contentType = getMime(filePath)
 
   try {
     const stats = fs.statSync(filePath)
@@ -1250,7 +1303,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       pathname.startsWith('/music/fonts/') ||
       pathname.startsWith('/music/img/') ||
       pathname === '/music/manifest.json' ||
-      pathname === '/music/sw.js'
+      pathname === '/music/sw.js' ||
+      pathname === '/music/about.md'
     )
 
     if (isPlayerRequest || isLegacyPlayerAsset) {
@@ -1325,6 +1379,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
       }
 
+      // DSP impulse data is fetched by JavaScript, not offered as downloadable audio.
+      const impulse = /^music\/assets\/medias\/filters\/([a-z0-9_-]+)\.ir$/.exec(targetPath)
+      if (impulse) {
+        res.setHeader('X-Content-Type-Options', 'nosniff')
+        serveStatic(req, res, path.join(global.lx.staticPath, 'music/assets/medias/filters', `${impulse[1]}.wav`), 'application/octet-stream')
+        return
+      }
       const filePath = path.join(global.lx.staticPath, targetPath)
       if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
         serveStatic(req, res, filePath)
@@ -1403,7 +1464,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     // [Subsonic API]
     const subsonicEnable = global.lx.config['subsonic.enable']
     if (subsonicEnable && isSubsonicRequest) {
-      const { subsonicHandler } = require('./subsonic')
+      const { subsonicHandler } = require('./integrations/subsonic')
       return subsonicHandler.handleRequest(req, res, urlObj)
     }
 
@@ -1515,7 +1576,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         if (req.method === 'GET') {
-          // 修改：返回包含密码及自定义目录配置的用户列表
+          // 统计各个用户的在线同步设备数 (通过 WebSocket 活跃客户端)
+          const onlineUserDeviceCounts: Record<string, number> = {}
+          if (wss) {
+            for (const client of (wss.clients as Set<any>)) {
+              const uName = client.userInfo?.name
+              if (uName && client.readyState === 1) {
+                onlineUserDeviceCounts[uName] = (onlineUserDeviceCounts[uName] || 0) + 1
+              }
+            }
+          }
+
+          // 修改：返回包含在线状态、密码及自定义目录配置的用户列表
           const users = global.lx.config.users.map(u => ({
             name: u.name,
             password: u.password,
@@ -1524,9 +1596,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             allowOperateCustomMusicDir: u.allowOperateCustomMusicDir ?? false,
             allowWriteCustomMusicDir: u.allowWriteCustomMusicDir ?? false,
             enableAutoDownload: u.enableAutoDownload ?? false,
+            disabled: u.disabled ?? false,
+            online: (onlineUserDeviceCounts[u.name] || 0) > 0,
+            onlineDevices: onlineUserDeviceCounts[u.name] || 0,
           }))
           if (global.lx.config['user.enablePublicFavorites']) {
-            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false, enableAutoDownload: false })
+            users.unshift({ name: '_open', password: '', enableCustomMusicDir: false, customMusicDir: '', allowOperateCustomMusicDir: false, allowWriteCustomMusicDir: false, enableAutoDownload: false, disabled: false, online: false, onlineDevices: 0 })
           }
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -1574,7 +1649,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         if (req.method === 'PUT') {
           void readBody(req).then(body => {
             try {
-              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload } = JSON.parse(body)
+              const { name, newName, password, enableCustomMusicDir, customMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload, disabled } = JSON.parse(body)
               if (!name) {
                 res.writeHead(400)
                 res.end('Missing required fields')
@@ -1620,6 +1695,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 if (allowOperateCustomMusicDir !== undefined) user.allowOperateCustomMusicDir = !!allowOperateCustomMusicDir
                 if (allowWriteCustomMusicDir !== undefined) user.allowWriteCustomMusicDir = !!allowWriteCustomMusicDir
                 if (enableAutoDownload !== undefined) user.enableAutoDownload = !!enableAutoDownload
+                if (disabled !== undefined) user.disabled = !!disabled
                 saveUsers()
 
                 // 检测是否需要自动迁移该用户的同步下载歌曲
@@ -2272,7 +2348,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               return
             }
             const user = global.lx.config.users.find(u => u.name === username && u.password === password)
-            if (user) {
+            if (user && user.disabled) {
+              loginLog.warn(`User login blocked (disabled): ${username} from ${ip}`)
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '该用户已被禁用' }))
+            } else if (user) {
               loginLog.info(`User login success: ${username} from ${ip}`)
               res.writeHead(200, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: true }))
@@ -2300,7 +2380,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               return
             }
             const user = global.lx.config.users.find((u: any) => u.name === username && u.password === password)
-            if (user) {
+            if (user && user.disabled) {
+              loginLog.warn(`User login blocked (disabled): ${username} from ${ip}`)
+              res.writeHead(403, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '该用户已被禁用' }))
+            } else if (user) {
               const token = generateSessionId()
               userSessions.set(token, { username, createdAt: Date.now() })
               loginLog.info(`User token issued: ${username} from ${ip}`)
@@ -2334,6 +2418,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const valid = !!username
         let enableCustomMusicDir = false
         let allowOperateCustomMusicDir = false
+        let allowWriteCustomMusicDir = false
         let enableAutoDownload = false
         if (username) {
           const user = global.lx.config.users.find(u => u.name === username)
@@ -2342,13 +2427,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           if (user && globalSwitch) {
             enableCustomMusicDir = !!user.enableCustomMusicDir
             allowOperateCustomMusicDir = !!user.allowOperateCustomMusicDir
+            allowWriteCustomMusicDir = !!user.allowWriteCustomMusicDir
           }
           if (user) {
             enableAutoDownload = !!user.enableAutoDownload
           }
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir, enableAutoDownload }))
+        res.end(JSON.stringify({ valid, username: username || null, enableCustomMusicDir, allowOperateCustomMusicDir, allowWriteCustomMusicDir, enableAutoDownload }))
         return
       }
 
@@ -2518,7 +2604,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
 
             try {
-              const { syncNativeLibraryToSubsonic } = require('./subsonic')
+              const { syncNativeLibraryToSubsonic } = require('./integrations/subsonic')
               syncNativeLibraryToSubsonic(username, 'artists',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
@@ -2604,7 +2690,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             try {
-              const { syncNativeLibraryToSubsonic } = require('./subsonic')
+              const { syncNativeLibraryToSubsonic } = require('./integrations/subsonic')
               syncNativeLibraryToSubsonic(username, 'albums',
                 added.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })),
                 removed.map((a: any) => ({ id: String(a.id), source: a.source, name: a.name })))
@@ -4606,7 +4692,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.end('Missing filename')
           return
         }
-        const cover = await fileCache.getCacheCover(filename, username) as any
+        const originalCover = await fileCache.getCacheCover(filename, username) as any
+        const cover = originalCover?.data && urlObj.searchParams.has('size') ? await coverThumbnail(originalCover, urlObj.searchParams.get('size')) : originalCover
         if (cover && cover.data) {
           res.writeHead(200, {
             'Content-Type': cover.mime || 'image/jpeg',
@@ -4798,7 +4885,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.end('Missing filename')
           return
         }
-        const cover = await customMusicManager.getCustomCover(filename, verified)
+        const originalCover = await customMusicManager.getCustomCover(filename, verified)
+        const cover = originalCover?.data && urlObj.searchParams.has('size') ? await coverThumbnail(originalCover, urlObj.searchParams.get('size')) : originalCover
         if (cover && cover.data) {
           res.writeHead(200, {
             'Content-Type': cover.mime || 'image/jpeg',
@@ -5558,6 +5646,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const urlStr = urlObj.searchParams.get('url')
         const filename = urlObj.searchParams.get('filename') || 'download.mp3'
         const isInline = urlObj.searchParams.get('inline') === '1'
+        const proxyLabel = filename === 'cover.jpg' ? '封面代理' : '下载代理'
 
         if (!urlStr) {
           res.writeHead(400)
@@ -5569,7 +5658,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const isTaggingMode = urlObj.searchParams.get('tag') === '1'
           const rawTaskId = urlObj.searchParams.get('taskId')
           const taskId = rawTaskId ? fileCache.getProgressKey(rawTaskId, proxyUser || '_open') : null
-          console.log(`[下载代理] 正在获取音频流 (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
+          console.log(`[${proxyLabel}] 正在获取${filename === 'cover.jpg' ? '封面图片' : '媒体流'} (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
 
           // 使用原生 http/https 模块以获得最高的流媒体转发性能
           const http = require('http')
@@ -5578,7 +5667,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           // Manual redirect handling for maximum control and stability
           const doFetch = async (targetUrl: string, attempt: number) => {
             if (attempt > 5) {
-              console.error('[下载代理] 触发过多重定向，已终止')
+              console.error(`[${proxyLabel}] 触发过多重定向，已终止`)
               if (!res.headersSent) {
                 res.writeHead(502)
                 res.end('Too Many Redirects')
@@ -5798,7 +5887,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               })
 
               proxyReq.on('error', (err: any) => {
-                console.error('[下载代理] 请求异常:', err)
+                console.error(`[${proxyLabel}] 请求异常:`, err)
                 failProxy(err)
               })
 
@@ -5813,7 +5902,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               proxyReq.end()
 
             } catch (err: any) {
-              console.error('[下载代理] 代理请求捕获异常:', err)
+              if (err.code === 'ERR_PRIVATE_UPSTREAM') {
+                console.warn(`[${proxyLabel}] 已拒绝受限地址: ${err.hostname} -> ${err.addresses.join(', ')}`)
+              } else console.error(`[${proxyLabel}] 代理请求捕获异常:`, err)
               if (!res.headersSent) {
                 res.writeHead(500)
                 res.end('Invalid or unavailable upstream URL')
@@ -5825,7 +5916,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           doFetch(urlStr, 0)
 
         } catch (err: any) {
-          console.error('[下载代理] 发生错误:', err)
+          console.error(`[${proxyLabel}] 发生错误:`, err)
           res.writeHead(500)
           res.end('Server Error')
         }
@@ -6095,7 +6186,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             // 2. 用户账号登录模式
             const matchedUser = (global.lx.config.users || []).find((u: any) => u.name === username && u.password === password)
-            if (matchedUser) {
+            if (matchedUser && matchedUser.disabled) {
+              loginLog.warn(`Player login blocked (disabled): ${username} from ${ip}`)
+              res.writeHead(200, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, message: '该用户已被禁用' }))
+            } else if (matchedUser) {
               const sessionId = generateSessionId()
               playerSessions.set(sessionId, { createdAt: Date.now(), user: matchedUser.name })
               loginLog.info(`Player login success (${matchedUser.name}) from ${ip}`)
@@ -6985,7 +7080,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
               const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
               try {
-                const { syncDislikeToRating } = require('./subsonic')
+                const { syncDislikeToRating } = require('./integrations/subsonic')
                 await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
               } catch (e) {
                 console.error('[黑名单 API] 评分回写失败:', e)
@@ -7100,165 +7195,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return customSourceHandlers.handleUpdatePlatforms(req, res)
       }
 
-      // elFinder 文件管理器连接器
-      if (pathname === '/api/elfinder/connector') {
-        // [修改] 优先从 Header 获取，如果没有则尝试从 URL 参数获取 (用于支持下载和预览)
-        const auth = req.headers['x-frontend-auth'] || urlObj.searchParams.get('auth')
-
-        if (auth !== global.lx.config['admin.password']) {
-          res.writeHead(401)
-          res.end('Unauthorized')
-          return
-        }
-
-        // 处理GET请求
-        if (req.method === 'GET') {
-          void (async () => {
-            try {
-              const params: any = {}
-              const url = new URL(req.url || '', `http://${req.headers.host}`)
-              url.searchParams.forEach((value, key) => {
-                params[key] = value
-              })
-
-              const connector = new ElFinderConnector(getSystemRoot())
-              const cmd = params.cmd || 'open'
-              const result = await connector.handle(cmd, params)
-
-              // [新增] 处理文件下载 (file) 和 打包下载 (zipdl)
-              if ((cmd === 'file' || cmd === 'zipdl') && result.path && !result.error) {
-                if (fs.existsSync(result.path)) {
-                  const mime = getMime(result.path)
-                  const headers: any = { 'Content-Type': mime }
-
-                  // 如果是下载请求，或者是打包下载，强制添加附件头
-                  if (params.download === '1' || cmd === 'zipdl') {
-                    headers['Content-Disposition'] = `attachment; filename="${encodeURIComponent(path.basename(result.path))}"`
-                  }
-
-                  res.writeHead(200, headers)
-                  fs.createReadStream(result.path).pipe(res)
-                  return
-                } else {
-                  res.writeHead(404)
-                  res.end('Not Found')
-                  return
-                }
-              }
-
-              res.writeHead(200, { 'Content-Type': 'application/json' })
-              res.end(JSON.stringify(result))
-            } catch (err: any) {
-              res.writeHead(500)
-              res.end(JSON.stringify({ error: [err.message] }))
-            }
-          })()
-          return
-        }
-
-        // 处理POST请求
-        if (req.method === 'POST') {
-          const contentType = req.headers['content-type'] || ''
-
-          // 处理文件上传
-          if (contentType.includes('multipart/form-data')) {
-            const form = formidable({ multiples: true, uploadDir: require('os').tmpdir() })
-
-            form.parse(req, async (err: any, fields: any, files: any) => {
-              if (err) {
-                res.writeHead(500)
-                res.end(JSON.stringify({ error: ['Upload error'] }))
-                return
-              }
-
-              const params = { ...fields }
-              // formidable v3 返回的值可能是数组，需要转换
-              for (const key in params) {
-                if (Array.isArray(params[key]) && params[key].length === 1) {
-                  params[key] = params[key][0]
-                }
-              }
-              console.log('[文件管理] 接收到上传文件列表:', Object.keys(files))
-              console.log('[文件管理] 接收到文件详情:', files)
-              try {
-                // 获取上传的文件（字段名可能是 upload, upload[] 等）
-                const uploadedFiles = files.upload || files['upload[]'] || Object.values(files)[0]
-
-                if (params.cmd === 'upload' && uploadedFiles) {
-                  const connector = new ElFinderConnector(getSystemRoot())
-                  const uploadFiles = Array.isArray(uploadedFiles) ? uploadedFiles : [uploadedFiles]
-                  const added: any[] = []
-
-                  for (const file of uploadFiles) {
-                    const target = (connector as any).decode(params.target)
-                    const destPath = require('path').join(target, file.originalFilename || file.newFilename)
-                    await require('fs').promises.copyFile(file.filepath, destPath)
-                    await require('fs').promises.unlink(file.filepath)
-
-                    const fileInfo = await (connector as any).getFileInfo(destPath)
-                    if (fileInfo) added.push(fileInfo)
-                  }
-
-                  res.writeHead(200, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify({ added }))
-                } else {
-                  const connector = new ElFinderConnector(getSystemRoot())
-                  const cmd = params.cmd || 'open'
-                  const result = await connector.handle(cmd, params)
-
-                  res.writeHead(200, { 'Content-Type': 'application/json' })
-                  res.end(JSON.stringify(result))
-                }
-              } catch (err: any) {
-                res.writeHead(500)
-                res.end(JSON.stringify({ error: [err.message] }))
-              }
-            })
-            return
-          } else {
-            // 普通POST数据
-            void readBody(req).then(async body => {
-              try {
-                // 修改开始：兼容 JSON 和 x-www-form-urlencoded
-                let params: any = {}
-                try {
-                  params = JSON.parse(body || '{}')
-                } catch (e) {
-                  // 如果 JSON 解析失败，尝试解析为 URL 查询参数格式
-                  const urlParams = new URLSearchParams(body)
-                  urlParams.forEach((value, key) => {
-                    // 处理数组情况 (例如 targets[])
-                    if (params[key]) {
-                      if (Array.isArray(params[key])) {
-                        params[key].push(value)
-                      } else {
-                        params[key] = [params[key], value]
-                      }
-                    } else {
-                      params[key] = value
-                    }
-                  })
-                }
-                // 修改结束
-
-                const connector = new ElFinderConnector(getSystemRoot())
-                const cmd = params.cmd || 'open'
-                const result = await connector.handle(cmd, params)
-
-                res.writeHead(200, { 'Content-Type': 'application/json' })
-                res.end(JSON.stringify(result))
-              } catch (err: any) {
-                res.writeHead(500)
-                res.end(JSON.stringify({ error: [err.message] }))
-              }
-            })
-            return
-          }
-        }
-
+      // VueFinder: scoped storage roots, header auth and media sessions.
+      if (pathname === '/api/files' || pathname.startsWith('/api/files/')) {
+        await handleFileManager(req, res, {
+          root: process.cwd(),
+          data: global.lx.dataPath,
+        }, global.lx.config['admin.password'])
         return
       }
-
 
       // Configuration API
       if (pathname === '/api/config') {
@@ -7304,6 +7248,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'sync.backupInterval': global.lx.config['sync.backupInterval'] || 24,
             'webdav.excludeCache': global.lx.config['webdav.excludeCache'] ?? false,
             'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'] ?? false,
+            'backup.webdav.types': getBackupTypes('webdav', global.lx.config as any),
+            'backup.openlist.types': getBackupTypes('openlist', global.lx.config as any),
+            'backup.webdav.mirrorDeletes': global.lx.config['backup.webdav.mirrorDeletes'] === true,
+            'backup.webdav.restoreOnStartup': global.lx.config['backup.webdav.restoreOnStartup'] === true,
+            backupTypeInfo: BACKUP_TYPE_INFO,
             'proxy.all.enabled': global.lx.config['proxy.all.enabled'] || false,
             'proxy.all.address': global.lx.config['proxy.all.address'] || '',
             // 三类细分代理：enabled 为 undefined 表示「沿用上面的统一开关」
@@ -7323,6 +7272,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'] ?? true,
             'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'] ?? 'fallback',
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
+            'subsonic.localPlaylist': global.lx.config['subsonic.localPlaylist'] ?? true,
+            'subsonic.customPlaylist': global.lx.config['subsonic.customPlaylist'] ?? true,
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
             'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'] ?? 'leaderboard',
@@ -7339,6 +7290,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? false,
+            'subsonic.playCacheFirstUseOpenlist': global.lx.config['subsonic.playCacheFirstUseOpenlist'] ?? false,
+            'subsonic.openlistDelivery': global.lx.config['subsonic.openlistDelivery'] || 'direct',
             'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'] ?? true,
             'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'] ?? 'flac,320k,128k',
             'subsonic.source.priority': global.lx.config['subsonic.source.priority'] ?? 'kw,tx,wy,mg,kg',
@@ -7351,6 +7304,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
             'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
             'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
+            'openlist.enable': global.lx.config['openlist.enable'] ?? false,
+            'openlist.endpoint': global.lx.config['openlist.endpoint'] || '',
+            'openlist.username': global.lx.config['openlist.username'] || '',
+            'openlist.password': global.lx.config['openlist.password'] || '',
+            'openlist.token': global.lx.config['openlist.token'] || '',
+            'openlist.root': global.lx.config['openlist.root'] || '/lx_music',
+            'openlist.keepLocalAfterUpload': global.lx.config['openlist.keepLocalAfterUpload'] !== false,
+            'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 5,
+            'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
+            'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
+            'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
+            'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
+            'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
             subsonicPortConflict: global.lx.subsonicPortConflict || null,
             configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
@@ -7363,9 +7329,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
 
         if (req.method === 'POST') {
-          void readBody(req).then(body => {
+          void readBody(req).then(async (body) => {
             try {
               const newConfig = JSON.parse(body)
+              for (const destination of ['webdav', 'openlist'] as const) {
+                const key = `backup.${destination}.types` as const
+                if (newConfig[key] !== undefined) {
+                  try { newConfig[key] = normalizeBackupTypes(newConfig[key]) }
+                  catch (e: any) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })); return }
+                }
+              }
+              if (newConfig['backup.webdav.types'] !== undefined) global.lx.config['backup.webdav.types'] = newConfig['backup.webdav.types']
+              if (newConfig['backup.openlist.types'] !== undefined) global.lx.config['backup.openlist.types'] = newConfig['backup.openlist.types']
+              if (newConfig['backup.webdav.mirrorDeletes'] !== undefined) global.lx.config['backup.webdav.mirrorDeletes'] = newConfig['backup.webdav.mirrorDeletes'] === true
+              if (newConfig['backup.webdav.restoreOnStartup'] !== undefined) global.lx.config['backup.webdav.restoreOnStartup'] = newConfig['backup.webdav.restoreOnStartup'] === true
               if (newConfig.serverName !== undefined) global.lx.config.serverName = newConfig.serverName
               if (newConfig['debug.enabled'] !== undefined) global.lx.config['debug.enabled'] = newConfig['debug.enabled']
               if (newConfig.maxSnapshotNum !== undefined) global.lx.config.maxSnapshotNum = parseInt(newConfig.maxSnapshotNum)
@@ -7510,6 +7487,30 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
               }
 
+              // [OpenList 配置] 仅当本次提交含 openlist 字段时才做连通性校验；
+              // 校验失败不再阻断保存（配置照存），仅作为 warning 提示，避免 OpenList 临时不可达时所有配置都保存不了
+              const hasOpenlistChange = Object.keys(newConfig).some(k => k === 'openlist.enable' || k.startsWith('openlist.'))
+              if (hasOpenlistChange) {
+                try {
+                  await validateOpenListConfig(newConfig)
+                } catch (ve: any) {
+                  warning = (warning ? warning + '；' : '') + 'OpenList 配置校验未通过（已保存，但同步可能因不可达而失败）：' + (ve?.message || ve)
+                }
+              }
+              if (newConfig['openlist.enable'] !== undefined) global.lx.config['openlist.enable'] = newConfig['openlist.enable']
+              if (newConfig['openlist.endpoint'] !== undefined) global.lx.config['openlist.endpoint'] = newConfig['openlist.endpoint']
+              if (newConfig['openlist.username'] !== undefined) global.lx.config['openlist.username'] = newConfig['openlist.username']
+              if (newConfig['openlist.password'] !== undefined) global.lx.config['openlist.password'] = newConfig['openlist.password']
+              if (newConfig['openlist.token'] !== undefined) global.lx.config['openlist.token'] = newConfig['openlist.token']
+              if (newConfig['openlist.root'] !== undefined) global.lx.config['openlist.root'] = newConfig['openlist.root']
+              if (newConfig['openlist.keepLocalAfterUpload'] !== undefined) global.lx.config['openlist.keepLocalAfterUpload'] = newConfig['openlist.keepLocalAfterUpload']
+              if (newConfig['openlist.verifyInterval'] !== undefined) global.lx.config['openlist.verifyInterval'] = parseInt(newConfig['openlist.verifyInterval']) || 5
+              if (newConfig['openlist.syncInterval'] !== undefined) global.lx.config['openlist.syncInterval'] = parseInt(newConfig['openlist.syncInterval']) || 60
+              if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
+              if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
+              if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
+              if (newConfig['openlist.backupSystemConfig'] !== undefined) global.lx.config['openlist.backupSystemConfig'] = newConfig['openlist.backupSystemConfig']
+
               if (newConfig['snapshot.backupPath'] !== undefined) {
                 try {
                   global.lx.config['snapshot.backupPath'] = validateDirectoryPath(String(newConfig['snapshot.backupPath']), '歌单快照备份路径')
@@ -7540,6 +7541,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
+              if (typeof newConfig['subsonic.localPlaylist'] === 'boolean') global.lx.config['subsonic.localPlaylist'] = newConfig['subsonic.localPlaylist']
+              if (typeof newConfig['subsonic.customPlaylist'] === 'boolean') global.lx.config['subsonic.customPlaylist'] = newConfig['subsonic.customPlaylist']
               if (newConfig['subsonic.publicLeaderboards'] !== undefined) global.lx.config['subsonic.publicLeaderboards'] = newConfig['subsonic.publicLeaderboards']
               if (newConfig['subsonic.leaderboardSource'] !== undefined) {
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()
@@ -7569,6 +7572,17 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
+              if (newConfig['subsonic.playCacheFirstUseOpenlist'] !== undefined) global.lx.config['subsonic.playCacheFirstUseOpenlist'] = newConfig['subsonic.playCacheFirstUseOpenlist']
+              if (newConfig['subsonic.openlistDelivery'] !== undefined) global.lx.config['subsonic.openlistDelivery'] = newConfig['subsonic.openlistDelivery']
+              if (hasOpenlistChange && global.lx.config['openlist.enable']) {
+                const raw = global.lx.config['openlist.userBackups']
+                let rules: any[] = []
+                try { rules = typeof raw === 'string' ? JSON.parse(raw) : raw || [] } catch { /* 校验警告已返回 */ }
+                if (Array.isArray(rules) && rules.some(r => r?.enabled && (global.lx.config['backup.openlist.types'] === undefined || r.backupCache === true) && (r.mode === 'upload-delete' || (!r.mode && global.lx.config['openlist.keepLocalAfterUpload'] === false)))) {
+                  global.lx.config['subsonic.playCacheFirst'] = true
+                  global.lx.config['subsonic.playCacheFirstUseOpenlist'] = true
+                }
+              }
               if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
               if (newConfig['subsonic.quality.priority'] !== undefined) global.lx.config['subsonic.quality.priority'] = String(newConfig['subsonic.quality.priority'])
               if (newConfig['subsonic.source.priority'] !== undefined) global.lx.config['subsonic.source.priority'] = String(newConfig['subsonic.source.priority'])
@@ -7586,7 +7600,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
 
               // 更新 WebDAVSync 配置
-              if (global.lx.webdavSync && (newConfig['webdav.enable'] !== undefined || newConfig['webdav.url'] || newConfig['webdav.username'] || newConfig['webdav.password'] || newConfig['webdav.syncPath'] || newConfig['webdav.backupPath'] || newConfig['sync.interval'] || newConfig['sync.backupInterval'] || newConfig['webdav.excludeCache'] !== undefined || newConfig['webdav.excludeMusic'] !== undefined)) {
+              if (global.lx.webdavSync && Object.keys(newConfig).some(key => key.startsWith('webdav.') || key.startsWith('backup.webdav.') || key.startsWith('sync.'))) {
                 global.lx.webdavSync.updateConfig({
                   enable: global.lx.config['webdav.enable'],
                   url: global.lx.config['webdav.url'],
@@ -7598,106 +7612,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   backupInterval: global.lx.config['sync.backupInterval'],
                   excludeCache: global.lx.config['webdav.excludeCache'],
                   excludeMusic: global.lx.config['webdav.excludeMusic'],
+                  types: getBackupTypes('webdav', global.lx.config as any),
+                  mirrorDeletes: global.lx.config['backup.webdav.mirrorDeletes'],
                 })
               }
 
-              const configPath = global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js')
-              const configContent = `module.exports = ${JSON.stringify({
-                serverName: global.lx.config.serverName,
-                bindIP: global.lx.config.bindIP,
-                port: global.lx.config.port,
-                'proxy.enabled': global.lx.config['proxy.enabled'],
-                'proxy.header': global.lx.config['proxy.header'],
-                'user.enablePath': global.lx.config['user.enablePath'],
-                'user.enableRoot': global.lx.config['user.enableRoot'],
-                'user.enablePublicRestriction': global.lx.config['user.enablePublicRestriction'],
-                'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'],
-                'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'],
-                'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'],
-                'user.enablePublicFavorites': global.lx.config['user.enablePublicFavorites'],
-                'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'],
-                'user.enableCustomMusicDir': global.lx.config['user.enableCustomMusicDir'],
-                'user.enableLoginCacheRestriction': global.lx.config['user.enableLoginCacheRestriction'],
-                'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
-                'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
-                'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
-                maxSnapshotNum: global.lx.config.maxSnapshotNum,
-                'list.addMusicLocationType': global.lx.config['list.addMusicLocationType'],
-                'debug.enabled': global.lx.config['debug.enabled'] || false,
-                disableTelemetry: global.lx.config.disableTelemetry,
-                'admin.password': global.lx.config['admin.password'],
-                'player.name': global.lx.config['player.name'],
-                'player.enableAuth': global.lx.config['player.enableAuth'],
-                'player.password': global.lx.config['player.password'],
-                'webdav.enable': global.lx.config['webdav.enable'],
-                'webdav.url': global.lx.config['webdav.url'],
-                'webdav.username': global.lx.config['webdav.username'],
-                'webdav.password': global.lx.config['webdav.password'],
-                'webdav.syncPath': global.lx.config['webdav.syncPath'],
-                'webdav.backupPath': global.lx.config['webdav.backupPath'],
-                'sync.interval': global.lx.config['sync.interval'],
-                'sync.backupInterval': global.lx.config['sync.backupInterval'],
-                'webdav.excludeCache': global.lx.config['webdav.excludeCache'],
-                'webdav.excludeMusic': global.lx.config['webdav.excludeMusic'],
-                'proxy.all.enabled': global.lx.config['proxy.all.enabled'],
-                'proxy.all.address': global.lx.config['proxy.all.address'],
-                // undefined 会被序列化省略 -> 下次启动仍为「沿用统一开关」
-                'proxy.music.enabled': global.lx.config['proxy.music.enabled'],
-                'proxy.music.address': global.lx.config['proxy.music.address'] || '',
-                'proxy.customSource.enabled': global.lx.config['proxy.customSource.enabled'],
-                'proxy.customSource.address': global.lx.config['proxy.customSource.address'] || '',
-                'proxy.app.enabled': global.lx.config['proxy.app.enabled'],
-                'proxy.app.address': global.lx.config['proxy.app.address'] || '',
-                'admin.path': global.lx.config['admin.path'] ?? '/admin',
-                'player.path': global.lx.config['player.path'] ?? '/',
-                'subsonic.enable': global.lx.config['subsonic.enable'],
-                'subsonic.path': global.lx.config['subsonic.path'],
-                'subsonic.standalone': global.lx.config['subsonic.standalone'] ?? false,
-                'subsonic.port': global.lx.config['subsonic.port'] ?? 0,
-                'subsonic.enableDebug': global.lx.config['subsonic.enableDebug'],
-                'subsonic.onlineSearch': global.lx.config['subsonic.onlineSearch'],
-                'subsonic.onlineSearchMode': global.lx.config['subsonic.onlineSearchMode'],
-                'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'],
-                'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'],
-                'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'],
-                'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'],
-                'subsonic.sharedListSort': global.lx.config['subsonic.sharedListSort'],
-                'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'],
-                'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'],
-                'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'],
-                'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'],
-                'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'],
-                'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'],
-                'subsonic.dislikeDuetMode': global.lx.config['subsonic.dislikeDuetMode'],
-                'subsonic.dislikeNormalizeName': global.lx.config['subsonic.dislikeNormalizeName'],
-                'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'],
-                'subsonic.recommendPoolSize': global.lx.config['subsonic.recommendPoolSize'],
-                'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'],
-                'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'],
-                'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'],
-                'subsonic.quality.enabled': global.lx.config['subsonic.quality.enabled'],
-                'subsonic.quality.priority': global.lx.config['subsonic.quality.priority'],
-                'subsonic.source.priority': global.lx.config['subsonic.source.priority'],
-                'subsonic.source.crossPlatform': global.lx.config['subsonic.source.crossPlatform'],
-                'subsonic.source.autoSwitchCustom': global.lx.config['subsonic.source.autoSwitchCustom'],
-                'configBackup.enable': global.lx.config['configBackup.enable'],
-                'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'],
-                'configBackup.dir': global.lx.config['configBackup.dir'],
-                'snapshot.backupPath': global.lx.config['snapshot.backupPath'] || '',
-                'singer.sourcePriority': global.lx.config['singer.sourcePriority'],
-                'artist.maxFetchPages': global.lx.config['artist.maxFetchPages'],
-                'cache.namingPattern': global.lx.config['cache.namingPattern'],
-                'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'],
-                users: global.lx.config.users.map(u => ({
-                  name: u.name,
-                  password: u.password,
-                  maxSnapshotNum: u.maxSnapshotNum,
-                  'list.addMusicLocationType': u['list.addMusicLocationType'],
-                  enableCustomMusicDir: u.enableCustomMusicDir,
-                  customMusicDir: u.customMusicDir,
-                  allowOperateCustomMusicDir: u.allowOperateCustomMusicDir,
-                })),
-              }, null, 2)}`
+              // 所有系统配置统一由 saveConfig 写入，避免两份字段清单漂移。
               if (typeof global.lx?.saveConfig === 'function') {
                 global.lx.saveConfig()
               }
@@ -7710,6 +7630,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               // 触发一次 WebDAV 同步检查（如果已配置）
               if (global.lx.webdavSync && global.lx.webdavSync.isConfigured()) {
                 void global.lx.webdavSync.syncChangedFiles()
+              }
+
+              // 配置保存后：若启用 OpenList 同步，后台（防抖）触发一次同步
+              startVerifyScheduler()
+              if (global.lx.config['openlist.enable']) {
+                scheduleOpenlistSync()
               }
 
               res.writeHead(200)
@@ -7824,6 +7750,149 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       }
 
       // [配置备份管理 API] 下载指定备份文件
+      // [OpenList 同步 API] 连接测试（不保存配置，仅校验）
+      if (pathname === '/api/openlist/test' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const endpoint = cfg.endpoint || global.lx.config['openlist.endpoint'] || ''
+            const username = cfg.username ?? (global.lx.config['openlist.username'] || '')
+            const password = cfg.password ?? (global.lx.config['openlist.password'] || '')
+            const token = cfg.token ?? (global.lx.config['openlist.token'] || '')
+            const root = cfg.root || global.lx.config['openlist.root'] || '/lx_music'
+            if (!endpoint) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: 'OpenList 地址不能为空' }))
+              return
+            }
+            const cl = new OpenListClient({ endpoint, username, password, token, root })
+            await cl.testConnection()
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ok: true }))
+          } catch (e: any) {
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, ok: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 手动触发同步（upload/download/sync 全量）
+      if (pathname === '/api/openlist/restore' && req.method === 'POST') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: 'Unauthorized' })); return
+        }
+        void restoreOpenlistData().then(result => {
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: result.errors.length === 0 && result.restored > 0, ...result, restartRequired: true }))
+        }).catch((e: any) => {
+          res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: e.message }))
+        })
+        return
+      }
+
+      if (pathname === '/api/openlist/sync' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const summary = await runSyncNow({ user: cfg.user, folder: cfg.folder })
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: summary.errors.length === 0, summary }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 备份/同步状态列表
+      if (pathname === '/api/openlist/backups' && req.method === 'GET') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        try {
+          const list = listBackups()
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: true, list }))
+        } catch (e: any) {
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+        }
+        return
+      }
+
+      // [OpenList 同步 API] 单文件手动重试
+      if (pathname === '/api/openlist/retry' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const id = Number(cfg.id)
+            if (!id) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: '缺少 id' }))
+              return
+            }
+            const rb = await retryBackup(id)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: rb.ok, message: rb.message || '' }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 批量软删除备份记录（级联附件，deleted_at 软删除）
+      if (pathname === '/api/openlist/delete' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const ids = Array.isArray(cfg.ids) ? cfg.ids.map((x: any) => Number(x)).filter((x: number) => x > 0) : []
+            if (!ids.length) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: '缺少有效的 id 列表' }))
+              return
+            }
+            const r = await deleteOpenlistBackups(ids)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, deleted: r.deleted, remoteRemoved: r.remoteRemoved, remoteFailed: r.remoteFailed }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
       if (pathname === '/api/config/backups/download' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
         if (auth !== global.lx.config['admin.password']) {
@@ -8267,11 +8336,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const targetFilename = payload.targetFilename
 
           void webdavSync.restoreFromRemote({ mode, targetFilename }).then(async (success: boolean) => {
-            if (success) {
-              await reloadServerData()
-            }
             res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success }))
+            res.end(JSON.stringify({ success, restartRequired: true, message: success ? '已恢复所选类型；请重启服务完整加载用户、歌单和音乐索引。' : '恢复失败或云端没有所选类型的文件' }))
           }).catch((err: any) => {
             res.writeHead(500)
             res.end(JSON.stringify({ success: false, message: err.message }))
@@ -8361,12 +8427,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           })
           const readStream = fs.createReadStream(zipPath)
           readStream.pipe(res)
-          readStream.on('finish', () => {
-            // 延时删除本地临时ZIP文件
-            setTimeout(() => {
-              if (fs.existsSync(zipPath)) fs.unlinkSync(zipPath)
-            }, 5000)
-          })
+          readStream.on('close', () => { void fs.promises.rm(zipPath, { force: true }).catch(() => {}) })
+          readStream.on('error', (err) => res.destroy(err))
+          res.on('close', () => readStream.destroy())
         } catch (err: any) {
           res.writeHead(500); res.end(err.message)
         }
@@ -8397,19 +8460,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const webdavSync = global.lx.webdavSync
             if (!webdavSync) throw new Error('Restore system not initialized')
 
-            await webdavSync.extractZip(file.filepath, global.lx.dataPath)
+            const restored = await webdavSync.restoreLocalBackup(file.filepath)
 
             // 删除临时上传的文件
             if (fs.existsSync(file.filepath)) fs.unlinkSync(file.filepath)
 
-            // [新增] 还原后自动触发重载
-            await reloadServerData()
-
             res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success: true, message: 'Restore from local ZIP success and reloaded' }))
+            res.end(JSON.stringify({ success: true, restored, restartRequired: true, message: '已恢复所选类型；请重启服务完整加载数据。' }))
           } catch (restoreErr: any) {
             console.error('[数据备份] 本地还原异常:', restoreErr)
             res.writeHead(500); res.end('Restore failed: ' + restoreErr.message)
+          } finally {
+            if (fs.existsSync(file.filepath)) fs.unlinkSync(file.filepath)
           }
         })
         return
@@ -8921,6 +8983,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
   host = `http://${ip.includes(':') ? `[${ip}]` : ip}:${port}`
   httpServer.listen(port, ip)
+  // 启动 OpenList 校验调度器（按 openlist.verifyInterval 周期校验远端可用性）
+  startVerifyScheduler()
 })
 
 // [Subsonic 独立端口] 在独立监听端口上只暴露 Subsonic API。
@@ -8949,7 +9013,7 @@ const startSubsonicStandaloneServer = () => {
     }
 
     try {
-      const { subsonicHandler } = require('./subsonic')
+      const { subsonicHandler } = require('./integrations/subsonic')
       const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
 
       // [路由守卫] 仅允许 /rest/{method} 形式的 Subsonic API 调用，其余路径一律 404。
@@ -9030,6 +9094,10 @@ const startSubsonicStandaloneServer = () => {
 // }
 
 export const startServer = async (port: number, ip: string) => {
+  // 注册 OpenList 自动同步钩子（供配置保存 / 下载落盘等处调用）
+  ;(global.lx as any).scheduleOpenlistSync = scheduleOpenlistSync
+  // 订阅 fileCache 的通用「文件落盘」事件，落盘即触发防抖同步（与 fileCache 解耦）
+  registerFileCacheSyncHook()
   // Initialize file cache settings from global config
   if (global.lx.config) {
     if (global.lx.config.serverCacheLocation) fileCache.setCacheLocation(global.lx.config.serverCacheLocation)

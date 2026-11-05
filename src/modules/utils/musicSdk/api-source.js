@@ -27,7 +27,7 @@ const getUserApi = () => {
   if (!userApiModule) {
     try {
       // 延迟加载 userApi 模块
-      userApiModule = require('../../../server/userApi')
+      userApiModule = require('../../../server/sources/userApi')
     } catch (err) {
       console.error('[api-source] Failed to load userApi:', err.message)
       userApiModule = { getLoadedApis: () => [] }

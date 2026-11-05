@@ -1,135 +1,177 @@
-# LX Music Sync Server Architecture and Configuration Guide
+# Configuration, environment and storage
 
-LX Music Sync Server adheres to the design principle of **zero configuration and out-of-the-box use**, while providing a highly flexible **multi-level configuration injection engine and environment variable reading mechanism** to meet the needs of advanced deployment scenarios. When the Node.js backend service process starts, the system will follow strict hierarchical rules to merge and rewrite various configuration items.
+The default configuration is `data/config.js`. `DATA_PATH` changes the data directory; `CONFIG_PATH` selects an external configuration file. If the target configuration is absent on first start, the server tries to initialize it from the legacy/bundled root configuration.
 
-## Configuration Loading Hierarchy and Execution Priority
+Normal startup merges defaults, configuration and environment variables. WebDAV restoration can subsequently reload remote configuration and accounts, so environment variables do not universally remain the final authority. Check the active path and effective values in the console.
 
-LX Music Sync Server has built a unified basic model skeleton (located in `src/defaultConfig.ts`). During the initialization of the service instance, the configuration parser will streamingly distribute parameters to the **service-side underlying environment** (such as network binding, WebDAV settings, etc.) and the **front-end running environment** (injected into the browser execution sandbox `/js/config.js`) respectively.
+Environment changes need a process restart or container recreation. Some console changes apply immediately; listener/path changes can require restart and reconnection.
 
-The loading and merging of configurations follow the priority sequence from high to low below. High-priority options will **hardly override** the corresponding keys of low-priority ones:
+### Environment variables
 
-1. **Runtime Environment Variables (Environment Variables)**: Has very high priority. For example, `PORT=9527`.
-2. **WebDAV Cloud Data (WebDAV Cloud Data)**: If WebDAV is configured, the system will try to restore from the cloud on startup. **Restored cloud content will overwrite persistent `data/config.js` and trigger a hot-reload**.
-3. **Explicit Custom Configuration File Path (Custom Config File)**: Path specified via `CONFIG_PATH` (defaults to persistent `data/config.js` inside the data directory).
-4. **Persistent Configuration (Persistent Config)**: The `data/config.js` in the data directory (if absent on first launch, will smoothly migrate from legacy root `config.js`).
-5. **System-level Default Constants (Default Consts)**: Defaults in `src/defaultConfig.ts`.
+Defaults below refer to code defaults. Bundled configuration, saved values and image environment can differ; Docker data/log paths are described in the [deployment guide](./getting-started.md).
 
----
+| Environment variable | Config key | Description | Default |
+| --- | --- | --- | --- |
+| `PORT` | `port` | Service port | `9527` |
+| `BIND_IP` | `bindIP` | Listening interface | `0.0.0.0` |
+| `ADMIN_PATH` | `admin.path` | Backend management interface path | `/admin` |
+| `PLAYER_PATH` | `player.path` | Web player access path (default root `/`) | `/` |
+| `ADMIN_PASSWORD` | `admin.password` | Admin password (for management console and music player admin login) | `123456` |
+| `SERVER_NAME` | `serverName` | Sync service name (shown in client pairing & admin console title) | `LX Sync Server` |
+| `PLAYER_NAME` | `player.name` | Web player name (shown in web player title & login card) | `LX Music Web` |
+| `ENABLE_DEBUG` | `debug.enabled` | Enable DEBUG mode (verbose debug and source sandbox logs, default false) | `false` |
+| `MAX_SNAPSHOT_NUM` | `maxSnapshotNum` | Max snapshots to keep | `10` |
+| `CONFIG_PATH` | - | Absolute path to external config file (defaults to `data/config.js`) | - |
+| `DATA_PATH` | - | Absolute path to data storage directory | `./data` |
+| `LOG_PATH` | - | Absolute path to log output directory | `./logs` |
+| `PROXY_HEADER` | `proxy.header` | Original client IP header supplied by reverse proxy | `x-real-ip` |
+| `USER_ENABLE_ROOT` | `user.enableRoot` | Enable root path (use `ip:port`, password must be unique) | `false` |
+| `USER_ENABLE_PATH` | `user.enablePath` | Enable user path (use `ip:port/username`, passwords can repeat) | `true` |
+| `WEBDAV_ENABLE` | `webdav.enable` | Enable WebDAV sync and backup | `false` |
+| `WEBDAV_URL` | `webdav.url` | WebDAV URL | - |
+| `WEBDAV_USERNAME` | `webdav.username` | WebDAV Username | - |
+| `WEBDAV_PASSWORD` | `webdav.password` | WebDAV Password | - |
+| `WEBDAV_SYNC_PATH` | `webdav.syncPath` | WebDAV remote sync path | `/lx-sync` |
+| `WEBDAV_BACKUP_PATH` | `webdav.backupPath` | WebDAV remote backup path | `/lx-sync-backups` |
+| `SYNC_INTERVAL` | `sync.interval` | WebDAV incremental sync interval (min) | `60` |
+| `BACKUP_INTERVAL` | `sync.backupInterval` | WebDAV full backup interval (hours) | `24` |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Legacy compatibility; data backup now always excludes caches | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Legacy fallback; explicit backup type arrays take precedence | `false` |
+| `ENABLE_WEBPLAYER_AUTH` | `player.enableAuth` | Enable Web Player password | `false` |
+| `WEBPLAYER_PASSWORD` | `player.password` | Web Player password | `123456` |
+| `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |
+| `ENABLE_PUBLIC_USER_RESTRICTION` | `user.enablePublicRestriction` | Enable public user permission restriction (restrict upload/delete public sources) | `true` |
+| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `user.enablePublicNonAdminLocalMusic` | Enable non-admin access to local music (allows non-admin public accounts to access local music) | `false` |
+| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `user.enablePublicNonAdminBrowserDownload` | Enable non-admin browser download (allows non-admin/public accounts to download songs via browser) | `true` |
+| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `user.enablePublicNonAdminServerCache` | Enable non-admin server cache (allows non-admin/public accounts to cache songs on server) | `false` |
+| `ENABLE_PUBLIC_FAVORITES` | `user.enablePublicFavorites` | Enable public favorites and songs (allows guest/public to view and play public favorites) | `false` |
+| `ENABLE_PUBLIC_NON_ADMIN_ACCESS` | `user.enablePublicNonAdminAccess` | Enable non-admin access to public favorites & songs (allows non-admin public accounts to view) | `false` |
+| `ENABLE_CUSTOM_MUSIC_DIR` | `user.enableCustomMusicDir` | Enable custom music directories feature globally | `false` |
+| `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | Enable cache settings restriction for logged-in non-admin users | `false` |
+| `ENABLE_CACHE_SIZE_LIMIT` | `user.enableCacheSizeLimit` | Enable cache size limit (auto-cleanup via LRU) | `false` |
+| `CACHE_SIZE_LIMIT` | `user.cacheSizeLimit` | Cache size limit in MB | `2000` |
+| `CONFIG_BACKUP_ENABLE` | `configBackup.enable` | Enable automatic config.js backup (creates daily backup copy) | `true` |
+| `CONFIG_BACKUP_RETENTION_DAYS` | `configBackup.retentionDays` | Config backup retention period in days (auto cleans up expired backups) | `7` |
+| `CONFIG_BACKUP_DIR` | `configBackup.dir` | Backup directory, relative to data; empty uses data/backups | `empty` |
+| `SNAPSHOT_BACKUP_PATH` | `snapshot.backupPath` | Custom storage path for playlist snapshots (absolute or relative to `./data`) | - |
+| `LIST_ADD_MUSIC_LOCATION_TYPE` | `list.addMusicLocationType` | Position when adding songs to list (`top` / `bottom`) | `top` |
+| `PROXY_ALL_ENABLED` | `proxy.all.enabled` | Enable outgoing request proxy (for Music SDK) | `false` |
+| `PROXY_ALL_ADDRESS` | `proxy.all.address` | Proxy address (supports http:// or socks5://) | - |
+| `SINGER_SOURCE_PRIORITY` | `singer.sourcePriority` | Singer info retrieval priority (e.g., `tx,wy` or `wy,tx`) | `tx,wy` |
+| `SUBSONIC_ENABLE` | `subsonic.enable` | Enable Subsonic API support | `true` |
+| `SUBSONIC_PATH` | `subsonic.path` | Subsonic API access path (default `/rest`) | `/rest` |
+| `SUBSONIC_PORT` | `subsonic.port` | Separate port; requires subsonic.standalone=true | `4050` |
+| `SUBSONIC_ENABLE_DEBUG` | `subsonic.enableDebug` | Enable Subsonic debug log mode | `false` |
+| `SUBSONIC_ONLINE_SEARCH` | `subsonic.onlineSearch` | Enable Subsonic online search | `true` |
+| `SUBSONIC_ONLINE_SEARCH_MODE` | `subsonic.onlineSearchMode` | Subsonic online search mode (`fallback` / `merge` / `local_only`) | `fallback` |
+| `SUBSONIC_ONLINE_SEARCH_SOURCES` | `subsonic.onlineSearchSources` | Subsonic online search default platforms | `wy,tx,kw,kg,mg` |
+| `SUBSONIC_PUBLIC_LEADERBOARDS` | `subsonic.publicLeaderboards` | Expose online shared playlists/leaderboards | `false` |
+| `SUBSONIC_LEADERBOARD_SOURCE` | `subsonic.leaderboardSource` | Subsonic public leaderboard default platform (single platform, e.g., `tx`, `wy`) | `tx` |
+| `SUBSONIC_LYRIC_TRANSLATION` | `subsonic.lyricTranslation` | Include translations in Subsonic lyrics | `true` |
+| `SUBSONIC_CACHE_ON_PLAY` | `subsonic.cacheOnPlay` | Trigger server caching on Subsonic playback (cached to user dir) | `false` |
+| `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback (default off, to avoid server egress) | `false` |
+| `SUBSONIC_QUALITY_ENABLED` | `subsonic.quality.enabled` | Enable Subsonic audio quality selection | `true` |
+| `SUBSONIC_QUALITY_PRIORITY` | `subsonic.quality.priority` | Subsonic audio quality priority order (e.g. `flac,320k,128k`) | `flac,320k,128k` |
+| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | Cross-platform candidate priority | `kw,tx,wy,mg,kg` |
+| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | Allow cross-platform candidate lookup | `true` |
+| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | Try other custom scripts on the same platform | `true` |
+| `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |
+| `CACHE_NAMING_PATTERN` | `cache.namingPattern` | simple, standard, singer_name_quality_album, singer_name, name_singer | `simple` |
+| `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
+| `LX_USER_<username>` | `users` | Create account using a password string | — |
 
-## Core Configuration Parameter Dictionary
+Boolean values are case-insensitive: `true/1/yes/y/on` and `false/0/no/n/off`.
 
-The following list an array of environment variable (ENV) parameters that affect critical service behaviors:
+`LX_USER_<username>` accepts a password string. Use user management for advanced account settings; JSON in that environment variable is not an advanced-account configuration format.
 
-### I. Network Communication and Underlying Service Configuration
+Options without environment mappings include `subsonic.standalone`, `subsonic.localPlaylist`, `subsonic.customPlaylist` and category proxies `proxy.music.*`, `proxy.customSource.*`, `proxy.app.*`. Category proxy `enabled` inherits the global setting when unset, forces direct connection when false and enables that category's proxy when true; an empty category address falls back to the global address.
 
-This module manages the Node.js listening process and the basic settings of the network stack.
+See the [code defaults](https://github.com/XCQ0607/lxserver/blob/main/src/defaultConfig.ts).
 
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :-------------------- | :------------ | :------- | :-------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `PORT` | `9527` | Integer | **Service listening port**. It is recommended to avoid using other high-frequency ports in the host (such as 80, 443, 3306). |
-| `BIND_IP` | `0.0.0.0` | String | **Scope of service binding IP interfaces**. Set to `127.0.0.1` to accept only local Lookback calls; set to `0.0.0.0` means listening to all internal and external available network adapters of the host simultaneously. |
-| `ADMIN_PATH` | `'/admin'` | String | **Backend management interface path**. Default is `/admin`. |
-| `PLAYER_PATH` | `'/'` | String | **Web player access path**. Default is the root path `/`. |
-| `SERVER_NAME` | `LX Sync Server` | String | **Sync service name**. Showed in client connections, backend management console title, and admin login card title. |
-| `PROXY_HEADER` | `x-real-ip` | String | **Reverse proxy remote IP penetration identifier**. When the system runs behind reverse proxies or load balancers such as Nginx, it is used to extract the true client source IP address to ensure accurate traceability of equipment audit logs. |
-| `PROXY_ALL_ENABLED` | `false` | Boolean | **Enable global outgoing request proxy**. If enabled, network requests from the server (e.g. search, resolving) will go through the proxy. |
-| `PROXY_ALL_ADDRESS` | `''` | String | **Proxy address**. Supports `http://` or `socks5://`, e.g. `socks5://127.0.0.1:10808`. |
-| `DISABLE_TELEMETRY` | `false` | Boolean | **System telemetry feedback circuit breaker**. Set to `true` will completely block anonymous state probe packets between the system and external nodes, and disable all system-level new version updates or announcement distributions. |
+## Storage, backups and updates
 
-> 💡 **Boolean Environment Variable Format Note**:
-> All boolean environment variables support flexible case-insensitive formats:
-> - **Enabled (True)**: `true` / `1` / `yes` / `y` / `on`
-> - **Disabled (False)**: `false` / `0` / `no` / `n` / `off`
+| Location | Contents |
+| --- | --- |
+| `data/` or `DATA_PATH` | Configuration, accounts, playlists, preferences and runtime state |
+| `data/config.js` unless `CONFIG_PATH` is set | Active server configuration |
+| Root `cache/` and `music/` | Audio/indexes in root-directory storage mode |
+| Data-directory `cache/` and `music/` | Audio/indexes in data-directory storage mode |
+| Custom library path | Existing external audio files; preserve its mounts separately |
+| Log directory | Source default: `logs/`; image default: `data/logs/` |
 
-### II. Persistence and Account Sandbox Management Strategy
+Audio folders are further scoped by account. A temporary browse switch neither moves files nor changes the saved account location.
 
-This module involves monitoring the status of connected clients and isolation specifications at the physical storage level.
+Keep `subsonic-local-registry.json` and `subsonic-local-state.json` with user data: they preserve local identities, favorites and playlist relationships. They are not disposable audio caches.
 
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :-------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ADMIN_PASSWORD` | `123456` | String | **Admin Password**. Used to log into the management console (default `/admin`) and the music player admin login. Recommended to modify immediately on setup. |
-| `MAX_SNAPSHOT_NUM` | `10` | Integer | **Time snapshot retention threshold setting**. The maximum allowed length of the historical archive snapshot queue retained by the system. Early histories exceeding this queue limit will be cyclically discarded by the underlying timed GC task. |
-| `DATA_PATH` | `./data` | String | **Data directory path**. Specifies where persistence data (users.json, snapshots) are stored. |
-| `LOG_PATH` | `./logs` | String | **Log directory path**. Specifies where system logs are stored. |
-| `CONFIG_PATH` | `''` | String | **External config path**. Manually specify an extra config.js file path. |
-| `USER_ENABLE_PATH` | `true` | Boolean | **Enable User Path Mode (Recommended)**. When enabled, client sync URL is `http://ip:port/<username>`, and data is isolated per user. **Allows multiple users to use identical passwords**. |
-| `USER_ENABLE_ROOT` | `false` | Boolean | **Enable Root Path Mode**. When enabled, client sync URL is `http://ip:port` (without username), and server auto-matches user by password. **Requires all user passwords to be unique**. |
-| `ENABLE_PUBLIC_USER_RESTRICTION` | `true` | Boolean | **Restrict public user permissions**. If enabled, non-admin public users will be restricted from sensitive operations like uploading source, deleting public sources, caching to server, etc. |
-| `ENABLE_PUBLIC_NON_ADMIN_LOCAL_MUSIC` | `false` | Boolean | **Enable non-admin access to local music**. If enabled, allows non-admin public accounts to access local music. |
-| `ENABLE_PUBLIC_NON_ADMIN_BROWSER_DOWNLOAD` | `true` | Boolean | **Enable non-admin browser download**. If enabled, allows non-admin/public accounts to download songs via browser. |
-| `ENABLE_PUBLIC_NON_ADMIN_SERVER_CACHE` | `false` | Boolean | **Enable non-admin server cache**. If enabled, allows non-admin/public accounts to cache or save songs to server. |
-| `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `false` | Boolean | **Restrict cache settings for logged-in users**. If enabled, non-admin logged-in users will be restricted from modifying core cache settings. |
-| `ENABLE_CACHE_SIZE_LIMIT` | `false` | Boolean | **Enable automatic cache cleanup**. If enabled, the system will monitor and limit the total user cache size, and automatically delete oldest files (LRU) when the limit is reached. |
-| `CACHE_SIZE_LIMIT` | `2000` | Integer | **Cache size limit (MB)**. The threshold at which the auto-cleanup mechanism is triggered. |
+Playlist snapshots restore playlists; configuration backups restore configuration. Neither substitutes for audio backups. Configuration backups default to a seven-day retention period under the data directory's `backups/` folder.
 
-### III. WebDAV Configuration
+WebDAV and OpenList use the data types selected in **System settings → Cloud backup scope**. Startup restore is off by default and requires `backup.webdav.restoreOnStartup=true`. `backup.webdav.types` and `backup.openlist.types` independently select each destination's scope. Music means `data/music`; cache and external libraries are excluded. See [Cloud backup and recovery](./backup-recovery.md) for provider behavior, compatibility and restore steps.
 
-The underlying periodic polling asynchronous daemon of the service will only be fully awakened if the following environment variable group is authorized (especially the `WEBDAV_URL` link effectively takes effect):
-
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :------------------- | :--------- | :------- | :------------------------------------------------------------------------------------------------------------- |
-| `WEBDAV_URL` | `''` | String | Various complete URIs with standard WebDAV protocol gateway interfaces (including HTTPS declaration), for example: `https://dav.jianguoyun.com/dav/Sync`. |
-| `WEBDAV_USERNAME` | `''` | String | Authorization identification name used for WebDAV service node handshake authentication. |
-| `WEBDAV_PASSWORD` | `''` | String | Remote WebDAV gateway access key (highly recommended to use an independent application-specific authorization password to reduce secondary leakage risks). |
-| `SYNC_INTERVAL` | `60` | Integer | Cold shrinking timed parameters (unit: minutes) that trigger full thermal backup and pull comparison synchronization flow periods. |
-
-> 🔖 **Stateful Resurrection and Initialization Mechanism**:
-> 1. **Cloud-First Restoration**: If this set of variables is detected at startup, the system will prioritize attempting to pull archives from the cloud.
-> 2. **Environment-Driven Persistence**: If the cloud config is empty (e.g., first deployment in Docker/Cloud), the system will **automatically persist the current effective configuration (such as ports, passwords set via environment variables) into `data/config.js` in the data directory and upload it to the cloud** for initialization. This ensures you can establish the initial cloud data solely through environment variables.
-
-### IV. Web-side Composite Media Playback Space Protection Logic
-
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :------------------------ | :--------- | :------- | :------------------------------------------------------------------------------------------------------------------ |
-| `PLAYER_NAME` | `LX Music Web` | String | **Web player name**. Displayed on the web player tab title, and the player login card title. |
-| `ENABLE_WEBPLAYER_AUTH` | `false` | Boolean | Whether to establish a separate entry-blocking defense wall for the derived browser access interface (rendered under default root path `/`) and refuse direct face-to-face from visitors. |
-| `WEBPLAYER_PASSWORD` | `123456` | String | If the upper-level authentication mode takes effect, it is the separate password dictionary for verification. This gives administrators the ability to decouple keys for different levels of the audience layer and the backend control panel. |
-
-### V. Playlist Management Strategy
-
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :--- | :--- | :--- | :--- |
-| `LIST_ADD_MUSIC_LOCATION_TYPE` | `top` | String | **New song location**. `top` (add to the top) or `bottom` (add to the bottom). |
-
-### VII. Subsonic Protocol Configuration
-
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :--- | :--- | :--- | :--- |
-| `SUBSONIC_ENABLE` | `true` | Boolean | **Enable Subsonic protocol**. Allows connections from Subsonic-compatible clients. |
-| `SUBSONIC_PATH` | `'/rest'` | String | **Subsonic access path**. Default is `/rest`. |
-| `SUBSONIC_ENABLE_DEBUG` | `false` | Boolean | **Enable Subsonic debug log mode**. Default is `false`. |
-| `SUBSONIC_ONLINE_SEARCH` | `true` | Boolean | **Enable Subsonic online search**. Supports searching and streaming external online tracks in Subsonic clients. |
-| `SUBSONIC_ONLINE_SEARCH_MODE` | `'fallback'` | String | **Subsonic online search mode**. `fallback`, `merge`, or `local_only`. |
-| `SUBSONIC_ONLINE_SEARCH_SOURCES` | `'wy,tx,kw,kg,mg'` | String | **Subsonic default online search sources**. Comma-separated platform codes. |
-| `SUBSONIC_LYRIC_TRANSLATION` | `true` | Boolean | **Include translations in Subsonic lyrics**. |
-
-### VIII. Business Feature Extension Configuration
-
-| Environment Variable Mapping Key (ENV) | System Default Value | Data Type | Scope and Applicable Scenarios |
-| :--- | :--- | :--- | :--- |
-| `SINGER_SOURCE_PRIORITY` | `'tx,wy'` | String | **Singer source priority**. Controls the priority order for fetching singer details, photos, and Mid. Available values are `tx` (Tencent) and `wy` (Netease), separated by commas. |
-| `ARTIST_MAX_FETCH_PAGES` | `20` | Integer | **Maximum fetch pages for artist tracks**. Upper limit when fetching full song lists for artists. |
-| `CACHE_NAMING_PATTERN` | `'simple'` | String | **Cache file naming pattern**. `simple` or `custom`. |
-| `SYSTEM_ALLOW_UNSAFE_VM` | `false` | Boolean | **Allow unsafe VM custom source scripts**. If enabled, allows running custom source scripts requiring VM sandbox features (use with caution). |
-
-### IX. (Advanced Feature) Silent Preset Accounts in CLI Environment
-
-With the pre-declaration strategy at the operating system level, users can statically write accounts into the data persistence layer within the server initialization startup sequence without skipping graphical interface configuration:
-
-Based on the prefix regex extraction mechanism: Adopt the naming rule of `LX_USER_<target signature string>=<password string>` to write into environment variables to achieve authorized interception and building file execution.
-
-#### Example of environment variable dispatch startup:
+For container updates:
 
 ```bash
-# Execute this system declaration, and the accompanying script task will land these three entity records into the data system for authorized issuance.
-export LX_USER_foo="mypassword123"
-export LX_USER_bar="mypassword321"
-export LX_USER_hello="12345"
-npm run start
+docker compose pull
+docker compose up -d
+docker compose logs --tail=100
 ```
 
-*(Note: After the successful accompanying system control operation mentioned above, this memory object will be converted into entity data and permanently archived to the mounted `<DATA_PATH>/users.json` file for continuous function verification.)*
+Preserve all used storage first. Source updates require dependency installation, rebuilding and restarting. Verify account access, playlists, local scanning and actual playback after migration.
 
----
+## Advanced account and path settings
 
-When using Docker environments to orchestrate services, it is recommended that you directly convert the contents of this configuration file mapping manual into an `environment` array in `docker-compose.yml`, or append `-e [KEY]=[VALUE]` to the container parameter adjustment command to achieve system feature definitions and smooth startup.
+### Configuration fragment
+
+This example illustrates the separate Subsonic listener and a user directory. Merge the fields into your existing object; do not replace a complete configuration with this fragment:
+
+```js
+module.exports = {
+  'subsonic.enable': true,
+  'subsonic.standalone': true,
+  'subsonic.port': 4050,
+  'user.enableCustomMusicDir': true,
+  users: [
+    {
+      name: 'user1',
+      password: 'replace-with-your-user-password',
+      enableCustomMusicDir: true,
+      customMusicDir: '/library',
+      allowOperateCustomMusicDir: false,
+      allowWriteCustomMusicDir: false,
+    },
+  ],
+}
+```
+
+`/library` is a Linux/container example. A direct Windows run can use a real path such as `D:/Music`. Leave operation/write permissions disabled while verifying browsing and playback. A separate Docker listener also needs a `4050:4050` port mapping.
+
+### Set a temporary startup environment
+
+Bash:
+
+```bash
+DATA_PATH=/absolute/path/to/test-data PORT=9528 npm run dev
+```
+
+PowerShell:
+
+```powershell
+$env:DATA_PATH = 'D:\lxserver-test-data'
+$env:PORT = '9528'
+npm run dev
+```
+
+These commands do not change other terminals' environments. Use a directory separate from your regular instance and check that the test configuration does not restore the same WebDAV namespace.
+
+Use user management for custom paths, operation/write permissions, automatic downloads and account disablement. Manual configuration uses the JavaScript configuration object's users array; existing users.json and remote restoration also affect the final account list. Editing only the root example config does not necessarily override deployed accounts.
+
+Paths belong to the server's environment: host paths for source runs, container paths for Docker. Application permission cannot override a read-only filesystem mount. Browsing another location does not move audio; storage migration is a separate operation.
+
+## Checks after changing configuration
+
+- Ports: verify main/separate Subsonic listeners and matching container mappings.
+- Paths: check player, console and clients; avoid duplicated proxy prefixes.
+- Proxies: distinguish outgoing category proxies from media forwarding; verify search and actual playback separately.
+- Directories: check mounts, account permissions and scans, not just saved strings.
+- WebDAV: check remote namespace, exclusions, recovery logs and effective settings.
+
+See [deployment](./getting-started.md) and [operations](./operations.md).

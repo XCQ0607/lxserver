@@ -1,0 +1,83 @@
+Bundled license information:
+
+@vue/shared/dist/shared.esm-bundler.js:
+  /**
+  * @vue/shared v3.5.44
+  * (c) 2018-present Yuxi (Evan) You and Vue contributors
+  * @license MIT
+  **/
+
+@vue/reactivity/dist/reactivity.esm-bundler.js:
+  /**
+  * @vue/reactivity v3.5.44
+  * (c) 2018-present Yuxi (Evan) You and Vue contributors
+  * @license MIT
+  **/
+
+@vue/runtime-core/dist/runtime-core.esm-bundler.js:
+  /**
+  * @vue/runtime-core v3.5.44
+  * (c) 2018-present Yuxi (Evan) You and Vue contributors
+  * @license MIT
+  **/
+
+@vue/runtime-dom/dist/runtime-dom.esm-bundler.js:
+  /**
+  * @vue/runtime-dom v3.5.44
+  * (c) 2018-present Yuxi (Evan) You and Vue contributors
+  * @license MIT
+  **/
+
+vue/dist/vue.runtime.esm-bundler.js:
+  /**
+  * vue v3.5.44
+  * (c) 2018-present Yuxi (Evan) You and Vue contributors
+  * @license MIT
+  **/
+
+@uppy/core/lib/utils/Translator.js:
+  /**
+   * Takes a string with placeholder variables like `%{smart_count} file selected`
+   * and replaces it with values from options `{smart_count: 5}`
+   *
+   * @license https://github.com/airbnb/polyglot.js/blob/master/LICENSE
+   * taken from https://github.com/airbnb/polyglot.js/blob/master/lib/polyglot.js#L299
+   *
+   * @param phrase that needs interpolation, with placeholders
+   * @param options with values that will be used to replace placeholders
+   */
+
+vue-advanced-cropper/dist/index.esm-bundler.js:
+  /*!
+    Copyright (c) 2018 Jed Watson.
+    Licensed under the MIT License (MIT), see
+    http://jedwatson.github.io/classnames
+  */
+  /*! *****************************************************************************
+  Copyright (c) Microsoft Corporation.
+  
+  Permission to use, copy, modify, and/or distribute this software for any
+  purpose with or without fee is hereby granted.
+  
+  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
+  REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
+  AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
+  INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
+  LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
+  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
+  PERFORMANCE OF THIS SOFTWARE.
+  ***************************************************************************** */
+
+overlayscrollbars/overlayscrollbars.mjs:
+  /*!
+   * OverlayScrollbars
+   * Version: 2.17.0
+   *
+   * Copyright (c) Rene Haas | KingSora.
+   * https://github.com/KingSora
+   *
+   * Released under the MIT license.
+   */
+
+@viselect/vanilla/dist/viselect.js:
+  /*! @viselect/vanilla v3.10.1 MIT | https://github.com/simonwep/viselect/tree/master/packages/vanilla */

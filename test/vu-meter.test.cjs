@@ -1,10 +1,10 @@
 const { test } = require('node:test')
 const assert = require('node:assert/strict')
-const { readFileSync, existsSync } = require('node:fs')
+const { readFileSync } = require('node:fs')
 const vm = require('node:vm')
 
 function createVisualizerEnvironment() {
-  const filePath = existsSync('public/music/js/visualizer.js') ? 'public/music/js/visualizer.js' : 'public/music/js/player/visualizer.js'
+  const filePath = 'public/music/js/player/visualizer.js'
   const code = readFileSync(filePath, 'utf8')
   const listeners = {}
   let currentTime = 1000
@@ -49,7 +49,7 @@ test('vuToNorm accurately maps dial scale points to dial tick norms', () => {
   assert.ok(LXStudioVUMeterAnimation, 'LXStudioVUMeterAnimation must be exported on window')
 
   const vu = new LXStudioVUMeterAnimation()
-  
+
   // Test scale bounds and tick alignments matching canvas masterTicks
   assert.equal(vu.vuToNorm(-30), 0.0)
   assert.ok(Math.abs(vu.vuToNorm(-20) - 0.08) < 1e-3, '-20 VU must map to norm 0.08')
@@ -88,6 +88,13 @@ test('design-study dials fall back to Nocturne for unsupported themes', () => {
   const legacy = { 'vintage-amber': 'study-nocturne', 'ocean-blue': 'study-nocturne', 'cyber-cyan': 'study-nocturne', 'champagne-gold': 'study-nocturne', 'studio-monochrome': 'study-nocturne', unknown: 'study-nocturne' }
   for (const [from, to] of Object.entries(legacy)) {
     assert.equal(LXStudioVUMeterAnimation.normalizeTheme(from), to)
+  }
+  for (const id of STUDY_THEMES) {
+    assert.equal(LXStudioVUMeterAnimation.normalizeTheme(id), id)
+  }
+  for (const id of ['constructor', 'toString', '__proto__', null, undefined]) {
+    assert.equal(LXStudioVUMeterAnimation.normalizeTheme(id), 'study-nocturne')
+    assert.ok(vu.getDesign(id).geometry)
   }
 })
 

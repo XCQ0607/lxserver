@@ -12,7 +12,7 @@ To ensure security, server endpoints enforce different authentication mechanisms
    - Header: `x-frontend-auth: <Admin Password>`
    - Uses the master administrator password (`admin.password`). Required for global configurations, user administration, file manager, WebDAV backup/restore, and server process restarts.
 2. **User Token Authentication (`x-user-token`)**:
-   - Header: `x-user-token: <Token>` or Query string: `?token=<Token>` for stream endpoints.
+   - Header: `x-user-token: <Token>`. Query-token support is endpoint-specific, not a general substitute.
    - Uses a session token issued upon login or a persistent API token. Used for operating user-specific playlists, favorite libraries, dislike rules, cache management, and sound effects.
 3. **Web Player Cookie Authentication (`lx_player_session`)**:
    - Uses an HttpOnly `lx_player_session` cookie for independent web player access control.
@@ -131,7 +131,7 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 
 ### 4.1 Search & Leaderboards
 - **`GET /api/music/search`**: Search songs across platforms (`kw`, `kg`, `tx`, `wy`, `mg`).
-- **`GET /api/music/tipSearch`**: Search keyword suggestions (`?source=...&text=...`).
+- **`GET /api/music/tipSearch`**: Search keyword suggestions (`?source=...&name=...`).
 - **`GET /api/music/hotSearch`**: Real-time hot search keywords from online platforms.
 - **`GET /api/music/songList/tags`**: Get playlist category tags.
 - **`GET /api/music/songList/list`**: Get curated playlists by tag.
@@ -140,6 +140,32 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 - **`GET /api/music/songList/userPlaylist`**: Get user public playlists from platforms.
 - **`GET /api/music/leaderboard/boards`**: Get leaderboard categories.
 - **`GET /api/music/leaderboard/list`**: Get songs inside a leaderboard.
+
+
+#### Search parameters and response
+
+| Query | Meaning |
+| --- | --- |
+| `name` | Required keyword; missing value returns HTTP 400 plain text `Missing name` |
+| `source` | `kw` (default), `kg`, `tx`, `wy`, `mg`; aggregation uses separate frontend requests, not `source=all` |
+| `type` | `song` (default), `singer`, `album`, `playlist`; support varies by source |
+| `page` | Default 1; songs use it only with an explicit positive `limit` |
+| `limit` | Positive: one song page, capped at source page size. Omitted/non-positive: serial fetching from page 1. Other types default to 20 per page |
+
+Success is an **object**, not an array. Read `data.list`:
+
+```json
+{"list": [], "total": 100, "allPage": 5, "pageSize": 20, "fetchedPages": 2, "stopReason": "single-page", "hasMore": true, "source": "kw"}
+```
+
+- `total/allPage` are upstream values with computed fallbacks and may be estimates; use `list.length` for received count and local pagination.
+- `fetchedPages` is the last fetched upstream page number, not the request count.
+- Serial fetching checks budgets of 60 pages, 4000 items and 15 seconds before subsequent requests; these are not strict item or HTTP timeout guarantees.
+- `stopReason`: `all-pages`, `single-page`, `empty-page`, `repeat-page`, `page-cap`, `page-wall`, `item-budget`, `time-budget`.
+- `hasMore` indicates truncation; single-page mode only checks whether the page reached `pageSize`. False after empty/repeated/final pages does not prove all platform tracks were accessible.
+- Singer/album/playlist responses have `list,total,allPage,pageSize,fetchedPages,source`, without `hasMore/stopReason`.
+- Unsupported sources/types or first-page failures return HTTP 500 with `{"error":"...","code":500}`. Later-page failures may return partial results with `page-wall`.
+- Tip search accepts `name,source` and returns an array (`[]` on missing keyword/upstream failure).
 
 ### 4.2 Audio URL Resolution & Streaming
 - **`POST /api/music/url`**: Resolve audio direct URL (supports quality fallback and multi-source matching).
@@ -153,7 +179,7 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 ### 4.3 Enhanced Metadata Details
 - **`GET /api/music/artistDetail`**: Rich artist profile, follower count, and HD artwork.
 - **`GET /api/music/artistAlbums`**: Paged albums of an artist.
-- **`GET /api/music/artistSongs`**: Paged songs of an artist.
+- **`GET /api/music/artistSongs`**: Fetch songs serially as an array, bounded by artist.maxFetchPages (default 20 pages, 100 tracks per page).
 - **`GET /api/music/albumSongs`**: Get all tracks inside an album.
 
 ---
@@ -215,7 +241,7 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 - **`GET /api/music/custom/embedLyric` / `POST /api/music/custom/embedLyric`**: Embed lyrics into local files.
 
 ### 6.2 Remaster & Quality Upgrade (`/api/music/remaster/*`)
-- **`POST /api/music/remaster/start`**: Start remaster queue (downloads higher quality lossless files to replace lower bitrates).
+- **`POST /api/music/remaster/start`**: Start quality-replacement download queue: required targetQuality and nonempty filenames (up to 10000), optional isCustomDir. Custom-directory operations require allowOperateCustomMusicDir. This is not a local encoding/transcode endpoint.
 - **`GET /api/music/remaster/status`**: Get remaster task status and progress.
 - **`POST /api/music/remaster/cancel`**: Cancel active remaster queue.
 
@@ -258,7 +284,7 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 - **`POST /api/config`**: Incrementally update configuration items (ports, paths, subsonic behaviors, proxy settings).
 - **`POST /api/config/test-proxy`**: Test proxy server connectivity.
 - **`POST /api/admin/reload`**: Hot reload `config.js`, `users.json`, and user script sources.
-- **`POST /api/restart`** (alias `/api/admin/restart`): Safely restart server process.
+- **`POST /api/restart`**: Safely restart server process.
 - **`GET /api/logs`**: Read access and error logs.
 - **`GET /api/stats`**: Performance and memory usage statistics.
 - **`POST /api/utils/check-dir`**: Validate if a local directory exists and is accessible.
@@ -283,12 +309,29 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 - **`GET /api/webdav/logs`**: Get WebDAV synchronization logs.
 - **`GET /api/webdav/progress`**: **SSE streaming endpoint**, real-time sync progress.
 
-### 9.4 File Manager API (ElFinder Connector)
-- **`GET /api/elfinder/connector` / `POST /api/elfinder/connector`**: Backend connector for ElFinder web file manager.
-- **`GET /api/files`**: List files in data directory.
-- **`GET /api/files/download`**: Download files from data directory.
-- **`POST /api/files` / `PUT /api/files`**: Upload or update files.
-- **`DELETE /api/files`**: Delete files.
+### 9.4 File Manager API (VueFinder RemoteDriver)
+
+The active handler is `src/server/integrations/fileManager.ts`. The former ElFinder connector and PUT/DELETE `/api/files` contract are obsolete. Use `x-frontend-auth`. Only media GET/HEAD can alternatively use the one-hour HttpOnly `lx_files` cookie issued by `POST /api/files/session`; restart invalidates it.
+
+Virtual paths: `root://` is the process working directory; `data://` is the data directory.
+
+| Method / path | Fields / behavior |
+| --- | --- |
+| `POST /api/files/session` | Issue media cookie; return storages and upload limit |
+| `GET /api/files` | Query `path=root://`; return storages, dirname, files, read_only |
+| `GET /api/files/search` | Query path, filter, deep=1, size=all/small/medium/large |
+| `GET/HEAD /api/files/preview`, `GET/HEAD /api/files/download`, `GET/HEAD /api/files/thumbnail` | Query path; preview/download support Range; thumbnail returns WebP |
+| `POST /api/files/upload` | Multipart path, files, optional overwrite=1; 1 GiB per file |
+| `POST /api/files/create-file`, `POST /api/files/create-folder` | JSON path, name |
+| `POST /api/files/rename` | JSON path, item, name |
+| `POST /api/files/delete` | JSON path, items:[{path:"data://example.txt"}] |
+| `POST /api/files/copy`, `POST /api/files/move` | JSON destination, sources:["data://example.txt"] |
+| `POST /api/files/save` | JSON path, content; text up to 8 MiB |
+| `POST /api/files/archive` | JSON destination (or path), name, items:[{path:"data://example.txt"}]; create ZIP |
+| `POST /api/files/unarchive` | JSON destination (or path), item (ZIP virtual path); extract ZIP |
+
+Errors return `{"message":"..."}` with the corresponding HTTP status.
+
 
 ---
 
@@ -306,3 +349,13 @@ Used for managing persistent API Tokens for third-party scripts and clients. Req
 - **`GET /id`** (or `/<username>/id`): Get server unique ID (`ServerId`).
 - **`POST /ah`** (or `/<username>/ah`): Auth negotiation and client pairing.
 - **`WebSocket Upgrade (WS)`**: Client upgrades HTTP connection to WebSocket Server for encrypted real-time sync.
+
+## 11. Additional task APIs and route index
+
+- `POST /api/music/user/list/reorder`: user token; JSON listId, orderedSongIds. Unlisted songs are appended; success is plain text.
+- `GET /api/music/auto-link/candidates?custom=true`: matching candidates; omit custom for cache.
+- `POST /api/music/auto-link/start`: JSON keys, sources, custom, concurrency; optional query browseLocation. Custom writes require allowWriteCustomMusicDir.
+- `GET /api/music/auto-link/status?offset=0&limit=200`, `POST /api/music/auto-link/cancel`: inspect/cancel matching.
+- Auto-link requires user token; success: `{"success":true,"data":...}`; business errors: HTTP 400, `{"success":false,"message":"..."}`.
+
+See the [current route index](./routes.md) for all route entries and directly read fields.

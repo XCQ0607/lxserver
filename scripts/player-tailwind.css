@@ -1,0 +1,146 @@
+/* stylelint-disable */
+@import "tailwindcss" source(none);
+
+@source "../public/music/**/*.html";
+@source "../public/music/app.js";
+@source "../public/music/js/**/*.js";
+@source inline("{,hover:,dark:}{bg,text,border,ring}-{red,orange,amber,yellow,green,emerald,teal,cyan,blue,indigo,violet,purple,pink,gray,slate}-{50,100,200,300,400,500,600,700,800,900,950}");
+
+@custom-variant dark (&:is(.dark, .dark *, [data-appearance="dark"], [data-appearance="dark"] *));
+
+@theme {
+  /* Keep every breakpoint in px so Tailwind v4 media query sorting stays monotonic */
+  --breakpoint-sm: 640px;
+  --breakpoint-md: 1025px;
+  --breakpoint-lg: 1280px;
+  --breakpoint-xl: 1440px;
+  --breakpoint-2xl: 1536px;
+
+  /* Preserve Tailwind v3 4px blur-sm / backdrop-blur-sm scale */
+  --blur-sm: 4px;
+
+  /* Map emerald palette to dynamic theme CSS variables */
+  --color-emerald-50: var(--c-50);
+  --color-emerald-100: var(--c-100);
+  --color-emerald-200: var(--c-200);
+  --color-emerald-300: var(--c-300);
+  --color-emerald-400: var(--c-400);
+  --color-emerald-500: var(--c-500);
+  --color-emerald-600: var(--c-600);
+  --color-emerald-700: var(--c-700);
+  --color-emerald-800: var(--c-800);
+  --color-emerald-900: var(--c-900);
+  --color-emerald-950: var(--c-950);
+
+  /* Register custom theme surface/text/border tokens */
+  --bg-main: var(--bg-main);
+  --bg-panel: var(--bg-panel);
+  --bg-header: var(--bg-header);
+  --text-main: var(--text-main);
+  --text-muted: var(--text-muted);
+  --text-dim: var(--text-dim);
+  --border-main: var(--border-main);
+  --border-dim: var(--border-dim);
+}
+
+@property --fa-display {
+  syntax: "*";
+  inherits: false;
+  initial-value: inline-block;
+}
+
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--border-dim, var(--color-gray-200, currentColor));
+    --tw-ring-color: color-mix(in srgb, var(--c-500, #3b82f6) 50%, transparent);
+  }
+
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  /* Prevent parent display utilities (.block, .flex, etc.) from leaking --fa-display to child FontAwesome icons */
+  .fa,
+  .fas,
+  .far,
+  .fab,
+  .fa-solid,
+  .fa-regular,
+  .fa-brands,
+  .fa-classic,
+  .fa-sharp {
+    --fa-display: inline-block;
+  }
+}
+
+/* Native Tailwind v4 theme utilities — automatically support hover:, md:, dark:, etc. and /opacity modifiers */
+@utility t-bg-* {
+  background-color: --value(--bg-*) !important;
+  background-color: color-mix(in srgb, --value(--bg-*) --modifier(integer)%, transparent) !important;
+}
+
+@utility t-bg-panel-light {
+  background-color: color-mix(in srgb, var(--bg-panel) 75%, var(--bg-main)) !important;
+}
+
+@utility t-bg-item-hover {
+  &:hover {
+    background-color: var(--bg-item-hover) !important;
+  }
+}
+
+@utility t-bg-glass {
+  background-color: var(--bg-glass) !important;
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+@utility t-text-* {
+  color: --value(--text-*) !important;
+  color: color-mix(in srgb, --value(--text-*) --modifier(integer)%, transparent) !important;
+}
+
+@utility t-border-* {
+  border-color: --value(--border-*) !important;
+  border-color: color-mix(in srgb, --value(--border-*) --modifier(integer)%, transparent) !important;
+}
+
+@utility t-shadow {
+  box-shadow: var(--shadow-main) !important;
+}
+
+/* Ensure Tailwind v4 display utilities seamlessly work with FontAwesome's --fa-display variable */
+@utility hidden {
+  --fa-display: none;
+  display: none;
+}
+
+@utility block {
+  --fa-display: block;
+  display: block;
+}
+
+@utility inline-block {
+  --fa-display: inline-block;
+  display: inline-block;
+}
+
+@utility flex {
+  --fa-display: flex;
+  display: flex;
+}
+
+@utility inline-flex {
+  --fa-display: inline-flex;
+  display: inline-flex;
+}
+
+
+
+
+

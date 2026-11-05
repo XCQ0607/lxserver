@@ -1,69 +1,22 @@
-# 快速启动部署指南
+# 部署与首次使用
 
-欢迎使用 LX Music 数据同步与 Web 播放中枢服务。该平台提供私有化云端数据同步集成方案，并随附功能齐备的在线媒体高品质流播放能力。
+## 选择运行方式
 
-## 基础设施依赖
+| 方式 | 适用情况 | 需要准备 |
+| --- | --- | --- |
+| Docker / Docker Compose | NAS、服务器、长期运行 | Docker，保存配置和音乐的宿主机目录 |
+| Node.js 源码运行 | 本地开发、自行修改或编译 | Node.js 22 或更高版本、npm、Git |
+| Release 服务端压缩包 | 使用已编译的服务端 | Node.js，包含编译产物的发行包 |
+| 桌面客户端 | 在桌面窗口中管理与使用服务 | 与操作系统、CPU 架构匹配的安装包 |
+| PM2 托管 | 已编译的 Node.js 服务长期运行 | 单独安装 PM2，先完成构建 |
 
-在启动本服务项目前，请确保承载该实例的主机系统（或虚拟机、容器化设施）符合以下最低先决条件：
+默认主端口是 `9527`。启动后，播放器位于 `/`，管理后台位于 `/admin`，Subsonic 路径为 `/rest`。
 
-**直接基于源码运行：**
+## Docker Compose
 
-- **Node.js**: `v20.x` 或更高版本（生产环境推荐采用 `v20.x` / `v22.x` 的长期支持 LTS 版本）。
-- **网络资源**: 确保业务所需的监听端口（默认配置为 `9527`）已在主机防火墙策略及云服务商安全组规则中正确放行入口流量。
-
-**基于容器化设施运行（生产首选）：**
-
-- `Docker Engine` 引擎运行时。
-- `Docker Compose`（当涉及声明式服务编排时必需）。
-
----
-
-## 部署执行方案与最佳实践
-
-### 方案一：使用桌面客户端
-
-对于桌面用户，我们强烈推荐使用基于 Electron 的**桌面客户端**。它集成了服务器管理与播放器，且具备系统托盘常驻功能。
-
-1. **前往下载**: [GitHub Releases](https://github.com/XCQ0607/lxserver/releases/latest)
-2. **选择版本**:
-   - **Windows**: 下载 `Universal.exe` (全架构合一) 或 `portable.exe` (绿色版)。
-   - **macOS**: 下载 `universal.dmg` (支持 Intel/M1/M2)。
-   - **Linux**: 提供 `.deb` (Debian/Ubuntu) 和 `.AppImage` 格式。
-3. **初始化**: 首次运行将引导你选择数据存储位置，随后服务将自动在后台启动并在系统托盘可见。
-
-### 方案二：基于 Docker 引擎的容器化部署
-
-本项目支持从 Docker Hub 或 GitHub Packages 拉取镜像：
-
-- **Docker Hub**: `xcq0607/lxserver:latest`
-- **GitHub Packages**: `ghcr.io/xcq0607/lxserver:latest`
-
-执行以下指令启动容器：
-
-```bash
-docker run -d \
-  -p 9527:9527 \
-  -v $(pwd)/data:/server/data \
-  -v $(pwd)/logs:/server/logs \
-  -v $(pwd)/cache:/server/cache \
-  -v $(pwd)/music:/server/music \
-  --name lx-sync-server \
-  --restart unless-stopped \
-  xcq0607/lxserver:latest
-```
-
-**容器挂载卷 (Volume Mappings) ：**
-
-- `-v $(pwd)/data:/server/data`：该项配置为**核心必选项**。负责将实例内生成的所有应用层状态数据导出宿主机持久保存。
-- `-v $(pwd)/logs:/server/logs`：用于承接并输出服务应用层所有分级审计日志的物理挂载点。
-- `-v $(pwd)/cache:/server/cache`：用于存放音乐缓存文件，极大提升重复播放时的加载速度。
-- `-v $(pwd)/music:/server/music`：用于存放仅下载歌曲文件。
-
-**声明式 Docker Compose ：**
-针对需标准化长久管理的生产实施，创建名为 `docker-compose.yml` 的定义配置：
+在准备保存数据的目录中创建 `compose.yaml`：
 
 ```yaml
-version: '3'
 services:
   lx-sync-server:
     image: xcq0607/lxserver:latest
@@ -73,86 +26,124 @@ services:
       - "9527:9527"
     volumes:
       - ./data:/server/data
-      - ./logs:/server/logs
       - ./cache:/server/cache
       - ./music:/server/music
+      # 使用已有音乐目录时再添加挂载，例如：
+      # - /mnt/nas/music:/library:ro
     environment:
-      - NODE_ENV=production
-      # - ADMIN_PASSWORD=123456
-      # - ENABLE_WEBPLAYER_AUTH=true
-      # - WEBPLAYER_PASSWORD=yourpassword
+      NODE_ENV: production
+      ADMIN_PASSWORD: "replace-with-your-admin-password"
+      ENABLE_WEBPLAYER_AUTH: "true"
+      WEBPLAYER_PASSWORD: "replace-with-your-player-password"
+      # 创建同步用户，也可以启动后在后台添加：
+      # LX_USER_user1: "replace-with-your-user-password"
 ```
 
-配置审查无误后，通过指令 `docker-compose up -d` 启动基础架构实例集。
-
-### 方案二：基于物理环境的源码编译部署
-
-针对受限非容器化环境或二次研发拓展场景，需于操作系统直接组装并拉起进程：
+执行：
 
 ```bash
-# 1. 由远端代码仓库提取代码的 Main 主线状态至当前目录
-git clone https://github.com/XCQ0607/lxserver.git 
+docker compose up -d
+docker compose logs -f --tail=100
+```
+
+也可以将镜像名换成 `ghcr.io/xcq0607/lxserver:latest`。固定版本部署时，把 `latest` 换成镜像仓库实际存在的版本标签。
+
+镜像默认将日志写入 `/server/data/logs`，上述 `data` 挂载已包含日志。如需单独保存，增加 `./logs:/server/logs` 挂载，并同时设置 `LOG_PATH: /server/logs`。只挂载 `/server/logs` 不会改变默认日志位置。
+
+`cache` 和 `music` 挂载用于程序根目录存储模式；选择数据目录存储后，相应文件位于 `/server/data` 下。保留这三个挂载，可以在切换存储模式和更新容器时继续使用原文件。
+
+## Docker Run
+
+以下为 Bash 示例，路径相对于当前目录：
+
+```bash
+docker run -d \
+  --name lx-sync-server \
+  --restart unless-stopped \
+  -p 9527:9527 \
+  -v "$(pwd)/data:/server/data" \
+  -v "$(pwd)/cache:/server/cache" \
+  -v "$(pwd)/music:/server/music" \
+  -e ADMIN_PASSWORD="replace-with-your-admin-password" \
+  -e ENABLE_WEBPLAYER_AUTH=true \
+  -e WEBPLAYER_PASSWORD="replace-with-your-player-password" \
+  xcq0607/lxserver:latest
+```
+
+Windows PowerShell 用户可以使用上面的 Compose 文件，避免多行命令和路径语法的差异。
+
+## 从源码运行
+
+```bash
+git clone https://github.com/XCQ0607/lxserver.git
 cd lxserver
-
-# 2. 调用严格解析流程初始化模块依赖库
-npm ci 
-
-# 3. 对 TypeScript 类型及 Vue DOM 模板进行预编译聚合处理
+npm ci
 npm run build
-
-# 4. 执行基于内置调度器的生产节点启动命令
 npm start
 ```
 
-*工程实践提示：在无人值守的服务器环境中执行原生应用托管，建议引入譬如 `pm2` 的进程级调度与重启控制系统：`pm2 start npm --name "lxserver" -- start`。*
+构建会生成服务端 JavaScript、播放器样式和文件管理器前端资源，并检查音频指纹工具。安装和首次构建需要访问依赖仓库及相关二进制下载地址。
 
----
+本地开发使用 `npm run dev`。修改 TypeScript 源码后，生产运行方式需要重新执行 `npm run build`；`npm start` 加载的是 `server/` 中的编译结果。
 
-## 负载前置与 Nginx 反向代理接入策略
+## Release 与桌面客户端
 
-在暴露至公网的主流程节点前，强烈建议接驳成熟的 Web 守护网关实例。此举旨在安全地应用 SSL 加密以及隐藏内部分发端口特性。
+从 [GitHub Releases](https://github.com/XCQ0607/lxserver/releases) 下载对应文件。桌面版选择匹配系统与架构的安装包，具体提供哪些构建以该次发布的附件为准。
 
-以下为适配系统 WebSocket 双工链接机制及追踪用户源端 IP Header 解析的标准化 Nginx 反派配置参考示例（承接通配 `80 / 443` 端向本服务 `9527` 进行流量穿网与隧道接管转发）：
+服务端压缩包需要包含 `server/`、`public/`、`index.js` 和 `package.json` 等运行文件。解压后安装生产依赖并启动：
 
-```nginx
-server {
-    listen 80;
-    server_name music.yourdomain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:9527;
-  
-        # 定义 Header 头传递策略以确保 Node 层可取到客户端外网层 IP
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  
-        # 补全长连接升级特性定义（对内部的同步通信套接字服务必要条件）
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
+```bash
+npm install --omit=dev
+node index.js
 ```
 
----
+GitHub 自动生成的 Source code 压缩包是源码，不能当作已编译的服务端包使用；使用源码包时按前面的源码步骤构建。
 
-## 服务访问与客户端连接指引
+`node index.js` 直接运行编译产物，不执行 npm 生命周期脚本；`npm start` 还会执行音频指纹工具检查和构建信息刷新。使用 npm 启动时需保留发行包中的 `scripts/`。桌面版使用独立的存储设置，端口被占用时会尝试其他端口，以应用实际显示的地址为准。
 
-在服务实例启动后，您可以通过以下方式访问 Web 端或配置客户端连接：
+## PM2 托管与自行构建镜像
 
-### 1. Web 界面访问
-| 模块标识 | 访问地址 | 认证要求 | 说明 |
-| :--- | :--- | :--- | :--- |
-| **Web 播放器** | `http://<服务器IP>:9527/` | 默认免密（可配置 `ENABLE_WEBPLAYER_AUTH` 开启） | 现代化的在线音乐播放器，支持多源搜索与串流。 |
-| **管理后台** | `http://<服务器IP>:9527/admin` | 管理员密码（默认 `123456`） | 用户管理、歌单与快照管理、WebDAV 备份配置及系统参数设置。 |
+先完成依赖安装和构建，再在项目目录执行：
 
-### 2. LX Music 客户端同步（桌面端 / 移动端）
-在客户端「设置 → 同步设置」中选择自定义服务器连接：
-- **用户路径模式（推荐，默认开启）**：连接 URL 填写 `http://<服务器IP>:9527/<用户名>`（例如 `http://192.168.1.100:9527/user1`），密码填写用户密码。**此模式允许多用户密码相同**。
-- **根路径模式（需开启 `USER_ENABLE_ROOT`）**：连接 URL 填写 `http://<服务器IP>:9527`，密码填写用户密码。**此模式要求所有用户密码必须唯一**。
+```bash
+npm install -g pm2
+npm run prd
+pm2 status
+pm2 logs lx-music-sync-server
+pm2 save
+```
 
-### 3. Subsonic 音乐客户端连接
-- **服务器地址**：`http://<服务器IP>:9527/rest`（若配置了 `SUBSONIC_PORT` 独立端口，则为 `http://<服务器IP>:<端口>/rest`）。
-- **认证方式**：使用在管理后台创建的用户账号和密码登录。
+`npm run prd` 调用 `pm2 start ecosystem.config.js --env production`，不会自动构建。PM2 不在项目依赖内，需要单独安装；`pm2 save` 保存进程列表，系统开机自启还需按部署系统配置。
 
-有关在实例化生命周期早期实现底层变量的静默导入、以及配置层级重写的更多前序细节知识，请移步浏览查阅《[配置引擎及环境变量注入指南](./configuration.md)》。
+如需使用自己修改的 Docker 镜像：
+
+```bash
+docker build -t lxserver:local .
+```
+
+把 Compose 中的镜像改为 `lxserver:local` 后启动。桌面包构建命令为 `npm run electron:dist`，原生模块与打包环境要求取决于目标系统；它属于开发构建流程，不是普通服务端的启动命令。
+
+## 第一次启动后
+
+1. 打开 `http://服务器IP:9527/admin`，使用设置的管理员密码登录。未配置时，默认密码是 `123456`。
+2. 在“用户管理”中创建个人账号，设置用户名和同步密码。
+3. 打开 `http://服务器IP:9527/`。若启用了播放器访问认证，先输入播放器访问密码，再按需登录个人账号。
+4. 需要在线播放时，在自定义源管理中导入可用的音源脚本并启用。
+5. 需要管理本地歌曲时，检查存储位置、目录挂载和账号权限，再扫描音乐目录。
+
+管理员密码、播放器访问密码、个人账号密码用途不同，详见“账号与权限”。
+
+## 启动命令的区别
+
+| 命令 | 实际作用 |
+| --- | --- |
+| `npm start` | 运行 prestart 检查后加载已编译的服务 |
+| `node index.js` | 直接加载已编译服务，不执行 npm prestart |
+| `npm run dev` | 用 tsx/nodemon 运行源码，适合开发 |
+| `npm run prd` | 交给 PM2，以 production 环境运行；需先构建 |
+| `docker compose up -d` | 按 Compose 文件创建或启动容器 |
+| `npm run electron:dist` | 构建并打包桌面应用，不是服务端托管命令 |
+
+开发模式与生产模式使用同一份目录时仍可能读取同一套数据。试改功能时可通过环境变量另设 `DATA_PATH`，避免开发实例写入常用账号状态。
+
+客户端地址与同步方式见 [同步及后台指南](./sync-server.md)，完整配置见 [配置指南](./configuration.md)，反向代理、升级、备份和排障见 [运行维护](./operations.md)。

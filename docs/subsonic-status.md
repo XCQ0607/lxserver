@@ -1,6 +1,6 @@
 # Subsonic 协议支持状态对照
 
-> 范围：`src/server/subsonic.ts` 对 Subsonic REST API 的**自定义实现**对照表。
+> 范围：`src/server/integrations/subsonic.ts` 对 Subsonic REST API 的**自定义实现**对照表。
 > 图例：✅ 已实现可用　🟡 占位（返回空 / no-op，兼容客户端握手）　❌ 未实现（返回 `Method not found`）
 > 更新：2026-09-19（协议补全：专辑信息 / 播放上报 / 书签 / 播放队列 / 相似歌曲 / 转码，见第四节）
 

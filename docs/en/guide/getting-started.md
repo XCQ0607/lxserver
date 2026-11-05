@@ -1,69 +1,22 @@
-# Quick Start Deployment Guide
+# Deployment and first run
 
-Welcome to the LX Music Data Synchronization and Web Playing hub service. This platform provides a private cloud data synchronization integration solution, along with a fully functional online high-quality media streaming capability.
+## Choose a runtime
 
-## Infrastructure Dependencies
+| Method | Suitable for | Requirements |
+| --- | --- | --- |
+| Docker / Compose | NAS and unattended servers | Docker and persistent host directories |
+| Source build | Development and custom builds | Node.js 22+, npm and Git |
+| Server release archive | Running compiled server files | Node.js 22+ and the server release package |
+| Desktop app | Using the player and admin console in desktop windows | A package matching your OS and architecture |
+| PM2 | Keeping a compiled Node.js deployment running | A built server and separately installed PM2 |
 
-Before starting this service project, please ensure that the host system (or virtual machine, containerized facility) carrying this instance meets the following minimum prerequisites:
+The main service defaults to port `9527`: player at `/`, admin console at `/admin`, Subsonic at `/rest`.
 
-**Running Directly from Source:**
+## Docker Compose
 
-- **Node.js**: `v20.x` or higher (`v20.x` / `v22.x` LTS version is recommended for production environments).
-- **Network Resources**: Ensure that the listening port required for the business (default configuration is `9527`) has been correctly allowed in the host firewall policy and the cloud provider's security group rules.
-
-**Running on Containerized Facilities (Preferred for Production):**
-
-- `Docker Engine` runtime.
-- `Docker Compose` (required when involving declarative service orchestration).
-
----
-
-## Deployment Execution Plan and Best Practices
-
-### Option 1: Using Desktop Client
-
-For desktop users, we strongly recommend using the **Desktop Client** based on Electron. It integrates the server management and player, featuring system tray support.
-
-1. **Download**: [GitHub Releases](https://github.com/XCQ0607/lxserver/releases/latest)
-2. **Choose Version**:
-   - **Windows**: Download `Universal.exe` (All-in-one) or `portable.exe` (Portable version).
-   - **macOS**: Download `universal.dmg` (Supports Intel/M1/M2).
-   - **Linux**: `.deb` (Debian/Ubuntu) and `.AppImage` formats available.
-3. **Initialization**: The first launch will guide you to select a data storage location, then the service will start in the background and be visible in the system tray.
-
-### Option 2: Containerized Deployment Based on Docker Engine
-
-This project supports pulling images from Docker Hub or GitHub Packages:
-
-- **Docker Hub**: `xcq0607/lxserver:latest`
-- **GitHub Packages**: `ghcr.io/xcq0607/lxserver:latest`
-
-Execute the following command to start the container:
-
-```bash
-docker run -d \
-  -p 9527:9527 \
-  -v $(pwd)/data:/server/data \
-  -v $(pwd)/logs:/server/logs \
-  -v $(pwd)/cache:/server/cache \
-  -v $(pwd)/music:/server/music \
-  --name lx-sync-server \
-  --restart unless-stopped \
-  xcq0607/lxserver:latest
-```
-
-**Container Volume Mappings:**
-
-- `-v $(pwd)/data:/server/data`: This configuration is a **core mandatory item**. It is responsible for exporting all application-layer state data generated within the instance to the host for persistent storage.
-- `-v $(pwd)/logs:/server/logs`: A physical mount point used to receive and output all graded audit logs of the service.
-- `-v $(pwd)/cache:/server/cache`: Used to store music cache files, significantly improving loading speed during repeated playback.
-- `-v $(pwd)/music:/server/music`: **Used exclusively for storing downloaded songs.**
-
-**Declarative Docker Compose:**
-For standardized long-term management in production implementation, create a definition configuration named `docker-compose.yml`:
+Create `compose.yaml` in the directory where you want to keep your data:
 
 ```yaml
-version: '3'
 services:
   lx-sync-server:
     image: xcq0607/lxserver:latest
@@ -73,86 +26,120 @@ services:
       - "9527:9527"
     volumes:
       - ./data:/server/data
-      - ./logs:/server/logs
       - ./cache:/server/cache
       - ./music:/server/music
+      # Optional existing library:
+      # - /mnt/nas/music:/library:ro
     environment:
-      - NODE_ENV=production
-      # - ADMIN_PASSWORD=123456
-      # - ENABLE_WEBPLAYER_AUTH=true
-      # - WEBPLAYER_PASSWORD=yourpassword
+      NODE_ENV: production
+      ADMIN_PASSWORD: "replace-with-your-admin-password"
+      ENABLE_WEBPLAYER_AUTH: "true"
+      WEBPLAYER_PASSWORD: "replace-with-your-player-password"
+      # Optional initial sync account:
+      # LX_USER_user1: "replace-with-your-user-password"
 ```
 
-After reviewing the configuration correctly, start the infrastructure instance set with the command `docker-compose up -d`.
+```bash
+docker compose up -d
+docker compose logs -f --tail=100
+```
 
-### Option 2: Source Compilation Deployment Based on Physical Environment
+The alternative image is `ghcr.io/xcq0607/lxserver:latest`. For a pinned deployment, use a version tag that exists in the image registry.
 
-For restricted non-containerized environments or secondary research and development expansion scenarios, you need to assemble and pull up the process directly on the operating system:
+The image writes logs to `/server/data/logs` by default, so the data mount already includes logs. To store logs separately, add `./logs:/server/logs` **and** set `LOG_PATH: /server/logs`. Mounting that directory alone does not change the log destination.
+
+The `cache` and `music` mounts preserve audio in root-directory storage mode. Data-directory storage puts those folders below `/server/data`. Keep the directories used by your account when recreating containers.
+
+## Docker Run
+
+Bash example:
 
 ```bash
-# 1. Extract the code from the remote code repository to the current directory in the Main branch state
-git clone https://github.com/XCQ0607/lxserver.git 
+docker run -d \
+  --name lx-sync-server \
+  --restart unless-stopped \
+  -p 9527:9527 \
+  -v "$(pwd)/data:/server/data" \
+  -v "$(pwd)/cache:/server/cache" \
+  -v "$(pwd)/music:/server/music" \
+  -e ADMIN_PASSWORD="replace-with-your-admin-password" \
+  -e ENABLE_WEBPLAYER_AUTH=true \
+  -e WEBPLAYER_PASSWORD="replace-with-your-player-password" \
+  xcq0607/lxserver:latest
+```
+
+On Windows PowerShell, Compose avoids differences in multiline shell syntax and host-path expansion.
+
+## Build from source
+
+```bash
+git clone https://github.com/XCQ0607/lxserver.git
 cd lxserver
-
-# 2. Call the strict analysis process to initialize the module dependency library
-npm ci 
-
-# 3. Perform pre-compilation aggregation processing on TypeScript types and Vue DOM templates
+npm ci
 npm run build
-
-# 4. Execute the production node start command based on the built-in scheduler
 npm start
 ```
 
-*Engineering Practice Tip: For native application hosting in unattended server environments, it is recommended to introduce a process-level scheduling and restart control system such as `pm2`: `pm2 start npm --name "lxserver" -- start`.*
+The build generates server JavaScript, player CSS and the file-manager bundle, and checks the audio fingerprint utility. Installation and the first build need access to dependency and binary downloads.
 
----
+For development, use `npm run dev`. Production runs compiled files in `server/`; changing TypeScript source requires another build before restarting production.
 
-## Load Front-end and Nginx Reverse Proxy Access Strategy
+## Compiled releases and desktop app
 
-Before exposing it to the public network main process node, it is strongly recommended to connect a mature Web daemon gateway instance. This is intended to securely apply SSL encryption and hide internal distribution port features.
+Download a package from [Releases](https://github.com/XCQ0607/lxserver/releases). Desktop packages vary by release; choose the OS and architecture listed in that release's assets. The desktop app manages its storage separately and can choose another port when `9527` is busy; use the address shown by the app.
 
-The following is a standardized Nginx reverse proxy configuration reference example adapted to the system's WebSocket duplex link mechanism and tracing the user's source-end IP Header parsing (taking over traffic through the network and tunnel takeover forwarding from universal `80 / 443` ports to this service `9527`):
+A server archive contains compiled files such as `server/`, `public/`, `index.js` and `package.json`. It can be launched directly after extracting it. If production dependencies are absent or incompatible with the target platform, install them first:
 
-```nginx
-server {
-    listen 80;
-    server_name music.yourdomain.com;
-
-    location / {
-        proxy_pass http://127.0.0.1:9527;
-  
-        # Define the Header transmission policy to ensure that the Node layer can get the client's public network layer IP
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-  
-        # Complement the long-connection upgrade feature definition (necessary condition for internal synchronization communication socket services)
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-    }
-}
+```bash
+npm install --omit=dev
+node index.js
 ```
 
----
+GitHub's automatically generated **Source code** archives are source distributions, not compiled server packages. Follow the source-build instructions for those archives.
 
-## Service Access & Client Connection Guide
+`node index.js` runs the compiled server without npm lifecycle hooks. `npm start` also runs the repository's prestart steps, which check the fingerprint utility and refresh build metadata. Keep the `scripts/` directory when using the npm startup workflow.
 
-After the service starts, you can access the Web interfaces or connect clients via the following ways:
+## PM2 and local image builds
 
-### 1. Web Interface Access
-| Module | Access URL | Auth Requirement | Description |
-| :--- | :--- | :--- | :--- |
-| **Web Player** | `http://<server-ip>:9527/` | Default free (can be enabled via `ENABLE_WEBPLAYER_AUTH`) | Modern online music web player supporting multi-source search and streaming. |
-| **Admin Console** | `http://<server-ip>:9527/admin` | Admin password (default `123456`) | User management, playlist and snapshot review, WebDAV backup and system settings. |
+After building the project, install PM2 separately and run the supplied ecosystem configuration from the project directory:
 
-### 2. LX Music Client Sync (Desktop / Mobile)
-Go to client "Settings → Sync Settings" and choose Custom Server:
-- **User Path Mode (Recommended, enabled by default)**: Connection URL `http://<server-ip>:9527/<username>` (e.g. `http://192.168.1.100:9527/user1`), password is the user's password. **Allows multiple users to use identical passwords**.
-- **Root Path Mode (Requires `USER_ENABLE_ROOT`)**: Connection URL `http://<server-ip>:9527`, password is the user's password. **Requires all user passwords to be strictly unique**.
+```bash
+npm install -g pm2
+npm run prd
+pm2 logs lx-music-sync-server
+pm2 status
+pm2 save
+```
 
-### 3. Subsonic Music Client Connection
-- **Server Address**: `http://<server-ip>:9527/rest` (or `http://<server-ip>:<port>/rest` if `SUBSONIC_PORT` is configured).
-- **Authentication**: Log in with user credentials created in the Admin Console.
+`npm run prd` executes `pm2 start ecosystem.config.js --env production`; it does not compile the project. PM2 is not a project dependency. OS boot integration is a separate setup step; saving a process list alone does not configure it.
 
-For more advance details on implementing silent import of underlying variables in the early lifecycle of instantiation, and configuration hierarchy rewriting, please move to read "[Configuration Engine and Environment Variable Injection Guide](./configuration.md)".
+To build the image from your current checkout:
+
+```bash
+docker build -t lxserver:local .
+```
+
+Use `lxserver:local` in your Compose file instead of the registry image. `npm run electron:dist` builds and packages the desktop app; packaging requirements and native-module support depend on the target platform.
+
+## First-run checklist
+
+1. Open `http://server-ip:9527/admin` and sign in with your configured administrator password. The unchanged default is `123456`.
+2. Create a personal account in user management and set its sync password.
+3. Open the player at `http://server-ip:9527/`. If player access authentication is enabled, enter the player password, then sign in to your personal account as needed.
+4. Import and enable a working custom source for online playback.
+5. For local music, check the storage selection, mounted paths and account permissions, then scan the directory.
+
+## What each command does
+
+| Command | Behavior |
+| --- | --- |
+| `npm start` | Run prestart checks, then compiled server |
+| `node index.js` | Run compiled server without npm prestart |
+| `npm run dev` | Run source through tsx/nodemon |
+| `npm run prd` | Start compiled server under PM2 in production mode |
+| `docker compose up -d` | Create/start containers from Compose |
+| `npm run electron:dist` | Build/package desktop app, not server hosting |
+
+Development and production can access the same data if configured that way. Use a separate `DATA_PATH` when experimenting to avoid changing your regular accounts.
+
+For client addresses see [sync and console](./sync-server.md). See [configuration](./configuration.md) and [operations](./operations.md) for settings, reverse proxy, upgrades and recovery.
