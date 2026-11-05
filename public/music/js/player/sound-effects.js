@@ -8,6 +8,7 @@ window.soundEffects = (function () {
     let convolverNode, convolverMainGain, convolverSendGain;
     let pitchShifterNode, pitchFactorParam;
     let pannerNode;
+    let bypassGain, effectsGain;
     let pannerInfo = { enable: false, speed: 25, distance: 5, rad: 0, interval: null };
 
     const freqs = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -44,6 +45,7 @@ window.soundEffects = (function () {
     ];
 
     let settings = {
+        enabled: true,
         eq: Array(10).fill(0),
         pitch: 1.0,
         panner: { enable: false, speed: 25, distance: 5 },
@@ -56,6 +58,7 @@ window.soundEffects = (function () {
     let mobileEffectsEnabled = false;
 
     function hasActiveEffects() {
+        if (settings.enabled === false) return false;
         const isEqActive = settings.eq && settings.eq.some(val => val !== 0);
         const isPitchActive = settings.pitch !== 1.0;
         const isReverbActive = settings.reverb && settings.reverb.id && settings.reverb.id !== 'none';
@@ -138,7 +141,12 @@ window.soundEffects = (function () {
 
         // Panner
         pannerNode = audioContext.createPanner();
-        // pannerNode.panningModel = 'HRTF';
+        // Binaural head/ear filtering supplies front/back cues for headphones.
+        pannerNode.distanceModel = 'inverse';
+        pannerNode.refDistance = 1;
+        pannerNode.rolloffFactor = 1;
+        pannerNode.coneInnerAngle = 360;
+        pannerNode.coneOuterAngle = 360;
 
 
         // 2. Connect Link: Source -> EQ -> Split(Dry/Wet)
@@ -160,7 +168,14 @@ window.soundEffects = (function () {
 
         // Mixer -> [Pitch inserted later] -> Panner -> Analyser -> Destination
         mixerNode.connect(pannerNode);
-        pannerNode.connect(analyser);
+        effectsGain = audioContext.createGain();
+        bypassGain = audioContext.createGain();
+        effectsGain.gain.value = settings.enabled === false ? 0 : 1;
+        bypassGain.gain.value = settings.enabled === false ? 1 : 0;
+        pannerNode.connect(effectsGain);
+        effectsGain.connect(analyser);
+        mediaSource.connect(bypassGain);
+        bypassGain.connect(analyser);
         analyser.connect(audioContext.destination);
 
         // Store gains for control
@@ -174,7 +189,7 @@ window.soundEffects = (function () {
         isGraphBuilt = true;
 
         if (audioContext.state === 'suspended') {
-            audioContext.resume().catch(() => {});
+            audioContext.resume().catch(() => { });
         }
 
         // 3. Load Settings
@@ -275,6 +290,7 @@ window.soundEffects = (function () {
     }
 
     function saveSettings() {
+        renderStatus();
         const payload = {
             settings: settings,
             customPresets: customPresets
@@ -354,9 +370,18 @@ window.soundEffects = (function () {
         if (settings.pitch !== 1.0) connectPitchShifter();
         else disconnectPitchShifter();
         applyPitch();
+        applyMaster();
+    }
+
+    function applyMaster() {
+        if (!effectsGain || !bypassGain) return;
+        const on = settings.enabled !== false;
+        effectsGain.gain.setTargetAtTime(on ? 1 : 0, audioContext.currentTime, 0.02);
+        bypassGain.gain.setTargetAtTime(on ? 0 : 1, audioContext.currentTime, 0.02);
     }
 
     let reverbRequest = 0;
+    const impulseBuffers = new Map();
     function updateReverb() {
         if (!canProcessLocally() || !convolverNode || !audioContext) return;
         const request = ++reverbRequest;
@@ -368,9 +393,17 @@ window.soundEffects = (function () {
             if (dryGainNode) dryGainNode.gain.value = 1.0;
             if (wetGainNode) wetGainNode.gain.value = 0;
         } else {
-            fetch(`/music/assets/medias/filters/${rev.source}`)
-                .then(r => r.arrayBuffer())
-                .then(data => audioContext.decodeAudioData(data))
+            if (!impulseBuffers.has(rev.source)) {
+                const pending = fetch(`/music/assets/medias/filters/${rev.source.replace(/\.wav$/, '.ir')}`)
+                    .then(r => {
+                        if (!r.ok) throw new Error(`Impulse response HTTP ${r.status}`);
+                        return r.arrayBuffer();
+                    })
+                    .then(data => audioContext.decodeAudioData(data))
+                    .catch(error => { impulseBuffers.delete(rev.source); throw error; });
+                impulseBuffers.set(rev.source, pending);
+            }
+            impulseBuffers.get(rev.source)
                 .then(buffer => {
                     if (!canProcessLocally() || !convolverNode || request !== reverbRequest || settings.reverb.id !== rev.id) return;
                     convolverNode.buffer = buffer;
@@ -387,11 +420,31 @@ window.soundEffects = (function () {
         if (pannerInfo.interval) {
             clearInterval(pannerInfo.interval);
             pannerInfo.interval = null;
-            pannerInfo.rad = 0;
         }
 
-        if (p.enable) {
-            console.log('[SoundEffects] Starting Panner (Desktop Logic)');
+        if (p.enable && settings.enabled !== false) {
+            pannerNode.panningModel = 'HRTF';
+            const speed = Math.max(1, Math.min(50, Number(p.speed) || 25));
+            const radius = Math.max(0.1, Math.min(3, (Number(p.distance) || 5) * 0.1));
+            const period = 4 + (50 - speed) * 0.32;
+            let lastTime = audioContext.currentTime;
+            const move = () => {
+                const now = audioContext.currentTime;
+                // Use elapsed audio time: timer throttling must not change rotation speed.
+                pannerInfo.rad = (pannerInfo.rad + (now - lastTime) * 2 * Math.PI / period) % (2 * Math.PI);
+                lastTime = now;
+                const coords = [Math.sin(pannerInfo.rad) * radius, 0, -Math.cos(pannerInfo.rad) * radius];
+                [pannerNode.positionX, pannerNode.positionY, pannerNode.positionZ].forEach((param, i) => {
+                    if (param.cancelAndHoldAtTime) param.cancelAndHoldAtTime(now);
+                    else {
+                        const value = param.value;
+                        param.cancelScheduledValues(now);
+                        param.setValueAtTime(value, now);
+                    }
+                    param.linearRampToValueAtTime(coords[i], now + 0.025);
+                });
+            };
+            move();
             pannerInfo.interval = setInterval(() => {
                 if (!canProcessLocally()) {
                     clearInterval(pannerInfo.interval);
@@ -399,23 +452,16 @@ window.soundEffects = (function () {
                     return;
                 }
                 if (!pannerNode) return;
-                pannerInfo.rad += 1;
-                if (pannerInfo.rad > 360) pannerInfo.rad -= 360;
-
-                const rad = pannerInfo.rad * Math.PI / 180;
-                const nx = Math.sin(rad);
-                const ny = Math.cos(rad);
-                const nz = Math.cos(rad);
-
-                const factor = p.distance * 0.1; // Adjust distance factor to match desktop feel
-                pannerNode.positionX.value = nx * factor;
-                pannerNode.positionY.value = ny * factor;
-                pannerNode.positionZ.value = nz * factor;
-            }, p.speed * 10);
+                move();
+            }, 25);
         } else {
-            pannerNode.positionX.value = 0;
-            pannerNode.positionY.value = 0;
-            pannerNode.positionZ.value = 0;
+            // Equal-power at the listener preserves the original stereo when disabled.
+            pannerNode.panningModel = 'equalpower';
+            for (const param of [pannerNode.positionX, pannerNode.positionY, pannerNode.positionZ]) {
+                param.cancelScheduledValues(audioContext.currentTime);
+                param.setValueAtTime(0, audioContext.currentTime);
+            }
+            pannerInfo.rad = 0;
         }
     }
 
@@ -451,16 +497,112 @@ window.soundEffects = (function () {
         if (label) label.innerText = settings.pitch.toFixed(2) + 'x';
     }
 
+    function renderStatus() {
+        const enabled = settings.enabled !== false;
+        const toggle = document.getElementById('sound-effects-enable');
+        if (toggle) toggle.checked = enabled;
+        const title = document.getElementById('sound-effects-state');
+        if (title) title.textContent = enabled ? '音效已开启' : '音效已暂停';
+        const switchLabel = document.getElementById('sound-effects-switch-label');
+        if (switchLabel) switchLabel.textContent = enabled ? '音效开' : '音效关';
+
+        const tagsContainer = document.getElementById('sound-effects-tags');
+        if (tagsContainer) {
+            const tags = [];
+            const pausedClass = enabled ? '' : ' is-paused';
+
+            // 1. Reverb Tag
+            if (settings.reverb && settings.reverb.id && settings.reverb.id !== 'none') {
+                const revName = reverbOptions.find(r => r.id === settings.reverb.id)?.name || '混响';
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="环境混响: ${revName} (点击 ✕ 一键关闭)">
+                        <i class="fas fa-water effects-tag-icon"></i>
+                        <span class="effects-tag-text">混响: ${revName}</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetReverb()" title="关闭混响" aria-label="关闭混响">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            // 2. EQ Tag
+            const nonZeroBands = settings.eq ? settings.eq.filter(v => v !== 0).length : 0;
+            if (nonZeroBands > 0) {
+                const matchedPreset = defaultPresets.find(p => p.values.join(',') === settings.eq.join(',')) ||
+                    customPresets.find(p => p.values.join(',') === settings.eq.join(','));
+                const eqLabel = activePresetName || matchedPreset?.name || `${nonZeroBands}段自定义`;
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="均衡器: ${eqLabel} (点击 ✕ 一键重置为 0dB)">
+                        <i class="fas fa-sliders-h effects-tag-icon"></i>
+                        <span class="effects-tag-text">EQ: ${eqLabel}</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetEQ()" title="重置均衡器" aria-label="重置均衡器">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            // 3. Pitch Tag
+            if (settings.pitch && Math.abs(settings.pitch - 1.0) > 0.001) {
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="音调: ${settings.pitch.toFixed(2)}x (点击 ✕ 恢复原调)">
+                        <i class="fas fa-tachometer-alt effects-tag-icon"></i>
+                        <span class="effects-tag-text">音调: ${settings.pitch.toFixed(2)}x</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetPitch()" title="恢复原调" aria-label="恢复原调">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            // 4. 3D Surround Tag
+            if (settings.panner && settings.panner.enable) {
+                tags.push(`
+                    <span class="effects-tag${pausedClass}" title="3D 环绕: 开启 (点击 ✕ 一键关闭)">
+                        <i class="fas fa-headphones effects-tag-icon"></i>
+                        <span class="effects-tag-text">3D 环绕</span>
+                        <button type="button" class="effects-tag-remove" onclick="event.stopPropagation(); window.soundEffects.resetPanner()" title="关闭 3D 环绕" aria-label="关闭 3D 环绕">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </span>
+                `);
+            }
+
+            if (tags.length === 0) {
+                tagsContainer.innerHTML = `
+                    <span class="effects-no-tags-tip">
+                        <i class="fas fa-circle-check text-emerald-500/80 text-[10px]"></i>
+                        <span>当前为纯净直通音色，未开启任何额外音效</span>
+                    </span>
+                `;
+            } else {
+                let html = tags.join('');
+                if (tags.length >= 2) {
+                    html += `
+                        <button type="button" class="effects-tag-reset-all" onclick="window.soundEffects.resetAll()" title="一键关闭并重置所有已生效配置">
+                            <i class="fas fa-rotate-left text-[10px]"></i>
+                            <span>全部重置</span>
+                        </button>
+                    `;
+                }
+                tagsContainer.innerHTML = html;
+            }
+        }
+    }
+
     function renderUI() {
+        renderStatus();
         const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
         const status = document.getElementById('sound-effects-status');
         if (status) status.textContent = remote
-            ? 'AirPlay / 投放正在播放：音效仅保存，不改变接收设备的声音。'
-            : isGraphBuilt
-                ? (isMobileDevice() ? '本机音效已开启。使用 AirPlay 前请恢复原生播放。' : '本机音效已开启。')
-                : isMobileDevice()
-                    ? '选择音效后立即在本机生效。使用 AirPlay 前需恢复原生播放；刷新后默认使用原生播放。'
-                    : '选择音效后立即在本机生效。';
+            ? 'AirPlay / 投放中：仅保存音效配置'
+            : settings.enabled === false
+                ? '正在播放原始音色，重新开启即可恢复以上设置'
+                : isGraphBuilt
+                    ? (isMobileDevice() ? '本机音效已开启' : '')
+                    : isMobileDevice()
+                        ? '选择音效后立即生效'
+                        : '';
         const nativeButton = document.getElementById('sound-effects-native');
         if (nativeButton) nativeButton.hidden = !isGraphBuilt || !isMobileDevice();
         // EQ Presets
@@ -470,7 +612,7 @@ window.soundEffects = (function () {
             let html = defaultPresets.map(p => {
                 const isActive = activePresetName === p.name || (activePresetName === '' && settings.eq.join(',') === p.values.join(','));
                 return `
-                <button class="px-3 py-1.5 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
+                <button class="px-2.5 py-1 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
                     onclick="window.soundEffects.applyPreset('${p.name}')">${p.name}</button>
             `;
             }).join('');
@@ -480,14 +622,14 @@ window.soundEffects = (function () {
                 const isActive = activePresetName === p.name;
                 return `
                 <div class="relative group">
-                    <button class="px-3 py-1.5 pr-10 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-md shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
+                    <button class="px-2.5 py-1 pr-9 text-[11px] font-bold rounded-lg border t-border-main transition-all ${isActive ? 'bg-emerald-500 text-white border-emerald-500 shadow-sm shadow-emerald-500/20' : 't-bg-main t-text-muted hover:t-bg-item-hover'}"
                         onclick="window.soundEffects.applyPreset('${p.name}')">${p.name}</button>
                     <div class="absolute right-1 top-1/2 -translate-y-1/2 flex items-center transition-opacity">
-                        <button class="w-4 h-4 flex items-center justify-center text-[10px] text-gray-400 hover:text-emerald-500" 
+                        <button class="w-3.5 h-3.5 flex items-center justify-center text-[9px] text-gray-400 hover:text-emerald-500" 
                             onclick="event.stopPropagation(); window.soundEffects.renameCustomPreset('${p.name}')" title="重命名">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="w-4 h-4 flex items-center justify-center text-[10px] text-gray-400 hover:text-red-500" 
+                        <button class="w-3.5 h-3.5 flex items-center justify-center text-[9px] text-gray-400 hover:text-red-500" 
                             onclick="event.stopPropagation(); window.soundEffects.deleteCustomPreset('${p.name}')" title="删除">
                             <i class="fas fa-trash-alt"></i>
                         </button>
@@ -500,15 +642,15 @@ window.soundEffects = (function () {
                 html += `
                     <div class="relative flex items-center">
                         <input type="text" id="new-preset-name" placeholder="输入名称..." 
-                            class="w-24 px-2 py-1 text-[11px] rounded-lg border border-emerald-500 t-bg-main t-text-main focus:outline-none shadow-sm"
+                            class="w-24 px-2 py-0.5 text-[11px] rounded-lg border border-emerald-500 t-bg-main t-text-main focus:outline-none shadow-sm"
                             onkeydown="if(event.key==='Enter') window.soundEffects.saveNewPreset(this.value); if(event.key==='Escape') window.soundEffects.cancelAddPreset();"
                             onblur="window.soundEffects.saveNewPreset(this.value)">
                         <script>setTimeout(() => document.getElementById('new-preset-name')?.focus(), 50);</script>
                     </div>
                 `;
             } else {
-                html += `<button class="p-1 px-3 text-xs rounded-lg border border-dashed t-border-main hover:text-emerald-500 transition-colors" 
-                    onclick="window.soundEffects.startAddPreset()" title="在此添加自定义预设">+</button>`;
+                html += `<button class="py-0.5 px-2.5 text-xs rounded-lg border border-dashed t-border-main hover:text-emerald-500 transition-colors" 
+                    onclick="window.soundEffects.startAddPreset()" title="添加自定义预设">+</button>`;
             }
             presetContainer.innerHTML = html;
         }
@@ -517,30 +659,30 @@ window.soundEffects = (function () {
         const reverbList = document.getElementById('reverb-list');
         if (reverbList) {
             reverbList.innerHTML = reverbOptions.map(r => `
-                <label class="flex items-center gap-2 cursor-pointer group text-[12px] font-bold t-text-muted hover:t-text-main min-w-[75px]">
-                    <div class="relative w-4 h-4 border t-border-dim rounded flex items-center justify-center transition-colors ${settings.reverb.id === r.id ? 'bg-emerald-500 border-emerald-500' : 'bg-white'}">
+                <label class="flex items-center gap-1.5 cursor-pointer group text-[11px] font-semibold t-text-muted hover:t-text-main">
+                    <div class="relative w-3.5 h-3.5 border t-border-dim rounded flex items-center justify-center transition-colors ${settings.reverb.id === r.id ? 'bg-emerald-500 border-emerald-500' : 'bg-white dark:bg-gray-800'}">
                          <input type="radio" name="reverb-opt" value="${r.id}" ${settings.reverb.id === r.id ? 'checked' : ''} 
                             class="absolute inset-0 opacity-0 cursor-pointer" onchange="window.soundEffects.setReverb('${r.id}')">
-                         ${settings.reverb.id === r.id ? '<i class="fas fa-check text-[9px] text-white"></i>' : ''}
+                         ${settings.reverb.id === r.id ? '<i class="fas fa-check text-[8px] text-white"></i>' : ''}
                     </div>
                     <span>${r.name}</span>
                 </label>
             `).join('');
         }
 
-        // EQ Sliders (Horizontal 2-column grid)
+        // EQ Sliders (Compact horizontal 2-column grid)
         const eqContainer = document.getElementById('eq-sliders-container');
         if (eqContainer) {
-            let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-6 w-full px-2">';
+            let html = '<div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2 w-full">';
             freqs.forEach((f, i) => {
                 const label = f >= 1000 ? (f / 1000) + 'k' : f;
                 html += `
-                <div class="flex items-center gap-4 w-full">
-                    <span class="w-8 text-[12px] font-bold t-text-muted text-right">${label}</span>
+                <div class="flex items-center gap-2.5 w-full">
+                    <span class="w-7 text-[11px] font-bold t-text-muted text-right">${label}</span>
                     <input type="range" min="-12" max="12" step="1" value="${settings.eq[i]}" 
                         class="flex-1 h-1.5 rounded-full lc-range-input cursor-pointer"
                         oninput="window.soundEffects.setEQ(${i}, this.value)">
-                    <span class="w-10 text-[12px] font-mono font-bold text-emerald-600 text-left">${settings.eq[i]}db</span>
+                    <span class="w-9 text-[11px] font-mono font-bold text-emerald-600 dark:text-emerald-400 text-left">${settings.eq[i]}db</span>
                 </div>
                 `;
             });
@@ -606,6 +748,17 @@ window.soundEffects = (function () {
 
     const manager = {
         init,
+        setEnabled: function (enabled) {
+            if (!isGraphBuilt) loadSettings();
+            settings.enabled = !!enabled;
+            saveSettings();
+            if (enabled) ensureLocalGraph();
+            if (canProcessLocally() && isGraphBuilt) {
+                applyMaster();
+                updatePanner();
+            }
+            renderUI();
+        },
         toggle: function () {
             const modal = document.getElementById('sound-effects-modal');
             if (modal.classList.contains('hidden')) {
@@ -688,6 +841,31 @@ window.soundEffects = (function () {
             if (ensureLocalGraph()) updateReverb();
             renderUI();
         },
+        resetReverb: function () {
+            this.setReverb('none');
+        },
+        resetAll: function () {
+            if (!isGraphBuilt) loadSettings();
+            settings.reverb.id = 'none';
+            settings.reverb.mainGain = 1.0;
+            settings.reverb.sendGain = 0;
+            animateSlider('reverb-main-gain', 100);
+            animateSlider('reverb-send-gain', 0);
+            settings.eq = Array(10).fill(0);
+            activePresetName = '';
+            settings.pitch = 1.0;
+            settings.panner = { enable: false, speed: 25, distance: 5 };
+            saveSettings();
+            if (ensureLocalGraph()) {
+                updateReverb();
+                if (eqFilters.length) eqFilters.forEach(f => f.gain.setTargetAtTime(0, audioContext.currentTime, 0.1));
+                disconnectPitchShifter();
+                applyPitch();
+                updatePanner();
+            }
+            renderUI();
+            if (window.showSuccess) window.showSuccess('已重置所有生效音效配置');
+        },
         setPitch: function (val) {
             if (!isGraphBuilt) loadSettings();
             val = parseFloat(val);
@@ -703,6 +881,7 @@ window.soundEffects = (function () {
             if (label) label.innerText = settings.pitch.toFixed(2) + 'x';
             const slider = document.getElementById('pitch-slider');
             if (slider) slider.value = settings.pitch;
+            renderStatus();
         },
         resetPitch: function () {
             settings.pitch = 1.0;
@@ -715,6 +894,13 @@ window.soundEffects = (function () {
             if (label) label.innerText = '1.00x';
             const slider = document.getElementById('pitch-slider');
             if (slider) slider.value = 1.0;
+            renderUI();
+        },
+        resetPanner: function () {
+            settings.panner = { enable: false, speed: 25, distance: 5 };
+            saveSettings();
+            if (isGraphBuilt) updatePanner();
+            renderUI();
         },
         setPanner: function (key, val) {
             if (!isGraphBuilt) loadSettings();

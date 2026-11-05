@@ -56,8 +56,8 @@ LX Music Sync Server 是一个可以自行部署的音乐同步服务。它在 [
 | 方式 | 适用情况 | 需要准备 |
 | --- | --- | --- |
 | Docker / Docker Compose | NAS、服务器、长期运行 | Docker，保存配置和音乐的宿主机目录 |
-| Node.js 源码运行 | 本地开发、自行修改或编译 | Node.js 22 或更高版本、npm、Git |
-| Release 服务端压缩包 | 使用已编译的服务端 | Node.js，包含编译产物的发行包 |
+| Node.js 源码运行 | 本地开发、自行修改或编译 | Node.js 22.13.0 或更高版本、npm、Git |
+| Release 服务端压缩包 | 使用已编译的服务端 | Node.js 22.13.0 或更高版本，包含编译产物的发行包 |
 | 桌面客户端 | 在桌面窗口中管理与使用服务 | 与操作系统、CPU 架构匹配的安装包 |
 | PM2 托管 | 已编译的 Node.js 服务长期运行 | 单独安装 PM2，先完成构建 |
 
@@ -377,15 +377,36 @@ Chromecast 支持具备 Cast 能力的桌面/Android Chromium 浏览器，需要
 
 Subsonic 用户目录中的 `subsonic-local-registry.json` 和 `subsonic-local-state.json` 保存本地歌曲身份、收藏及歌单关系，迁移时应保留，不能当作可随意删除的临时缓存。
 
-### 快照、配置备份与 WebDAV
+### 快照、配置备份与云端备份
 
 歌单快照用于恢复歌单数据，配置备份用于恢复 `config.js`，它们都不能代替音频文件备份。
 
 配置备份默认开启，保留 7 天；默认位置为数据目录的 `backups/`。可以用 `CONFIG_BACKUP_DIR` 和 `SNAPSHOT_BACKUP_PATH` 自定义配置备份、歌单快照的存储位置。
 
-WebDAV 支持数据同步和远程备份。填写地址、账号、同步目录与备份目录后，先测试连接，再检查同步日志。启用 WebDAV 的服务在启动时会尝试从远端恢复数据，部署新实例时应确认远端目录属于预期的服务。
+在「系统设置 → 云端备份范围」中，可分别选择 WebDAV 和 OpenList 备份的数据类型。两端默认都选中以下五类，但仍需单独启用对应服务并配置连接信息；同时启用会保存两份副本，不会在两个云端之间同步。
 
-`WEBDAV_EXCLUDE_CACHE` 和 `WEBDAV_EXCLUDE_MUSIC` 可以排除数据目录内对应音频目录的同步与备份，适合只同步账号和歌单的情况。不要据此假设外部音乐目录或程序根目录音频已得到备份。
+| 类型 | 备份内容 |
+| --- | --- |
+| `music` 歌曲文件 | 仅数据目录内的 `music/`，包含歌曲、歌词、封面和音乐索引 |
+| `userFiles` 用户文件 | 源脚本、源相关状态及上传文件 |
+| `snapshots` 快照文件 | 歌单、屏蔽列表快照及索引，包括配置的外部快照目录 |
+| `userData` 用户数据 | 用户目录内其余持久化数据，如歌单、偏好及 Subsonic 本地关系数据 |
+| `system` 系统数据 | 当前生效的配置文件及数据目录根部的账号、服务信息等 JSON 文件 |
+
+这些设置属于系统配置，保存在当前生效的 `config.js`，没有对应环境变量：
+
+```js
+'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+'backup.webdav.mirrorDeletes': false,
+'backup.webdav.restoreOnStartup': false,
+```
+
+类型数组为空表示该端不备份任何数据类型。普通数据备份始终排除缓存、日志、临时文件、运行数据库和本地备份包；程序根目录的音乐和自定义外部音乐库需要另行备份。OpenList 的「永久播放缓存」单独配置，勾选歌曲文件不会自动开启缓存上传或删除本地歌曲。
+
+WebDAV 增量文件与 ZIP 备份采用相同范围，默认分别每 60 分钟、24 小时执行；OpenList 数据备份保存在其根目录的 `_data/` 下，默认每 60 分钟检查。普通备份保留本地文件。WebDAV 默认也保留云端已有文件，只有显式开启 `backup.webdav.mirrorDeletes` 才会向增量目录传播本地删除，历史 ZIP 不受影响。
+
+WebDAV 默认不在启动时恢复，需显式开启 `backup.webdav.restoreOnStartup`。手动恢复按该端当前勾选范围下载，覆盖本地同名文件并保留本地独有文件，不会反向上传。恢复不是整个目录的原子替换，完成后应重启服务，使配置、账号、歌单和音乐索引完整重新加载。部署新实例前确认云端目录和备份范围，具体步骤见 [备份与恢复](docs/guide/backup-recovery.md)。
 
 ### 更新与迁移
 
@@ -403,7 +424,7 @@ docker compose logs --tail=100
 
 系统默认使用 `data/config.js`；`DATA_PATH` 改变数据目录，`CONFIG_PATH` 指定独立配置文件。首次启动时，若目标配置文件不存在，会尝试从程序根目录的旧配置初始化。
 
-普通启动按默认值、配置文件、环境变量的顺序合并配置。启用了 WebDAV 恢复时，恢复过程还会重新加载远端配置和账号数据，因此不能简单理解为“环境变量始终覆盖一切”。当前生效值和配置路径可在管理后台查看。
+普通启动按默认值、配置文件、环境变量的顺序合并配置。显式启用 WebDAV 启动恢复时，恢复过程还会重新加载远端配置和账号数据；手动恢复后需要重启服务。当前生效值和配置路径可在管理后台查看。
 
 环境变量在进程启动时读取。修改 Compose 中的环境变量后需要重建容器；后台配置是否即时生效取决于具体选项，监听端口和路径调整后应按提示重新连接或重启。
 
@@ -436,8 +457,8 @@ docker compose logs --tail=100
 | `WEBDAV_BACKUP_PATH`                       | `webdav.backupPath`                        | WebDAV 全量备份远端路径                                                                            | `/lx-sync-backups` |
 | `SYNC_INTERVAL`                            | `sync.interval`                            | WebDAV 增量同步检测间隔(分钟)                                                                      | `60`               |
 | `BACKUP_INTERVAL`                          | `sync.backupInterval`                      | WebDAV 全量备份间隔(小时)                                                                          | `24`               |
-| `WEBDAV_EXCLUDE_CACHE`                     | `webdav.excludeCache`                      | 排除缓存目录同步 (`data/cache/<用户>`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
-| `WEBDAV_EXCLUDE_MUSIC`                     | `webdav.excludeMusic`                      | 排除下载目录同步 (`data/music/<用户>`)，开启后不参与增量同步及全量备份（已同步的文件不会被删除） | `false`            |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | 旧版兼容项；普通数据备份始终排除缓存 | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | 未配置显式备份类型时的旧版兼容项；以 `backup.webdav.types` 为准 | `false` |
 | `ENABLE_WEBPLAYER_AUTH`                    | `player.enableAuth`                        | 是否启用 Web 播放器访问密码                                                                        | `false`            |
 | `WEBPLAYER_PASSWORD`                       | `player.password`                          | Web 播放器访问密码                                                                                 | `123456`           |
 | `DISABLE_TELEMETRY`                        | `disableTelemetry`                         | 是否禁用匿名数据统计，系统更新提示以及系统公告提示                                                 | `false`            |
@@ -473,14 +494,13 @@ docker compose logs --tail=100
 | `SUBSONIC_PLAY_CACHE_FIRST`                | `subsonic.playCacheFirst`                  | Subsonic 播放时是否优先使用服务器已有的本地缓存/下载文件直接传输(默认关闭,避免服务器自担出向流量) | `false`            |
 | `SUBSONIC_QUALITY_ENABLED`                 | `subsonic.quality.enabled`                 | Subsonic 是否开启音质优选                                                                          | `true`             |
 | `SUBSONIC_QUALITY_PRIORITY`                | `subsonic.quality.priority`                | Subsonic 音质优选优先级列表 (如 `flac,320k,128k`)                                                | `flac,320k,128k`   |
+| `SUBSONIC_SOURCE_PRIORITY`                 | `subsonic.source.priority`                 | 跨平台优选顺序                                                                                     | `kw,tx,wy,mg,kg`   |
+| `SUBSONIC_SOURCE_CROSS_PLATFORM`           | `subsonic.source.crossPlatform`            | 跨平台查找候选                                                                                     | `true`             |
+| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM`        | `subsonic.source.autoSwitchCustom`         | 同平台解析失败时是否尝试其他自定义源脚本                                                           | `true`             |
 | `ARTIST_MAX_FETCH_PAGES`                   | `artist.maxFetchPages`                     | 歌手歌曲最大抓取页数                                                                               | `20`               |
 | `CACHE_NAMING_PATTERN` | `cache.namingPattern` | `simple`、`standard`、`singer_name_quality_album`、`singer_name`、`name_singer` | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM`                   | `system.allowUnsafeVM`                     | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                                                  | `false`            |
 | `LX_USER_<用户名>`                         | `users` 数组                               | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)                                           | -                    |
-
-| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | 跨平台优选顺序 | `kw,tx,wy,mg,kg` |
-| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | 跨平台查找候选 | `true` |
-| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | 同平台解析失败时是否尝试其他自定义源脚本 | `true` |
 
 布尔值不区分大小写，开启可用 `true/1/yes/y/on`，关闭可用 `false/0/no/n/off`。
 
@@ -576,6 +596,10 @@ npm run docs:build --prefix docs
 
 
 ## 🤝 贡献与致谢
+
+想一起维护服务端、播放器、Subsonic、测试或文档，可以看看 [贡献者招募](RECRUITING.md)。不要求长期投入，从一个小问题开始也可以。
+
+日常开发基于 `dev`，普通 PR 提交到 `dev`；正式发布时再由维护者合入 `main`。参与前请阅读 [贡献指南](CONTRIBUTING.md)、[维护与发布约定](GOVERNANCE.md) 和 [行为准则](CODE_OF_CONDUCT.md)。
 
 - 修改自 [lyswhut/lx-music-sync-server](https://github.com/lyswhut/lx-music-sync-server)。
 - Web 播放器逻辑参考 [lx-music-desktop](https://github.com/lyswhut/lx-music-desktop)。

@@ -4,6 +4,7 @@ import { getCacheBrowseLocation } from './cacheBrowseLocation'
 import { isRemasterStage, remasterStaging } from '../task/remasterStaging'
 
 
+
 import fs from 'fs'
 import type { Stats } from 'fs'
 import path from 'path'
@@ -12,6 +13,19 @@ import https from 'https'
 import crypto from 'crypto'
 import { PassThrough } from 'stream'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
+
+/**
+ * OpenList 同步/下载回填缓存索引的对外封装。
+ * 供 openlistBackup 在「下载/双向同步」把远端文件落到本地后登记为缓存条目，
+ * 以及在「删除本地文件」时注销缓存条目，使应用能正确识别本地文件是否存在。
+ */
+export function registerOpenListCacheFile(username: string, item: any, folder: 'cache' | 'music'): void {
+  indexManager.update(username, item, folder)
+}
+
+export function unregisterOpenListCacheFile(username: string, songId: string, folder: 'cache' | 'music', quality?: string): void {
+  indexManager.remove(username, songId, folder, quality)
+}
 import { buildLyrics, parseLyrics } from '../../utils/lrcTool'
 import { formatPlayTime } from '../../utils/common'
 import { getUserSpace } from '../../user'
@@ -199,6 +213,7 @@ export interface CacheItem {
     requestedSource?: string
     downloadSource?: string
     sourceName?: string
+    origin?: 'openlist' | 'platform' | 'local'
     quality: string
     filename: string
     folder: string // 'cache' or 'music'
@@ -2199,6 +2214,16 @@ export const downloadAndCache = (...args: Parameters<typeof downloadAndCacheImpl
     const job = downloadAndCacheImpl(...args).finally(() => {
         if (downloadJobs.get(key)?.promise === job) downloadJobs.delete(key)
     })
+    // 文件成功落盘后，发一个与 openlist 无关的通用事件，供各模块（如 openlist 备份）订阅
+    job.then(() => {
+      const lx = (globalThis as any).lx
+      if (lx?.fileCachedListeners?.length) {
+        const info = { username, quality: quality || 'unknown', dir }
+        for (const fn of lx.fileCachedListeners) {
+          try { fn(info) } catch (e) { console.error('[fileCache] fileCached listener error:', e) }
+        }
+      }
+    }).catch(() => {})
     downloadJobs.set(key, { promise: job, signature })
     return job
 }
@@ -2325,6 +2350,26 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
     }
 
     if (signal?.aborted) return
+
+    // Q1：缓存未命中时先查 OpenList 是否已有该文件的 verified 备份，有则直接取回，
+    // 避免回源平台重复下载并重新上传（保留平台来源字段，仅用 origin 标记回写管道）。
+    // 该路径对「原生客户端 / Web / Subsonic」等走 lx-server 的请求统一生效——
+    // 因为 OpenList 上传备份本身也是全局触发（见 downloadAndCacheImpl 的 fileCachedUploadListeners），
+    // 故「优先使用 OpenList 取回」不限定 Subsonic。是否启用由 openlist 自身开关（enable + 用户备份配置）决定，
+    // 并受 subsonic.playCacheFirst / subsonic.playCacheFirstUseOpenlist 控制（见 isOpenlistCacheFirstEnabled）。
+    if (username) {
+      const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
+      const restoreResolver = (globalThis as any).lx?.cacheRestoreResolver
+      const restored = restoreResolver ? await restoreResolver(username, targetFolder, dir, baseName, quality || 'unknown', signal) : null
+      if (restored) {
+        cacheProgress.set(songKey, { progress: 100, status: 'finished', total: restored.size, received: restored.size })
+        expireProgress(songKey)
+        return Promise.resolve()
+      }
+    }
+
+    if (signal?.aborted) return
+
     // 立即同步占坑标记下载中，关闭“拿到 200 响应前”的并发竞态窗口；
     // 后续到达的相同 songKey 请求会被上面的守卫跳过，不再重复下载。
     cacheProgress.set(songKey, { progress: 0, status: 'downloading', total: 0, received: 0, speed: 0, updatedAt: Date.now() })
@@ -2604,6 +2649,18 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
 
                     await ensureCachedLyrics(songInfo, actualQuality, username, isOnlyDownload, finalPath, folderType, shouldCacheLyric, shouldEmbedLyric)
                     alignOrphanLyric(username, id, actualQuality, folderType)
+
+                    // [OpenList 备份] 音频落盘后，发中性事件由 openlist 模块订阅并判定是否上传
+                    const lxU = (globalThis as any).lx
+                    if (lxU?.fileCachedUploadListeners?.length) {
+                        for (const fn of lxU.fileCachedUploadListeners) {
+                            try {
+                                fn({ user: normalizedUsername, folderType, localPath: finalPath, meta: { source: metadata.source, songmid: id, quality: actualQuality, origin: 'platform' } })
+                            } catch (e) {
+                                console.warn('[fileCache] fileCachedUpload listener error:', e)
+                            }
+                        }
+                    }
 
                     cacheProgress.set(songKey, { progress: 100, status: 'finished', total: total || received, received, speed: 0, updatedAt: Date.now() })
                     expireProgress(songKey)
@@ -2967,7 +3024,9 @@ export const clearAllCache = (username?: string) => {
         for (const file of files) {
             try {
                 const stats = fs.statSync(path.join(dir, file))
-                fs.unlinkSync(path.join(dir, file))
+                const fp = path.join(dir, file)
+                fs.unlinkSync(fp)
+                ;(globalThis as any).lx?.softDeleteLocalFileByPath?.(fp)
                 deletedCount++; freedSize += stats.size
             } catch (e) { }
         }
@@ -3133,12 +3192,24 @@ export const checkAndCleanupCache = async (username?: string) => {
         }
     }
     allFiles.sort((a, b) => a.mtime - b.mtime)
+    // 跳过「仍有活跃备份记录」的文件，避免本地缓存被清理后 OpenList 上传因源文件不存在而失败
+    let activeBackupPaths: Set<string> | null = null
+    try { activeBackupPaths = (globalThis as any).lx?.getActiveBackupLocalPaths?.() ?? null } catch { activeBackupPaths = null }
     let currentSize = totalSize
     const targetSize = limitBytes * 0.95
     let deletedCount = 0
     for (const file of allFiles) {
         if (currentSize <= targetSize) break
-        try { fs.unlinkSync(file.path); currentSize -= file.size; deletedCount++ } catch (e) { }
+        if (activeBackupPaths && activeBackupPaths.has(file.path)) {
+            if ((global as any).lx?.config?.['debug.enabled']) console.log(`[文件缓存] 跳过清理（仍有活跃备份记录）: ${file.path}`)
+            continue
+        }
+        try {
+            fs.unlinkSync(file.path)
+            ;(globalThis as any).lx?.softDeleteLocalFileByPath?.(file.path)
+            currentSize -= file.size
+            deletedCount++
+        } catch (e) { }
     }
     console.log(`[文件缓存] 用户 ${normalizedUsername} 缓存空间清理完成，已删除 ${deletedCount} 个过期文件`)
 }

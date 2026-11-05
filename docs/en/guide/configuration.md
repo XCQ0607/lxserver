@@ -35,8 +35,8 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `WEBDAV_BACKUP_PATH` | `webdav.backupPath` | WebDAV remote backup path | `/lx-sync-backups` |
 | `SYNC_INTERVAL` | `sync.interval` | WebDAV incremental sync interval (min) | `60` |
 | `BACKUP_INTERVAL` | `sync.backupInterval` | WebDAV full backup interval (hours) | `24` |
-| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Exclude cache dir from sync (`data/cache/<user>`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
-| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Exclude music/download dir from sync (`data/music/<user>`). When enabled, skips incremental sync & full backup (already-synced files are NOT deleted) | `false` |
+| `WEBDAV_EXCLUDE_CACHE` | `webdav.excludeCache` | Legacy compatibility; data backup now always excludes caches | `false` |
+| `WEBDAV_EXCLUDE_MUSIC` | `webdav.excludeMusic` | Legacy fallback; explicit backup type arrays take precedence | `false` |
 | `ENABLE_WEBPLAYER_AUTH` | `player.enableAuth` | Enable Web Player password | `false` |
 | `WEBPLAYER_PASSWORD` | `player.password` | Web Player password | `123456` |
 | `DISABLE_TELEMETRY` | `disableTelemetry` | Disable anonymous telemetry and update notifications | `false` |
@@ -72,13 +72,13 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `SUBSONIC_PLAY_CACHE_FIRST` | `subsonic.playCacheFirst` | Prefer streaming local cached/downloaded files on Subsonic playback (default off, to avoid server egress) | `false` |
 | `SUBSONIC_QUALITY_ENABLED` | `subsonic.quality.enabled` | Enable Subsonic audio quality selection | `true` |
 | `SUBSONIC_QUALITY_PRIORITY` | `subsonic.quality.priority` | Subsonic audio quality priority order (e.g. `flac,320k,128k`) | `flac,320k,128k` |
+| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | Cross-platform candidate priority | `kw,tx,wy,mg,kg` |
+| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | Allow cross-platform candidate lookup | `true` |
+| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | Try other custom scripts on the same platform | `true` |
 | `ARTIST_MAX_FETCH_PAGES` | `artist.maxFetchPages` | Maximum fetch pages for artist tracks | `20` |
 | `CACHE_NAMING_PATTERN` | `cache.namingPattern` | simple, standard, singer_name_quality_album, singer_name, name_singer | `simple` |
 | `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
 | `LX_USER_<username>` | `users` | Create account using a password string | — |
-| `SUBSONIC_SOURCE_PRIORITY` | `subsonic.source.priority` | Cross-platform candidate priority | `kw,tx,wy,mg,kg` |
-| `SUBSONIC_SOURCE_CROSS_PLATFORM` | `subsonic.source.crossPlatform` | Allow cross-platform candidate lookup | `true` |
-| `SUBSONIC_SOURCE_AUTOSWITCH_CUSTOM` | `subsonic.source.autoSwitchCustom` | Try other custom scripts on the same platform | `true` |
 
 Boolean values are case-insensitive: `true/1/yes/y/on` and `false/0/no/n/off`.
 
@@ -105,7 +105,7 @@ Keep `subsonic-local-registry.json` and `subsonic-local-state.json` with user da
 
 Playlist snapshots restore playlists; configuration backups restore configuration. Neither substitutes for audio backups. Configuration backups default to a seven-day retention period under the data directory's `backups/` folder.
 
-WebDAV supports remote sync and backups. Startup with WebDAV configured can restore remote data and reload configuration/accounts. Confirm the remote namespace before connecting a new installation. `WEBDAV_EXCLUDE_CACHE` and `WEBDAV_EXCLUDE_MUSIC` exclude the corresponding audio folders within data; they do not back up external or root-directory libraries for you.
+WebDAV and OpenList use the data types selected in **System settings → Cloud backup scope**. Startup restore is off by default and requires `backup.webdav.restoreOnStartup=true`. `backup.webdav.types` and `backup.openlist.types` independently select each destination's scope. Music means `data/music`; cache and external libraries are excluded. See [Cloud backup and recovery](./backup-recovery.md) for provider behavior, compatibility and restore steps.
 
 For container updates:
 
