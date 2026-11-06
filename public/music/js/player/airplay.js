@@ -5,6 +5,7 @@
     if (!audio || !button || typeof audio.webkitShowPlaybackTargetPicker !== 'function') return;
 
     let available = false;
+    let warnedCapturedRoute = false;
     function update() {
         const wireless = !!audio.webkitCurrentPlaybackTargetIsWireless;
         button.hidden = !available && !wireless;
@@ -13,6 +14,13 @@
         button.title = wireless ? 'AirPlay connected' : 'AirPlay';
         button.classList.toggle('text-emerald-500', wireless);
         window.iOSBackgroundAudio?.setWirelessPlayback(wireless);
+        if (!wireless) warnedCapturedRoute = false;
+        // Control Center can select AirPlay without going through our picker.
+        if (wireless && !warnedCapturedRoute && window.soundEffects?.needsNativeReload()) {
+            warnedCapturedRoute = true;
+            window.soundEffects.open();
+            window.showInfo?.('请点击“刷新并恢复原生播放 / AirPlay”后，重新选择 AirPlay 设备。', 6500);
+        }
     }
     audio.addEventListener('webkitplaybacktargetavailabilitychanged', event => {
         available = event.availability === 'available';

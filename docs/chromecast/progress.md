@@ -1,5 +1,14 @@
 # Chromecast progress
 
+## Native AirPlay capture recovery — 2026-11-07
+
+- [x] Detect any captured media source, including visualizer-only capture on desktop, and expose native restoration on all platforms. System/Control Center handoffs show recovery once per connection without automatically reloading.
+- [x] Keep native output across playback, resize and reload while retaining saved effects, queue/position and auto-resume preferences. Explicit local active-effect edits can resume DSP; remote edits, master-off edits and resets preserve native mode.
+- [x] Preserve current upstream VU artwork, mobile DSP opt-in, master bypass, preset/reset controls and existing playback restoration.
+- [x] Add 26 integrated capture, route, storage, playback and master-effect regressions plus Node 22/24 pull-request validation; refresh the worker cache to v59. The untouched upstream baseline failed 15 of the original 20 cases. The adapted branch passes all 117 tests (73 CJS and 44 TypeScript), type checking, production compilation and JavaScript/diff checks.
+- [x] AirPlay playback on the deployed repair was user-confirmed; the exact device/receiver profile was not recorded.
+- [ ] Maintainer review and merge. Broader physical device and receiver coverage remains unverified.
+
 ## Complete customization submission and version identity — 2026-10-20
 
 ### Expanded review before deployment

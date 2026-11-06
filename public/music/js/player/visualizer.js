@@ -1278,13 +1278,18 @@ const musicVisualizer = (function () {
         const isAnyVisualizerWanted = !isSuppressed && (isFooterOn || isDetailOn);
         const hasEffectsAnalyser = window.soundEffects && window.soundEffects.getAnalyser && window.soundEffects.getAnalyser();
 
+        if (window.soundEffects?.isNativePlaybackPreferred?.()) {
+            triggerStandaloneLoop();
+            return;
+        }
+
         if (!isAnyVisualizerWanted && !hasEffectsAnalyser) {
             console.log('[Visualizer] Visualizer disabled or suppressed by iOS adaptive setting. Skipping AudioContext creation.');
             return;
         }
 
         // AirPlay / 无线投送期间本地不创建音频流
-        if (audio.webkitCurrentPlaybackTargetIsWireless) {
+        if (audio.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) {
             return;
         }
 

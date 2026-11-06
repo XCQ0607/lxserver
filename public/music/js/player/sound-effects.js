@@ -56,6 +56,16 @@ window.soundEffects = (function () {
     let isGraphBuilt = false;
     // Mobile starts native on every page load. Only a local effect edit opts into DSP.
     let mobileEffectsEnabled = false;
+    // Native restoration must survive later playback, resize and reload events.
+    let preferNativePlayback = false;
+    try {
+        preferNativePlayback = sessionStorage.getItem('lx_native_audio_mode') === '1' ||
+            sessionStorage.getItem('lx_native_audio_restore') === '1';
+    } catch (_) { }
+
+    function needsNativeReload() {
+        return !!(mediaSource || window._sharedAudioSourceNode);
+    }
 
     function hasActiveEffects() {
         if (settings.enabled === false) return false;
@@ -87,7 +97,7 @@ window.soundEffects = (function () {
     function canProcessLocally() {
         // Capturing a mobile media element cannot be undone by disconnecting Web Audio.
         // Keep native playback until an explicit local effect edit opts into DSP.
-        return (isGraphBuilt || mobileEffectsEnabled || !isMobileDevice()) &&
+        return !preferNativePlayback && (isGraphBuilt || mobileEffectsEnabled || !isMobileDevice()) &&
             !document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless &&
             !window.LXPlayback?.isRemote;
     }
@@ -592,19 +602,25 @@ window.soundEffects = (function () {
 
     function renderUI() {
         renderStatus();
-        const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
+        const wireless = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless;
+        const remote = wireless || !!window.LXPlayback?.isRemote;
+        const captured = needsNativeReload();
         const status = document.getElementById('sound-effects-status');
-        if (status) status.textContent = remote
+        if (status) status.textContent = wireless && captured
+            ? '请刷新并恢复原生播放后，重新选择 AirPlay 设备'
+            : remote
             ? 'AirPlay / 投放中：仅保存音效配置'
+            : preferNativePlayback
+                ? '正在使用原生播放，可直接选择 AirPlay；已保留音效设置'
             : settings.enabled === false
                 ? '正在播放原始音色，重新开启即可恢复以上设置'
-                : isGraphBuilt
-                    ? (isMobileDevice() ? '本机音效已开启' : '')
+                : captured
+                    ? '本机音效或可视化已开启；使用 AirPlay 前请恢复原生播放'
                     : isMobileDevice()
                         ? '选择音效后立即生效'
                         : '';
         const nativeButton = document.getElementById('sound-effects-native');
-        if (nativeButton) nativeButton.hidden = !isGraphBuilt || !isMobileDevice();
+        if (nativeButton) nativeButton.hidden = !captured;
         // EQ Presets
         const presetContainer = document.getElementById('eq-presets');
         if (presetContainer) {
@@ -737,6 +753,15 @@ window.soundEffects = (function () {
     function ensureLocalGraph() {
         const audio = document.getElementById('audio-player');
         if (audio?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return false;
+        if (hasActiveEffects() && preferNativePlayback) {
+            // Only an explicit local edit opts back into processing. Remote edits
+            // and saved/server-loaded settings must leave native output alone.
+            try {
+                sessionStorage.removeItem('lx_native_audio_mode');
+                sessionStorage.removeItem('lx_native_audio_restore');
+            } catch (_) { }
+            preferNativePlayback = false;
+        }
         if (isMobileDevice() && hasActiveEffects()) mobileEffectsEnabled = true;
         if (!canProcessLocally()) return false;
         if (!audioContext || !isGraphBuilt) init(true);
@@ -911,12 +936,20 @@ window.soundEffects = (function () {
             renderUI();
         },
         isGraphBuilt: () => isGraphBuilt,
-        needsNativeReload: () => isMobileDevice() && isGraphBuilt,
+        isNativePlaybackPreferred: () => preferNativePlayback,
+        needsNativeReload,
         restoreNativePlayback: function () {
             if (!this.needsNativeReload()) return;
             // Disconnecting nodes cannot release a captured media element.
             window.savePlaybackState?.();
-            sessionStorage.setItem('lx_native_audio_restore', '1');
+            try {
+                sessionStorage.setItem('lx_native_audio_mode', '1');
+                sessionStorage.setItem('lx_native_audio_restore', '1');
+            } catch (_) {
+                window.showError?.('无法保存原生播放状态，请允许网站存储后重试。');
+                return;
+            }
+            preferNativePlayback = true;
             window.location.reload();
         },
         getContext: () => audioContext || window._sharedAudioContext || null,

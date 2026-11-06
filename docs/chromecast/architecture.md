@@ -15,7 +15,7 @@ Capabilities live only in bounded process memory (two hours, sixteen per owner, 
 
 Native same-origin audio, artwork and browser downloads use the HttpOnly player session cookie (Secure on HTTPS); the player removes account query tokens from these URLs. Cookie fallback is confined to read-only media handlers and validates the account and session lifetime. Legacy API query-token handling remains for compatibility, but the player does not generate it. API mutations still require their existing header authentication. Local sound-effect changes are saved during wireless playback without building or updating a local graph.
 
-The current combined submission caches first-party modules under `lx-music-web-v51`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
+The native AirPlay recovery update caches first-party modules under `lx-music-web-v59`. Google's SDK stays network-loaded. SDK failure or unsupported browsers leave local playback available.
 
 References: [Google Web Sender setup](https://developers.google.com/cast/docs/web_sender), [integration](https://developers.google.com/cast/docs/web_sender/integrate), [supported media](https://developers.google.com/cast/docs/media).
 
@@ -27,4 +27,6 @@ Cookie recovery first checks native media access without API headers, then resto
 
 Token verification returns the session owner and upgrades guest or other-account cookies to the authenticated account before native media. Existing-Token fast paths also verify this binding. Cast quota ownership uses only a validated, unexpired stored session or a verified account; unknown cookies share the public quota. Playlist card metadata is escaped in both layouts, with JSON arguments escaped for inline click attributes.
 
-Mobile loads remain native until an explicit local effect edit opts into DSP. The panel reports native, local-processed or receiver output. After mobile capture the in-page AirPlay picker directs the user through a native reload, because disconnecting Web Audio does not release a captured media element. That reload preserves queue/position with a one-time session flag without changing the auto-resume preference. Existing wireless/Cast edits remain saved-only.
+Mobile loads remain native until an explicit local effect edit opts into DSP. The panel reports native, local-processed or receiver output. Any shared media source, including visualizer-only capture on desktop, requires a native reload before AirPlay because disconnecting Web Audio cannot release a captured media element. The native-restore control is available on all platforms; Control Center handoffs expose the same recovery without automatically reloading.
+
+The existing one-time `lx_native_audio_restore` flag preserves queue/position without changing auto-resume. A separate per-tab `lx_native_audio_mode` preference prevents both visualization and effects from recapturing audio on playback, resize or another reload. Only an explicit local active-effect edit opts back into DSP; saved/server-loaded settings, master-off edits, resets and wireless/Cast edits retain native output. Storage failure reports an error and prevents an ineffective reload. The current VU renderer and master-enable/bypass controls remain intact.
