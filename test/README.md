@@ -17,6 +17,10 @@ npm run test:unit
 | security.test.ts | 收藏用户隔离、公开收藏写权限、音源归属路径、目录越界与链接越界、Cookie 解析、下载代理私网 IP 拦截 |
 | file-api.test.ts | 真实 HTTP 文件接口：认证、媒体会话范围与防篡改、路径校验、Range/HEAD、HTML 预览隔离、创建保存、防覆盖、根目录保护、方法限制 |
 | download-cast.test.ts | 下载音质按序降级与失败、成功后停止重试、投屏授权过期/撤销/账号会话失效、资源数量限制、URL 允许范围与 token 清理 |
+| backup-policy.test.ts | 共享备份类型切分、增量与 ZIP 内容一致、恢复不写回远端、配置 API 读值与 `saveConfig` 写回一致、写回丢键保护 |
+| openlist.test.cjs | OpenList 备份/恢复/同步（本地 HTTP 存储）：上传后删本地、字节校验、失败重试、双向同步、附件归属、数据备份类型、Subsonic 直链/代理交付 |
+| openlist-config.test.ts | OpenList 配置 SQLite：首次迁移（含旧 `keepLocalAfterUpload`）、已有记录时不覆盖、增量保存与用户规则替换、非法 JSON 兜底、`config.js` 残留键清理、运行时门面（规范化/`externalUrl` 回退/客户端缓存失效） |
+| webdav-connection.test.ts | WebDAV 连接校验：目录探测、错误码诊断、网络/证书/超时提示 |
 
 ## 后续优先补充
 
@@ -26,4 +30,4 @@ npm run test:unit
 4. 播放器：浏览器中切歌、刷新恢复队列和进度、播放失败恢复、音效开关后的音频图行为。
 
 这些快速测试不等于完整端到端验证，也未验证真实声音输出。
-当前 package.json 的 npm test 还引用不存在的 CJS 测试；接入提交钩子时应同步改为 npm run test:unit。
+`npm test` 会先跑 `test/*.test.cjs`（浏览器断言与 OpenList 端到端）再跑 `test:unit`；提交钩子建议直接使用 `npm run test:unit`（更快、无浏览器依赖）。

@@ -21,7 +21,10 @@ export class ListManage {
     if (snapshotInfo.list.includes(md5)) {
       snapshotInfo.list.splice(snapshotInfo.list.indexOf(md5), 1)
     } else await this.snapshotDataManage.saveSnapshot(md5, listData)
-    if (snapshotInfo.latest) snapshotInfo.list.unshift(snapshotInfo.latest)
+    // 用户导入的备份不纳入系统快照 list/配额清理，避免被自动删除或误判为系统生成
+    if (snapshotInfo.latest && !this.snapshotDataManage.isImported(snapshotInfo.latest)) {
+      snapshotInfo.list.unshift(snapshotInfo.latest)
+    }
     snapshotInfo.latest = md5
     snapshotInfo.time = Date.now()
     this.snapshotDataManage.saveSnapshotInfo(snapshotInfo)

@@ -2716,6 +2716,12 @@ class App {
             if (form.elements['configBackup.dir']) {
                 form.elements['configBackup.dir'].value = config['configBackup.dir'] || '';
             }
+            if (form.elements['configBackup.intervalHours']) {
+                form.elements['configBackup.intervalHours'].value = config['configBackup.intervalHours'] || 24;
+            }
+            if (form.elements['configBackup.scheduleTime']) {
+                form.elements['configBackup.scheduleTime'].value = config['configBackup.scheduleTime'] || '00:00';
+            }
             if (form.elements['snapshot.backupPath']) {
                 form.elements['snapshot.backupPath'].value = config['snapshot.backupPath'] || '';
             }
@@ -3203,6 +3209,8 @@ class App {
             ...this.collectBackupPolicy(),
             'configBackup.enable': formData.get('configBackup.enable') === 'on',
             'configBackup.retentionDays': parseInt(formData.get('configBackup.retentionDays')) || 7,
+            'configBackup.intervalHours': parseInt(formData.get('configBackup.intervalHours')) || 24,
+            'configBackup.scheduleTime': (formData.get('configBackup.scheduleTime') || '').trim(),
             'configBackup.dir': (formData.get('configBackup.dir') || '').trim(),
             'snapshot.backupPath': (formData.get('snapshot.backupPath') || '').trim(),
             'admin.path': adminPath,
@@ -3415,6 +3423,9 @@ class App {
             if (form.elements['subsonic.dislikeRequireSinger']) {
                 form.elements['subsonic.dislikeRequireSinger'].checked = config['subsonic.dislikeRequireSinger'] !== false;
             }
+            if (form.elements['subsonic.ratingPlaylists']) {
+                form.elements['subsonic.ratingPlaylists'].checked = config['subsonic.ratingPlaylists'] !== false;
+            }
             if (form.elements['subsonic.linkRatingToDislike']) {
                 form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
             }
@@ -3446,6 +3457,9 @@ class App {
 
             this.initCustomSelects();
             this.syncCustomSelects();
+            this.bindLinkSyncToggles();
+            this.updateLinkSyncUI();
+            void this.loadLinkSyncUsers();
         } catch (e) {
             console.error('Failed to load subsonic config:', e);
         }
@@ -3484,6 +3498,7 @@ class App {
             'subsonic.dislikeDuetMode': formData.get('subsonic.dislikeDuetMode') || 'any',
             'subsonic.dislikeNormalizeName': formData.get('subsonic.dislikeNormalizeName') === 'on',
             'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
+            'subsonic.ratingPlaylists': formData.get('subsonic.ratingPlaylists') === 'on',
             'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
             'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
             'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
@@ -3546,6 +3561,137 @@ class App {
             showError('Subsonic 配置保存失败: ' + err.message);
             throw err;
         }
+    }
+
+    // ---- Subsonic 联动数据手动同步（与导入 / 回滚链路解耦） ----
+
+    bindLinkSyncToggles() {
+        if (this._linkSyncBound) return;
+        const form = document.getElementById('subsonic-form');
+        if (!form) return;
+        ['subsonic.linkRatingToDislike', 'subsonic.linkDislikeToRating'].forEach(key => {
+            const el = form.elements[key];
+            if (el) el.addEventListener('change', () => this.updateLinkSyncUI());
+        });
+        this._linkSyncBound = true;
+    }
+
+    updateLinkSyncUI() {
+        const form = document.getElementById('subsonic-form');
+        [
+            ['subsonic.linkRatingToDislike', 'sync-rating-to-dislike-btn'],
+            ['subsonic.linkDislikeToRating', 'sync-dislike-to-rating-btn'],
+        ].forEach(([key, btnId]) => {
+            const btn = document.getElementById(btnId);
+            if (btn) btn.classList.toggle('hidden', !form?.elements[key]?.checked);
+        });
+    }
+
+    async loadLinkSyncUsers() {
+        const select = document.getElementById('subsonic-sync-user');
+        if (!select) return;
+        try {
+            const users = await this.request('/api/users');
+            const names = (Array.isArray(users) ? users : []).map(u => u.name).filter(Boolean);
+            const wanted = this.pendingLinkSyncUser || select.value;
+            select.innerHTML = '';
+            names.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n;
+                opt.textContent = n;
+                select.appendChild(opt);
+            });
+            if (names.includes(wanted)) select.value = wanted;
+            else if (names.length) select.value = names[0];
+            this.pendingLinkSyncUser = null;
+            // 动态填充后同步自定义下拉显示（菜单在展开时会重新渲染）
+            this.initCustomSelects();
+            this.syncCustomSelects();
+        } catch (e) {
+            console.warn('[LinkSync] 加载用户列表失败:', e);
+        }
+    }
+
+    async syncLink(direction) {
+        if (this._linkSyncBusy) return;
+        const isRatingToDislike = direction === 'ratingToDislike';
+        const key = isRatingToDislike ? 'subsonic.linkRatingToDislike' : 'subsonic.linkDislikeToRating';
+        const label = isRatingToDislike ? '评星 → 不喜欢' : '不喜欢 → 评星';
+        const btn = document.getElementById(isRatingToDislike ? 'sync-rating-to-dislike-btn' : 'sync-dislike-to-rating-btn');
+        const form = document.getElementById('subsonic-form');
+        // 开关以服务端已保存的配置为准，避免「表单勾了但没保存」时后端拒绝
+        const checked = !!form?.elements[key]?.checked;
+        const saved = (this.loadedSubsonicConfig || {})[key] === true;
+        if (!checked || !saved) {
+            showError(`请先开启「${label} 自动联动」并保存配置，再执行同步。`);
+            return;
+        }
+        const user = document.getElementById('subsonic-sync-user')?.value || '';
+        if (!user) {
+            showError('请先选择联动同步目标用户');
+            return;
+        }
+        const confirmed = await showSelect('手动联动同步',
+            `将对用户 ${this.escapeHtml(user)} 执行「${label}」补数据：只补目标侧缺失的数据，不覆盖已有数据，也不会改动导入 / 回滚逻辑。\n\n确定继续吗？`,
+            { confirmText: '开始同步', cancelText: '取消' });
+        if (!confirmed) return;
+
+        this._linkSyncBusy = true;
+        const oldText = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
+        try {
+            const res = await this.request('/api/subsonic/sync-link', {
+                method: 'POST',
+                body: JSON.stringify({ user, direction })
+            });
+            const text = `同步完成（${label} · 用户 ${user}）：扫描 ${res.scanned} 条，新增 ${res.added} 条，已存在 ${res.skipped} 条` +
+                (res.failed ? `，失败 ${res.failed} 条` : '') +
+                (res.batches > 1 ? `，分 ${res.batches} 批处理（全量）` : '') + '。';
+            const box = document.getElementById('link-sync-result');
+            if (box) {
+                box.textContent = text;
+                box.classList.remove('hidden');
+            }
+            showSuccess(text);
+        } catch (err) {
+            showError('同步失败: ' + err.message);
+        } finally {
+            this._linkSyncBusy = false;
+            if (btn) { btn.disabled = false; btn.textContent = oldText || '同步'; }
+        }
+    }
+
+    async maybeOfferLinkSync(user, kindLabel) {
+        try {
+            // 用服务端已保存的配置校验开关，只提供手动操作入口，绝不自动执行联动
+            const config = await this.request('/api/config');
+            const ratingToDislike = config['subsonic.linkRatingToDislike'] === true;
+            const dislikeToRating = config['subsonic.linkDislikeToRating'] === true;
+            const threshold = Number(config['subsonic.dislikeRating'] ?? 1);
+            if ((!ratingToDislike && !dislikeToRating) || !(threshold > 0)) return;
+            const dirs = [ratingToDislike ? '评星 → 不喜欢' : '', dislikeToRating ? '不喜欢 → 评星' : '']
+                .filter(Boolean).join(' / ');
+            const go = await showSelect('回滚完成，联动数据未自动同步',
+                `已回滚用户 ${this.escapeHtml(user)} 的「${this.escapeHtml(kindLabel)}」数据。\n\n` +
+                `检测到联动开关已开启（${dirs}）。导入 / 回滚不会自动补另一侧数据，如需对齐请前往 Subsonic 配置页手动点击「同步」。`,
+                { confirmText: '前往配置', cancelText: '稍后处理' });
+            if (go) await this.jumpToLinkSync(user);
+        } catch (e) {
+            console.warn('[LinkSync] 联动提示检查失败:', e);
+        }
+    }
+
+    async jumpToLinkSync(user) {
+        this.pendingLinkSyncUser = user;
+        await this.switchView('subsonic');
+        setTimeout(() => {
+            const target = document.getElementById('link-sync-field');
+            if (!target) return;
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.style.outline = '2px solid var(--accent-primary)';
+            target.style.outlineOffset = '4px';
+            setTimeout(() => { target.style.outline = 'none'; }, 2000);
+        }, 350);
     }
 
     async loadLogs(isAuto = false) {
@@ -3794,11 +3940,11 @@ class App {
         })
         const modeOptions = (sel) => ([
             ['upload', '上传（保留本地）'],
-            ['upload-delete', '上传后删除本地'],
+            ['upload-delete', '上传后删除本地（仅删除本地歌曲及其歌词等附件）'],
             ['download', '下载（远端→本地）'],
             ['sync', '双向同步'],
         ]).map(([v, t]) => '<option value="' + v + '"' + (v === sel ? ' selected' : '') + '>' + t + '</option>').join('')
-        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：上传完成即删本地并清缓存索引；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
+        const modeHelp = '上传：本地新增自动上传，保留本地；上传后删除：仅对「下载 / 缓存」目录中的歌曲文件及其随同上传的歌词、封面等附件生效，上传校验通过后删除这些本地文件并清除缓存索引；系统配置、歌单与不喜欢快照、用户数据一律保留本地，不受此模式影响；下载：仅把云端该用户目录拉到本地并补缓存；双向同步：补齐缓存并同步修改；本地缓存淘汰不会删除远端文件'
         const toggleHtml = (id, checked) =>
             '<label class="toggle-switch">' +
             '<input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '') + '>' +
@@ -3837,12 +3983,14 @@ class App {
     }
 
     /** 用户在 OpenList 备份里把某用户模式改为「上传后删除本地」时给出强提示：
-     *  该模式会清除本地缓存索引，下次播放将无本地缓存；为保证直接命中 OpenList 直链（而非回源重下），
-     *  保存时会自动开启 Subsonic 的「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
+     *  该模式只删「下载 / 缓存」目录里的歌曲及其歌词、封面等附件，并清除本地缓存索引，
+     *  不会删除系统配置、歌单与不喜欢快照、用户数据；下次播放将无本地缓存；
+     *  为保证直接命中 OpenList 直链（而非回源重下），保存时会自动开启 Subsonic 的
+     *  「缓存优先时优先使用 OpenList」（见 saveOpenlistConfig）。 */
     onOpenlistModeChange(sel) {
         if (!sel || sel.value !== 'upload-delete') return
         if (window.showInfo) {
-            window.showInfo('已选择「上传后删除本地」：该模式会在上传完成后清除本地缓存索引，下次播放将无本地缓存。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
+            window.showInfo('已选择「上传后删除本地」：\n仅删除「下载 / 缓存」目录中已成功上传的歌曲文件及其歌词、封面等附件，并清除本地缓存索引，下次播放将无本地缓存。\n系统配置、歌单与不喜欢快照、用户数据不会被删除，始终保留本地。\n保存后系统会自动开启 Subsonic「缓存优先时优先使用 OpenList」，以便直接命中 OpenList 直链而非回源重下。\n（保存时会同时开启 Subsonic「服务器存在缓存优先播放」）')
         }
     }
 
@@ -3914,7 +4062,26 @@ class App {
         try {
             const r = await this.request('/api/openlist/backups')
             let list = (r && r.list) || []
-            // 状态指标卡：基于全量列表统计各状态数量（deleted 不计入 list，通常为 0）
+            // 先按当前 tab 的 folder scope 过滤（媒体文件记录=cache,music；系统配置=system；歌单快照=list），统计卡与下方列表口径一致
+            const scope = this._olbFolderScope
+            if (scope) {
+                const allowed = scope.split(',')
+                list = list.filter(f => {
+                    if (allowed.includes(f.folder_type)) return true
+                    // 歌单快照 tab：selectedData 模式下歌单/不喜欢快照记在 folder_type='data'，路径含 /(list|dislike)/snapshot，需纳入展示
+                    if (allowed.includes('list') && f.folder_type === 'data' && /(^|[\\/])(list|dislike)[\\/]snapshot([\\/]|$)/i.test(f.local_path || f.name || '')) return true
+                    return false
+                })
+            }
+            // 歌单快照页：按「我的歌单 / 我不喜欢」类型下拉过滤
+            const inSnapshot = scope && scope.split(',').includes('list')
+            const tfEl = document.getElementById('olb-filter-type')
+            const tf = tfEl ? tfEl.value : ''
+            if (inSnapshot && tf) {
+                list = list.filter(f => this.olbSnapshotType(f) === tf)
+            }
+            this._olbCurrentList = list
+            // 状态指标卡：基于当前页签过滤后的列表统计各状态数量（deleted 不计入 list，通常为 0）
             const STATUS_LABEL = { pending: '待上传', uploading: '进行中', completed: '已完成', verified: '已验证', failed: '失败', deleted: '已删除' }
             const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', verified: '#22c55e', failed: '#ef4444', deleted: '#94a3b8' }
             const statusOrder = ['pending', 'uploading', 'completed', 'verified', 'failed', 'deleted']
@@ -3990,7 +4157,7 @@ class App {
             const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             const fmtName = (f) => {
                 const nm = (f.name || '').toString().trim()
-                const base = nm || (f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)'
+                const base = nm ? nm.split(/[\\/]/).pop() : ((f.local_path ? f.local_path.split(/[\\/]/).pop() : '') || '(未知)')
                 return esc(base)
             }
             const fmtSize = (n) => {
@@ -4004,7 +4171,13 @@ class App {
                 const d = new Date(f.updated_at || f.created_at || Date.now())
                 const color = badgeColor[f.status] || '#64748b'
                 const label = statusMap[f.status] || f.status || ''
-                const typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                let typeLabel
+                if (this._olbFolderScope && this._olbFolderScope.split(',').includes('list')) {
+                    const st = this.olbSnapshotType(f)
+                    typeLabel = st === 'dislike' ? '我不喜欢' : (st === 'list' ? '我的歌单' : (f.folder_type === 'list' ? '我的歌单' : '数据备份'))
+                } else {
+                    typeLabel = f.folder_type === 'data' ? '数据备份' : f.folder_type === 'music' ? '下载' : (f.folder_type === 'cache' ? '缓存' : (f.folder_type === 'list' ? '快照' : (f.folder_type || '')))
+                }
                 const canRetry = f.status !== 'verified' && f.status !== 'deleted'
                 const retryBtn = canRetry
                     ? '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
@@ -4022,14 +4195,13 @@ class App {
                     '<td style="text-align:center;"><input type="checkbox" class="olb-sel" data-id="' + f.id + '" ' + checked + ' onchange="app.toggleOpenlistSelect(this)"></td>' +
                     '<td><span class="olb-user-tag">' + esc(f.user || '') + '</span></td>' +
                     '<td style="white-space:nowrap;color:var(--text-secondary);">' + typeLabel + '</td>' +
-                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + fmtName(f) + '">' + fmtName(f) + '</td>' +
+                    '<td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--text-primary);" title="' + esc(f.name || f.local_path || '') + '">' + fmtName(f) + '</td>' +
                     '<td style="text-align:center;white-space:nowrap;"><span class="olb-badge" style="--badge-color:' + color + ';"><span class="olb-badge-dot"></span>' + label + '</span></td>' +
                     '<td style="white-space:nowrap;font-family:monospace;font-size:0.8rem;">' + fmtSize(f.size) + '</td>' +
                     '<td style="text-align:center;">' + localMark + '</td>' +
                     '<td style="max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + errCell + '</td>' +
-                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString() + '</td>' +
-                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '</td>' +
-                    '<td style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-secondary);font-size:.76rem;font-family:monospace;" title="' + esc(pathStr) + '">' + esc(pathStr) + '</td>' +
+                    '<td style="white-space:nowrap;color:var(--text-secondary);font-size:0.78rem;">' + d.toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</td>' +
+                    '<td style="text-align:center;white-space:nowrap;">' + retryBtn + '<button type="button" class="btn-secondary" style="padding:.2rem .55rem;font-size:.75rem;margin-left:.3rem;" onclick="app.showOpenlistDetail(' + f.id + ')">更多</button></td>' +
                     '</tr>'
             }).join('')
             const pager = '<div class="olb-pager">' +
@@ -4056,7 +4228,6 @@ class App {
                 '<th>异常原因</th>' +
                 '<th style="width:145px;">更新时间</th>' +
                 '<th style="width:65px;text-align:center;">操作</th>' +
-                '<th>云端路径</th>' +
                 '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pager
             this.updateOlbSelCount()
         } catch (e) {
@@ -4077,6 +4248,67 @@ class App {
         } catch (e) {
             console.error(e)
             if (window.showError) window.showError('重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    async retrySelectedOpenlist() {
+        if (!this._olbSelected || !this._olbSelected.size) return
+        const ids = Array.from(this._olbSelected)
+        if (!confirm('确认对选中的 ' + ids.length + ' 条记录提交批量重试？（失败/异常状态的记录将重新上传或验证）')) return
+        try {
+            const r = await this.request('/api/openlist/retry-batch', { method: 'POST', body: JSON.stringify({ ids }) })
+            if (r && r.success) {
+                if (window.showInfo) window.showInfo('已提交 ' + (r.retried || 0) + ' 条重试' + ((r.failed ? ('，' + r.failed + ' 条失败') : '')))
+                this.loadOpenlistBackups(true)
+            } else if (window.showError) {
+                window.showError('批量重试失败: ' + ((r && (r.error || r.message)) || '未知错误'))
+            }
+        } catch (e) {
+            console.error(e)
+            if (window.showError) window.showError('批量重试失败: ' + (e && e.message || e))
+        }
+    }
+
+    showOpenlistDetail(id) {
+        const list = this._olbCurrentList || []
+        const f = list.find(x => x.id === id)
+        if (!f) { if (window.showError) window.showError('未找到该记录详情'); return }
+        const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+        const fmtSize = (n) => { n = Number(n) || 0; if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(1) + ' MB' }
+        const row = (k, v) => '<tr><td class="olb-detail-key">' + esc(k) + '</td><td class="olb-detail-val">' + (v === '' || v == null ? '<span style="color:var(--text-secondary)">—</span>' : esc(v)) + '</td></tr>'
+        const html = '<table class="olb-detail-table">' +
+            row('记录 ID', f.id) +
+            row('用户', f.user) +
+            row('类型', f.folder_type) +
+            row('文件名', f.name) +
+            row('状态', f.status) +
+            row('大小', fmtSize(f.size)) +
+            row('来源平台', f.source) +
+            row('音质', f.quality) +
+            row('歌曲 ID', f.songmid) +
+            row('本地存在', f.local_exists ? '是' : '否') +
+            row('重试次数', f.retry_count) +
+            row('本地路径', f.local_path) +
+            row('云端路径', f.remote_path) +
+            row('远端大小', f.remote_size) +
+            row('本地哈希', f.local_hash) +
+            row('更新时间', f.updated_at) +
+            row('错误信息', f.error) +
+            row('缓存元数据', (() => {
+                if (!f.cache_metadata) return ''
+                try { return JSON.stringify(JSON.parse(f.cache_metadata), null, 2) } catch { return String(f.cache_metadata) }
+            })()) +
+            '</table>'
+        const modal = document.getElementById('modal')
+        const title = document.getElementById('modal-title')
+        const body = document.getElementById('modal-body')
+        if (modal && title && body) {
+            const nmBase = String(f.name || '').trim().split(/[\\/]/).pop() || ''
+            title.textContent = '记录详情 #' + f.id + (nmBase ? ' · ' + nmBase : '')
+            body.innerHTML = html
+            modal.classList.remove('hidden')
+        } else {
+            alert('记录 #' + f.id + '\n用户: ' + f.user + '\n类型: ' + f.folder_type + '\n状态: ' + f.status + '\n云端路径: ' + (f.remote_path || '') + '\n本地路径: ' + (f.local_path || ''))
         }
     }
 
@@ -4104,6 +4336,8 @@ class App {
         if (span) span.textContent = n ? ('已选 ' + n + ' 项') : ''
         const btn = document.getElementById('olb-bulkdel')
         if (btn) btn.disabled = n === 0
+        const rbtn = document.getElementById('olb-bulkretry')
+        if (rbtn) rbtn.disabled = n === 0
     }
 
     async deleteSelectedOpenlist() {
@@ -4127,8 +4361,16 @@ class App {
     switchOpenlistTab(name) {
         const map = {
             config: ['tab-btn-openlist-config', 'openlist-pane-config'],
-            records: ['tab-btn-openlist-records', 'openlist-pane-records'],
+            media: ['tab-btn-openlist-media', 'openlist-pane-records'],
+            system: ['tab-btn-openlist-system', 'openlist-pane-records'],
+            snapshot: ['tab-btn-openlist-snapshot', 'openlist-pane-records'],
         }
+        const scopeMap = { media: 'cache,music', system: 'system', snapshot: 'list' }
+        this._olbFolderScope = scopeMap[name] || ''
+        // 切换页签是新的筛选上下文：清空选中、重置页码与选中计数，避免沿用上一页签状态
+        this._olbSelected = new Set()
+        this._olbPage = 1
+        this.updateOlbSelCount()
         for (const [btnId, paneId] of Object.values(map)) {
             const b = document.getElementById(btnId); if (b) b.classList.remove('active')
             const p = document.getElementById(paneId); if (p) p.classList.remove('active')
@@ -4136,7 +4378,7 @@ class App {
         const [btnId, paneId] = map[name] || map.config
         const b = document.getElementById(btnId); if (b) b.classList.add('active')
         const p = document.getElementById(paneId); if (p) p.classList.add('active')
-        if (name === 'records') this.loadOpenlistBackups()
+        if (paneId === 'openlist-pane-records') this.loadOpenlistBackups()
     }
 
     scheduleOpenlistReload() {
@@ -4145,7 +4387,7 @@ class App {
     }
 
     clearOpenlistFilters() {
-        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
+        ['olb-filter-user', 'olb-filter-folder', 'olb-filter-status', 'olb-filter-type', 'olb-filter-name', 'olb-filter-path'].forEach((id) => {
             const el = document.getElementById(id); if (el) el.value = ''
         })
         this._olbPage = 1
@@ -4164,6 +4406,17 @@ class App {
         el.value = (el.value === status) ? '' : status
         this._olbPage = 1
         this.loadOpenlistBackups()
+    }
+
+    // 判断 OpenList 同步记录属于「我的歌单」还是「我不喜欢」（仅歌单快照页有意义）
+    olbSnapshotType(f) {
+        if (f.folder_type === 'list') return 'list'
+        if (f.folder_type === 'data') {
+            const p = (f.local_path || f.name || '')
+            if (/(^|[\\/])(dislike)[\\/]snapshot([\\/]|$)/i.test(p)) return 'dislike'
+            if (/(^|[\\/])(list)[\\/]snapshot([\\/]|$)/i.test(p)) return 'list'
+        }
+        return ''
     }
 
     gotoOpenlistPage(n) {
@@ -4392,7 +4645,7 @@ class App {
                 res.backups.forEach((item, index) => {
                     const isLatest = index === 0;
                     const sizeStr = item.size ? (item.size / (1024 * 1024)).toFixed(1) + ' MB' : '大小未知';
-                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString() : '未知时间');
+                    const timeStr = item.timeStr || (item.time ? new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '未知时间');
                     const escapedFilename = this.escapeHtml(item.filename || item.basename);
                     const escapedBasename = this.escapeHtml(item.basename);
 
@@ -4863,7 +5116,7 @@ class App {
         if (diff < day) return Math.floor(diff / hour) + '小时前';
 
         const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN');
+        return date.toLocaleString('zh-CN', { hour12: false });
     }
 
     // ========== 文件管理器功能 ==========
@@ -5032,7 +5285,7 @@ class App {
 
     formatDate(timestamp) {
         const date = new Date(timestamp);
-        return date.toLocaleString('zh-CN');
+        return date.toLocaleString('zh-CN', { hour12: false });
     }
 
     formatUptime(seconds) {
@@ -5147,6 +5400,20 @@ class App {
                 dirText.textContent = data.backupDir || 'backups';
                 dirText.title = data.backupDir || 'backups';
             }
+            const nextText = document.getElementById('config-backup-next-text');
+            if (nextText) {
+                if (data.autoBackupEnabled && data.nextBackupAt) {
+                    nextText.textContent = new Date(data.nextBackupAt).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                } else if (data.autoBackupEnabled) {
+                    nextText.textContent = '计算中…';
+                } else {
+                    nextText.textContent = '已停用';
+                }
+            }
+            const lastText = document.getElementById('config-backup-last-text');
+            if (lastText) {
+                lastText.textContent = data.lastBackupAt ? new Date(data.lastBackupAt).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '暂无';
+            }
 
             if (!list.length) {
                 container.innerHTML = '<div style="padding: 2.5rem; text-align: center; color: var(--text-secondary);">暂无系统配置备份文件。可点击上方【立即备份配置】手动创建第一份备份。</div>';
@@ -5162,7 +5429,7 @@ class App {
 
                 return `
                 <div class="snapshot-row">
-                    <div class="col-time">${new Date(item.time).toLocaleString()}</div>
+                    <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
                     <div class="col-id" title="${item.name}">
                         <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
                             <span style="font-family:monospace; font-weight:600;">${item.name}</span>
@@ -5286,26 +5553,47 @@ class App {
             return;
         }
 
+        // 确保「类型 / 来源」筛选条件存在
+        this.ensureSnapshotKindTabs();
+        const kind = this._snapshotKind || 'all';
+        const origin = this._snapshotOrigin || 'all';
+
         // 添加加载状态
         container.classList.add('content-loading');
 
         try {
             // 添加 user 参数
-            const list = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
+            const all = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
+            const list = all.filter(i =>
+                (kind === 'all' || (i.kind || 'list') === kind) &&
+                (origin === 'all' || (i.origin || 'auto') === origin));
 
             if (!list.length) {
-                container.innerHTML = '<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">暂无快照</div>';
+                const emptyText = origin === 'imported' ? '该用户暂无导入的备份快照'
+                    : kind === 'dislike' ? '该用户暂无「不喜欢」快照'
+                        : kind === 'rating' ? '该用户暂无「我的评分」快照' : '暂无快照';
+                container.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">${emptyText}</div>`;
                 container.classList.remove('content-loading');
                 return;
             }
 
-            container.innerHTML = list.map(item => `
+            container.innerHTML = list.map(item => {
+                const imported = item.origin === 'imported';
+                const originTag = imported
+                    ? '<span class="kind-tag" style="color:#a78bfa;font-size:.7rem;border:1px solid #a78bfa;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem;" title="用户上传导入的备份；列表时间取自该文件原始修改时间">导入备份</span>'
+                    : '<span class="kind-tag" style="color:#94a3b8;font-size:.7rem;border:1px solid #94a3b8;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem;" title="服务端在数据变更时自动生成">系统快照</span>';
+                const kindTag = item.kind === 'dislike'
+                    ? '<span class="kind-tag" style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我不喜欢</span>'
+                    : item.kind === 'rating'
+                        ? '<span class="kind-tag" style="color:#f59e0b;font-size:.7rem;border:1px solid #f59e0b;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的评分</span>'
+                        : '<span class="kind-tag" style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的歌单</span>';
+                return `
             <div class="snapshot-row">
-                <div class="col-time">${new Date(item.time).toLocaleString()}</div>
-                <div class="col-id" title="${item.id}">snapshot_${item.id}</div>
+                <div class="col-time"${imported ? ' title="时间取自备份文件的原始修改时间"' : ''}>${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                <div class="col-id"><span class="col-id-text" title="snapshot_${item.id}">snapshot_${item.id}</span>${kindTag}${originTag}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
-                    <button class="btn-download" onclick="app.downloadSnapshot('${item.id}')">
+                    <button class="btn-download" onclick="app.downloadSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <!-- 下载图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -5314,7 +5602,7 @@ class App {
                         </svg>
                         下载备份
                     </button>
-                    <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}')">
+                    <button class="btn-restore" onclick="app.restoreSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <!-- 恢复图标 -->
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="1 4 1 10 7 10"></polyline>
@@ -5323,7 +5611,7 @@ class App {
                         回滚
                     </button>
                     <!-- [新增] 删除按钮 -->
-                    <button class="btn-delete" onclick="app.deleteSnapshot('${item.id}')">
+                    <button class="btn-delete" onclick="app.deleteSnapshot('${item.id}', '${item.kind || 'list'}')">
                         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="3 6 5 6 21 6"></polyline>
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
@@ -5332,7 +5620,7 @@ class App {
                     </button>
                 </div>
             </div>
-        `).join('');
+        `; }).join('');
 
             // 移除加载状态并添加淡入动画
             container.classList.remove('content-loading');
@@ -5349,6 +5637,46 @@ class App {
             container.classList.remove('content-loading');
         }
     }
+
+    // 在「歌单快照」面板顶部注入「类型 / 来源」两个下拉查询条件
+    ensureSnapshotKindTabs() {
+        const container = document.getElementById('snapshots-list');
+        if (!container || !container.parentElement) return;
+        const parent = container.parentElement;
+
+        if (!document.getElementById('snapshot-kind-filter')) {
+            const sel = document.createElement('select');
+            sel.id = 'snapshot-kind-filter';
+            sel.className = 'form-input config-input olb-select';
+            sel.style.cssText = 'margin:.25rem .5rem .75rem 0;width:auto;';
+            sel.innerHTML = '<option value="all">全部类型</option><option value="list">我的歌单</option><option value="dislike">我不喜欢</option><option value="rating">我的评分</option>';
+            sel.value = this._snapshotKind || 'all';
+            sel.addEventListener('change', () => {
+                this._snapshotKind = sel.value;
+                this.loadSnapshots();
+            });
+            // 插到表头之前，避免把表头与快照列表隔开
+            parent.insertBefore(sel, parent.querySelector('.snapshots-table-header') || container);
+        }
+
+        if (!document.getElementById('snapshot-origin-filter')) {
+            const sel = document.createElement('select');
+            sel.id = 'snapshot-origin-filter';
+            sel.className = 'form-input config-input olb-select';
+            sel.style.cssText = 'margin:.25rem 0 .75rem;width:auto;';
+            sel.innerHTML = '<option value="all">全部来源</option><option value="imported">导入备份</option><option value="auto">系统快照</option>';
+            sel.value = this._snapshotOrigin || 'all';
+            sel.addEventListener('change', () => {
+                this._snapshotOrigin = sel.value;
+                this.loadSnapshots();
+            });
+            parent.insertBefore(sel, parent.querySelector('.snapshots-table-header') || container);
+        }
+
+        // 动态插入的 select 需要立即套用自定义下拉样式（initCustomSelects 自带幂等保护）
+        this.initCustomSelects();
+    }
+
     triggerUploadSnapshot() {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
@@ -5358,24 +5686,97 @@ class App {
         document.getElementById('snapshot-upload-input').click();
     }
 
+    // 导入时由超管从用户清单显式选择目标用户，选择结果即最终目标
+    async showImportTargetDialog({ filename, kindLabel, defaultUser }) {
+        let users = this.allUsers;
+        if (!Array.isArray(users) || !users.length) {
+            try {
+                users = await this.request('/api/users');
+                this.allUsers = users;
+            } catch (err) {
+                showError('获取用户清单失败: ' + err.message);
+                return null;
+            }
+        }
+        if (!users.length) {
+            showError('用户清单为空，无法导入');
+            return null;
+        }
+        const options = users.map(u => {
+            const label = u.name === '_open' ? '公开用户 (_open)' : u.name;
+            return `<option value="${this.escapeHtml(u.name)}"${u.name === defaultUser ? ' selected' : ''}>${this.escapeHtml(label)}</option>`;
+        }).join('');
+        return new Promise(resolve => {
+            const modal = document.createElement('div');
+            modal.id = 'snapshot-import-target-modal';
+            modal.className = 'fixed inset-0 z-[3000] flex items-center justify-center p-6 animate-fade-in';
+            modal.innerHTML = `
+                <div class="absolute inset-0 bg-black/40 backdrop-blur-[4px]"></div>
+                <div class="lx-glass rounded-[28px] w-full max-w-md overflow-hidden relative shadow-2xl">
+                    <div class="p-8">
+                        <h3 class="text-xl font-bold text-white mb-4">选择导入目标用户</h3>
+                        <p class="text-sm text-white/60 leading-relaxed mb-5">
+                            备份文件：${this.escapeHtml(filename)}<br>
+                            备份类型：${kindLabel}
+                        </p>
+                        <label class="text-sm text-white/70" for="snapshot-import-target-user">导入到用户</label>
+                        <select id="snapshot-import-target-user" class="lx-input w-full px-4 py-3 rounded-2xl mt-2">${options}</select>
+                    </div>
+                    <div class="p-5 flex gap-3">
+                        <button id="snapshot-import-target-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-2xl">取消</button>
+                        <button id="snapshot-import-target-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl">继续</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+            const close = (result) => { modal.remove(); resolve(result); };
+            modal.querySelector('#snapshot-import-target-ok').onclick = () => close(modal.querySelector('#snapshot-import-target-user').value);
+            modal.querySelector('#snapshot-import-target-cancel').onclick = () => close(null);
+            modal.querySelector('.absolute.inset-0').onclick = () => close(null);
+        });
+    }
+
     // [新增] 处理快照上传
     async handleSnapshotUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-
-        const username = document.getElementById('snapshot-user-select')?.value;
-        if (!username) return;
-
         // 重置 input，允许重复上传同名文件
         event.target.value = '';
 
+        const panelUser = document.getElementById('snapshot-user-select')?.value || '';
+        let content;
         try {
-            const content = await file.text();
-            // 使用文件最后修改时间
-            const time = file.lastModified;
-            const filename = file.name;
+            content = await file.text();
+        } catch (err) {
+            showError('读取备份文件失败: ' + err.message);
+            return;
+        }
+        let jsonData = null;
+        try { jsonData = JSON.parse(content); } catch { /* 非 JSON 也可按原生歌单快照导入 */ }
+        const isRatingBackup = jsonData && (jsonData.type === 'lxRating_v1' || (
+            jsonData.ratings && typeof jsonData.ratings === 'object' && !Array.isArray(jsonData.ratings) &&
+            !Array.isArray(jsonData.dislikeList) && !Array.isArray(jsonData.defaultList) && !Array.isArray(jsonData.userList)
+        ));
+        const kindLabel = isRatingBackup ? '我的评分'
+            : jsonData && Array.isArray(jsonData.dislikeList) &&
+                !Array.isArray(jsonData.defaultList) && !Array.isArray(jsonData.userList) ? '我不喜欢' : '我的歌单';
 
-            const response = await fetch(`/api/data/upload-snapshot?user=${encodeURIComponent(username)}&time=${time}&filename=${encodeURIComponent(filename)}`, {
+        // 目标用户由超管在清单中选择，选择结果即最终目标
+        const targetUser = await this.showImportTargetDialog({ filename: file.name, kindLabel, defaultUser: panelUser });
+        if (!targetUser) return;
+
+        // 「导入后立即恢复」默认开启：回滚会覆盖目标用户的数据，操作前二次确认
+        const restore = document.getElementById('snapshot-upload-restore')?.checked !== false;
+        if (restore) {
+            const safeTarget = this.escapeHtml(targetUser);
+            const confirmed = await showSelect('导入并恢复备份',
+                `导入到用户：${safeTarget}\n\n导入后将以该文件覆盖 ${safeTarget} 当前的对应数据。\n系统会自动把导入前的状态保存为一份「系统快照」，之后可随时回滚。是否继续？`,
+                { danger: true, confirmText: '导入并恢复' });
+            if (!confirmed) return;
+        }
+
+        try {
+            const time = file.lastModified;
+            const response = await fetch(`/api/data/upload-snapshot?user=${encodeURIComponent(targetUser)}&time=${time}&filename=${encodeURIComponent(file.name)}&restore=${restore ? 1 : 0}`, {
                 method: 'POST',
                 headers: {
                     'X-Frontend-Auth': this.password
@@ -5388,8 +5789,16 @@ class App {
                 throw new Error(text || 'Upload failed');
             }
 
-            showSuccess('上传成功');
-            this.loadSnapshots();
+            const result = await response.json().catch(() => ({}));
+            const resultKindLabel = result.kind === 'rating' ? '我的评分' : result.kind === 'dislike' ? '我不喜欢' : '我的歌单';
+            showSuccess(result.restored
+                ? `已导入「${resultKindLabel}」备份到用户 ${targetUser} 并恢复成功${result.safetySnapshot ? '（已自动保存导入前快照）' : ''}`
+                : `已导入「${resultKindLabel}」备份到用户 ${targetUser}（仅保存为快照，可稍后手动恢复）`);
+            // 仅提示 + 提供手动操作入口，不在此处调用联动同步
+            if (result.restored) void this.maybeOfferLinkSync(targetUser, resultKindLabel);
+            // 目标用户与面板用户不同时切换面板，便于立刻看到导入结果（selectUser 内部会刷新列表）
+            if (targetUser !== panelUser) this.selectUser('snapshot', targetUser);
+            else this.loadSnapshots();
         } catch (err) {
             console.error(err);
             showError('上传失败: ' + err.message);
@@ -5397,7 +5806,7 @@ class App {
     }
 
     // [新增] 删除快照
-    async deleteSnapshot(id) {
+    async deleteSnapshot(id, kind) {
         if (!(await showSelect('删除快照', '确定要删除这个快照吗？', { danger: true }))) return;
 
         const username = document.getElementById('snapshot-user-select')?.value;
@@ -5410,7 +5819,7 @@ class App {
                     'Content-Type': 'application/json',
                     'X-Frontend-Auth': this.password
                 },
-                body: JSON.stringify({ id })
+                body: JSON.stringify({ id, kind: kind || 'list' })
             });
 
             if (!response.ok) {
@@ -5425,7 +5834,7 @@ class App {
             showError('删除失败: ' + err.message);
         }
     }
-    async downloadSnapshot(id) {
+    async downloadSnapshot(id, kind) {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
             showInfo('请先选择用户');
@@ -5433,27 +5842,38 @@ class App {
         }
 
         try {
-            // 添加 user 参数
-            const data = await this.request(`/api/data/snapshot?id=${id}&user=${encodeURIComponent(username)}`);
+            const data = await this.request(`/api/data/snapshot?id=${encodeURIComponent(id)}&user=${encodeURIComponent(username)}&kind=${encodeURIComponent(kind || 'list')}`);
 
-            // 转换为 LX Music 备份格式
-            const defaultList = { id: 'default', name: 'list__name_default' };
-            const loveList = { id: 'love', name: 'list__name_love' };
+            let backupData, fname;
+            if (kind === 'rating') {
+                // 评分快照导出为 lxRating_v1（含完整 subsonic-meta 结构），导入时按 type 识别
+                backupData = data;
+                fname = `lx_rating_${username}_${id.substring(0, 8)}.json`;
+            } else if (kind === 'dislike') {
+                // 不喜欢快照直接导出原始规则（{ dislikeList: [...] }），不要套 playList_v2（否则内容会被清空成空壳）
+                backupData = data;
+                fname = `lx_dislike_${username}_${id.substring(0, 8)}.json`;
+            } else {
+                // 转换为 LX Music 备份格式
+                const defaultList = { id: 'default', name: 'list__name_default' };
+                const loveList = { id: 'love', name: 'list__name_love' };
 
-            const backupData = {
-                type: 'playList_v2',
-                data: [
-                    { ...defaultList, list: data.defaultList || [] },
-                    { ...loveList, list: data.loveList || [] },
-                    ...(data.userList || []),
-                ],
-            };
+                backupData = {
+                    type: 'playList_v2',
+                    data: [
+                        { ...defaultList, list: data.defaultList || [] },
+                        { ...loveList, list: data.loveList || [] },
+                        ...(data.userList || []),
+                    ],
+                };
+                fname = `lx_backup_${username}_${id.substring(0, 8)}.json`;
+            }
 
             const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
             a.href = url;
-            a.download = `lx_backup_${username}_${id.substring(0, 8)}.json`;
+            a.download = fname;
             a.click();
             URL.revokeObjectURL(url);
         } catch (err) {
@@ -5545,7 +5965,7 @@ class App {
         }
     }
 
-    async restoreSnapshot(id) {
+    async restoreSnapshot(id, kind) {
         const username = document.getElementById('snapshot-user-select')?.value;
         if (!username) {
             showInfo('请先选择用户');
@@ -5557,12 +5977,14 @@ class App {
         }
 
         try {
-            // 添加 user 参数
+            // 通用回滚入口：list / dislike 共用，按 kind 分流到后端对应快照恢复
             await this.request(`/api/data/restore-snapshot?user=${encodeURIComponent(username)}`, {
                 method: 'POST',
-                body: JSON.stringify({ id })
+                body: JSON.stringify({ id, kind })
             });
             showSuccess('回滚成功！请重启客户端或重新连接同步服务。');
+            // 仅提示 + 提供手动操作入口，不在此处调用联动同步
+            void this.maybeOfferLinkSync(username, kind === 'rating' ? '我的评分' : kind === 'dislike' ? '我不喜欢' : '我的歌单');
             this.loadDashboard(); // 刷新数据概览
         } catch (err) {
             showError('回滚失败: ' + err.message);

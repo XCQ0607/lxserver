@@ -164,22 +164,38 @@ test('shared cloud backup policy and WebDAV restore', async t => {
   await t.test('configuration API values survive the actual saveConfig writer and reload', () => {
     const server = fs.readFileSync(path.join(__dirname, '../src/server/server.ts'), 'utf8')
     const apiStart = server.indexOf("if (pathname === '/api/config')")
-    const start = server.indexOf('const config = {', apiStart)
+    // openlist 配置改为从 SQLite 读取后，olCfg 的定义在 config 对象之前，切片需一并包含
+    const olStart = server.indexOf('const olCfg = getOpenlistConfig()', apiStart)
+    const start = olStart >= 0 ? olStart : server.indexOf('const config = {', apiStart)
     const end = server.indexOf('          res.writeHead(200', start)
     const getter = transformSync(`module.exports = () => { ${server.slice(start, end)}; return config; }`, { loader: 'ts', format: 'cjs' }).code
+    // OpenList 配置已迁到 SQLite，GET 段通过 getOpenlistConfig() 读取，vm 里用空配置桩替代
+    const openlistStub = () => ({
+      enable: false, endpoint: '', username: '', password: '', token: '', root: '/lx_music',
+      verifyInterval: 5, syncInterval: 60, includeNonAudio: false, externalUrl: '',
+      backupSystemConfig: false, userBackups: [],
+    })
+    const memoryConfig: any = {
+      ...defaultConfig, 'backup.webdav.types': [], 'backup.openlist.types': ['snapshots', 'system'],
+      'backup.webdav.mirrorDeletes': true, 'backup.webdav.restoreOnStartup': true,
+      'subsonic.playCacheFirstUseOpenlist': true, 'subsonic.openlistDelivery': 'proxy',
+    }
+    // 启动迁移会把 openlist.* 从内存配置中清除，这里模拟同样状态，用于验证不再写回 config.js
+    for (const key of Object.keys(memoryConfig)) if (key.startsWith('openlist.')) delete memoryConfig[key]
     const runtime: any = {
-      module: { exports: null }, global: { lx: { dataPath: source, configPath: path.join(source, 'saved-config.js'), config: {
-        ...defaultConfig, 'backup.webdav.types': [], 'backup.openlist.types': ['snapshots', 'system'],
-        'backup.webdav.mirrorDeletes': true, 'backup.webdav.restoreOnStartup': true,
-        'subsonic.playCacheFirstUseOpenlist': true, 'subsonic.openlistDelivery': 'proxy',
-      } } },
+      module: { exports: null }, global: { lx: { dataPath: source, configPath: path.join(source, 'saved-config.js'), config: memoryConfig } },
       path, fs, process, crypto, BACKUP_TYPE_INFO, getBackupTypes, backupConfig() {}, lastConfigHash: '', console: { error() {} },
+      getOpenlistConfig: openlistStub,
+      require: Object.assign(() => ({}), { resolve: () => 'stub-config', cache: {} as Record<string, unknown> }),
     }
     vm.runInNewContext(getter, runtime)
     const readPayload = runtime.module.exports
     const before = JSON.parse(JSON.stringify(readPayload()))
     const index = fs.readFileSync(path.join(__dirname, '../src/index.ts'), 'utf8')
-    const writerStart = index.indexOf('const saveConfigToFile = () => {')
+    // saveConfigToFile 依赖同文件的键丢失校验函数，切片需从该函数开始；旧版没有这两个函数时回退到 saveConfigToFile
+    const writerStart = index.includes('const readExistingConfigKeys = ()')
+      ? index.indexOf('const readExistingConfigKeys = ()')
+      : index.indexOf('const saveConfigToFile = () => {')
     const writerEnd = index.indexOf('\nglobal.lx = {', writerStart)
     vm.runInNewContext(transformSync(index.slice(writerStart, writerEnd) + '; module.exports = saveConfigToFile;', { loader: 'ts', format: 'cjs' }).code, runtime)
     const writer = runtime.module.exports
@@ -189,6 +205,8 @@ test('shared cloud backup policy and WebDAV restore', async t => {
     runtime.global.lx.config = saved.exports
     const after = JSON.parse(JSON.stringify(readPayload()))
     for (const key of ['backup.webdav.types', 'backup.openlist.types', 'backup.webdav.mirrorDeletes', 'backup.webdav.restoreOnStartup', 'subsonic.playCacheFirstUseOpenlist', 'subsonic.openlistDelivery']) assert.deepEqual(after[key], before[key])
+    // OpenList 配置只存 SQLite，不得再写回 config.js
+    assert.equal(Object.keys(saved.exports).some(key => key.startsWith('openlist.')), false)
     runtime.global.lx.configPath = source // A directory cannot be replaced by a config file.
     assert.throws(() => writer())
     assert.equal(fs.readdirSync(temp).some(name => name.endsWith('.tmp')), false)

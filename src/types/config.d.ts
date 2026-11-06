@@ -239,6 +239,18 @@ declare namespace LX {
     'configBackup.dir'?: string
 
     /**
+     * 本地配置自动备份周期（小时），默认 24；留空或非法值回退为 24
+     */
+    'configBackup.intervalHours'?: number
+
+    /**
+     * 本地配置自动备份锚点时间（HH:MM），默认 00:00（即每天 0 点）。
+     * 若设置，则在该时刻首次触发，之后每 intervalHours 小时循环；
+     * 留空（或清除）则按每天 00:00（每 intervalHours 小时，从 00:00 起）触发
+     */
+    'configBackup.scheduleTime'?: string
+
+    /**
      * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
      * 相对路径基于 data 目录，绝对路径直接使用
      */
@@ -388,6 +400,15 @@ declare namespace LX {
     'subsonic.linkDislikeToRating'?: boolean
 
     /**
+     * 是否向 Subsonic 客户端暴露 1~5 星评星歌单 (默认 true)
+     * 虚拟只读歌单(不落盘、不影响 LX 客户端「我的歌单」)：id 为 rating_1 ~ rating_5。
+     * rating_1 承载「我不喜欢」：除 1 星歌曲外并入 dislike 规则命中的歌曲，并强制显示 1 星；
+     * 开启时「1 星 <-> 不喜欢」双向联动强制生效（不受上面两个解耦开关影响），
+     * 便于只能用评星操作的 Subsonic 客户端通过 1 星查找并处理不喜欢。
+     */
+    'subsonic.ratingPlaylists'?: boolean
+
+    /**
      * Subsonic 列表中是否隐藏 dislike 命中的歌曲 (默认 true)
      * 开启后，命中不喜欢规则的歌曲会直接从专辑/歌单/搜索等列表中剔除；
      * 关闭则保留，仅以评分形式体现（不做剔除）。
@@ -532,7 +553,9 @@ declare namespace LX {
     'system.allowUnsafeVM'?: boolean
 
     // ===== OpenList 备份/同步 =====
-    /** 是否启用 OpenList 备份/同步 */
+    // 已迁移到 SQLite（openlist_config / openlist_user_backup），以下键仅作为旧配置迁移来源；
+    // 运行时请使用 src/server/openlistConfigDb.ts 的 loadOpenlistConfig / saveOpenlistConfig。
+    /** 是否启用 OpenList 备份/同步（已迁移至 SQLite，仅迁移读取） */
     'openlist.enable'?: boolean
     /** OpenList 地址(如 http://127.0.0.1:5244) */
     'openlist.endpoint'?: string
@@ -544,8 +567,6 @@ declare namespace LX {
     'openlist.token'?: string
     /** OpenList 中 lx-music 备份根目录 */
     'openlist.root'?: string
-    /** 上传 OpenList 后是否保留本地文件 */
-    'openlist.keepLocalAfterUpload'?: boolean
     /** 远端可用性校验周期(分钟) */
     'openlist.verifyInterval'?: number
     /** 双向同步周期(分钟) */

@@ -65,7 +65,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   })
   // Isolate the music SDK and user spaces; exercise the real manager, SQLite DB and HTTP client.
   await build({
-    stdin: { contents: "export * from './src/server/openlistBackup'; export * from './src/server/openlistBackupDb'; export * from './src/server/openlistClient'", resolveDir: root, loader: 'ts' },
+    stdin: { contents: "export * from './src/server/openlistBackup'; export * from './src/server/openlistBackupDb'; export * from './src/server/openlistClient'; export * from './src/server/openlistConfigDb'", resolveDir: root, loader: 'ts' },
     bundle: true, platform: 'node', format: 'cjs', outfile: path.join(temp, 'manager.cjs'),
     plugins: [{ name: 'application-boundaries', setup(b) {
       b.onResolve({ filter: /^@\/(server\/music\/fileCache|server\/sources\/userApi|user(\/data)?|constants)$/ }, a => ({ path: a.path, namespace: 'boundary' }))
@@ -84,18 +84,24 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   const api = require(path.join(temp, 'manager.cjs'))
   const state = global.__openlistTest = { dirs: { cache: path.join(temp, 'cache'), music: path.join(temp, 'music') }, items: new Map(), registered: [], removed: [] }
   const config = {
-    'openlist.enable': true, 'openlist.endpoint': base, 'openlist.token': 'test-token', 'openlist.root': '/root',
-    'openlist.userBackups': [{ user: 'alice', enabled: true, backupCache: true, backupDownload: true, backupSnapshot: false, mode: 'sync' }],
     'subsonic.playCacheFirst': true, 'subsonic.playCacheFirstUseOpenlist': true,
   }
   global.lx = { dataPath: temp, userPath: temp, config }
-  const rule = config['openlist.userBackups'][0]
+  // OpenList 配置以 SQLite 为准：测试通过存储层写入，config 对象只保留非 OpenList 键
+  const rule = { user: 'alice', enabled: true, backupCache: true, backupDownload: true, backupSnapshot: false, mode: 'sync' }
+  const pushConfig = () => api.saveOpenlistConfig({
+    enable: true, endpoint: base, token: 'test-token', root: '/root', includeNonAudio: false,
+    userBackups: [{ ...rule }],
+  })
+  // 修改用户规则后立即同步到 SQLite，业务侧才能读到新值
+  const setRule = patch => { Object.assign(rule, patch); pushConfig() }
+  pushConfig()
   const reset = () => {
     api.stopVerifyScheduler()
     for (const table of ['openlist_attachment_links', 'openlist_backup_attachments', 'openlist_backup_files', 'openlist_local_files']) api.getBackupDb().exec('DELETE FROM ' + table)
     for (const dir of Object.values(state.dirs)) { fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir) }
     Object.assign(rule, { enabled: true, backupCache: true, backupDownload: true, mode: 'sync' })
-    config['openlist.includeNonAudio'] = false
+    pushConfig()
     config['subsonic.playCacheFirst'] = true
     config['subsonic.playCacheFirstUseOpenlist'] = true
     remote.clear(); state.items.clear(); state.registered.length = 0; state.removed.length = 0
@@ -113,7 +119,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   const sync = folder => api.runSyncNow({ user: 'alice', folder })
 
   await t.test('upload-delete verifies bytes, restores soft-deleted registration and original metadata', async () => {
-    reset(); rule.mode = 'upload-delete'
+    reset(); setRule({ mode: 'upload-delete' })
     const local = putLocal()
     await sync('cache'); await api.verifyPending()
     assert.equal(fs.existsSync(local), false)
@@ -126,7 +132,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   })
 
   await t.test('manual retry replaces a mismatched remote file and reports real transfer failures', async t => {
-    reset(); rule.mode = 'upload-delete'
+    reset(); setRule({ mode: 'upload-delete' })
     const local = putLocal('cache', 'song.mp3', 'valuable-new-audio')
     const row = api.upsertBackupFile({ user: 'alice', folderType: 'cache', localPath: local, remotePath: rp(), mode: rule.mode, status: 'failed' })
     remote.set(rp(), { body: Buffer.from('bad'), modified: new Date().toISOString() })
@@ -140,7 +146,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   })
 
   await t.test('same-sized corrupted cloud bytes never authorize deleting the local original', async () => {
-    reset(); rule.mode = 'upload-delete'
+    reset(); setRule({ mode: 'upload-delete' })
     const local = putLocal()
     await sync('cache')
     remote.get(rp()).body = Buffer.from('tampered')
@@ -185,7 +191,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   })
 
   await t.test('download mode updates existing files and preserves nested directory identity', async () => {
-    reset(); rule.mode = 'download'
+    reset(); setRule({ mode: 'download' })
     remote.set(rp('cache', 'a/song.mp3'), { body: Buffer.from('first'), modified: '2025-01-01T00:00:00Z' })
     remote.set(rp('cache', 'b/song.mp3'), { body: Buffer.from('second'), modified: '2025-01-01T00:00:00Z' })
     await sync('cache')
@@ -200,15 +206,15 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     await sync('cache'); await api.verifyPending(); fs.unlinkSync(local)
     config['subsonic.playCacheFirst'] = false
     assert.equal(await api.tryRestoreFromOpenlist('alice', 'cache', state.dirs.cache, 'song', '320k'), null)
-    config['subsonic.playCacheFirst'] = true; rule.backupCache = false
+    config['subsonic.playCacheFirst'] = true; setRule({ backupCache: false })
     assert.equal(await api.resolveOpenlistCacheDirectUrl('alice', 'cache', 'song'), null)
     assert.equal(await api.tryRestoreFromOpenlist('alice', 'cache', state.dirs.cache, 'song', '320k'), null)
-    rule.backupCache = true
+    setRule({ backupCache: true })
     assert.ok(await api.resolveOpenlistCacheEntry('alice', 'cache', 'different-name', { id: 'tx_song123', source: 'tx', quality: '320k' }))
   })
 
   await t.test('attachments belong to matching songs; shared covers survive deletion of one song', async () => {
-    reset(); config['openlist.includeNonAudio'] = true
+    reset(); api.saveOpenlistConfig({ includeNonAudio: true })
     putLocal('music', 'one.mp3'); putLocal('music', 'two.mp3')
     fs.writeFileSync(path.join(state.dirs.music, 'one.lrc'), 'one lyrics')
     fs.writeFileSync(path.join(state.dirs.music, 'two.lrc'), 'two lyrics')
@@ -243,7 +249,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   })
 
   await t.test('enabling data backup never runs an old music upload-delete rule', async () => {
-    reset(); rule.mode = 'upload-delete'
+    reset(); setRule({ mode: 'upload-delete' })
     const local = putLocal('music')
     await sync('music')
     config['backup.openlist.types'] = ['music']
@@ -251,8 +257,22 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     assert.equal(fs.readFileSync(local, 'utf8'), 'original')
   })
 
+  await t.test('backfill upload-delete keeps local files when the remote copy disappeared', async () => {
+    reset(); setRule({ mode: 'upload' })
+    const local = putLocal('music', 'keep.mp3', 'precious')
+    await sync('music')
+    await api.verifyPending()
+    const row = api.listAllBackups().find(r => r.local_path === local)
+    assert.equal(row.status, 'verified')
+    // 远端被手动删除：数据库仍是 verified，但不能仅凭该状态删除本地（music 是用户实际文件）
+    remote.delete(rp('music', 'keep.mp3'))
+    setRule({ mode: 'upload-delete' })
+    await api.triggerBackfillUploadDelete('alice')
+    assert.equal(fs.existsSync(local), true)
+  })
+
   await t.test('selected data types round-trip into a fresh installation without a backup database', async () => {
-    reset(); rule.backupCache = false
+    reset(); setRule({ backupCache: false })
     config['backup.openlist.types'] = ['music', 'userFiles', 'snapshots', 'userData', 'system']
     const data = {
       'config.js': 'module.exports = {}',
@@ -271,9 +291,13 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     fs.writeFileSync(path.join(state.dirs.cache, 'not-a-backup.mp3'), 'cache')
     const result = await api.runSyncNow()
     assert.deepEqual(result.errors, [])
-    assert.equal(result.uploaded, Object.keys(data).length)
+    // 本 fork 额外保留系统配置时间点副本（_system/config-history），不计入 _data 数据文件
+    const historyPrefix = '/root/_system/config-history/'
+    const historyKeys = [...remote.keys()].filter(name => name.startsWith(historyPrefix))
+    assert.equal(historyKeys.length, 1)
+    assert.equal(result.uploaded, Object.keys(data).length + historyKeys.length)
     await api.verifyPending()
-    assert.deepEqual([...remote.keys()].sort(), Object.keys(data).map(p => '/root/_data/' + p).sort())
+    assert.deepEqual([...remote.keys()].filter(name => !name.startsWith(historyPrefix)).sort(), Object.keys(data).map(p => '/root/_data/' + p).sort())
     // A missing cloud copy must be recreated even if the local bytes are unchanged.
     remote.delete('/root/_data/music/alice/song.lrc')
     assert.equal((await api.runSyncNow()).errors.length, 0)
@@ -282,6 +306,8 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     api.closeBackupDb()
     global.lx.dataPath = fresh
     global.lx.configPath = path.join(fresh, 'config.js')
+    // 新安装的数据目录没有配置记录：按迁移路径重新写入，恢复流程才能连上云端
+    pushConfig()
     const putsBefore = uploads
     const restored = await api.restoreOpenlistData()
     assert.equal(restored.restored, Object.keys(data).length)
