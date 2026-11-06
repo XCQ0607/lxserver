@@ -100,9 +100,12 @@ export function scanBackupFiles(context: BackupContext, types: readonly BackupTy
   const snapshots = String(context.config?.['snapshot.backupPath'] || '')
   if (types.includes('snapshots') && snapshots) {
     const base = path.isAbsolute(snapshots) ? snapshots : path.join(context.dataPath, snapshots)
-    // 外部快照目录只映射每个用户的 snapshot 子目录。
+    // 外部快照目录只映射每个用户的 snapshot 子目录（歌单与 dislike）。
     if (fs.existsSync(base)) for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
-      if (entry.isDirectory() && !entry.isSymbolicLink()) walk(path.join(base, entry.name, 'snapshot'), `_snapshots/${entry.name}/snapshot/`)
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        walk(path.join(base, entry.name, 'snapshot'), `_snapshots/${entry.name}/snapshot/`)
+        walk(path.join(base, entry.name, 'dislike', 'snapshot'), `_snapshots/${entry.name}/dislike/snapshot/`)
+      }
     }
   }
   return files

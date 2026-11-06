@@ -94,8 +94,10 @@ const getConfigHash = (filePath: string) => {
 const dataPath = envParams.DATA_PATH ?? path.join(__dirname, '../data')
 const resolvedConfigPath = process.env.CONFIG_PATH || path.join(dataPath, 'config.js')
 
-// [本地配置备份] 每天一份 config-YYYY-MM-DD.js，保留可配置天数（见 configBackup.*）
-let lastBackupDate = ''
+// [本地配置备份] 按周期生成 config-<槽位>.js，保留可配置天数（见 configBackup.*）
+// 定时 / 启动槽位与「保存配置」触发的槽位分开，避免保存操作打乱定时备份节奏
+let lastBackupSlot = ''
+let lastSaveBackupSlot = ''
 
 const getConfigBackupDir = (): string => {
   const dir = global.lx?.config['configBackup.dir']
@@ -122,7 +124,37 @@ const getTimestampStr = () => {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}_${pad2(d.getHours())}${pad2(d.getMinutes())}${pad2(d.getSeconds())}`
 }
 
-// 清理超过保留期的本地配置备份（按文件 mtime 判断）
+// 本地快照备份文件名：snapshot_<name>-<日期_时分秒>[-序号]。每次落盘生成独立文件，不覆盖历史，可按时间点回溯。
+const snapshotBackupPrefix = (name: string) => `snapshot_${name}-`
+const isSnapshotBackupOf = (file: string, name: string): boolean => {
+  if (file === `snapshot_${name}`) return true // 兼容旧版无时间戳的副本
+  const prefix = snapshotBackupPrefix(name)
+  if (!file.startsWith(prefix)) return false
+  return /^\d{4}-\d{2}-\d{2}_\d{6}(?:-\d+)?$/.test(file.slice(prefix.length))
+}
+
+// 按同一保留期清理过期的本地快照副本（snapshots/<user>/ 下的 snapshot_* 文件）
+const cleanOldSnapshotBackups = (backupDir: string, cutoff: number) => {
+  const root = path.join(backupDir, 'snapshots')
+  if (!fs.existsSync(root)) return
+  for (const user of fs.readdirSync(root, { withFileTypes: true })) {
+    if (!user.isDirectory()) continue
+    const dir = path.join(root, user.name)
+    try {
+      for (const file of fs.readdirSync(dir)) {
+        if (!file.startsWith('snapshot_')) continue
+        const fp = path.join(dir, file)
+        try {
+          const stat = fs.statSync(fp)
+          if (stat.isFile() && stat.mtimeMs < cutoff) fs.unlinkSync(fp)
+        } catch { /* ignore */ }
+      }
+      if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir)
+    } catch { /* ignore */ }
+  }
+}
+
+// 清理超过保留期的本地配置备份与快照备份（按文件 mtime 判断）
 const cleanOldConfigBackups = () => {
   const backupDir = getConfigBackupDir()
   try {
@@ -135,6 +167,7 @@ const cleanOldConfigBackups = () => {
         if (fs.statSync(fp).mtimeMs < cutoff) fs.unlinkSync(fp)
       } catch { /* ignore */ }
     }
+    cleanOldSnapshotBackups(backupDir, cutoff)
   } catch (err) {
     console.error('[Config] Failed to clean old config backups:', err)
   }
@@ -167,23 +200,69 @@ const migrateConfigBackups = (targetBackupDir: string) => {
   }
 }
 
-// 每天自动备份一次（同日覆盖），备份后顺带清理过期文件
-const backupConfig = () => {
+// 按配置的备份周期生成槽位键：定时触发周期≥24h 按天（同日覆盖），否则带时分（每周期一个文件）
+// 保存触发固定按天去重，不参与定时槽位；备份后顺带清理过期文件
+const backupConfig = (trigger: 'schedule' | 'save' = 'schedule') => {
   if (global.lx?.config['configBackup.enable'] === false) return
   const backupDir = getConfigBackupDir()
   migrateConfigBackups(backupDir)
+  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+  const now = new Date()
   const dateStr = getTodayStr()
-  if (dateStr === lastBackupDate) return
+  const slotKey = trigger === 'save'
+    ? dateStr
+    : (intervalHours >= 24 ? dateStr : `${dateStr}-${pad2(now.getHours())}${pad2(now.getMinutes())}`)
+  if (slotKey === (trigger === 'save' ? lastSaveBackupSlot : lastBackupSlot)) return
   try {
     if (!global.lx?.configPath || !fs.existsSync(global.lx.configPath)) return
     fs.mkdirSync(backupDir, { recursive: true })
-    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${dateStr}.js`))
-    lastBackupDate = dateStr
-    console.log(`[Config] Local backup saved to ${backupDir}/config-${dateStr}.js`)
+    fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${slotKey}.js`))
+    if (trigger === 'save') {
+      lastSaveBackupSlot = slotKey
+    } else {
+      lastBackupSlot = slotKey
+      if (global.lx) global.lx.lastConfigBackupAt = Date.now()
+    }
+    console.log(`[Config] Local backup saved to ${backupDir}/config-${slotKey}.js`)
   } catch (err) {
     console.error('[Config] Failed to backup config:', err)
   }
   cleanOldConfigBackups()
+}
+
+// 本地快照备份：当本地备份开关打开时，把刚落盘的歌单/不喜欢快照复制一份带时间戳的副本到备份目录。
+// 每次落盘都独立成文件（秒级时间戳 + 同秒序号），保证可按时间点回溯，不覆盖历史。
+// 复用 configBackup.enable 开关与 getConfigBackupDir 目录约定（"跟配置走"）
+const backupSnapshotToLocal = (srcPath: string, user: string, name: string) => {
+  if (global.lx?.config['configBackup.enable'] === false) return
+  if (!srcPath || !fs.existsSync(srcPath) || !user || !name) return
+  const backupDir = getConfigBackupDir()
+  const destDir = path.join(backupDir, 'snapshots', user)
+  try {
+    fs.mkdirSync(destDir, { recursive: true })
+    const base = `${snapshotBackupPrefix(name)}${getTimestampStr()}`
+    let dest = path.join(destDir, base)
+    let seq = 1
+    while (fs.existsSync(dest)) dest = path.join(destDir, `${base}-${seq++}`)
+    fs.copyFileSync(srcPath, dest)
+  } catch (err) {
+    console.error('[Config] Failed to backup snapshot locally:', err)
+  }
+}
+
+// 删除某个快照时，清理其所有本地历史副本（含旧版无时间戳副本），避免孤儿文件
+const removeSnapshotLocalBackups = (user: string, name: string) => {
+  if (!user || !name) return
+  const destDir = path.join(getConfigBackupDir(), 'snapshots', user)
+  if (!fs.existsSync(destDir)) return
+  try {
+    for (const file of fs.readdirSync(destDir)) {
+      if (!isSnapshotBackupOf(file, name)) continue
+      try { fs.unlinkSync(path.join(destDir, file)) } catch { /* ignore */ }
+    }
+  } catch (err) {
+    console.error('[Config] Failed to remove snapshot local backups:', err)
+  }
 }
 
 // 手动立即备份一次（精确到秒时间戳，不覆盖当天的自动备份）
@@ -204,8 +283,37 @@ const backupConfigNow = (): { success: boolean, filename?: string, error?: strin
   }
 }
 
-const saveConfigToFile = () => {
+/** 读取磁盘 config.js 当前的键集合（不修改内存配置） */
+const readExistingConfigKeys = (): string[] => {
+  try {
+    if (!global.lx.configPath || !fs.existsSync(global.lx.configPath)) return []
+    const resolved = require.resolve(global.lx.configPath)
+    delete require.cache[resolved]
+    const existing = require(global.lx.configPath)
+    // 值为 undefined 的键在 margeConfig 中会被跳过、JSON.stringify 写回时也会消失，
+    // 不能算作「本次写回丢失的键」，否则一份带 undefined 的配置会让启动直接抛错
+    return Object.keys(existing || {}).filter(key => (existing as any)[key] !== undefined)
+  } catch {
+    return []
+  }
+}
+
+/** 对比磁盘 config.js 与内存配置的键集合，返回本次写回会丢失的键 */
+const findDroppedConfigKeys = (): string[] => {
+  const nextKeys = new Set(Object.keys(global.lx.config))
+  return readExistingConfigKeys().filter(key => !nextKeys.has(key))
+}
+
+const saveConfigToFile = (allowKeyDrop = false) => {
   const content = `module.exports = ${JSON.stringify(global.lx.config, null, 2)}`
+  // 写回前校验：已有 config.js 中的键不应在本次写回中消失，防止合并 / 迁移逻辑静默丢字段
+  const dropped = findDroppedConfigKeys()
+  if (dropped.length > 0) {
+    console.warn(`[Config] 写回配置将丢失以下键${allowKeyDrop ? '（已忽略）' : '，已阻止'}：${dropped.join(', ')}`)
+    if (!allowKeyDrop) {
+      throw new Error(`配置写回被阻止：将丢失 ${dropped.length} 个键（${dropped.slice(0, 5).join(', ')}）。如确认要删除这些配置，请手动编辑 config.js。`)
+    }
+  }
   const temporary = `${global.lx.configPath}.${process.pid}.${crypto.randomUUID()}.tmp`
   try {
     const targetDir = path.dirname(global.lx.configPath)
@@ -217,7 +325,7 @@ const saveConfigToFile = () => {
     fs.renameSync(temporary, global.lx.configPath)
     lastConfigHash = crypto.createHash('md5').update(content).digest('hex')
     // console.log('Current memory config saved to ' + global.lx.configPath)
-    backupConfig()
+    backupConfig('save')
   } catch (err) {
     console.error('Failed to save config file:', err)
     throw err
@@ -236,6 +344,8 @@ global.lx = {
   saveConfig: saveConfigToFile,
   backupConfigNow,
   getConfigBackupDir,
+  backupSnapshotToLocal,
+  removeSnapshotLocalBackups,
 }
 
 const mergeConfigFileEnv = (config: Partial<Record<ENV_PARAMS_Value_Type, string>>) => {
@@ -272,10 +382,19 @@ const margeConfig = (p: string) => {
     console.warn('Read config error: ' + (err.message as string))
     return false
   }
-  const newConfig = { ...global.lx.config }
-  for (const key of Object.keys(defaultConfig) as Array<keyof LX.Config>) {
-    // @ts-expect-error
-    if (config[key] !== undefined) newConfig[key] = config[key]
+  // 保留用户配置中的所有键（不再只按 defaultConfig 白名单合并）：
+  // 避免 defaultConfig 尚未收录的新键（如新增的 openlist.*）在加载 / 回写时被静默丢弃
+  const newConfig = { ...global.lx.config } as LX.Config
+  for (const key of Object.keys(config) as Array<keyof LX.Config>) {
+    if (config[key] !== undefined) (newConfig as any)[key] = config[key]
+  }
+
+  // [向后兼容] 旧版 Subsonic 独立端口靠 subsonic.port > 0 直接监听，无 standalone 开关概念。
+  // 升级到引入 subsonic.standalone（默认 false）的版本后，旧配置缺失该键会按默认值静默关闭独立端口，
+  // 造成「升级前已有端口值却被关掉」。故对「原始 config 缺开关键且有端口值(>0)」的旧配置默认视为开启；
+  // 仅当原始 config 未显式设置该键时生效（用户显式设为 false 则尊重其意图，不被覆盖）。
+  if (config['subsonic.standalone'] === undefined && (Number(config['subsonic.port']) || 0) > 0) {
+    newConfig['subsonic.standalone'] = true
   }
 
   console.log('[配置] 加载配置文件: ' + p)
@@ -858,13 +977,85 @@ if (!fs.existsSync(openLibDir)) {
   fs.mkdirSync(openLibDir, { recursive: true })
 }
 
-// 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
-saveConfigToFile()
+// OpenList 配置迁移到 SQLite：数据表已有记录时忽略 config.js 中的旧值
+let openlistKeysRemovedFromDisk = false
+try {
+  const { migrateOpenlistConfigFromLegacy, stripOpenlistKeysFromConfig } = require('./server/openlistConfigDb')
+  const legacyOpenlistKeys = Object.keys(global.lx.config).filter(key => key.startsWith('openlist.'))
+  if (migrateOpenlistConfigFromLegacy(global.lx.config)) {
+    console.log('[Config] OpenList 配置已迁移到 SQLite（openlist_config / openlist_user_backup）')
+  } else if (legacyOpenlistKeys.length) {
+    // 已有配置时不再用 config.js 覆盖，明确提示用户去页面改，避免改配置文件却看不到生效
+    console.warn('[Config] 数据库中已有 OpenList 配置，本次忽略 config.js 中的旧值；如需修改请前往 Web 管理页 →「OpenList 备份/同步」')
+  }
+  // 只把「磁盘 config.js 中真实存在」的 openlist 键算作有意删除，其余键仍走严格校验
+  const diskKeys = new Set(readExistingConfigKeys())
+  const cleanedConfig = { ...global.lx.config }
+  const removedAll: string[] = stripOpenlistKeysFromConfig(cleanedConfig)
+  if (removedAll.length) global.lx.config = cleanedConfig
+  const removed = removedAll.filter(key => diskKeys.has(key))
+  if (removed.length) {
+    openlistKeysRemovedFromDisk = true
+    console.log(`[Config] 已从 config.js 移除 OpenList 键：${removed.join(', ')}`)
+  }
+} catch (e: any) {
+  console.warn('[Config] OpenList 配置迁移失败:', e?.message || e)
+}
 
-// 每日清理过期本地配置备份（保留最近 7 天）
+// 启动前最后保存一次合并后的配置，确保环境变量被固化到 config.js 中
+saveConfigToFile(openlistKeysRemovedFromDisk)
+
+// 本地配置备份调度：每 N 小时一次，可选锚点时间（HH:MM）对齐到该时刻首次触发
+const getNextRunTime = (anchor: string, intervalMs: number, now: number): number => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(anchor)
+  if (!m) return now + intervalMs
+  const hour = Math.min(23, Math.max(0, Number(m[1])))
+  const minute = Math.min(59, Math.max(0, Number(m[2])))
+  // 以固定历元（本地 1970-01-01 HH:MM）为网格基准，而不是「当天锚点」：
+  // 周期不能整除 24 小时时，用当天锚点会让相位每天被重置，实际间隔小于配置值。
+  const epochBase = new Date(1970, 0, 1, hour, minute, 0, 0).getTime()
+  const k = Math.ceil((now - epochBase) / intervalMs)
+  let t = epochBase + k * intervalMs
+  if (t <= now) t += intervalMs
+  return t
+}
+let configBackupTimer: ReturnType<typeof setTimeout> | undefined
+// setTimeout 最大延迟为 2^31-1 毫秒（约 24.8 天）；备份周期可配到 365 天，直接使用会溢出成 1ms 死循环
+const MAX_TIMER_DELAY = 2 ** 31 - 1
+const scheduleConfigBackup = () => {
+  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+  const intervalMs = intervalHours * 60 * 60 * 1000
+  const anchor = String(global.lx?.config?.['configBackup.scheduleTime'] || '00:00').trim()
+  const now = Date.now()
+  const nextRun = getNextRunTime(anchor, intervalMs, now)
+  if (global.lx) global.lx.nextConfigBackupAt = nextRun
+  // 目标时间只算一次：超长周期被 MAX_TIMER_DELAY 截断后继续等待剩余时间，
+  // 若在回调里重新调度会重算 nextRun（基准随 now 前移），长周期永远等不到。
+  const arm = () => {
+    const remain = nextRun - Date.now()
+    if (remain > 0) {
+      configBackupTimer = setTimeout(arm, Math.min(remain, MAX_TIMER_DELAY))
+      if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+      return
+    }
+    backupConfig()
+    scheduleConfigBackup()
+  }
+  arm()
+}
+
+// 启动即备份一次，并按当前配置调度后续自动备份
+backupConfig()
+scheduleConfigBackup()
+if (global.lx) global.lx.rescheduleConfigBackup = () => {
+  if (configBackupTimer) clearTimeout(configBackupTimer)
+  scheduleConfigBackup()
+}
+
+// 每日清理过期本地配置备份（保留最近 N 天；即便备份被禁用也照常执行）
 cleanOldConfigBackups()
-const configBackupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
-if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+const configCleanupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
+if (typeof configCleanupTimer.unref === 'function') configCleanupTimer.unref()
 
 startServer(global.lx.config.port, '0.0.0.0')
 

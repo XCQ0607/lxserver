@@ -104,6 +104,7 @@ const config: LX.Config = {
   'subsonic.sharedListMode': 'leaderboard', // 共享歌单内容模式: leaderboard | playlist | both
   'subsonic.sharedListSort': 'hot', // 共享歌单排序: hot | new
   'subsonic.dislikeRating': 1, // 评分联动 dislike 阈值: 0 < rating <= 该值 视为不喜欢(写回原生 dislike 规则); 设为 0 关闭联动
+  'subsonic.ratingPlaylists': true, // 是否向 Subsonic 客户端暴露 1~5 星评星歌单(虚拟只读, 不落盘); 开启时 1 星歌单承载「我不喜欢」并强制双向联动
   'subsonic.linkRatingToDislike': false, // 解耦开关(正向): 评星 -> 不喜欢 是否自动联动; false=不联动(仅记录评分)
   'subsonic.linkDislikeToRating': false, // 解耦开关(反向): 不喜欢 -> 评星 是否自动联动; false=不联动(仅记录不喜欢)
   'subsonic.hideDisliked': true, // 是否在 Subsonic 列表中隐藏 dislike 命中的歌曲(关闭则只评分不剔除)
@@ -132,13 +133,14 @@ const config: LX.Config = {
   'system.allowUnsafeVM': false, // 是否允许运行 VM 模式自定义源脚本
 
   // ===== OpenList 备份/同步 =====
+  // 注意：OpenList 配置已迁移到 SQLite（src/server/openlistConfigDb.ts 的 openlist_config / openlist_user_backup），
+  // 运行时一律以数据库为准；以下键仅作为旧版 config.js 的迁移来源与默认值保留，启动迁移后会被从内存/配置文件中清除。
   'openlist.enable': false, // 是否启用 OpenList 备份/同步
   'openlist.endpoint': '', // OpenList 地址(如 http://127.0.0.1:5244)
   'openlist.username': '', // OpenList 管理员账号(用于 testConnection)
   'openlist.password': '', // OpenList 密码
   'openlist.token': '', // OpenList 用户令牌(与账号密码二选一)
   'openlist.root': '/lx_music', // OpenList 中 lx-music 备份根目录
-  'openlist.keepLocalAfterUpload': true, // 上传 OpenList 后是否保留本地文件
   'openlist.verifyInterval': 5, // 远端可用性校验周期(分钟)
   'openlist.syncInterval': 60, // 双向同步周期(分钟)
   'openlist.userBackups': '[]', // 各用户备份目录配置(JSON 数组)

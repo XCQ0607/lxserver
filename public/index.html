@@ -1196,6 +1196,20 @@
                                     </div>
                                 </div>
                                 <div class="config-divider"></div>
+                                <div class="config-field-row">
+                                    <div class="config-field">
+                                        <label class="config-label">备份周期（小时）</label>
+                                        <input type="number" name="configBackup.intervalHours"
+                                            class="form-input config-input" min="1" max="8760" placeholder="24" />
+                                        <small class="config-hint">每 N 小时自动备份一次</small>
+                                    </div>
+                                    <div class="config-field">
+                                        <label class="config-label">锚点时间</label>
+                                        <input type="time" name="configBackup.scheduleTime" class="form-input config-input" />
+                                        <small class="config-hint">留空=从每天 00:00 起每 N 小时；填 HH:MM 则从该时刻起算，之后每 N 小时循环</small>
+                                    </div>
+                                </div>
+                                <div class="config-divider"></div>
                                 <div class="config-field">
                                     <label class="config-label">歌单快照备份路径</label>
                                     <input type="text" name="snapshot.backupPath" class="form-input config-input"
@@ -1849,7 +1863,20 @@
                                 </div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
-                                        <span class="config-toggle-label">评星 → 不喜欢 自动联动 <button type="button" class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)" data-help="Subsonic 客户端打低星时写回原生 dislike 规则；关闭则评分仅记录、不触碰不喜欢">?</button></span>
+                                        <span class="config-toggle-label">评星歌单（1~5 星） <button type="button" class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)" data-help="向 Subsonic 客户端暴露 1~5 星虚拟只读歌单，不落盘、不影响 LX 客户端我的歌单。1 星歌单承载「我不喜欢」：开启后强制双向联动，客户端打 1 星即加入不喜欢，提高或清除评分即移除">?</button></span>
+                                    </div>
+                                    <label class="toggle-switch">
+                                        <input type="checkbox" name="subsonic.ratingPlaylists" />
+                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                    </label>
+                                </div>
+                                <div class="config-toggle-row">
+                                    <div class="config-toggle-info">
+                                        <span class="config-toggle-label">评星 → 不喜欢 自动联动 <button type="button" class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)" data-help="Subsonic 客户端打低星时写回原生 dislike 规则；评星歌单开启时此项强制生效">?</button></span>
+                                        <button type="button" id="sync-rating-to-dislike-btn" class="btn-secondary hidden"
+                                            style="margin-top: 8px; padding: 4px 10px; font-size: 0.8rem; white-space: nowrap;"
+                                            onclick="app.syncLink('ratingToDislike')"
+                                            title="按当前配置把低星评分补写成「我不喜欢」规则；导入 / 回滚不会自动执行">同步：补齐「我不喜欢」</button>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.linkRatingToDislike" />
@@ -1859,11 +1886,23 @@
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
                                         <span class="config-toggle-label">不喜欢 → 评星 自动联动 <button type="button" class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)" data-help="网页端/Subsonic 点「不喜欢」回写客户端评分（低星）；关闭则不喜欢仅写入规则、不回写评星">?</button></span>
+                                        <button type="button" id="sync-dislike-to-rating-btn" class="btn-secondary hidden"
+                                            style="margin-top: 8px; padding: 4px 10px; font-size: 0.8rem; white-space: nowrap;"
+                                            onclick="app.syncLink('dislikeToRating')"
+                                            title="按当前配置把「我不喜欢」规则补写成低星评分；导入 / 回滚不会自动执行">同步：补齐低星评分</button>
                                     </div>
                                     <label class="toggle-switch">
                                         <input type="checkbox" name="subsonic.linkDislikeToRating" />
                                         <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                     </label>
+                                </div>
+                                <div class="config-field" id="link-sync-field">
+                                    <label class="config-label">联动数据同步目标用户</label>
+                                    <select id="subsonic-sync-user" class="form-input config-input"></select>
+                                    <div class="config-hint" style="line-height: 1.5; color: var(--text-secondary);">
+                                        导入 / 回滚备份只覆盖对应数据，<strong>不会自动联动</strong>；需要对齐另一侧数据时，请在对应开关打开并保存后，点击上方「同步」按钮手动执行。
+                                    </div>
+                                    <div id="link-sync-result" class="config-hint hidden" style="line-height: 1.5;"></div>
                                 </div>
                                 </div>
                                 <div class="config-section-title">音质 / 源优选 (Subsonic)</div>
@@ -2251,6 +2290,10 @@
                         <div class="header-left">
                             <h3>备份与恢复管理</h3>
                             <p class="text-secondary">集中管理系统配置文件历史备份与各用户歌单数据快照，保障数据安全与即时回滚。</p>
+                            <p class="text-secondary" style="margin-top:6px;color:var(--warning-color, #f59e0b);">
+                                OpenList 相关的业务数据（备份记录、附件索引与 OpenList 配置）保存在 SQLite 数据库文件
+                                <code>data/openlist-backup.db</code>，不在下方配置 / 快照备份范围内，需要另外单独备份；本项目暂不支持自动备份该数据库文件。
+                            </p>
                         </div>
                         <div class="backup-segmented-tabs glass">
                             <button type="button" class="backup-tab-btn active" id="tab-btn-config-backup"
@@ -2300,6 +2343,14 @@
                                     <div class="meta-label">备份保存目录</div>
                                     <div class="meta-value text-truncate" id="config-backup-dir-text" title="backups">
                                         backups</div>
+                                </div>
+                                <div class="config-backup-meta-item">
+                                    <div class="meta-label">下一次自动备份</div>
+                                    <div class="meta-value" id="config-backup-next-text">—</div>
+                                </div>
+                                <div class="config-backup-meta-item">
+                                    <div class="meta-label">上次自动备份</div>
+                                    <div class="meta-value" id="config-backup-last-text">—</div>
                                 </div>
                             </div>
                             <div class="config-backup-actions-wrap">
@@ -2365,6 +2416,11 @@
                                 </div>
                                 <input type="hidden" id="snapshot-user-select" value="">
                                 <input type="file" id="snapshot-upload-input" style="display: none;" accept=".json">
+                                <label style="display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; font-size: 0.85rem; cursor: pointer;"
+                                    title="导入下载的备份后立即覆盖当前数据（回滚）；取消勾选则仅保存为一份新快照">
+                                    <input type="checkbox" id="snapshot-upload-restore" checked>
+                                    导入后恢复
+                                </label>
                                 <button onclick="app.triggerUploadSnapshot()" class="btn-secondary"
                                     style="white-space: nowrap; flex-shrink: 0;">
                                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2412,7 +2468,7 @@
                                 </svg>
                                 <span>备份配置</span>
                             </button>
-                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-records" onclick="app.switchOpenlistTab('records')">
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-media" onclick="app.switchOpenlistTab('media')">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
                                     <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
                                     <polyline points="14 2 14 8 20 8"></polyline>
@@ -2420,7 +2476,22 @@
                                     <line x1="16" y1="17" x2="8" y2="17"></line>
                                     <polyline points="10 9 9 9 8 9"></polyline>
                                 </svg>
-                                <span>文件记录</span>
+                                <span>媒体文件记录</span>
+                            </button>
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-system" onclick="app.switchOpenlistTab('system')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <circle cx="12" cy="12" r="3"></circle>
+                                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                                </svg>
+                                <span>系统配置记录</span>
+                            </button>
+                            <button type="button" class="backup-tab-btn" id="tab-btn-openlist-snapshot" onclick="app.switchOpenlistTab('snapshot')">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;">
+                                    <path d="M9 18V5l12-2v13"></path>
+                                    <circle cx="6" cy="18" r="3"></circle>
+                                    <circle cx="18" cy="16" r="3"></circle>
+                                </svg>
+                                <span>歌单快照记录</span>
                             </button>
                         </div>
                         <div id="openlist-pane-config" class="backup-tab-pane active">
@@ -2503,9 +2574,9 @@
                                             <div class="config-toggle-info">
                                                 <span class="config-toggle-label">
                                                     <span>播放缓存同时上传封面与歌词</span>
-                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词也会一并上传">?</span>
+                                                    <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="开启后，下载 / 缓存目录里的图片和歌词会随歌曲一并上传；在「上传后删除本地」模式下，这些附件也会随歌曲一起从本地删除">?</span>
                                                 </span>
-                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本</span>
+                                                <span class="config-toggle-desc">随同音频文件自动备份其本地封面图片与歌词文本；「上传后删除本地」模式下会一并删除</span>
                                             </div>
                                             <label class="toggle-switch">
                                                 <input type="checkbox" name="openlist.includeNonAudio" />
@@ -2518,7 +2589,7 @@
                                                 <line x1="12" y1="16" x2="12" y2="12"></line>
                                                 <line x1="12" y1="8" x2="12.01" y2="8"></line>
                                             </svg>
-                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地；如需恢复请使用下方恢复按钮。</span>
+                                            <span>数据备份类型请在「系统设置 → 云端备份范围」中选择。常规备份只上传并保留本地。「上传后删除本地」仅对下载 / 缓存目录中的歌曲及其歌词、封面等附件生效；系统配置、歌单与不喜欢快照、用户数据一律保留本地，不受该模式影响。如需恢复请使用下方恢复按钮。</span>
                                         </div>
                                         <div class="config-divider"></div>
                                         <div class="config-field">
@@ -2602,7 +2673,7 @@
                                 </div>
                                 <div>
                                     <h3 class="config-card-title">
-                                        <span>同步状态与文件记录</span>
+                                        <span>同步记录（媒体文件 / 系统配置 / 歌单快照）</span>
                                         <span class="help-icon" role="button" tabindex="0" onclick="app.toggleHelp(this)" data-help="查看已备份文件与同步结果（含图片等附件计数）">?</span>
                                     </h3>
                                     <p class="config-card-desc">实时查看文件备份进度、验证状态及失败重试</p>
@@ -2619,6 +2690,13 @@
                                                 <line x1="12" y1="3" x2="12" y2="15"></line>
                                             </svg>
                                             立即全量同步
+                                        </button>
+                                        <button type="button" id="olb-bulkretry" class="btn-secondary" onclick="app.retrySelectedOpenlist()" disabled>
+                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
+                                                <polyline points="23 4 23 10 17 10"></polyline>
+                                                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+                                            </svg>
+                                            批量重试
                                         </button>
                                         <button type="button" id="olb-bulkdel" class="btn-secondary btn-danger-soft" onclick="app.deleteSelectedOpenlist()" disabled>
                                             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;">
@@ -2645,6 +2723,11 @@
                                             <option value="verified">已验证</option>
                                             <option value="failed">失败</option>
                                             <option value="deleted">已删除</option>
+                                        </select>
+                                        <select id="olb-filter-type" class="form-input config-input olb-select" onchange="app.applyOpenlistFilter()" title="按歌单快照类型筛选（仅歌单快照页生效）">
+                                            <option value="">全部类型</option>
+                                            <option value="list">我的歌单</option>
+                                            <option value="dislike">我不喜欢</option>
                                         </select>
                                         <input type="text" id="olb-filter-name" class="form-input config-input olb-input" placeholder="文件名搜索" oninput="app.scheduleOpenlistReload()" />
                                         <input type="text" id="olb-filter-path" class="form-input config-input olb-input" placeholder="路径包含搜索" oninput="app.scheduleOpenlistReload()" />

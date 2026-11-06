@@ -368,7 +368,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
         count: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).count?.(...args) },
         countReset: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).countReset?.(...args) },
         assert: (condition?: boolean, ...data: any[]) => { if (global.lx.config['debug.enabled']) console.assert(condition, ...data) },
-        dir: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.dir(...args) },
+        dir: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).dir(...args) },
         dirxml: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).dirxml?.(...args) },
         error: (...args: any[]) => { console.error(...args) }
     }

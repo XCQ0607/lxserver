@@ -19,6 +19,11 @@ import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
+import { invalidateSubsonicPlaylistCache } from '@/server/integrations/subsonic'
+import {
+  createRatingSnapshot, saveRatingImport, listRatingSnapshots,
+  readRatingSnapshot, restoreRatingSnapshot, deleteRatingSnapshot, isValidSnapshotId,
+} from './ratingSnapshot'
 import { createMsg2call } from 'message2call'
 import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
@@ -26,19 +31,20 @@ import formidable from 'formidable'
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
 import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
-import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData } from '@/server/openlistBackup'
+import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete } from '@/server/openlistBackup'
 import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes } from '@/utils/backupPolicy'
 import { OpenListClient } from '@/server/openlistClient'
+import { getOpenlistConfig, saveOpenlistConfig } from '@/server/openlistRuntime'
 
 async function validateOpenListConfig(newConfig: any): Promise<void> {
-  const c: any = global.lx.config
-  const enable = newConfig['openlist.enable'] !== undefined ? !!newConfig['openlist.enable'] : !!c['openlist.enable']
+  const current = getOpenlistConfig()
+  const enable = newConfig['openlist.enable'] !== undefined ? !!newConfig['openlist.enable'] : current.enable
   if (!enable) return
-  const endpoint = newConfig['openlist.endpoint'] !== undefined ? newConfig['openlist.endpoint'] : (c['openlist.endpoint'] || '')
-  const username = newConfig['openlist.username'] !== undefined ? newConfig['openlist.username'] : (c['openlist.username'] || '')
-  const password = newConfig['openlist.password'] !== undefined ? newConfig['openlist.password'] : (c['openlist.password'] || '')
-  const token = newConfig['openlist.token'] !== undefined ? newConfig['openlist.token'] : (c['openlist.token'] || '')
-  const root = newConfig['openlist.root'] !== undefined ? newConfig['openlist.root'] : (c['openlist.root'] || '/lx_music')
+  const endpoint = newConfig['openlist.endpoint'] !== undefined ? newConfig['openlist.endpoint'] : (current.endpoint || '')
+  const username = newConfig['openlist.username'] !== undefined ? newConfig['openlist.username'] : (current.username || '')
+  const password = newConfig['openlist.password'] !== undefined ? newConfig['openlist.password'] : (current.password || '')
+  const token = newConfig['openlist.token'] !== undefined ? newConfig['openlist.token'] : (current.token || '')
+  const root = newConfig['openlist.root'] !== undefined ? newConfig['openlist.root'] : (current.root || '/lx_music')
   if (!endpoint) throw new Error('OpenList 地址(endpoint)不能为空')
   const cl = new OpenListClient({ endpoint, username, password, token, root })
   try {
@@ -46,12 +52,12 @@ async function validateOpenListConfig(newConfig: any): Promise<void> {
   } catch (e: any) {
     throw new Error('OpenList 账号校验失败：' + (e?.message || e))
   }
-  const rawUB = newConfig['openlist.userBackups'] !== undefined ? newConfig['openlist.userBackups'] : c['openlist.userBackups']
+  const rawUB = newConfig['openlist.userBackups'] !== undefined ? newConfig['openlist.userBackups'] : current.userBackups
   let ub: any[] = []
   if (rawUB) {
     try { ub = typeof rawUB === 'string' ? JSON.parse(rawUB) : rawUB } catch { ub = [] }
   }
-  const users: any[] = c.users || []
+  const users: any[] = (global.lx.config as any).users || []
   for (const e of ub) {
     if (!e || !e.enabled) continue
     if (!users.find((u: any) => u.name === e.user)) throw new Error(`OpenList 同步配置中的用户「${e.user}」不存在`)
@@ -69,7 +75,7 @@ function scheduleOpenlistSync(): void {
   if (pendingOpenlistSyncTimer) clearTimeout(pendingOpenlistSyncTimer)
   pendingOpenlistSyncTimer = setTimeout(() => {
     pendingOpenlistSyncTimer = null
-    if (!global.lx.config['openlist.enable']) return
+    if (!getOpenlistConfig().enable) return
     void runSyncNow({}).catch((e: any) => {
       console.warn('[OpenList] 自动同步失败:', e?.message || e)
     })
@@ -1247,6 +1253,39 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     accessLog.info(`${req.method} ${urlObj.pathname} from ${ip}`)
     const pathname = urlObj.pathname
 
+    // 快照类 API 统一鉴权加固（覆盖 snapshots / snapshot / restore-snapshot / delete-snapshot / upload-snapshot）：
+    // 1) 目标用户必须是已配置用户或公共空间 _open，避免为任意字符串创建孤儿数据目录
+    // 2) 取消 _open 匿名免鉴权，公共空间同样需要超管；非超管须持有效用户 token 且与 user 一致
+    // 3) 覆盖性回滚（导入即恢复、手动回滚）仅允许超管执行
+    // 各端点内部原有的鉴权保留作为二次校验，此处负责拦截匿名与非法目标用户。
+    if (pathname.startsWith('/api/data/') && pathname.includes('snapshot')) {
+      const snapshotUserParam = urlObj.searchParams.get('user')
+      const auth = req.headers['x-frontend-auth']
+      const isAdmin = !!auth && auth === global.lx.config['admin.password']
+      const isPublicParam = snapshotUserParam === 'default' || snapshotUserParam === '_open' || snapshotUserParam === 'open'
+      const isKnownUser = !!snapshotUserParam && (isPublicParam || global.lx.config.users.some(u => u.name === snapshotUserParam))
+      if (!isKnownUser) {
+        res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('Invalid user')
+        return
+      }
+      const isOverwrite = pathname === '/api/data/restore-snapshot' ||
+        (pathname === '/api/data/upload-snapshot' && urlObj.searchParams.get('restore') === '1')
+      if (isOverwrite && !isAdmin) {
+        res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' })
+        res.end('Forbidden: admin required')
+        return
+      }
+      if (!isAdmin) {
+        const verified = verifyUserAuth(req)
+        if (!verified || isPublicParam || verified !== snapshotUserParam) {
+          res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' })
+          res.end('Unauthorized')
+          return
+        }
+      }
+    }
+
     // 读取路径配置（每次请求都重新读取，保存后立刻生效）
     const normalizePath = (p: string) => (p || '').replace(/\/+$/, '')
     const playerPath = global.lx.config['player.path'] ?? '/'
@@ -1945,7 +1984,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         const userSpace = getUserSpace(verifiedUser)
         try {
-          const list = await userSpace.listManage.getSnapshotList()
+          const listSnaps = await userSpace.listManage.getSnapshotList()
+          const dislikeSnaps = userSpace.dislikeManage ? await userSpace.dislikeManage.snapshotDataManage.getSnapshotListWithMeta() : []
+          const ratingSnaps = await listRatingSnapshots(verifiedUser)
+          const list = [
+            ...listSnaps.map(s => ({ ...s, kind: 'list', origin: s.origin || 'auto' })),
+            ...dislikeSnaps.map(s => ({ ...s, kind: 'dislike', origin: s.origin || 'auto' })),
+            ...ratingSnaps.map(s => ({ ...s, kind: 'rating', origin: s.origin || 'auto' })),
+          ].sort((a, b) => (b.time || 0) - (a.time || 0))
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
@@ -1991,8 +2037,27 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.end('Missing id')
           return
         }
+        if (!isValidSnapshotId(id)) {
+          res.writeHead(400)
+          res.end('Invalid id')
+          return
+        }
         try {
-          const data = await userSpace.listManage.getSnapshot(id)
+          const kindParam = urlObj.searchParams.get('kind')
+          let data: any = null
+          if (kindParam === 'rating') {
+            const meta = await readRatingSnapshot(verifiedUser, id)
+            if (meta) data = { type: 'lxRating_v1', ...meta }
+          } else {
+            data = await userSpace.listManage.getSnapshot(id)
+            if (!data && userSpace.dislikeManage) {
+              data = await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)
+            }
+            if (!data) {
+              const meta = await readRatingSnapshot(verifiedUser, id)
+              if (meta) data = { type: 'lxRating_v1', ...meta }
+            }
+          }
           if (!data) {
             res.writeHead(404)
             res.end('Not Found')
@@ -2039,10 +2104,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userSpace = getUserSpace(verifiedUser)
         try {
           const body = await readBody(req)
-          const { id } = JSON.parse(body)
+          const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
+          if (!isValidSnapshotId(id)) throw new Error('Invalid id')
 
-          await userSpace.listManage.restoreSnapshot(id)
+          if (kind === 'dislike' && userSpace.dislikeManage) {
+            await userSpace.dislikeManage.restoreSnapshot(id)
+            invalidateDislikeCache(verifiedUser)
+          } else if (kind === 'rating') {
+            await restoreRatingSnapshot(verifiedUser, id)
+          } else {
+            await userSpace.listManage.restoreSnapshot(id)
+            invalidateSubsonicPlaylistCache()
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -2236,11 +2310,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userSpace = getUserSpace(verifiedUser)
         try {
           const body = await readBody(req)
-          const { id } = JSON.parse(body)
+          const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
+          if (!isValidSnapshotId(id)) throw new Error('Invalid id')
 
-          // 调用刚刚在 ListManage 中添加的方法
-          await userSpace.listManage.removeSnapshot(id)
+          let removed = false
+          if (kind === 'rating') {
+            removed = await deleteRatingSnapshot(verifiedUser, id)
+          } else if (kind === 'dislike' && userSpace.dislikeManage) {
+            try { await userSpace.dislikeManage.snapshotDataManage.removeSnapshot(id); removed = true } catch { /* ignore */ }
+          } else {
+            try { await userSpace.listManage.removeSnapshot(id); removed = true } catch { /* ignore */ }
+          }
+          if (!removed) throw new Error('快照不存在或删除失败')
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -2257,6 +2339,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userParam = urlObj.searchParams.get('user')
         const time = parseInt(urlObj.searchParams.get('time') || '0')
         const filename = urlObj.searchParams.get('filename')
+        const restore = urlObj.searchParams.get('restore') === '1'
 
         if (!userParam) {
           res.writeHead(400)
@@ -2289,47 +2372,93 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         try {
           const body = await readBody(req)
           let finalData = body
+          let kind: 'list' | 'dislike' | 'rating' = 'list'
 
-          // [核心兼容性修复] 检测是否为落雪音乐离线备份格式 (playList_v2)
-          try {
-            const jsonData = JSON.parse(body)
-            if (jsonData && jsonData.type === 'playList_v2' && Array.isArray(jsonData.data)) {
-              startupLog.info(`[Snapshot] Detected LX Music backup format for user ${verifiedUser}, converting back to internal format...`)
+          // 判定备份类型：
+          // 1) 落雪音乐离线备份 playList_v2 -> 转成服务器内部歌单快照格式
+          // 2) 「我不喜欢」备份 { dislikeList: [...] } -> 保持原始规则格式
+          // 3) 「我的评分」备份 lxRating_v1 / { ratings } -> 规范化为 subsonic-meta 结构
+          // 4) 其它 -> 视为服务器原生歌单快照（内部格式）
+          let jsonData: any = null
+          try { jsonData = JSON.parse(body) } catch { /* 非 JSON：按原生歌单快照处理 */ }
 
-              // 寻找默认列表
-              const defaultList = jsonData.data.find((l: any) => l.id === 'default')?.list || []
-              // 寻找收藏列表
-              const loveList = jsonData.data.find((l: any) => l.id === 'love')?.list || []
-              // 其他所有列表均作为用户列表
-              const userList = jsonData.data.filter((l: any) => l.id !== 'default' && l.id !== 'love')
-
-              // 拼装为服务器内部快照格式
-              const internalFormat = {
-                defaultList,
-                loveList,
-                userList
-              }
-
-              // 压缩为单行 JSON 以节省磁盘空间并保持与原生快照一致的大小
-              finalData = JSON.stringify(internalFormat)
-              startupLog.info(`[Snapshot] Conversion complete for user ${verifiedUser}.`)
-            }
-          } catch (parseErr) {
-            // 解析失败说明不是标准的 JSON 格式或已经是原始快照，保持原样即可
+          if (jsonData && jsonData.type === 'playList_v2' && Array.isArray(jsonData.data)) {
+            startupLog.info(`[Snapshot] Detected LX Music backup format for user ${verifiedUser}, converting back to internal format...`)
+            const defaultList = jsonData.data.find((l: any) => l.id === 'default')?.list || []
+            const loveList = jsonData.data.find((l: any) => l.id === 'love')?.list || []
+            const userList = jsonData.data.filter((l: any) => l.id !== 'default' && l.id !== 'love')
+            finalData = JSON.stringify({ defaultList, loveList, userList })
+            kind = 'list'
+            startupLog.info(`[Snapshot] Conversion complete for user ${verifiedUser}.`)
+          } else if (jsonData && Array.isArray(jsonData.dislikeList) && !Array.isArray(jsonData.defaultList) && !Array.isArray(jsonData.userList)) {
+            // 规范化为 dislike 快照格式，避免导入文件携带额外字段
+            finalData = JSON.stringify({ dislikeList: jsonData.dislikeList })
+            kind = 'dislike'
+          } else if (jsonData && (jsonData.type === 'lxRating_v1' || (
+            jsonData.ratings && typeof jsonData.ratings === 'object' && !Array.isArray(jsonData.ratings) &&
+            !Array.isArray(jsonData.dislikeList) && !Array.isArray(jsonData.defaultList) && !Array.isArray(jsonData.userList)
+          ))) {
+            finalData = JSON.stringify({
+              starredAlbums: Array.isArray(jsonData.starredAlbums) ? jsonData.starredAlbums : [],
+              starredArtists: Array.isArray(jsonData.starredArtists) ? jsonData.starredArtists : [],
+              starredArtistNames: Array.isArray(jsonData.starredArtistNames) ? jsonData.starredArtistNames : [],
+              ratings: jsonData.ratings && typeof jsonData.ratings === 'object' && !Array.isArray(jsonData.ratings) ? jsonData.ratings : {},
+            })
+            kind = 'rating'
           }
 
-          // 处理文件名：如果以 snapshot_ 开头，则去掉（因为 saveSnapshotWithTime 会自动加）
-          // 如果不以 snapshot_ 开头，则保持原样（saveSnapshotWithTime 会自动加 snapshot_ 前缀）
+          // 处理文件名：去掉 snapshot_ 前缀（保存时会自动加回）；并阻止路径穿越
           let name = filename
           if (name.startsWith('snapshot_')) {
             name = name.substring(9)
           }
+          if (!name || /[/\\]/.test(name) || name === '.' || name === '..' || name.includes('\0')) {
+            throw new Error('Invalid filename')
+          }
 
-          // 调用 ListManage 中的 saveSnapshotWithTime 方法
-          await userSpace.listManage.saveSnapshotWithTime(name, finalData, time)
+          // 导入即回滚会覆盖当前数据：先按类型保存一份「导入前状态」，保证操作可撤销
+          // createSnapshot 内容未变时会复用现有 latest，不会重复生成快照
+          let safetySnapshot: string | null = null
+          if (restore) {
+            if (kind === 'rating') {
+              safetySnapshot = await createRatingSnapshot(verifiedUser)
+            } else if (kind === 'dislike' && userSpace.dislikeManage) {
+              safetySnapshot = await userSpace.dislikeManage.createSnapshot()
+            } else {
+              safetySnapshot = await userSpace.listManage.createSnapshot()
+            }
+          }
+
+          // 按类型保存到对应快照目录
+          if (kind === 'rating') {
+            await saveRatingImport(verifiedUser, name, JSON.parse(finalData), time)
+          } else if (kind === 'dislike') {
+            if (!userSpace.dislikeManage) throw new Error('Dislike snapshot is not available')
+            await userSpace.dislikeManage.saveSnapshotWithTime(name, finalData, time)
+          } else {
+            await userSpace.listManage.saveSnapshotWithTime(name, finalData, time)
+          }
+
+          // 导入即回滚：恢复后主动失效派生缓存，避免 TTL 内返回陈旧数据
+          let restored = false
+          if (restore) {
+            if (kind === 'rating') {
+              await restoreRatingSnapshot(verifiedUser, name)
+            } else if (kind === 'dislike' && userSpace.dislikeManage) {
+              await userSpace.dislikeManage.restoreSnapshot(name)
+              invalidateDislikeCache(verifiedUser)
+            } else {
+              await userSpace.listManage.restoreSnapshot(name)
+              invalidateSubsonicPlaylistCache()
+            }
+            restored = true
+            startupLog.info(`[Snapshot] Imported backup ${name} (${kind}) restored for user ${verifiedUser}, safety snapshot ${safetySnapshot}`)
+          } else {
+            startupLog.info(`[Snapshot] Imported backup ${name} (${kind}) saved for user ${verifiedUser}`)
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true }))
+          res.end(JSON.stringify({ success: true, kind, restored, safetySnapshot }))
         } catch (err: any) {
           res.writeHead(500)
           res.end(err.message)
@@ -7077,7 +7206,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             const dislikeRatingThreshold = global.lx.config['subsonic.dislikeRating'] ?? 1
-            if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
+            // 评星歌单开启时，1 星歌单承载「我不喜欢」，反向联动也需生效：
+            // 网页端点不喜欢 -> 回写 1 星，使该歌曲出现在 rating_1 歌单中。
+            const linkDislikeToRating = global.lx.config['subsonic.linkDislikeToRating'] || global.lx.config['subsonic.ratingPlaylists'] !== false
+            if (linkDislikeToRating && dislikeRatingThreshold > 0 && id && source) {
               const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
               try {
                 const { syncDislikeToRating } = require('./integrations/subsonic')
@@ -7113,6 +7245,47 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             console.error('[黑名单 API] 处理异常:', err?.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: err.message }))
+          }
+        })
+        return
+      }
+
+      // [手动联动同步] 导入/回滚不自动补数据；仅管理员在 Subsonic 配置页点按钮时按方向补齐目标侧数据
+      if (pathname === '/api/subsonic/sync-link' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async body => {
+          try {
+            const payload = JSON.parse(body || '{}')
+            const user = String(payload.user || '').trim()
+            const direction = String(payload.direction || '')
+            if (!user) throw new Error('Missing user')
+            if (direction !== 'ratingToDislike' && direction !== 'dislikeToRating') throw new Error('Invalid direction')
+
+            // 依托对应配置：对应方向开关未开启、或阈值关闭时，不补数据
+            const label = direction === 'ratingToDislike' ? '评星 → 不喜欢 自动联动' : '不喜欢 → 评星 自动联动'
+            const enabled = direction === 'ratingToDislike'
+              ? global.lx.config['subsonic.linkRatingToDislike'] === true
+              : global.lx.config['subsonic.linkDislikeToRating'] === true
+            if (!enabled) throw new Error(`请先在 Subsonic 配置中开启「${label}」并保存后再同步`)
+            const threshold = Number(global.lx.config['subsonic.dislikeRating'] ?? 1)
+            if (!Number.isFinite(threshold) || threshold <= 0) throw new Error('评分联动 dislike 阈值为 0（已关闭），无法同步')
+
+            const { syncRatingsToDislike, syncDislikesToRating } = require('./integrations/subsonic')
+            const summary = direction === 'ratingToDislike'
+              ? await syncRatingsToDislike(user)
+              : await syncDislikesToRating(user)
+            startupLog.info(`[LinkSync] ${direction} (user=${user}): added=${summary.added}, skipped=${summary.skipped}, failed=${summary.failed}`)
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, ...summary }))
+          } catch (err: any) {
+            startupLog.warn(`[LinkSync] 同步失败: ${err?.message}`)
+            res.writeHead(400, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, message: err?.message || 'Sync failed' }))
           }
         })
         return
@@ -7214,6 +7387,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
 
         if (req.method === 'GET') {
+          const olCfg = getOpenlistConfig()
           const config = {
             serverName: global.lx.config.serverName,
             'debug.enabled': global.lx.config['debug.enabled'] || false,
@@ -7279,6 +7453,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'] ?? 'leaderboard',
             'subsonic.sharedListSort': global.lx.config['subsonic.sharedListSort'] ?? 'hot',
             'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'] ?? 1,
+            'subsonic.ratingPlaylists': global.lx.config['subsonic.ratingPlaylists'] ?? true,
             'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'] ?? false,
             'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'] ?? false,
             'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'] ?? true,
@@ -7302,21 +7477,22 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
             'configBackup.enable': global.lx.config['configBackup.enable'] ?? true,
             'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
+            'configBackup.intervalHours': global.lx.config['configBackup.intervalHours'] ?? 24,
+            'configBackup.scheduleTime': global.lx.config['configBackup.scheduleTime'] ?? '00:00',
             'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
             'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
-            'openlist.enable': global.lx.config['openlist.enable'] ?? false,
-            'openlist.endpoint': global.lx.config['openlist.endpoint'] || '',
-            'openlist.username': global.lx.config['openlist.username'] || '',
-            'openlist.password': global.lx.config['openlist.password'] || '',
-            'openlist.token': global.lx.config['openlist.token'] || '',
-            'openlist.root': global.lx.config['openlist.root'] || '/lx_music',
-            'openlist.keepLocalAfterUpload': global.lx.config['openlist.keepLocalAfterUpload'] !== false,
-            'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 5,
-            'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
-            'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
-            'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
-            'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
-            'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
+            'openlist.enable': olCfg.enable,
+            'openlist.endpoint': olCfg.endpoint,
+            'openlist.username': olCfg.username,
+            'openlist.password': olCfg.password,
+            'openlist.token': olCfg.token,
+            'openlist.root': olCfg.root,
+            'openlist.verifyInterval': olCfg.verifyInterval,
+            'openlist.syncInterval': olCfg.syncInterval,
+            'openlist.userBackups': JSON.stringify(olCfg.userBackups),
+            'openlist.includeNonAudio': olCfg.includeNonAudio,
+            'openlist.externalUrl': olCfg.externalUrl,
+            'openlist.backupSystemConfig': olCfg.backupSystemConfig,
             subsonicPortConflict: global.lx.subsonicPortConflict || null,
             configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
@@ -7497,19 +7673,39 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   warning = (warning ? warning + '；' : '') + 'OpenList 配置校验未通过（已保存，但同步可能因不可达而失败）：' + (ve?.message || ve)
                 }
               }
-              if (newConfig['openlist.enable'] !== undefined) global.lx.config['openlist.enable'] = newConfig['openlist.enable']
-              if (newConfig['openlist.endpoint'] !== undefined) global.lx.config['openlist.endpoint'] = newConfig['openlist.endpoint']
-              if (newConfig['openlist.username'] !== undefined) global.lx.config['openlist.username'] = newConfig['openlist.username']
-              if (newConfig['openlist.password'] !== undefined) global.lx.config['openlist.password'] = newConfig['openlist.password']
-              if (newConfig['openlist.token'] !== undefined) global.lx.config['openlist.token'] = newConfig['openlist.token']
-              if (newConfig['openlist.root'] !== undefined) global.lx.config['openlist.root'] = newConfig['openlist.root']
-              if (newConfig['openlist.keepLocalAfterUpload'] !== undefined) global.lx.config['openlist.keepLocalAfterUpload'] = newConfig['openlist.keepLocalAfterUpload']
-              if (newConfig['openlist.verifyInterval'] !== undefined) global.lx.config['openlist.verifyInterval'] = parseInt(newConfig['openlist.verifyInterval']) || 5
-              if (newConfig['openlist.syncInterval'] !== undefined) global.lx.config['openlist.syncInterval'] = parseInt(newConfig['openlist.syncInterval']) || 60
-              if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
-              if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
-              if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
-              if (newConfig['openlist.backupSystemConfig'] !== undefined) global.lx.config['openlist.backupSystemConfig'] = newConfig['openlist.backupSystemConfig']
+              // [OpenList 配置] 写入 SQLite（openlist_config / openlist_user_backup），不再进 config.js
+              if (hasOpenlistChange) {
+                const patch: any = {}
+                if (newConfig['openlist.enable'] !== undefined) patch.enable = !!newConfig['openlist.enable']
+                if (newConfig['openlist.endpoint'] !== undefined) patch.endpoint = String(newConfig['openlist.endpoint'] || '')
+                if (newConfig['openlist.username'] !== undefined) patch.username = String(newConfig['openlist.username'] || '')
+                if (newConfig['openlist.password'] !== undefined) patch.password = String(newConfig['openlist.password'] || '')
+                if (newConfig['openlist.token'] !== undefined) patch.token = String(newConfig['openlist.token'] || '')
+                if (newConfig['openlist.root'] !== undefined) patch.root = String(newConfig['openlist.root'] || '/lx_music')
+                if (newConfig['openlist.verifyInterval'] !== undefined) patch.verifyInterval = parseInt(newConfig['openlist.verifyInterval']) || 5
+                if (newConfig['openlist.syncInterval'] !== undefined) patch.syncInterval = parseInt(newConfig['openlist.syncInterval']) || 60
+                if (newConfig['openlist.userBackups'] !== undefined) {
+                  try {
+                    const arr = typeof newConfig['openlist.userBackups'] === 'string' ? JSON.parse(newConfig['openlist.userBackups']) : newConfig['openlist.userBackups']
+                    if (Array.isArray(arr)) {
+                      patch.userBackups = arr.filter((e: any) => e && e.user).map((e: any) => ({
+                        user: String(e.user),
+                        enabled: e.enabled !== false,
+                        backupDownload: e.backupDownload !== false,
+                        backupCache: e.backupCache !== false,
+                        backupSnapshot: e.backupSnapshot !== false,
+                        mode: e.mode || 'upload',
+                        downloadDir: e.downloadDir || undefined,
+                        cacheDir: e.cacheDir || undefined,
+                      }))
+                    }
+                  } catch { /* 非法 JSON 忽略 */ }
+                }
+                if (newConfig['openlist.includeNonAudio'] !== undefined) patch.includeNonAudio = !!newConfig['openlist.includeNonAudio']
+                if (newConfig['openlist.externalUrl'] !== undefined) patch.externalUrl = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
+                if (newConfig['openlist.backupSystemConfig'] !== undefined) patch.backupSystemConfig = !!newConfig['openlist.backupSystemConfig']
+                if (Object.keys(patch).length) saveOpenlistConfig(patch)
+              }
 
               if (newConfig['snapshot.backupPath'] !== undefined) {
                 try {
@@ -7533,11 +7729,24 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
               if (newConfig['subsonic.enableDebug'] !== undefined) global.lx.config['subsonic.enableDebug'] = newConfig['subsonic.enableDebug']
               // [本地配置备份] configBackup 配置
-              if (newConfig['configBackup.enable'] !== undefined) global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']
+              let configBackupChanged = false
+              if (newConfig['configBackup.enable'] !== undefined) { global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']; configBackupChanged = true }
               if (newConfig['configBackup.retentionDays'] !== undefined) {
                 const rd = Number(newConfig['configBackup.retentionDays'])
                 global.lx.config['configBackup.retentionDays'] = Number.isFinite(rd) && rd > 0 ? Math.floor(rd) : 7
+                configBackupChanged = true
               }
+              if (newConfig['configBackup.intervalHours'] !== undefined) {
+                const ih = parseInt(newConfig['configBackup.intervalHours'])
+                global.lx.config['configBackup.intervalHours'] = Number.isFinite(ih) && ih >= 1 && ih <= 8760 ? Math.floor(ih) : 24
+                configBackupChanged = true
+              }
+              if (newConfig['configBackup.scheduleTime'] !== undefined) {
+                const st = String(newConfig['configBackup.scheduleTime']).trim()
+                global.lx.config['configBackup.scheduleTime'] = /^([01]?\d|2[0-3]):[0-5]\d$/.test(st) ? st : ''
+                configBackupChanged = true
+              }
+              if (configBackupChanged) global.lx.rescheduleConfigBackup?.()
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
@@ -7566,6 +7775,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
               if (newConfig['subsonic.dislikeNormalizeName'] !== undefined) global.lx.config['subsonic.dislikeNormalizeName'] = !!newConfig['subsonic.dislikeNormalizeName']
               if (newConfig['subsonic.dislikeRequireSinger'] !== undefined) global.lx.config['subsonic.dislikeRequireSinger'] = !!newConfig['subsonic.dislikeRequireSinger']
+              if (newConfig['subsonic.ratingPlaylists'] !== undefined) global.lx.config['subsonic.ratingPlaylists'] = !!newConfig['subsonic.ratingPlaylists']
               if (newConfig['subsonic.linkRatingToDislike'] !== undefined) global.lx.config['subsonic.linkRatingToDislike'] = !!newConfig['subsonic.linkRatingToDislike']
               if (newConfig['subsonic.linkDislikeToRating'] !== undefined) global.lx.config['subsonic.linkDislikeToRating'] = !!newConfig['subsonic.linkDislikeToRating']
               if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
@@ -7574,13 +7784,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
               if (newConfig['subsonic.playCacheFirstUseOpenlist'] !== undefined) global.lx.config['subsonic.playCacheFirstUseOpenlist'] = newConfig['subsonic.playCacheFirstUseOpenlist']
               if (newConfig['subsonic.openlistDelivery'] !== undefined) global.lx.config['subsonic.openlistDelivery'] = newConfig['subsonic.openlistDelivery']
-              if (hasOpenlistChange && global.lx.config['openlist.enable']) {
-                const raw = global.lx.config['openlist.userBackups']
-                let rules: any[] = []
-                try { rules = typeof raw === 'string' ? JSON.parse(raw) : raw || [] } catch { /* 校验警告已返回 */ }
-                if (Array.isArray(rules) && rules.some(r => r?.enabled && (global.lx.config['backup.openlist.types'] === undefined || r.backupCache === true) && (r.mode === 'upload-delete' || (!r.mode && global.lx.config['openlist.keepLocalAfterUpload'] === false)))) {
+              const savedOlCfg = getOpenlistConfig()
+              if (hasOpenlistChange && savedOlCfg.enable) {
+                const raw = savedOlCfg.userBackups
+                let rules: any[] = Array.isArray(raw) ? raw : []
+                const udRules = Array.isArray(rules) ? rules.filter(r => r?.enabled && (global.lx.config['backup.openlist.types'] === undefined || r.backupCache === true) && r.mode === 'upload-delete') : []
+                if (udRules.length) {
                   global.lx.config['subsonic.playCacheFirst'] = true
                   global.lx.config['subsonic.playCacheFirstUseOpenlist'] = true
+                  // 保存为 upload-delete 时，对存量本地文件触发一次性迁移（异步，不阻塞保存响应）
+                  for (const r of udRules) void triggerBackfillUploadDelete(r.user)
                 }
               }
               if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
@@ -7634,7 +7847,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               // 配置保存后：若启用 OpenList 同步，后台（防抖）触发一次同步
               startVerifyScheduler()
-              if (global.lx.config['openlist.enable']) {
+              if (getOpenlistConfig().enable) {
                 scheduleOpenlistSync()
               }
 
@@ -7674,14 +7887,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 // 优先从文件名解析精确时间戳
                 let timestamp = 0
                 const manualMatch = file.match(/^config-manual-(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})\.js$/)
-                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})\.js$/)
+                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2}))?\.js$/)
 
                 if (manualMatch) {
                   const [, y, m, d, h, min, s] = manualMatch
                   timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), Number(s)).getTime()
                 } else if (autoMatch) {
-                  // 自动备份若与 mtime/birthtime 在同一天，优先使用文件修改时间以展示具体时刻；否则取日期当天 00:00
-                  timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                  // 带时分后缀的文件解析为精确时刻；否则使用文件修改时间以展示具体时刻
+                  if (autoMatch[4] !== undefined) {
+                    const [, y, m, d, h, min] = autoMatch
+                    timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), 0).getTime()
+                  } else {
+                    timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                  }
                 }
 
                 if (!timestamp) {
@@ -7710,6 +7928,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             backupDir,
             autoBackupEnabled: global.lx.config['configBackup.enable'] !== false,
             retentionDays: global.lx.config['configBackup.retentionDays'] || 7,
+            intervalHours: global.lx.config['configBackup.intervalHours'] || 24,
+            scheduleTime: global.lx.config['configBackup.scheduleTime'] || '00:00',
+            nextBackupAt: global.lx.nextConfigBackupAt || 0,
+            lastBackupAt: global.lx.lastConfigBackupAt || 0,
             list,
           }))
         } catch (err: any) {
@@ -7761,11 +7983,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         void readBody(req).then(async (body) => {
           try {
             const cfg = JSON.parse(body || '{}')
-            const endpoint = cfg.endpoint || global.lx.config['openlist.endpoint'] || ''
-            const username = cfg.username ?? (global.lx.config['openlist.username'] || '')
-            const password = cfg.password ?? (global.lx.config['openlist.password'] || '')
-            const token = cfg.token ?? (global.lx.config['openlist.token'] || '')
-            const root = cfg.root || global.lx.config['openlist.root'] || '/lx_music'
+            const current = getOpenlistConfig()
+            const endpoint = cfg.endpoint || current.endpoint || ''
+            const username = cfg.username ?? (current.username || '')
+            const password = cfg.password ?? (current.password || '')
+            const token = cfg.token ?? (current.token || '')
+            const root = cfg.root || current.root || '/lx_music'
             if (!endpoint) {
               res.writeHead(422, { 'Content-Type': 'application/json' })
               res.end(JSON.stringify({ success: false, error: 'OpenList 地址不能为空' }))
@@ -7885,6 +8108,42 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const r = await deleteOpenlistBackups(ids)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, deleted: r.deleted, remoteRemoved: r.remoteRemoved, remoteFailed: r.remoteFailed }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 批量重试备份记录（对选中的失败/异常项逐一提交重试）
+      if (pathname === '/api/openlist/retry-batch' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const ids = Array.isArray(cfg.ids) ? cfg.ids.map((x: any) => Number(x)).filter((x: number) => x > 0) : []
+            if (!ids.length) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: '缺少有效的 id 列表' }))
+              return
+            }
+            let ok = 0
+            let fail = 0
+            for (const id of ids) {
+              try {
+                const rb = await retryBackup(id)
+                if (rb && rb.ok) ok++
+                else fail++
+              } catch { fail++ }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, retried: ok, failed: fail }))
           } catch (e: any) {
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
@@ -9149,6 +9408,12 @@ export const startServer = async (port: number, ip: string) => {
   // if (status.status) await handleStopServer()
 
   startupLog.info(`starting sync server in ${process.env.NODE_ENV == 'production' ? 'production' : 'development'}`)
+  let appVersion = 'unknown'
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'))
+    if (pkg && pkg.version) appVersion = String(pkg.version)
+  } catch { }
+  startupLog.info(`LX Music Server version: v${appVersion}`)
   const proxyEnabled = global.lx.config['proxy.all.enabled']
   const proxyAddress = global.lx.config['proxy.all.address']
   console.log(`[网络代理] 音乐 SDK 代理状态: ${proxyEnabled ? `已启用 (${proxyAddress})` : '未启用'}`)
