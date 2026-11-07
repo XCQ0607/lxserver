@@ -1,3 +1,4 @@
+import { lookupLocalLyrics } from '@/server/music/localLyrics'
 import http from 'http'
 import { Readable } from 'stream'
 import { pipeline } from 'stream/promises'
@@ -6,7 +7,7 @@ import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
 import { downloadAndCache, checkCache, serveCacheFile, getFileName } from '@/server/music/fileCache'
-import { resolveOpenlistCacheEntry } from '@/server/openlistBackup'
+import { resolveOpenlistCacheEntry } from '@/server/openlist/openlistBackup'
 import {
     getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
     resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
@@ -1619,7 +1620,7 @@ class SubsonicHandler {
         const songInfo: any = { id: track.platformId || track.id, source: match?.[1] || 'local', songmid: match?.[2] || '', name: track.title, singer: track.artist }
         // Reuse the website's indexed lyric lookup, including name/artist fallback.
         try {
-            const cached = checkLyricCache(songInfo, user)
+            const cached = lookupLocalLyrics(songInfo, user)
             if (cached.exists && (cached.content?.lyric || cached.content?.lrc)) return { ...cached.content, lyric: cached.content.lyric || cached.content.lrc }
         } catch { /* Missing cache must not prevent an online fallback. */ }
         if (!match || !musicSdk[match[1]]?.getLyric) return { lyric: '' }
@@ -6222,10 +6223,10 @@ class SubsonicHandler {
                         // 命中缓存但客户端音频格式与缓存容器不一致 → 走服务端转码（需 subsonic.transcode.enabled 开启，否则发原始缓存文件）
                         if (this.shouldTranscodeFormat(params, c.filename) && global.lx.config['subsonic.transcode.enabled']) {
                             const tcBitrate = maxBitrate === 0 ? 320 : maxBitrate
-                            await this.transcodeStream(req, res, c.filename, tcBitrate, format, timeOffsetSec, this.getRequestedAudioFormat(params))
+                            await this.transcodeStream(req, res, c.path || c.filename, tcBitrate, format, timeOffsetSec, this.getRequestedAudioFormat(params))
                             return
                         }
-                        return serveCacheFile(req, res, c.filename, username)
+                        return serveCacheFile(req, res, c.filename, username, c.folder === 'music' ? 'music' : 'cache')
                     }
                 }
             }
@@ -6247,8 +6248,9 @@ class SubsonicHandler {
             // OpenList 命中后交付：本地缓存未命中但 OpenList 已有该文件时，
             // 按「交付方式」配置决定：direct=302 直链（客户端直连，省服务器出向流量）；proxy=服务端代理转发（兼容不支持跳转的客户端）。
             // 仅在「缓存优先 + 优先使用 OpenList」同时开启时生效。
-            if (method === 'stream' || method === 'download') {
+            if ((method === 'stream' || method === 'download') && global.lx.config['subsonic.playCacheFirst'] !== false && global.lx.config['subsonic.playCacheFirstUseOpenlist'] === true) {
               let openlistHit: Awaited<ReturnType<typeof resolveOpenlistCacheEntry>> = null
+              const playbackSignal = AbortSignal.timeout(4000)
               const cloudQualities = this.getCacheProbeOrder(quality, maxBitrate).qualities
               if (global.lx.config['subsonic.transcode.enabled']) {
                 for (const q of this.getCacheProbeOrder('flac', 0).qualities) if (!cloudQualities.includes(q)) cloudQualities.push(q)
@@ -6256,7 +6258,7 @@ class SubsonicHandler {
               for (const q of cloudQualities) {
                 for (const folder of ['cache', 'music'] as const) {
                   const openlistBase = getFileName(musicInfo, q, folder === 'music', username)
-                  openlistHit = await resolveOpenlistCacheEntry(username, folder, openlistBase, { id: musicInfo.id || id, source, quality: q })
+                  openlistHit = await resolveOpenlistCacheEntry(username, folder, openlistBase, { id: musicInfo.id || id, source, quality: q }, playbackSignal)
                   if (openlistHit) break
                 }
                 if (openlistHit) break
@@ -7626,8 +7628,9 @@ class SubsonicHandler {
                 singer: params.get('artist') || ''
             } as any
 
+            const localLyric = lookupLocalLyrics(musicMeta, username)
             let hash = (musicMeta as any).hash || (musicMeta as any).meta?.hash || ''
-            if (source === 'kg' && !hash) {
+            if (!localLyric.exists && source === 'kg' && !hash) {
                 try {
                     const title = musicMeta.name || params.get('title') || params.get('name') || songmid
                     const searchRes = await musicSdk.kg.musicSearch.search(title, 1, 5)
@@ -7652,8 +7655,7 @@ class SubsonicHandler {
                 lrcUrl: (musicMeta as any).lrcUrl || (musicMeta as any).meta?.lrcUrl || '',
             }
 
-            const requestObj = musicSdk[source].getLyric(songInfo)
-            const lyricInfo = await requestObj.promise
+            const lyricInfo = localLyric.exists ? localLyric.content : await musicSdk[source].getLyric(songInfo).promise
 
             const rawLrc = lyricInfo.lyric || ''
             const transLrc = lyricInfo.tlyric || ''

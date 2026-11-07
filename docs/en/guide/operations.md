@@ -48,7 +48,7 @@ Application rollback and data rollback are separate. An older binary may not und
 
 Preserve user state together with audio. Subsonic local registry/state files retain IDs, favorites and playlist relationships. Moving or renaming audio externally can assign it a new identity.
 
-WebDAV incremental checks default to 60 minutes (`SYNC_INTERVAL`); full backup intervals default to 24 hours (`BACKUP_INTERVAL`). Startup with WebDAV configured attempts remote recovery and then reloads configuration/accounts; recovery is not limited to a first start with empty data.
+WebDAV incremental checks default to 60 minutes (`SYNC_INTERVAL`); full backup intervals default to 24 hours (`BACKUP_INTERVAL`). Configuring WebDAV does not enable automatic recovery. `backup.webdav.restoreOnStartup` defaults to false. When explicitly enabled, every startup restores selected data and reloads configuration/accounts before opening the service, not just the first empty start. Restart after manual restoration. See [Backup and recovery](./backup-recovery.md) for instructions.
 
 ## Reverse proxy
 

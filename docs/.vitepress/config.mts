@@ -50,14 +50,14 @@ export default defineConfig({
             text: '核心功能',
             items: [
               { text: '同步服务器设置', link: '/guide/sync-server' },
-              { text: 'Web 播放器指南', link: '/guide/web-player' }
+              { text: '播放器、歌词与解析顺序', link: '/guide/web-player' }
             ]
           },
           {
             text: '配置指南',
             items: [
               { text: '配置文件及环境变量', link: '/guide/configuration' },
-              { text: '云端备份与恢复', link: '/guide/backup-recovery' }
+              { text: '备份与恢复', link: '/guide/backup-recovery' }
             ]
           },
           {
@@ -123,14 +123,14 @@ export default defineConfig({
             text: 'Core Features',
             items: [
               { text: 'Sync Server Settings', link: '/en/guide/sync-server' },
-              { text: 'Web Player Guide', link: '/en/guide/web-player' }
+              { text: 'Playback, Lyrics & Sources', link: '/en/guide/web-player' }
             ]
           },
           {
             text: 'Config Guide',
             items: [
               { text: 'Config & Env Vars', link: '/en/guide/configuration' },
-              { text: 'Cloud Backup & Recovery', link: '/en/guide/backup-recovery' }
+              { text: 'Backup & Recovery', link: '/en/guide/backup-recovery' }
             ]
           },
           {

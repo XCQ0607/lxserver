@@ -50,7 +50,7 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | Enable cache settings restriction for logged-in non-admin users | `false` |
 | `ENABLE_CACHE_SIZE_LIMIT` | `user.enableCacheSizeLimit` | Enable cache size limit (auto-cleanup via LRU) | `false` |
 | `CACHE_SIZE_LIMIT` | `user.cacheSizeLimit` | Cache size limit in MB | `2000` |
-| `CONFIG_BACKUP_ENABLE` | `configBackup.enable` | Enable automatic config.js backup (creates daily backup copy) | `true` |
+| `CONFIG_BACKUP_ENABLE` | `configBackup.enable` | Enable automatic config.js backup (default: every 24 hours) | `true` |
 | `CONFIG_BACKUP_RETENTION_DAYS` | `configBackup.retentionDays` | Config backup retention period in days (auto cleans up expired backups) | `7` |
 | `CONFIG_BACKUP_DIR` | `configBackup.dir` | Backup directory, relative to data; empty uses data/backups | `empty` |
 | `SNAPSHOT_BACKUP_PATH` | `snapshot.backupPath` | Custom storage path for playlist snapshots (absolute or relative to `./data`) | - |
@@ -105,7 +105,7 @@ Keep `subsonic-local-registry.json` and `subsonic-local-state.json` with user da
 
 Playlist snapshots restore playlists; configuration backups restore configuration. Neither substitutes for audio backups. Configuration backups default to a seven-day retention period under the data directory's `backups/` folder.
 
-WebDAV and OpenList use the data types selected in **System settings → Cloud backup scope**. Startup restore is off by default and requires `backup.webdav.restoreOnStartup=true`. `backup.webdav.types` and `backup.openlist.types` independently select each destination's scope. Music means `data/music`; cache and external libraries are excluded. See [Cloud backup and recovery](./backup-recovery.md) for provider behavior, compatibility and restore steps.
+WebDAV and OpenList use the data types selected in **Backup management → Cloud backup → Backup scope**. Startup restore is off by default and requires `backup.webdav.restoreOnStartup=true`. `backup.webdav.types` and `backup.openlist.types` independently select each destination's scope. Music means `data/music`; cache and external libraries are excluded. See [Cloud backup and recovery](./backup-recovery.md) for provider behavior, compatibility and restore steps.
 
 For container updates:
 
@@ -175,3 +175,50 @@ Paths belong to the server's environment: host paths for source runs, container 
 - WebDAV: check remote namespace, exclusions, recovery logs and effective settings.
 
 See [deployment](./getting-started.md) and [operations](./operations.md).
+
+## Backup configuration keys (admin UI or config.js)
+
+Backup settings live in **Backup management**: Local backups holds configuration/snapshot settings, Cloud backup holds connections, scopes, schedules and ZIP retention, and the OpenList playback cache card below its connection settings in Cloud backup holds user cache rules. See [Backup and recovery](./backup-recovery.md) for instructions.
+
+These are configuration keys, **not automatically supported uppercase environment variables**. There are currently no mappings for `OPENLIST_*`, `WEBDAV_RETENTION_*`, `CONFIG_BACKUP_INTERVAL_HOURS` or `CONFIG_BACKUP_SCHEDULE_TIME`. Save in the admin UI or edit the active `config.js`. Existing variables listed above, including `WEBDAV_*`, `CONFIG_BACKUP_ENABLE`, `CONFIG_BACKUP_RETENTION_DAYS` and `CONFIG_BACKUP_DIR`, remain supported.
+
+| Key | Default | Purpose |
+| --- | --- | --- |
+| `maxSnapshotNum` | `10` | Shared maximum snapshot count; users can override it |
+| `configBackup.enable` | `true` | Automatic local configuration history |
+| `configBackup.intervalHours` | `24` | Configuration backup interval, hours |
+| `configBackup.scheduleTime` | `'00:00'` | Server-local anchor; empty starts intervals at startup/rescheduling |
+| `configBackup.retentionDays` | `7` | Configuration history retention, days |
+| `configBackup.dir` | `''` | Empty uses the data directory's `backups` |
+| `snapshot.backupPath` | `''` | Additional per-user snapshot location |
+| `backup.webdav.types`, `backup.openlist.types` | All five types | Independent scopes shown below |
+| `backup.webdav.mirrorDeletes` | `false` | Propagate local deletion to tracked incremental counterparts |
+| `backup.webdav.restoreOnStartup` | `false` | Restore and overwrite selected local data before every startup |
+| `webdav.retentionCount` | `5` | Keep 1–1000 ZIPs, always retaining the newest |
+| `webdav.retentionDays` | `0` | ZIP age limit, 0–3650 days; 0 disables age-based removal |
+| `openlist.enable` | `false` | Enable OpenList backup and user cache rules |
+| `openlist.endpoint` | `''` | OpenList API URL |
+| `openlist.token` | `''` | OpenList API token |
+| `openlist.username`, `openlist.password` | `''` | Login credentials when not using a token |
+| `openlist.root` | `'/lx_music'` | Path within an existing OpenList mount, not a physical disk path |
+| `openlist.externalUrl` | `''` | External address; empty uses endpoint |
+| `openlist.syncInterval` | `60` | Backup/cache-rule check interval, minutes |
+| `openlist.verifyInterval` | `5` | Background status check interval, minutes; not scheduled full-body SHA-256 verification |
+| `openlist.historyRetentionDays` | `7` | Cloud history retention, days |
+| `openlist.userBackups` | `'[]'` | Advanced user cache rules as a JSON-array string; edit through the UI |
+| `openlist.includeNonAudio` | `false` | Include existing cache lyrics/artwork; does not change ordinary music scope |
+| `openlist.playback.enable` | `false` | Allow registered OpenList files as playback fallback; player/Subsonic options also apply |
+
+```js
+module.exports = {
+  // Merge into existing settings; do not replace unrelated configuration.
+  'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.webdav.mirrorDeletes': false,
+  'backup.webdav.restoreOnStartup': false,
+  'webdav.retentionCount': 5,
+  'webdav.retentionDays': 0,
+}
+```
+
+An empty array selects no data. Explicit types take precedence over legacy `webdav.excludeMusic`. `webdav.excludeCache` remains a compatibility key; ordinary backups always exclude cache. Legacy `openlist.backupSystemConfig` applies only without explicit types; use `backup.openlist.types` for new settings.

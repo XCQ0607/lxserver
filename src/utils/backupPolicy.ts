@@ -5,9 +5,18 @@ export const BACKUP_TYPES = ['music', 'userFiles', 'snapshots', 'userData', 'sys
 export type BackupType = typeof BACKUP_TYPES[number]
 export type BackupDestination = 'webdav' | 'openlist'
 let cloudRestoreRunning = false
-export const isCloudRestoreRunning = () => cloudRestoreRunning
+let activeCloudBackups = 0
+export const isCloudRestoreActive = () => cloudRestoreRunning
+export const isCloudBackupRunning = () => activeCloudBackups > 0
+export function beginCloudBackup(): () => void {
+  if (isCloudRestoreRunning()) throw new Error('恢复维护中，不能执行云端备份')
+  activeCloudBackups++
+  let released = false
+  return () => { if (!released) { activeCloudBackups--; released = true } }
+}
+export const isCloudRestoreRunning = () => cloudRestoreRunning || global.lx?.restoreMaintenance === true
 export function beginCloudRestore(): () => void {
-  if (cloudRestoreRunning) throw new Error('另一项云端恢复正在执行，请稍后重试')
+  if (isCloudRestoreRunning() || activeCloudBackups) throw new Error('云端正在备份、校验或恢复，请等待完成；恢复维护后需重启')
   cloudRestoreRunning = true
   return () => { cloudRestoreRunning = false }
 }
@@ -18,7 +27,7 @@ export interface BackupContext {
 }
 
 export const BACKUP_TYPE_INFO = [
-  { id: 'music', label: '歌曲与歌词', description: 'data/music 内的歌曲、歌词、封面和音乐索引；不包含 cache 或外部歌曲目录。' },
+  { id: 'music', label: '歌曲与歌词', description: '当前数据目录的 music/（默认 data/music）内的歌曲、已有歌词、封面和音乐索引；不含各级 cache、数据目录外独立 music 或外部曲库。' },
   { id: 'userFiles', label: '用户音源文件', description: 'users/source 内的音源脚本、顺序和状态文件，以及上传的用户文件。' },
   { id: 'snapshots', label: '歌单与不喜欢快照', description: '快照正文、snapshotInfo.json；包含没有扩展名的快照及已配置的外部歌单快照目录。' },
   { id: 'userData', label: '用户数据', description: '用户设置、播放记录、收藏与其他 JSON 数据；不包含音源文件和快照。' },

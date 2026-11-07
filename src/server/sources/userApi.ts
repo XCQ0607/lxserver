@@ -946,6 +946,16 @@ async function loadSourcesFromDir(dirPath: string, owner: string, stats: { loade
 let fsWatcher: fs.FSWatcher | null = null
 const lastReloadMap = new Map<string, number>() // 记录每个用户的最后加载时间
 
+export function unloadUserApis(username: string): void {
+    if (username === 'open' || username === '_open') return
+    for (const [key, api] of loadedApis) {
+        if (api.info.owner !== username) continue
+        loadedApis.delete(key)
+        apiStatus.delete(key)
+    }
+    lastReloadMap.set(username, Date.now())
+}
+
 // 启动文件监控
 function startWatcher(sourceRoot: string) {
     if (fsWatcher) return

@@ -48,6 +48,8 @@ const config: LX.Config = {
   'webdav.username': '',
   'webdav.password': '',
   'webdav.syncPath': '/lx-sync', // 增量同步远程路径
+  'webdav.retentionCount': 5, // ZIP 最多保留份数，始终保留最新一份
+  'webdav.retentionDays': 0, // 0 不按天数清理
   'webdav.backupPath': '/lx-sync-backups', // 全量备份远程路径
   'sync.interval': 60, // 同步间隔（分钟）默认1小时
   'sync.backupInterval': 24, // 全量备份间隔（小时）默认24小时
@@ -63,6 +65,8 @@ const config: LX.Config = {
   // 本地配置备份（config.js 每日一份本地副本）
   'configBackup.enable': true, // 是否启用本地配置备份
   'configBackup.retentionDays': 7, // 本地备份保留天数
+  'configBackup.intervalHours': 24, // 自动备份周期（小时）
+  'configBackup.scheduleTime': '00:00', // 锚点时间；空字符串表示从启动/保存时起计时
   'configBackup.dir': '', // 备份目录，留空则用 <data>/backups，相对路径基于 data 目录，绝对路径直接使用
 
   // 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot，相对路径基于 data 目录，绝对路径直接使用）
@@ -132,6 +136,7 @@ const config: LX.Config = {
   'system.allowUnsafeVM': false, // 是否允许运行 VM 模式自定义源脚本
 
   // ===== OpenList 备份/同步 =====
+  'openlist.playback.enable': false, // 本地未命中时允许 Web/Subsonic 使用已登记的 OpenList 文件
   'openlist.enable': false, // 是否启用 OpenList 备份/同步
   'openlist.endpoint': '', // OpenList 地址(如 http://127.0.0.1:5244)
   'openlist.username': '', // OpenList 管理员账号(用于 testConnection)
@@ -140,6 +145,7 @@ const config: LX.Config = {
   'openlist.root': '/lx_music', // OpenList 中 lx-music 备份根目录
   'openlist.verifyInterval': 5, // 远端可用性校验周期(分钟)
   'openlist.syncInterval': 60, // 双向同步周期(分钟)
+  'openlist.historyRetentionDays': 7, // 云端历史版本保留天数
   'openlist.userBackups': '[]', // 各用户备份目录配置(JSON 数组)
   'openlist.includeNonAudio': false, // 是否同步非音频文件(图片/封面等)
   'openlist.externalUrl': '', // OpenList 外网地址(留空则同 openlist.endpoint)

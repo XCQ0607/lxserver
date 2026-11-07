@@ -18,6 +18,8 @@ import { initLogger } from '@/utils/log4js'
 import defaultConfig from './defaultConfig'
 import { ENV_PARAMS, File } from './constants'
 import { checkAndCreateDirSync } from './utils'
+import { getNextConfigBackupTime, configBackupTimerDelay } from './utils/configBackupSchedule'
+import { hasInterruptedRestore } from './server/openlist/openlistRestoreTasks'
 
 // Declare Env Params Type
 type ENV_PARAMS_Type = typeof ENV_PARAMS
@@ -201,6 +203,7 @@ const migrateConfigBackups = (targetBackupDir: string) => {
 // 按配置的备份周期生成槽位键：周期≥24h 按天（同日覆盖），否则带时分（每周期一个文件）
 // 备份后顺带清理过期文件
 const backupConfig = () => {
+  if (global.lx?.restoreMaintenance) return
   if (global.lx?.config['configBackup.enable'] === false) return
   const backupDir = getConfigBackupDir()
   migrateConfigBackups(backupDir)
@@ -216,9 +219,10 @@ const backupConfig = () => {
     fs.mkdirSync(backupDir, { recursive: true })
     fs.copyFileSync(global.lx.configPath, path.join(backupDir, `config-${slotKey}.js`))
     lastBackupSlot = slotKey
-    if (global.lx) global.lx.lastConfigBackupAt = Date.now()
+    if (global.lx) { global.lx.lastConfigBackupAt = Date.now(); global.lx.lastConfigBackupError = '' }
     console.log(`[Config] Local backup saved to ${backupDir}/config-${slotKey}.js`)
   } catch (err) {
+    global.lx.lastConfigBackupError = String(err)
     console.error('[Config] Failed to backup config:', err)
   }
   cleanOldConfigBackups()
@@ -267,8 +271,13 @@ const backupConfigNow = (): { success: boolean, filename?: string, error?: strin
       return { success: false, error: 'Config file not found' }
     }
     fs.mkdirSync(backupDir, { recursive: true })
-    const filename = `config-manual-${getTimestampStr()}.js`
+    const base = `config-manual-${getTimestampStr()}`
+    let filename = `${base}.js`
+    let seq = 1
+    while (fs.existsSync(path.join(backupDir, filename))) filename = `${base}-${seq++}.js`
     fs.copyFileSync(global.lx.configPath, path.join(backupDir, filename))
+    global.lx.lastConfigBackupAt = Date.now()
+    global.lx.lastConfigBackupError = ''
     console.log(`[Config] Manual backup saved to ${backupDir}/${filename}`)
     return { success: true, filename }
   } catch (err: any) {
@@ -278,6 +287,7 @@ const backupConfigNow = (): { success: boolean, filename?: string, error?: strin
 }
 
 const saveConfigToFile = () => {
+  if (global.lx?.restoreMaintenance) return
   const content = `module.exports = ${JSON.stringify(global.lx.config, null, 2)}`
   const temporary = `${global.lx.configPath}.${process.pid}.${crypto.randomUUID()}.tmp`
   try {
@@ -306,6 +316,7 @@ global.lx = {
   config: defaultConfig,
   staticPath: process.env.STATIC_PATH ?? path.join(process.cwd(), 'public'),
   configPath: resolvedConfigPath,
+  restoreMaintenance: hasInterruptedRestore(dataPath) || require('@/server/backup/webdavRestoreTasks').hasInterruptedRestore(dataPath),
   saveConfig: saveConfigToFile,
   backupConfigNow,
   getConfigBackupDir,
@@ -372,9 +383,11 @@ const margeConfig = (p: string) => {
     }
     newConfig.users = users
   }
+  if (config['openlist.playback.enable'] === undefined && config['subsonic.playCacheFirstUseOpenlist'] === true && config['subsonic.playCacheFirst'] === true) newConfig['openlist.playback.enable'] = true
   global.lx.config = newConfig
 
   mergeConfigFileEnv(config)
+  global.lx.rescheduleConfigBackup?.()
   return true
 }
 
@@ -850,7 +863,7 @@ createModuleEvent()
 require('@/utils/migrate').default(global.lx.dataPath, global.lx.userPath)
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { startServer } = require('@/server')
+const { startServer, reloadServerData } = require('@/server')
 
 // 初始化 WebDAV 同步
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -862,6 +875,8 @@ const webdavSync = new WebDAVSync({
   password: global.lx.config['webdav.password'],
   syncPath: global.lx.config['webdav.syncPath'],
   backupPath: global.lx.config['webdav.backupPath'],
+  retentionCount: global.lx.config['webdav.retentionCount'],
+  retentionDays: global.lx.config['webdav.retentionDays'],
   interval: global.lx.config['sync.interval'],
   backupInterval: global.lx.config['sync.backupInterval'],
   excludeCache: global.lx.config['webdav.excludeCache'],
@@ -874,62 +889,18 @@ const webdavSync = new WebDAVSync({
 // 导出 webdavSync 实例供全局使用
 global.lx.webdavSync = webdavSync
 
-// 如果配置了 WebDAV，在启动时尝试从远程恢复
-if (webdavSync.isConfigured() && global.lx.config['backup.webdav.restoreOnStartup']) {
-  console.log('[WebDAV] 已配置 WebDAV，正在尝试从远端恢复数据...')
-  void webdavSync.restoreFromRemote().then(async (success: boolean) => {
+// 启动恢复完成后才开放服务，避免边播放/写入边覆盖数据。
+const startupWebdavRestore = (async () => {
+  if (webdavSync.isConfigured() && global.lx.config['backup.webdav.restoreOnStartup'] && !global.lx.restoreMaintenance) {
+    const success = await webdavSync.restoreFromRemote({ startup: true })
     if (success) {
-      console.log('[WebDAV] 数据已成功从 WebDAV 恢复')
-
-      // 1. 重新从磁盘加载最新的 config.js 到内存 (解决实时生效问题)
-      const configPath = global.lx.configPath
-      if (fs.existsSync(configPath)) {
-        console.log('[WebDAV] 恢复完成后重新加载配置文件: ' + configPath)
-        // 清除 node require 缓存以强制重载
-        try {
-          delete require.cache[require.resolve(configPath)]
-          margeConfig(configPath)
-        } catch (e) {
-          console.error('[WebDAV] 热重载配置文件失败:', e)
-        }
-      }
-
-      // 2. 重新加载 users.json
-      const usersJsonPath = path.join(global.lx.dataPath, 'users.json')
-      if (fs.existsSync(usersJsonPath)) {
-        try {
-          const users = JSON.parse(fs.readFileSync(usersJsonPath, 'utf-8'))
-          if (Array.isArray(users)) {
-            console.log('[WebDAV] 从恢复的 users.json 重新加载用户列表')
-            global.lx.config.users = users.map(u => ({ ...u, dataPath: '' }))
-
-            // 重新初始化用户目录
-            // eslint-disable-next-line @typescript-eslint/no-var-requires
-            const { getUserDirname } = require('@/user')
-            for (const user of global.lx.config.users) {
-              const dataPath = path.join(global.lx.userPath, getUserDirname(user.name))
-              checkAndCreateDir(dataPath)
-              user.dataPath = dataPath
-            }
-          }
-        } catch (err) {
-          console.error('[WebDAV] 恢复后重新加载 users.json 失败:', err)
-        }
-      }
-
-      // 3. 重新加载所有自定义源 (解决前端显示加载中/旧源问题)
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      const { initUserApis } = require('@/server/sources/userApi')
-      console.log('[WebDAV] 正在重新初始化自定义源...')
-      await initUserApis()
-    }
-    // 启动自动同步
-    webdavSync.startAutoSync()
-  })
-} else {
-  if (webdavSync.isConfigured()) webdavSync.startAutoSync()
-  console.log('[WebDAV] 未开启启动恢复；保留本地数据，按配置执行自动备份')
-}
+      await reloadServerData(true)
+      global.lx.restoreMaintenance = false
+      saveConfigToFile()
+    } else console.error('[WebDAV] 启动恢复失败，保留维护状态；请检查恢复记录后重启')
+  }
+  if (webdavSync.isConfigured() && !global.lx.restoreMaintenance) webdavSync.startAutoSync()
+})()
 
 // [新增] 确保数据目录下的 _open 及 _open/library 目录存在 (用于公共受限资源 & 公开收藏)
 const openDir = path.join(global.lx.userPath, '_open')
@@ -945,29 +916,27 @@ if (!fs.existsSync(openLibDir)) {
 saveConfigToFile()
 
 // 本地配置备份调度：每 N 小时一次，可选锚点时间（HH:MM）对齐到该时刻首次触发
-const getNextRunTime = (anchor: string, intervalMs: number, now: number): number => {
-  const m = /^(\d{1,2}):(\d{2})$/.exec(anchor)
-  if (!m) return now + intervalMs
-  const base = new Date(now)
-  base.setHours(Number(m[1]), Number(m[2]), 0, 0)
-  const diff = now - base.getTime()
-  let t = base.getTime() + Math.ceil(Math.max(diff, 0) / intervalMs) * intervalMs
-  if (t <= now) t += intervalMs
-  return t
-}
 let configBackupTimer: ReturnType<typeof setTimeout> | undefined
-const scheduleConfigBackup = () => {
-  const intervalHours = Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24)
+const scheduleConfigBackup = (previous?: number) => {
+  if (global.lx.config['configBackup.enable'] === false) {
+    global.lx.nextConfigBackupAt = 0
+    return
+  }
+  const intervalHours = Math.min(8760, Math.max(1, Number(global.lx?.config?.['configBackup.intervalHours']) || 24))
   const intervalMs = intervalHours * 60 * 60 * 1000
-  const anchor = String(global.lx?.config?.['configBackup.scheduleTime'] || '00:00').trim()
+  const anchor = String(global.lx?.config?.['configBackup.scheduleTime'] ?? '00:00').trim()
   const now = Date.now()
-  const nextRun = getNextRunTime(anchor, intervalMs, now)
+  const nextRun = getNextConfigBackupTime(anchor, intervalMs, now, previous)
   if (global.lx) global.lx.nextConfigBackupAt = nextRun
-  configBackupTimer = setTimeout(() => {
-    backupConfig()
-    scheduleConfigBackup()
-  }, nextRun - now)
-  if (typeof configBackupTimer.unref === 'function') configBackupTimer.unref()
+  const arm = () => {
+    configBackupTimer = setTimeout(() => {
+      if (Date.now() < nextRun) { arm(); return }
+      backupConfig()
+      scheduleConfigBackup(nextRun)
+    }, configBackupTimerDelay(nextRun, Date.now()))
+    configBackupTimer.unref()
+  }
+  arm()
 }
 
 // 启动即备份一次，并按当前配置调度后续自动备份
@@ -983,7 +952,11 @@ cleanOldConfigBackups()
 const configCleanupTimer = setInterval(cleanOldConfigBackups, 24 * 60 * 60 * 1000)
 if (typeof configCleanupTimer.unref === 'function') configCleanupTimer.unref()
 
-startServer(global.lx.config.port, '0.0.0.0')
+void startupWebdavRestore.then(() => startServer(global.lx.config.port, '0.0.0.0')).catch(error => {
+  global.lx.restoreMaintenance = true
+  console.error('[WebDAV] 启动恢复加载失败:', error)
+  startServer(global.lx.config.port, '0.0.0.0')
+})
 
 // 监控配置文件变动以实现热重载 (由于 nodemon 已忽略该文件)
 const activeWatcherConfigPath = global.lx.configPath
@@ -991,9 +964,11 @@ if (fs.existsSync(activeWatcherConfigPath)) {
   lastConfigHash = getConfigHash(activeWatcherConfigPath)
   let debounceTimer: NodeJS.Timeout | null = null
   fs.watch(activeWatcherConfigPath, (event) => {
+    if (global.lx.restoreMaintenance) return
     if (event === 'change') {
       if (debounceTimer) clearTimeout(debounceTimer)
       debounceTimer = setTimeout(() => {
+        if (global.lx.restoreMaintenance) return
         const currentHash = getConfigHash(activeWatcherConfigPath)
         // 如果内容未发生实质改变（如内部写配置触发的 fs.watch 事件），跳过热重载
         if (currentHash && currentHash === lastConfigHash) return
@@ -1006,11 +981,14 @@ if (fs.existsSync(activeWatcherConfigPath)) {
           // 重新初始化各模块以使用新配置（如果需要）
           if (global.lx.webdavSync) {
             global.lx.webdavSync.updateConfig({
+              enable: global.lx.config['webdav.enable'],
               url: global.lx.config['webdav.url'],
               username: global.lx.config['webdav.username'],
               password: global.lx.config['webdav.password'],
               syncPath: global.lx.config['webdav.syncPath'],
               backupPath: global.lx.config['webdav.backupPath'],
+              retentionCount: global.lx.config['webdav.retentionCount'],
+              retentionDays: global.lx.config['webdav.retentionDays'],
               interval: global.lx.config['sync.interval'],
               backupInterval: global.lx.config['sync.backupInterval'],
             })

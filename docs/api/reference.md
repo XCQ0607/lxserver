@@ -337,3 +337,91 @@ GET /api/music/search?name=周杰伦&source=kw&page=2&limit=20
 - `GET /api/webdav/logs`、`GET /api/webdav/progress`：同步日志与 SSE 进度。
 
 Subsonic 的协议范围与本地库行为另见 [本地音乐库说明](../subsonic-local-library.md) 和 [协议状态](../subsonic-status.md)。
+
+## 备份与恢复接口 {#backup-api}
+
+本节用于脚本集成；后台操作步骤见 [备份与恢复](../guide/backup-recovery.md)。这些管理接口使用 `x-frontend-auth: <管理员密码>`，JSON 请求使用 `Content-Type: application/json`。用户 Token 不能代替管理员密码。不要只按 HTTP 200 判断成功，还要检查 `success`、`errors` 及各接口的 `message`/`error`。
+
+### 本地导入导出与配置历史
+
+| 方法 / 路径 | 请求与返回要点 |
+| --- | --- |
+| `GET /api/backup/download` | 返回 ZIP；使用已保存的 WebDAV 类型范围，无需启用 WebDAV，不是无条件全目录导出 |
+| `POST /api/backup/upload` | multipart 文件字段 `backup`（也兼容 `file`）；按当前范围恢复本地 ZIP，不使用下面的 WebDAV 预览 token |
+| `GET /api/config/backups` | `success,list,autoBackupEnabled,retentionDays,intervalHours,scheduleTime,nextBackupAt,lastBackupAt`；时间为毫秒时间戳，0 表示暂无 |
+| `POST /api/config/backup-now` | 立即保存配置副本，返回 `success,filename`，失败可返回 `error` |
+| `GET /api/config/backups/download?file=<文件名>` | 下载指定配置副本 |
+| `POST /api/config/backups/restore` | JSON `fileName`；恢复配置历史，不等同于数据 ZIP 恢复 |
+| `DELETE /api/config/backups/<文件名>` | 删除指定本地配置副本 |
+
+### WebDAV
+
+| 方法 / 路径 | 请求与行为 |
+| --- | --- |
+| `POST /api/webdav/test` | 使用已保存配置，只检查目录读取；返回 `success,message,checks`，不验证写入/删除能力 |
+| `POST /api/webdav/sync` | 上传所选类型的本地文件，不做双向合并 |
+| `POST /api/webdav/backup` | JSON 可选 `force`，默认 `false`；创建并上传 ZIP |
+| `GET /api/webdav/backups` | 返回 `success,backups`；条目含 `filename,basename,size,time,timeStr` |
+| `DELETE /api/webdav/backup` | JSON `filename`，必须位于配置的 ZIP 目录；不是查询参数 `file` |
+| `POST /api/webdav/restore` | 先预览，再使用返回的 token 确认，详见下例 |
+| `GET /api/webdav/restore/tasks` | 返回 `success,tasks`；含状态、下载/写入数量、错误与 `canRollback` |
+| `POST /api/webdav/restore/tasks/<id>/rollback` | 回退保留的恢复前副本；拒绝覆盖恢复后的新修改 |
+| `DELETE /api/webdav/restore/tasks/<id>` | 删除本地任务及副本，不删除云端备份；运行中/待故障处理任务拒绝删除 |
+| `GET /api/webdav/logs` | 同步日志 |
+| `GET /api/webdav/progress` | SSE；也支持查询参数 `auth`，避免在可分享链接中携带凭据 |
+
+预览请求：
+
+```json
+{
+  "preview": true,
+  "mode": "files",
+  "strategy": "missing",
+  "keepCopies": true
+}
+```
+
+- `mode`：`files`（增量目录）、`zip`、`auto`（默认，目录无所选文件或不存在时尝试 ZIP）。
+- `targetFilename`：ZIP 模式下可指定备份列表中的文件名，省略选择最新 ZIP。
+- `strategy`：`missing`（仅补缺失）或 `overwrite`（覆盖同名）；API 默认 **overwrite**，不要省略后误以为是仅补缺失。
+- `keepCopies`：默认 `true`，保留恢复前副本。
+- 返回包含 `success,token,source,total,added,overwritten,merged,skipped,bytes,warnings,files`。`bytes` 是计划写入文件的字节数；ZIP 预览需要下载完整压缩包，不应将此值当作预览流量。
+
+确认时仅发送 `{"token":"预览返回值"}`；取消发送 `{"cancel":true,"token":"预览返回值"}`。预览有效期 15 分钟，配置或本地文件变化需重新预览。执行返回包含 `success,taskId,restored,backupDir,errors,restartRequired,message`（失败早于创建任务时部分字段不存在）。手动恢复需要维护状态与重启；跨文件提交不是文件系统原子事务。
+
+`POST /api/webdav/sync-file` 是单文件兼容入口，JSON 为 `path,action`，`action` 为 `upload` 或 `download`。它不具备整批恢复的预览、事务及回退记录；常规恢复应使用上述预览流程。
+
+### OpenList
+
+| 方法 / 路径 | 请求与行为 |
+| --- | --- |
+| `POST /api/openlist/test` | 可传 `endpoint,username,password,token,root`，未传使用已保存配置；只读测试，不保存 |
+| `POST /api/openlist/sync` | 可选 `user,folder`；备份并执行已启用用户缓存规则，返回 `success,summary` |
+| `GET /api/openlist/backups` | 返回 `success,list`；常规上传状态不等于完整内容校验结果 |
+| `GET /api/openlist/metadata` | 当前轻量检查任务、当前连接的主文件记录数量 |
+| `POST /api/openlist/metadata/start` | JSON `target` 为 `local`、`remote` 或 `both`；可传非空整数数组 `ids`，省略时检查当前连接全部记录。后台只读检查元信息，不传输正文、不删除文件 |
+| `POST /api/openlist/metadata/cancel` | 停止轻量检查，保留已完成观察结果 |
+| `POST /api/openlist/retry` | JSON `id` |
+| `POST /api/openlist/retry-batch` | JSON `ids` |
+| `POST /api/openlist/delete` | JSON `ids`；显式删除操作可能删除远端文件，返回 `deleted,remoteRemoved,remoteFailed` |
+| `GET /api/openlist/restore/history` | 可恢复的云端历史版本 |
+| `POST /api/openlist/restore` | 扫描预览：`preview:true,mode,types,backupBeforeRestore,snapshotId`；返回 `planToken` 及数量、文件清单、警告 |
+| `POST /api/openlist/restore/jobs/start` | 提交相同恢复参数和 `planToken`，返回 `success,taskId`，任务后台运行 |
+| `GET /api/openlist/restore/jobs` | 恢复任务列表及 `maintenance` 状态 |
+| `POST /api/openlist/restore/jobs/<id>/cancel` | 停止任务 |
+| `POST /api/openlist/restore/jobs/<id>/resume` | 继续可恢复任务；提交中断需先处理回退 |
+| `POST /api/openlist/restore/jobs/<id>/rollback` | 回退本次恢复，返回 `restartRequired` |
+| `DELETE /api/openlist/restore/jobs/<id>` | 删除任务与本地副本 |
+| `POST /api/openlist/integrity/preview` | JSON 可选 `type,user,scope`；scope 为 `changed`（默认）、`all` 或 `problems`，返回 `token,total,bytes,unknown` |
+| `POST /api/openlist/integrity/start` | JSON `token`，启动手动内容校验 |
+| `GET /api/openlist/integrity` | 当前校验任务和结果 |
+| `POST /api/openlist/integrity/cancel` | 停止内容校验 |
+
+OpenList 恢复的 `mode` 是 `missing` 或 `overwrite`（默认），与 WebDAV 的来源 `mode` 含义不同。`types` 可选，使用五类数据标识；未传使用已保存范围。`snapshotId` 省略恢复当前备份，指定时使用历史版本；`backupBeforeRestore` 默认 `true`。WebDAV 的 `token`、OpenList 恢复的 `planToken`、内容校验的 `token` 互不通用。
+
+维护期间可读取状态/配置及访问恢复管理、回退和重启入口；普通业务接口可能返回 503。重启后再继续备份或播放。内容校验可能下载文件正文，`bytes` 为最大正文读取估算，`unknown` 为缺少上传指纹的文件数；校验不会自动修复文件。
+
+
+### 备份概览状态
+
+`GET /api/backup/status` 使用 `x-frontend-auth` 鉴权。返回 `success,maintenance,webdav,openlist`，未启用的服务返回 null。WebDAV 包含 `running,restoring,nextSyncAt,nextZipAt,lastActivity,lastError`；OpenList 包含 `running,checking,nextSyncAt,nextCheckAt,counts,lastRun,lastRecordAt,lastError`。时间为毫秒时间戳，0 表示未安排。下一次时间是调度检查时间，不保证届时一定传输文件。运行结果摘要在进程重启后重新记录，持久化文件记录与整轮执行结果分开呈现。此接口不读取云端文件正文；未启用的服务在界面隐藏详情与执行按钮。

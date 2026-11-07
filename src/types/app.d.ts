@@ -17,7 +17,10 @@ declare global {
     removeSnapshotLocalBackups?: (user: string, name: string) => void
     nextConfigBackupAt?: number
     lastConfigBackupAt?: number
+    lastConfigBackupError?: string
     rescheduleConfigBackup?: () => void
+    restoreMaintenance?: boolean
+    pauseForRestore?: () => void
     lastCpuSample?: { idle: number, total: number }
     lastProcessSample?: { cpu: NodeJS.CpuUsage, time: number }
     subsonicPortConflict?: {
