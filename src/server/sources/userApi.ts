@@ -368,7 +368,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
         count: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).count?.(...args) },
         countReset: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).countReset?.(...args) },
         assert: (condition?: boolean, ...data: any[]) => { if (global.lx.config['debug.enabled']) console.assert(condition, ...data) },
-        dir: (...args: any[]) => { if (global.lx.config['debug.enabled']) console.dir(...args) },
+        dir: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).dir(...args) },
         dirxml: (...args: any[]) => { if (global.lx.config['debug.enabled']) (console as any).dirxml?.(...args) },
         error: (...args: any[]) => { console.error(...args) }
     }
@@ -945,6 +945,16 @@ async function loadSourcesFromDir(dirPath: string, owner: string, stats: { loade
 // 文件监控相关
 let fsWatcher: fs.FSWatcher | null = null
 const lastReloadMap = new Map<string, number>() // 记录每个用户的最后加载时间
+
+export function unloadUserApis(username: string): void {
+    if (username === 'open' || username === '_open') return
+    for (const [key, api] of loadedApis) {
+        if (api.info.owner !== username) continue
+        loadedApis.delete(key)
+        apiStatus.delete(key)
+    }
+    lastReloadMap.set(username, Date.now())
+}
 
 // 启动文件监控
 function startWatcher(sourceRoot: string) {

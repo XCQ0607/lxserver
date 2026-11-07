@@ -161,6 +161,7 @@ const DEFAULT_SETTINGS = {
     vuMeterTheme: 'study-nocturne',
     // Cache Settings
     enableServerCache: true, // 开启服务器缓存
+    preferLocalLyrics: true, // 先读取服务器 music/cache/自定义曲库的 LRC
     enableServerLyricCache: true, // 开启服务器歌词文件缓存
     embedLyricToFile: true, // 下载时将歌词嵌入文件（标签+.lrc）
     serverCacheLocation: 'root', // 缓存位置: 'data' (synced) or 'root' (local)
@@ -4013,7 +4014,7 @@ function renderArtistAlbumsUI(list) {
                                 <i class="fas fa-play"></i>
                              </div>
                         </div>
-                        <div class="absolute top-1.5 right-1.5 flex gap-1.5">
+                        <div class="absolute top-1 right-1 md:top-1.5 md:right-1.5 flex gap-1 md:gap-1.5">
                             <button type="button" class="artist-album-download-btn w-8 h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" data-album-index="${index}" title="下载本专辑全部歌曲">
                                 <i class="fas fa-download text-xs"></i>
                             </button>
@@ -5516,7 +5517,8 @@ function getSourceTypeText(sourceType, folder) {
     const map = {
         'server_cache': folder === 'music' ? '已下载文件' : '服务器缓存',
         'cache': '浏览器链接缓存',
-        'normal': '在线解析'
+        'normal': '在线解析',
+        'openlist': 'OpenList 已备份文件'
     };
     return map[sourceType] || '解析成功';
 }
@@ -6066,7 +6068,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 
     const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
     if (allowServerCache) {
-        let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry);
+        let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
         if (cacheResult.exists && !cacheResult.isCollision) {
             const actualQuality = cacheResult.quality || quality;
             console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
@@ -6076,7 +6078,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             if (typeof checkAndTriggerBackgroundCacheUpgrade === 'function') {
                 checkAndTriggerBackgroundCacheUpgrade(cleanedSong, quality, actualQuality);
             }
-            return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality, folder: cacheResult.folder };
+            return { url: serverCacheUrl, sourceType: cacheResult.origin === 'openlist' ? 'openlist' : 'server_cache', quality: actualQuality, folder: cacheResult.folder };
         }
     }
 
@@ -6294,7 +6296,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
 }
 
 // --- Server Cache Helpers ---
-async function checkServerCache(song, quality, exactQuality = false) {
+async function checkServerCache(song, quality, exactQuality = false, includeOpenlist = false) {
     try {
         const username = currentListData?.username || '';
         const params = new URLSearchParams({
@@ -6303,7 +6305,8 @@ async function checkServerCache(song, quality, exactQuality = false) {
             source: song.source,
             songmid: song.songmid || (song.meta && (song.meta.songmid || song.meta.songId)) || '',
             songId: song.songId || (song.meta && song.meta.songId) || song.id,
-            quality: quality || ''
+            quality: quality || '',
+            includeOpenlist: includeOpenlist ? '1' : '0'
         });
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
@@ -6623,6 +6626,8 @@ async function triggerServerCache(song, url, quality) {
                 url,
                 quality,
                 namingPattern: window.settings?.serverCacheNamingPattern || 'simple',
+                enableOnlyDownloadMode: !!window.settings?.enableOnlyDownloadMode,
+                cacheLyric: window.settings?.enableServerLyricCache !== false,
                 embedLyric: !!(window.settings?.embedLyricToFile ?? true)
             })
         });
@@ -6817,7 +6822,7 @@ async function showServerDirectories() {
                     <div class="text-xs text-gray-500 dark:text-gray-400 p-3 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 flex items-start gap-2">
                         <i class="fas fa-info-circle text-amber-500 mt-0.5 shrink-0"></i>
                         <div class="space-y-1">
-                            <div>• <strong>缓存位置</strong>：选择「DATA_PATH」会将文件存放于 WebDAV 同步目录下，备份时可一并打包；选择「运行目录」则仅保存在当前服务器本地。</div>
+                            <div>• <strong>缓存位置</strong>：选择「DATA_PATH」将文件放在数据目录下；常规备份只包含所选 data/music 内容，始终排除 cache。运行目录及自定义外部曲库需另行备份。</div>
                             <div>• <strong>仅下载模式</strong>：开启后下载路径变更为 <code class="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[11px]">music${sep}${data.username}</code>；关闭时统一保存在 <code class="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[11px]">cache${sep}${data.username}</code>。</div>
                         </div>
                     </div>
@@ -7333,6 +7338,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         if (urlResult.isPrefetch) {
             let detail = '解析成功';
             if (urlResult.sourceType === 'cache') detail = '命中缓存链接';
+            else if (urlResult.sourceType === 'openlist') detail = '命中 OpenList 文件';
             else if (urlResult.sourceType === 'server_cache') detail = urlResult.folder === 'music' ? '命中已下载文件' : '命中服务器缓存';
             else if (sourceName) detail = `${sourceName} 解析成功`;
             showSuccess(`[预读] ${song.name} ${detail}`);
@@ -7624,6 +7630,8 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
         statusText += ' 【缓存链接】';
     } else if (currentSourceType === 'server_cache') {
         statusText += currentCacheFolder === 'music' ? ' 【已下载】' : ' 【缓存】';
+    } else if (currentSourceType === 'openlist') {
+        statusText += ' 【OpenList】';
     }
 
     statusEl.innerText = statusText;
@@ -9142,6 +9150,7 @@ async function updateSetting(key, value) {
     }
     // 实时同步 UI 并应用效果
     syncSettingsUI(key, value);
+    if (key === 'preferLocalLyrics' && currentPlayingSong) { lastLyricSongId = null; void fetchLyric(currentPlayingSong, currentQuality); }
     if (key === 'networkListAutoCheckInterval' || key === 'autoUpdateNetworkList') {
         setupNetworkListAutoCheck();
         if (typeof refreshTaskScheduleStatus === 'function') {
@@ -9361,6 +9370,7 @@ const SETTINGS_UI_MAP = {
     enableLyricCache: { id: 'setting-enable-lyric-cache', type: 'checkbox' },
     enableSongUrlCache: { id: 'setting-enable-url-cache', type: 'checkbox' },
     enableServerCache: { id: 'setting-enable-server-cache', type: 'checkbox' },
+    preferLocalLyrics: { id: 'setting-prefer-local-lyrics', type: 'checkbox' },
     enableServerLyricCache: { id: 'setting-enable-server-lyric-cache', type: 'checkbox' },
     embedLyricToFile: { id: 'setting-embed-lyric-to-file', type: 'checkbox' },
     preferServerCache: { id: 'setting-prefer-server-cache', type: 'checkbox' },
@@ -10501,6 +10511,23 @@ async function fetchLyric(song, quality = null) {
         source = song.meta.source;
     }
 
+    if (settings.preferLocalLyrics !== false && song.isLocal && song._localFilename) {
+        try {
+            const params = new URLSearchParams({ filename: song._localFilename, folder: song._isCustomDir ? 'custom' : (song._localFolder || song.folder || 'cache') });
+            if (['root', 'data'].includes(song._localLocation)) params.set('browseLocation', song._localLocation);
+            const response = await fetch(`${API_BASE}/cache/lyric?${params}`, { headers: getUserAuthHeaders() });
+            if (!isCurrent()) return;
+            if (response.ok) {
+                const data = (await response.json()).data;
+                if (!isCurrent()) return;
+                if (data?.lyric || data?.lrc) {
+                    currentRawLrc = data.lyric || data.lrc; currentRawTlrc = data.tlyric || ''; currentRawRlrc = data.rlyric || ''; currentRawKlrc = data.klyric || data.lxlyric || '';
+                    lastLyricSongId = getLyricSongKey(song); initLyricPlayer(); applyLyricUpdate(); return;
+                }
+            }
+        } catch (error) { if (!isCurrent()) return; console.warn('[Lyric] 本地同名 LRC 读取失败:', error); }
+    }
+
     // 如果还是没有必要的数据，检查是否为本地文件（可尝试读取内嵌歌词）
     if (!songmid || !source) {
         // [新增] 本地未关联歌曲：优先尝试读取音频文件内嵌歌词
@@ -10531,36 +10558,10 @@ async function fetchLyric(song, quality = null) {
     currentRawKlrc = '';
     lastLyricSongId = null;
 
-    // ===== 1. 尝试读取浏览器本地缓存 (最高优先级) =====
     const cacheKey = `lx_lyric_${source}_${songmid}`;
-    if (settings.enableLyricCache !== false) {
-        try {
-            const cached = localStorage.getItem(cacheKey);
-            if (cached) {
-                const data = JSON.parse(cached);
-                currentRawLrc = data.lrc || '';
-                currentRawTlrc = data.tlyric || '';
-                currentRawRlrc = data.rlyric || '';
-                currentRawKlrc = data.klyric || data.lxlyric || '';
-                lastLyricSongId = currentLyricKey;
-
-                console.log(`[Lyric] 使用浏览器本地缓存歌词: ${songmid}`);
-                initLyricPlayer();
-                applyLyricUpdate();
-                return; // 命中缓存，直接返回
-            }
-        } catch (e) {
-            console.warn('[Lyric] 读取浏览器本地缓存失败:', e);
-            localStorage.removeItem(cacheKey);
-        }
-    }
-
-    // ===== 2. 尝试读取服务器端缓存歌词 =====
-    const username = currentListData?.username || '';
-    const headers = {};
-    Object.assign(headers, getUserAuthHeaders());
-
-    if (settings.enableServerLyricCache !== false) {
+    const headers = { ...getUserAuthHeaders() };
+    // ===== 1. 优先读取服务器本地 LRC（独立于保存开关） =====
+    if (settings.preferLocalLyrics !== false) {
         try {
             const serverCacheUrl = `${API_BASE}/cache/lyric?source=${source}&songmid=${songmid}&songId=${encodeURIComponent(song.id || '')}&name=${encodeURIComponent(song.name || '')}&singer=${encodeURIComponent(song.singer || '')}`;
             const scRes = await fetch(serverCacheUrl, { headers });
@@ -10595,6 +10596,29 @@ async function fetchLyric(song, quality = null) {
         }
     }
 
+    // ===== 2. 尝试读取浏览器歌词缓存 =====
+    if (settings.enableLyricCache !== false) {
+        try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                const data = JSON.parse(cached);
+                currentRawLrc = data.lrc || '';
+                currentRawTlrc = data.tlyric || '';
+                currentRawRlrc = data.rlyric || '';
+                currentRawKlrc = data.klyric || data.lxlyric || '';
+                lastLyricSongId = currentLyricKey;
+
+                console.log(`[Lyric] 使用浏览器本地缓存歌词: ${songmid}`);
+                initLyricPlayer();
+                applyLyricUpdate();
+                return; // 命中缓存，直接返回
+            }
+        } catch (e) {
+            console.warn('[Lyric] 读取浏览器本地缓存失败:', e);
+            localStorage.removeItem(cacheKey);
+        }
+    }
+
     // ===== 3. 从网络抓取最新歌词 =====
     try {
         const params = new URLSearchParams({
@@ -10611,6 +10635,7 @@ async function fetchLyric(song, quality = null) {
             trcUrl: song.trcUrl || ''
         });
 
+        params.set('preferLocal', settings.preferLocalLyrics !== false ? '1' : '0');
         const url = `${API_BASE}/lyric?${params.toString()}`;
         // [优化] 使用低优先级 fetch 获取歌词，避免阻塞主进程加载和 PWA 安装按钮出现
         const res = await fetch(url, { headers, priority: 'low' });
@@ -11881,7 +11906,7 @@ function renderLibraryArtists(list, isDislike = false) {
     const grid = container.querySelector('#lib-artist-grid');
     list.forEach(singer => {
         const div = document.createElement('div');
-        div.className = 'group relative flex flex-col items-center p-2 md:p-4 rounded-2xl transition-all hover:t-bg-panel hover:shadow-md cursor-pointer border border-transparent hover:border-emerald-500/30';
+        div.className = 'group relative flex flex-col items-center p-2.5 md:p-4 rounded-2xl transition-all t-bg-main border t-border-main shadow-sm hover:shadow-lg cursor-pointer hover:border-emerald-500/30 active:scale-[0.98]';
         div.dataset.libArtistId = singer.id;
         div.dataset.libArtistSource = singer.source;
         div.onclick = (e) => {
@@ -11894,7 +11919,7 @@ function renderLibraryArtists(list, isDislike = false) {
         };
         div.innerHTML = `
             <div class="relative mb-2 md:mb-3">
-                <div class="w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full overflow-hidden shadow-sm">
+                <div class="w-[4.5rem] h-[4.5rem] sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full overflow-hidden shadow-md ring-2 ring-white/60 dark:ring-white/10">
                     <img src="${singer.picUrl || '/music/assets/logo.svg'}"
                          onerror="this.src='/music/assets/logo.svg'"
                          class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
@@ -11902,7 +11927,7 @@ function renderLibraryArtists(list, isDislike = false) {
                 <div class="lib-batch-check absolute inset-0 bg-black/40 hidden items-center justify-center rounded-full">
                     <i class="fas fa-check-circle text-white text-2xl"></i>
                 </div>
-                <button class="lib-fav-btn absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10"
+                <button class="lib-fav-btn absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10"
                         title="${isDislike ? '取消不喜欢' : '取消收藏'}"
                         onclick="event.stopPropagation(); removeLibraryArtist('${singer.id}', '${singer.source}', ${isDislike})">
                     <i class="fas fa-times text-[10px]"></i>
@@ -11961,12 +11986,12 @@ function renderLibraryAlbums(list, isDislike = false) {
                 <i class="fas fa-trash"></i> 删除所选
             </button>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 p-6" id="lib-album-grid"></div>`;
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-3 md:gap-6 md:p-6" id="lib-album-grid"></div>`;
 
     const grid = container.querySelector('#lib-album-grid');
     list.forEach(item => {
         const div = document.createElement('div');
-        div.className = 'group relative flex flex-col p-3 rounded-2xl transition-all hover:t-bg-panel hover:shadow-lg cursor-pointer border border-transparent hover:border-emerald-500/20';
+        div.className = 'group relative flex flex-col p-2 md:p-3 rounded-2xl transition-all t-bg-main border t-border-main shadow-sm hover:shadow-lg cursor-pointer hover:border-emerald-500/30 active:scale-[0.98]';
         div.dataset.libAlbumId = item.id;
         div.dataset.libAlbumSource = item.source;
         div.onclick = (e) => {
@@ -11978,7 +12003,7 @@ function renderLibraryAlbums(list, isDislike = false) {
             enterAlbum(item.id, item.source || 'wy', item);
         };
         div.innerHTML = `
-            <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-3 relative">
+            <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-2 md:mb-3 relative">
                 <img src="${item.picUrl || '/music/assets/logo.svg'}"
                      onerror="this.src='/music/assets/logo.svg'"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
@@ -11986,29 +12011,29 @@ function renderLibraryAlbums(list, isDislike = false) {
                     <i class="fas fa-check-circle text-white text-3xl"></i>
                 </div>
                 ${!isDislike ? `
-                <div class="absolute top-1.5 right-1.5 flex gap-1.5">
-                    <button type="button" class="lib-album-download-btn w-8 h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" title="下载本专辑全部歌曲">
+                <div class="absolute top-1 right-1 md:top-1.5 md:right-1.5 flex gap-1 md:gap-1.5">
+                    <button type="button" class="lib-album-download-btn w-7 h-7 md:w-8 md:h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" title="下载本专辑全部歌曲">
                         <i class="fas fa-download text-xs"></i>
                     </button>
-                    <button type="button" class="lib-fav-btn w-8 h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消收藏"
+                    <button type="button" class="lib-fav-btn w-7 h-7 md:w-8 md:h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消收藏"
                             onclick="event.stopPropagation(); removeLibraryAlbum('${item.id}', '${item.source}')">
                         <i class="fas fa-times text-xs"></i>
                     </button>
                 </div>` : `
-                <div class="absolute top-1.5 right-1.5 flex gap-1.5">
-                    <button type="button" class="lib-fav-btn w-8 h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消不喜欢"
+                <div class="absolute top-1 right-1 md:top-1.5 md:right-1.5 flex gap-1 md:gap-1.5">
+                    <button type="button" class="lib-fav-btn w-7 h-7 md:w-8 md:h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消不喜欢"
                             onclick="event.stopPropagation(); removeLibraryAlbum('${item.id}', '${item.source}', true)">
                         <i class="fas fa-times text-xs"></i>
                     </button>
                 </div>`}
             </div>
-            <span class="text-sm font-bold t-text-main line-clamp-2 h-10 leading-5 mb-1" title="${item.name}">${item.name}</span>
-            <div class="flex items-center justify-between mt-1">
-                <span class="text-[10px] t-text-muted truncate flex-1">
+            <span class="text-[13px] md:text-sm font-bold t-text-main line-clamp-2 min-h-[2.5rem] leading-5 mb-1 px-0.5" title="${item.name}">${item.name}</span>
+            <div class="flex items-center justify-between gap-1 mt-auto px-0.5">
+                <span class="text-[11px] t-text-muted truncate flex-1 min-w-0">
                     ${item.artistName || '未知歌手'}
                     ${item.list && item.list.length ? `<span class="ml-1 text-emerald-500 font-bold">(${item.list.length} 首)</span>` : ''}
                 </span>
-                <span class="text-[10px] t-text-muted ml-2">${getSourceTag ? getSourceTag(item.source) : ''}</span>
+                <span class="text-[10px] t-text-muted flex-shrink-0">${getSourceTag ? getSourceTag(item.source) : ''}</span>
             </div>`;
         const downloadButton = div.querySelector('.lib-album-download-btn');
         downloadButton?.addEventListener('click', async event => {
@@ -12022,6 +12047,7 @@ window.renderLibraryAlbums = renderLibraryAlbums;
 
 /** 点击侧边栏"收藏歌手"，切换到展示视图 */
 function handleArtistLibraryClick() {
+    if (window.innerWidth < 1025) { const sb = document.getElementById('main-sidebar'); if (sb && !sb.classList.contains('-translate-x-full')) toggleSidebar(); }
     clearSearchDetailView();
     exitListSecondaryModes && exitListSecondaryModes();
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
@@ -12055,6 +12081,7 @@ window.handleArtistLibraryClick = handleArtistLibraryClick;
 
 /** 点击侧边栏"收藏专辑"，切换到展示视图 */
 function handleAlbumLibraryClick() {
+    if (window.innerWidth < 1025) { const sb = document.getElementById('main-sidebar'); if (sb && !sb.classList.contains('-translate-x-full')) toggleSidebar(); }
     clearSearchDetailView();
     exitListSecondaryModes && exitListSecondaryModes();
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));

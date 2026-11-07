@@ -84,7 +84,7 @@ Artwork, word lyrics, scan display and folders depend on both protocol and clien
 | Users | Create, rename, disable and assign directories | Distinguish removing an account from deleting its data |
 | Data/snapshots | Inspect playlists and restore past state | Verify account and timestamp before restoring |
 | Configuration | Paths, authentication, proxies, cache and Subsonic | Environment/WebDAV recovery can affect the next start |
-| WebDAV | Test, sync, back up and restore | Incremental/full backups have separate intervals |
+| Backup management | Local backups, WebDAV, OpenList, recovery and verification | Connections/scopes in Cloud backup; preview recovery and restart when requested |
 | File manager | Upload, edit, move and archive server files | Administrative filesystem access, not ordinary library permission |
 | Logs/maintenance | Inspect errors, reload or restart | Changed ports/paths require a new connection address |
 

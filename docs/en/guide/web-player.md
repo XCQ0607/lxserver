@@ -1,6 +1,65 @@
-# Web player and local music
+# Playback, lyrics and local music
 
 The player defaults to `/`, configurable with `PLAYER_PATH`. Player access authentication opens the player; personal login selects playlists, settings and directory permissions. A valid browser session normally avoids repeated access-password prompts.
+
+
+## Playback sources and resolution order
+
+**Prefer existing server audio** (formerly prefer cached songs) includes both the current user's `music` downloads and `cache` playback files. Matching uses indexed platform, song ID and quality; scan/link manually copied files or play them directly from the local library. Users are isolated, with `_open` for public files.
+
+| Files | Runtime-root mode | DATA_PATH mode |
+| --- | --- | --- |
+| Downloads and adjacent LRC | `<cwd>/music/<user>/` | `<DATA_PATH>/music/<user>/` |
+| Playback cache and adjacent LRC | `<cwd>/cache/<user>/` | `<DATA_PATH>/cache/<user>/` |
+
+The persistent per-user serverCacheLocation selects the base. A temporary local-library browsing location does not change the persistent playback base. Custom libraries use a separately configured per-user directory.
+
+### Web audio
+
+Local-library entries directly use their file URL for music, cache or custom directories. Online songs resolve in this order:
+
+1. With prefer-existing-server-audio enabled, probe the user's music/cache. Exact-quality downloads precede cache; other qualities may be fallback candidates.
+2. On a local miss, use registered OpenList user cache/download files if the backend playback-source master switch permits it.
+3. Reuse a browser-cached URL when enabled. URLs can expire and are not offline audio copies.
+4. Resolve an online source-script URL and deliver directly or through the configured proxy.
+
+Cache-song-files controls background writes; prefer-existing-server-audio controls existing-file reads. Disabling writes does not disable reads. Background writes pass the only-download-mode setting: enabled writes to music, otherwise cache, under the selected base. Foreground playback does not wait for the full background download.
+
+### Web lyrics
+
+Prefer-server-local-lyrics is independent of save-lyrics-files:
+
+| Setting | Effect |
+| --- | --- |
+| Prefer server-local lyrics | User music/cache LRC, then browser lyrics, then online lyrics |
+| Save lyric files | Write standalone LRC during lyric fetching/background audio saving; keep it adjacent to existing audio |
+| Browser lyric cache | Store/reuse text in this browser |
+| Embed lyrics during download | Write audio lyric tags independently of standalone LRC |
+
+Turning local preference off skips standalone-LRC lookup in both frontend and backend. Unlinked local tracks can still use embedded lyrics. Local entries support adjacent LRC in music, cache and custom directories even without a platform identity. Roots are determined by the authenticated user; arbitrary paths and cross-user traversal are not permitted. Audio and lyrics resolve independently.
+
+### Subsonic
+
+Online IDs such as tx_... probe local music/cache when subsonic.playCacheFirst is on. OpenList follows only when the Subsonic OpenList option and openlist.playback.enable are both on; online sources follow on a miss. Turning cache-first off skips both local and OpenList for online IDs. Delivery is normally a redirect, or server-side transcoding when required and enabled. Online-ID lyrics now try local LRC before the SDK, including indexed custom-library lyrics.
+
+Local IDs such as local_... are handled separately. The catalog includes the selected cache/music base and enabled custom directory regardless of cache-first. Missing local audio is an error, not a silent replacement with another online track. Lyrics try adjacent LRC, embedded lyrics, indexed local lyrics, and an online SDK fallback if linked to a platform.
+
+subsonic.cacheOnPlay controls background cache writes after online playback resolution, not existing-file reads. Switching tracks can cancel that task. The online download branch caches even when cacheOnPlay is off. Subsonic background caching explicitly fetches lyrics independently of Web save settings. Early local/OpenList hits avoid duplicate online caching.
+
+### Cloud sources
+
+In the admin UI, **Backup management → Cloud backup → OpenList playback cache → Allow OpenList as a playback source (local first)** is the shared master switch for Web and Subsonic. Web also requires its server-audio preference; Subsonic requires its own cache-first and OpenList options. Saving upload-and-delete rules no longer silently enables playback settings. Legacy enabled Subsonic settings migrate only when the new field is absent; explicit false is respected.
+
+A local database matches user/song/quality before querying one remote file, without directory scans per play. Concurrent lookups are coalesced, download addresses reused for up to 30 seconds, and metadata requests limited to four seconds each. Failed lookups fall back to online sources. Web uses existing proxy preferences; Subsonic uses direct redirects, proxy delivery or transcoding.
+
+Only registered user cache/download backups with the corresponding per-user directory rule enabled are direct playback candidates. Enabling only the ordinary five backup scopes is insufficient. Ordinary _data backups and historical objects are not automatically a music catalog. The shared downloader can also retrieve an OpenList backup into local storage, gated by the master setting independently of Subsonic-only preferences.
+
+WebDAV is not a live audio/lyrics fallback. Restore files manually or through explicit startup restore, then use local playback. See [Cloud backup and recovery](./backup-recovery.md).
+
+### LRC and backup scope
+
+Writing LRC and uploading LRC are separate. Disabling Web standalone-lyric saving stops implicit LRC creation during audio caching without deleting existing files. Ordinary music backups include existing audio, LRC, covers and indexes under data/music. openlist.includeNonAudio only controls the separate user-cache attachment pipeline. Ordinary backups exclude cache, cwd/music and external custom libraries.
+
 
 ## Playback, lyrics and appearance
 

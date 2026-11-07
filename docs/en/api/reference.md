@@ -295,16 +295,16 @@ Success is an **object**, not an array. Read `data.list`:
 - **`GET /api/config/backups/download?file=<name>`**: Download backup archive.
 - **`DELETE /api/config/backups/<fileName>`**: Delete config backup.
 - **`POST /api/config/backups/restore`**: Restore configuration snapshot.
-- **`GET /api/backup/download`**: Export full user data backup.
+- **`GET /api/backup/download`**: Export ZIP using the saved WebDAV scope.
 - **`POST /api/backup/upload`**: Import and restore user data backup.
 
 ### 9.3 WebDAV Cloud Sync & Remote Backups
 - **`POST /api/webdav/test`**: Test WebDAV connection and credentials.
-- **`POST /api/webdav/sync`**: Trigger full bidirectional WebDAV sync.
+- **`POST /api/webdav/sync`**: Upload local files within the selected scope.
 - **`POST /api/webdav/sync-file`**: Sync single file to WebDAV.
 - **`POST /api/webdav/backup`**: Create remote WebDAV backup archive.
 - **`GET /api/webdav/backups`**: List backups stored on WebDAV.
-- **`DELETE /api/webdav/backup`**: Delete remote backup (`?file=...`).
+- **`DELETE /api/webdav/backup`**: Delete remote backup (JSON `filename`).
 - **`POST /api/webdav/restore`**: Restore data from WebDAV backup.
 - **`GET /api/webdav/logs`**: Get WebDAV synchronization logs.
 - **`GET /api/webdav/progress`**: **SSE streaming endpoint**, real-time sync progress.
@@ -359,3 +359,91 @@ Errors return `{"message":"..."}` with the corresponding HTTP status.
 - Auto-link requires user token; success: `{"success":true,"data":...}`; business errors: HTTP 400, `{"success":false,"message":"..."}`.
 
 See the [current route index](./routes.md) for all route entries and directly read fields.
+
+## Backup and recovery API {#backup-api}
+
+For scripting; see [Backup and recovery](../guide/backup-recovery.md) for UI instructions. Admin requests use `x-frontend-auth: <admin password>` and JSON requests use `Content-Type: application/json`. User tokens do not replace admin authentication. Check `success`, `errors` and endpoint-specific `message`/`error`, not only HTTP 200.
+
+### Local archives and configuration history
+
+| Method / path | Contract |
+| --- | --- |
+| `GET /api/backup/download` | ZIP using the saved WebDAV scope; no enabled WebDAV required; not an unconditional full-directory export |
+| `POST /api/backup/upload` | Multipart field `backup` (also accepts `file`); restores local ZIP with current scope, without the WebDAV preview token |
+| `GET /api/config/backups` | `success,list,autoBackupEnabled,retentionDays,intervalHours,scheduleTime,nextBackupAt,lastBackupAt`; timestamps are milliseconds, 0 means unavailable |
+| `POST /api/config/backup-now` | Create config copy; `success,filename`, or `error` on failure |
+| `GET /api/config/backups/download?file=<name>` | Download a configuration copy |
+| `POST /api/config/backups/restore` | JSON `fileName`; config history restoration differs from data ZIP restoration |
+| `DELETE /api/config/backups/<name>` | Delete a local configuration copy |
+
+### WebDAV
+
+| Method / path | Contract |
+| --- | --- |
+| `POST /api/webdav/test` | Read-only directory checks with saved settings; returns `success,message,checks`, not proof of write/delete permissions |
+| `POST /api/webdav/sync` | Upload selected local types, not bidirectional merging |
+| `POST /api/webdav/backup` | Optional JSON `force`, default false; create/upload ZIP |
+| `GET /api/webdav/backups` | `success,backups`, entries: `filename,basename,size,time,timeStr` |
+| `DELETE /api/webdav/backup` | JSON `filename` within configured ZIP directory, not query `file` |
+| `POST /api/webdav/restore` | Preview, then confirm with returned token; example below |
+| `GET /api/webdav/restore/tasks` | `success,tasks`: state, downloaded/applied counts, errors and `canRollback` |
+| `POST /api/webdav/restore/tasks/<id>/rollback` | Restore retained pre-restore copies; rejects subsequent local changes |
+| `DELETE /api/webdav/restore/tasks/<id>` | Delete local task/copies, not cloud backups; running/unresolved tasks cannot be deleted |
+| `GET /api/webdav/logs` | Sync logs |
+| `GET /api/webdav/progress` | SSE; also accepts query `auth`, which should not be exposed in shared links |
+
+Preview request:
+
+```json
+{
+  "preview": true,
+  "mode": "files",
+  "strategy": "missing",
+  "keepCopies": true
+}
+```
+
+- `mode`: `files` (incremental directory), `zip`, or `auto` (default; ZIP fallback only for missing directory/no selected files).
+- `targetFilename`: optional ZIP filename from the backup list; omitted selects latest ZIP.
+- `strategy`: `missing` or `overwrite`; API default is **overwrite**, not missing-only.
+- `keepCopies`: defaults to true.
+- Response includes `success,token,source,total,added,overwritten,merged,skipped,bytes,warnings,files`. `bytes` counts planned write bytes; ZIP preview downloads the complete compressed archive, so this is not its preview transfer estimate.
+
+Confirm with `{"token":"returned-value"}` or cancel with `{"cancel":true,"token":"returned-value"}`. Plans expire after 15 minutes; configuration or local-file changes require a new preview. Execution returns `success,taskId,restored,backupDir,errors,restartRequired,message`; early failures may omit task fields. Manual restore enters maintenance mode and requires restart. Multi-file commit is not a filesystem atomic transaction.
+
+`POST /api/webdav/sync-file` is a legacy single-file endpoint with JSON `path,action`; action is `upload` or `download`. It does not provide batch preview, transaction or rollback records. Prefer the preview flow for recovery.
+
+### OpenList
+
+| Method / path | Contract |
+| --- | --- |
+| `POST /api/openlist/test` | Optional `endpoint,username,password,token,root`, falling back to saved values; read-only, does not save |
+| `POST /api/openlist/sync` | Optional `user,folder`; backup and enabled user-cache rules, returns `success,summary` |
+| `GET /api/openlist/backups` | `success,list`; upload status is separate from content verification |
+| `GET /api/openlist/metadata` | Current metadata job and count of primary records for this connection |
+| `POST /api/openlist/metadata/start` | JSON `target`: `local`, `remote`, `both`; optional nonempty integer `ids` array, omitted for all current-connection records. Starts a background read-only metadata check |
+| `POST /api/openlist/metadata/cancel` | Stop the metadata check; completed observations remain saved |
+| `POST /api/openlist/retry` | JSON `id` |
+| `POST /api/openlist/retry-batch` | JSON `ids` |
+| `POST /api/openlist/delete` | JSON `ids`; explicit deletion may remove remote files; returns `deleted,remoteRemoved,remoteFailed` |
+| `GET /api/openlist/restore/history` | Available recovery versions |
+| `POST /api/openlist/restore` | Preview with `preview:true,mode,types,backupBeforeRestore,snapshotId`; returns `planToken`, counts, files and warnings |
+| `POST /api/openlist/restore/jobs/start` | Same restore parameters plus `planToken`; returns `success,taskId`, runs in background |
+| `GET /api/openlist/restore/jobs` | Tasks and `maintenance` state |
+| `POST /api/openlist/restore/jobs/<id>/cancel` | Stop task |
+| `POST /api/openlist/restore/jobs/<id>/resume` | Continue an eligible task; interrupted commit needs rollback handling first |
+| `POST /api/openlist/restore/jobs/<id>/rollback` | Roll back, returning `restartRequired` |
+| `DELETE /api/openlist/restore/jobs/<id>` | Delete task/local copies |
+| `POST /api/openlist/integrity/preview` | Optional JSON `type,user,scope`: scope `changed` (default), `all`, `problems`; returns `token,total,bytes,unknown` |
+| `POST /api/openlist/integrity/start` | JSON `token`, start manual content verification |
+| `GET /api/openlist/integrity` | Current job and results |
+| `POST /api/openlist/integrity/cancel` | Stop verification |
+
+OpenList restore `mode` is `missing` or `overwrite` (default), unlike WebDAV's source-mode field. Optional `types` uses the five scope identifiers, defaulting to saved types. Omit `snapshotId` for current backup or supply a historical version. `backupBeforeRestore` defaults to true. WebDAV tokens, OpenList restore `planToken` and integrity tokens are not interchangeable.
+
+Maintenance allows status/config reads, recovery management, rollback and restart; ordinary business APIs may return 503. Resume backup/playback after restart. Verification may read full remote bodies: `bytes` is the maximum body-read estimate and `unknown` counts unavailable upload fingerprints. Verification does not automatically repair files.
+
+
+### Backup overview status
+
+`GET /api/backup/status` requires `x-frontend-auth`. Returns `success,maintenance,webdav,openlist`; disabled providers return null. WebDAV exposes `running,restoring,nextSyncAt,nextZipAt,lastActivity,lastError`. OpenList exposes `running,checking,nextSyncAt,nextCheckAt,counts,lastRun,lastRecordAt,lastError`. Times are milliseconds; 0 means no scheduled run. Next times indicate scheduler checks, not guaranteed transfers. Runtime summaries reset at process restart; persistent file records are separate. No cloud file bodies are read. The UI hides details and execution actions for disabled services.

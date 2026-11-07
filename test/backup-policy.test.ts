@@ -9,6 +9,7 @@ import { transformSync } from 'esbuild'
 import { Open } from 'unzipper'
 import { ZipArchive } from 'archiver'
 import { pipeline } from 'node:stream/promises'
+import { Readable } from 'node:stream'
 import WebDAVSync from '../src/utils/webdavSync'
 import { BACKUP_TYPES, BACKUP_TYPE_INFO, backupLocalPath, backupType, getBackupTypes, normalizeBackupTypes, scanBackupFiles } from '../src/utils/backupPolicy'
 import defaultConfig from '../src/defaultConfig'
@@ -93,6 +94,9 @@ test('shared cloud backup policy and WebDAV restore', async t => {
     },
     getDirectoryContents: async (prefix: string) => [...remote].filter(([name]) => name.startsWith(prefix)).map(([filename, bytes]) => ({ filename, basename: path.posix.basename(filename), type: 'file', size: bytes.length })),
     getFileContents: async (name: string) => { if (!remote.has(name)) throw Object.assign(new Error('not found'), { status: 404 }); return remote.get(name)! },
+    createReadStream: (name: string) => { if (!remote.has(name)) throw Object.assign(new Error('not found'), { status: 404 }); return Readable.from([remote.get(name)!]) },
+    stat: async (name: string) => { if (!remote.has(name)) throw Object.assign(new Error('not found'), { status: 404 }); return { size: remote.get(name)!.length, type: 'file' } },
+    moveFile: async (from: string, to: string) => { remote.set(to, remote.get(from)!); remote.delete(from) },
     deleteFile: async (name: string) => { remote.delete(name) },
   }
   const create = (types: any[] = [...BACKUP_TYPES]) => {
@@ -108,13 +112,14 @@ test('shared cloud backup policy and WebDAV restore', async t => {
     assert.ok(zipName)
     const zip = await Open.file(path.join(source, zipName!))
     const expected = [...scanBackupFiles({ dataPath: source }, BACKUP_TYPES).keys()].sort()
-    assert.deepEqual(zip.files.filter(f => f.type === 'File').map(f => f.path).sort(), expected)
-    assert.deepEqual([...remote.keys()].map(name => name.slice('/lx-sync/'.length)).sort(), expected)
+    assert.deepEqual(zip.files.filter(f => f.type === 'File' && !f.path.startsWith('.')).map(f => f.path).sort(), expected)
+    assert.deepEqual([...remote.keys()].filter(name => !path.posix.basename(name).startsWith('.')).map(name => name.slice('/lx-sync/'.length)).sort(), expected)
     fs.unlinkSync(path.join(source, zipName!))
   })
 
   await t.test('restore reads same-sized changed content, preserves local-only files and never uploads', async () => {
     const restore = create(['userData'])
+    remote.delete('/lx-sync/.lx-backup-manifest.json') // Legacy remote files have no integrity manifest.
     remote.set('/lx-sync/users/alice/settings.json', Buffer.from('new!'))
     write('users/alice/local-only.json', 'keep')
     const before = puts

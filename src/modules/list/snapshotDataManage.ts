@@ -89,10 +89,15 @@ export class SnapshotDataManage {
   }
 
   saveSnapshot = async (name: string, data: string) => {
+    if (global.lx?.restoreMaintenance) throw new Error('恢复维护中，请重启服务')
     syncLog.info('saveSnapshot', this.userDataManage.userName, name)
     const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
     try {
       fs.writeFileSync(filePath, data)
+      // 歌单快照落盘后，防抖触发一次云端备份（与缓存落盘上传同一入口；按配置备份 snapshots 类型）
+      void (globalThis as any).lx?.scheduleOpenlistSync?.()
+      // 本地备份开关打开时，复制一份快照到备份目录（"跟配置走"，复用 configBackup.enable 与备份目录约定）
+      void (globalThis as any).lx?.backupSnapshotToLocal?.(filePath, this.userDataManage.userName, name)
     } catch (err) {
       syncLog.error(err)
       throw err
@@ -108,6 +113,10 @@ export class SnapshotDataManage {
         const date = new Date(time)
         fs.utimesSync(filePath, date, date)
       }
+      // 歌单快照落盘后，防抖触发一次云端备份（与缓存落盘上传同一入口；按配置备份 snapshots 类型）
+      void (globalThis as any).lx?.scheduleOpenlistSync?.()
+      // 本地备份开关打开时，复制一份快照到备份目录（"跟配置走"，复用 configBackup.enable 与备份目录约定）
+      void (globalThis as any).lx?.backupSnapshotToLocal?.(filePath, this.userDataManage.userName, name)
     } catch (err) {
       syncLog.error(err)
       throw err
@@ -121,7 +130,10 @@ export class SnapshotDataManage {
       fs.unlinkSync(filePath)
     } catch (err) {
       syncLog.error(err)
+      throw err
     }
+    // 一并清理本地备份目录中该快照的所有带时间戳历史副本（含旧版无时间戳副本），避免孤儿文件
+    void (globalThis as any).lx?.removeSnapshotLocalBackups?.(this.userDataManage.userName, name)
   }
 
   getSnapshotListWithMeta = async () => {
@@ -251,6 +263,7 @@ export class SnapshotDataManage {
     this.updateSnapshotDir()
 
     this.saveSnapshotInfoThrottle = throttle(() => {
+      if (global.lx?.restoreMaintenance) return
       fs.writeFile(this.snapshotInfoFilePath, JSON.stringify(this.snapshotInfo), 'utf8', (err) => {
         if (err) console.error(err)
         void this.clearOldSnapshot()
