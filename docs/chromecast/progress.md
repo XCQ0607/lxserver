@@ -1,5 +1,28 @@
 # Chromecast progress
 
+## Live native audio handoff — 2026-11-07
+
+- Master off and native recovery now replace the captured audio element without a page reload, retaining source, pending position, pause state, volume, mute and playback rate. Saved effects and the queue remain available; storage failure does not block live recovery.
+- The playback proxy retains identity and listeners across replacements, suppresses old-element events and cancels stale seeks after a track change. AirPlay and visualization use the stable proxy; graph creation still uses the current DOM element. Cast sessions are not disconnected by local recovery.
+- Dispose the old iOS bridge, visualizer RAF loops and shared graph/context. Guard late worklet/reverb callbacks from mutating a new graph. Explicit master enable builds a new graph using retained settings. Player cache advances to v62.
+- Automated coverage includes paused/playing handoff, rapid toggles before metadata, track changes, old-element events, blocked storage, iOS bridge recreation, stale worklets and Cast return. No browser automation was run at the maintainer's request; rendered UI and physical Safari/AirPlay checks remain manual.
+- Validation: all 139 tests pass (95 CJS and 44 TypeScript); TypeScript checking, production compilation, changed JavaScript syntax and diff checks pass. Handoff-specific regressions also cover autoplay rejection, native load resetting playback rate and disposal of queued visualizer frames.
+
+## Native recovery follow-up review (superseded reload path) — 2026-11-07
+
+- Fixed reverb reset leaving native mode when saved EQ remains active. Removed synthetic slider input animations that could enable DSP after remote playback returns local or overwrite a later gain edit.
+- Playback saving now reports failure separately from an empty queue. Native reload is blocked on save failure; empty states do not set the one-time playback restore flag. Partial session writes are cleaned up, and recovery toasts honor their display duration.
+- Added nine recovery regressions plus six native-preview/master-switch regressions. Native mode displays a prominent tag, an off master switch and read-only saved controls; explicit enable applies the retained configuration. Wireless controls stay locked. Player cache advances to v61. Physical Safari/AirPlay receiver validation remains outstanding; the maintainer will check the rendered UI.
+
+## Native AirPlay capture recovery — 2026-11-07
+
+- [x] Detect any captured media source, including visualizer-only capture on desktop, and expose native restoration on all platforms. System/Control Center handoffs show recovery once per connection without automatically reloading.
+- [x] Keep native output across playback, resize and reload while retaining saved effects, queue/position and auto-resume preferences. Explicit local active-effect edits can resume DSP; remote edits, master-off edits and resets preserve native mode.
+- [x] Preserve current upstream VU artwork, mobile DSP opt-in, master bypass, preset/reset controls and existing playback restoration.
+- [x] Add 26 integrated capture, route, storage, playback and master-effect regressions plus Node 22/24 pull-request validation; refresh the worker cache to v59. The untouched upstream baseline failed 15 of the original 20 cases. The adapted branch passes all 117 tests (73 CJS and 44 TypeScript), type checking, production compilation and JavaScript/diff checks.
+- [x] AirPlay playback on the deployed repair was user-confirmed; the exact device/receiver profile was not recorded.
+- [ ] Maintainer review and merge. Broader physical device and receiver coverage remains unverified.
+
 ## Complete customization submission and version identity — 2026-10-20
 
 ### Expanded review before deployment

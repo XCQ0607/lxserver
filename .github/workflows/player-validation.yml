@@ -1,0 +1,32 @@
+name: Player validation
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'public/music/**'
+      - 'test/**'
+      - 'src/**'
+      - 'package*.json'
+      - 'tsconfig.json'
+      - '.github/workflows/player-validation.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  player:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run build --ignore-scripts

@@ -702,6 +702,11 @@ aside {
     visibility: visible !important;
 }
 
+/* Keep checked switch tracks above Tailwind's dark background utilities. */
+input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"] {
+    background-color: var(--c-500, #10b981);
+}
+
 /* 菜单选中项样式 */
 .active-option {
     background-color: var(--c-500) !important;
@@ -2156,6 +2161,12 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 
 /* Active Effect Tags in Status Bar */
 .effects-tags-wrapper { min-height: 24px; }
+.effects-mode-tag { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid #38bdf880; border-radius: 6px; background: #38bdf81a; color: var(--text-main); font-size: 12px; font-weight: 700; }
+.effects-mode-tag[hidden] { display: none; }
+.effects-controls { min-width: 0; margin: 0; padding: 0; border: 0; }
+.effects-controls:disabled { opacity: .7; }
+.effects-controls:disabled :is(input, button, label), .effects-tags-wrapper button:disabled { cursor: not-allowed; }
+.effects-tags-wrapper button:disabled { opacity: .35; pointer-events: none; }
 .effects-tag {
     display: inline-flex;
     align-items: center;
@@ -2193,7 +2204,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     margin-right: -2px;
     border-radius: 4px;
     background: transparent;
-    color: currentColor;
+    color: currentcolor;
     opacity: 0.65;
     border: none;
     cursor: pointer;
@@ -2254,18 +2265,19 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 #sound-effects-content input[type="range"] { min-width: 0; height: 4px; accent-color: var(--c-500, #10b981); }
 #sound-effects-content input[type="checkbox"] { accent-color: var(--c-500, #10b981); }
 #sound-effects-content #reverb-list { gap: 4px; }
-#reverb-list > label { min-width: 0; padding: 3px 7px; font-size: 11px; border: 1px solid var(--border-main); border-radius: 6px; font-weight: 500; transition: all .15s; }
-#reverb-list > label { position: relative; }
+#reverb-list > label { position: relative; min-width: 0; padding: 3px 7px; font-size: 11px; border: 1px solid var(--border-main); border-radius: 6px; font-weight: 500; transition: all .15s; }
 #reverb-list > label > div { position: absolute; width: 1px; height: 1px; overflow: hidden; opacity: 0; }
 #reverb-list > label:hover { border-color: var(--c-500, #10b981); }
-#reverb-list > label:has(input:checked) { color: var(--c-500, #10b981); border-color: currentColor; background: rgba(16, 185, 129, 0.1); }
+#reverb-list > label:has(input:checked) { color: var(--c-500, #10b981); border-color: currentcolor; background: rgba(16, 185, 129, 0.1); }
 #eq-sliders-container { min-height: 0; margin-bottom: 8px; }
 #eq-sliders-container > div { gap: 6px 14px; padding: 0; }
 #eq-sliders-container > div > div { gap: 8px; min-width: 0; }
 #eq-presets button { padding: 3px 8px; font-size: 11px; border-radius: 6px; font-weight: 500; }
+
 @media (pointer: coarse), (max-width: 767px) {
     .effects-tag-remove { opacity: 0.85; width: 18px; height: 18px; font-size: 11px; margin-left: 3px; }
 }
+
 @media (max-width: 767px) {
     .effects-status-bar { top: -14px; margin: -14px -14px 14px; padding: 12px; }
     #sound-effects-modal { padding: 8px; }

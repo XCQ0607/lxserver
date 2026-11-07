@@ -56,6 +56,16 @@ window.soundEffects = (function () {
     let isGraphBuilt = false;
     // Mobile starts native on every page load. Only a local effect edit opts into DSP.
     let mobileEffectsEnabled = false;
+    // Native restoration must survive later playback, resize and reload events.
+    let preferNativePlayback = false;
+    try {
+        preferNativePlayback = sessionStorage.getItem('lx_native_audio_mode') === '1' ||
+            sessionStorage.getItem('lx_native_audio_restore') === '1';
+    } catch (_) { }
+
+    function needsNativeRestore() {
+        return !!(mediaSource || window._sharedAudioSourceNode);
+    }
 
     function hasActiveEffects() {
         if (settings.enabled === false) return false;
@@ -87,7 +97,7 @@ window.soundEffects = (function () {
     function canProcessLocally() {
         // Capturing a mobile media element cannot be undone by disconnecting Web Audio.
         // Keep native playback until an explicit local effect edit opts into DSP.
-        return (isGraphBuilt || mobileEffectsEnabled || !isMobileDevice()) &&
+        return !preferNativePlayback && (isGraphBuilt || mobileEffectsEnabled || !isMobileDevice()) &&
             !document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless &&
             !window.LXPlayback?.isRemote;
     }
@@ -207,10 +217,12 @@ window.soundEffects = (function () {
         if (pitchShifterNode) return pitchShifterNode;
         if (pitchShifterInitPromise) return pitchShifterInitPromise;
 
+        const context = audioContext;
         pitchShifterInitPromise = (async () => {
             try {
                 console.log('[SoundEffects] Loading Pitch Shifter Module from /music/js/player/pitch-shifter/phase-vocoder.js');
-                await audioContext.audioWorklet.addModule('/music/js/player/pitch-shifter/phase-vocoder.js');
+                await context.audioWorklet.addModule('/music/js/player/pitch-shifter/phase-vocoder.js');
+                if (context !== audioContext) return null;
                 if (!canProcessLocally()) {
                     pitchShifterInitPromise = null;
                     return null;
@@ -237,6 +249,7 @@ window.soundEffects = (function () {
                 }
                 return pitchShifterNode;
             } catch (e) {
+                if (context !== audioContext) return null;
                 console.error('[SoundEffects] Failed to initialize pitch shifter:', e);
                 pitchShifterInitPromise = null;
                 return null;
@@ -257,7 +270,7 @@ window.soundEffects = (function () {
             pitchShifterNode.connect(pannerNode);
         } else {
             initPitchShifter().then(node => {
-                if (canProcessLocally() && node && settings.pitch !== 1.0) {
+                if (canProcessLocally() && node && node === pitchShifterNode && settings.pitch !== 1.0) {
                     try { mixerNode.disconnect(pannerNode); } catch (e) { }
                     try { mixerNode.disconnect(node); } catch (e) { }
                     try { node.disconnect(pannerNode); } catch (e) { }
@@ -384,6 +397,7 @@ window.soundEffects = (function () {
     const impulseBuffers = new Map();
     function updateReverb() {
         if (!canProcessLocally() || !convolverNode || !audioContext) return;
+        const context = audioContext;
         const request = ++reverbRequest;
         const rev = reverbOptions.find(r => r.id === settings.reverb.id);
 
@@ -399,8 +413,11 @@ window.soundEffects = (function () {
                         if (!r.ok) throw new Error(`Impulse response HTTP ${r.status}`);
                         return r.arrayBuffer();
                     })
-                    .then(data => audioContext.decodeAudioData(data))
-                    .catch(error => { impulseBuffers.delete(rev.source); throw error; });
+                    .then(data => context.decodeAudioData(data))
+                    .catch(error => {
+                        if (impulseBuffers.get(rev.source) === pending) impulseBuffers.delete(rev.source);
+                        throw error;
+                    });
                 impulseBuffers.set(rev.source, pending);
             }
             impulseBuffers.get(rev.source)
@@ -409,7 +426,9 @@ window.soundEffects = (function () {
                     convolverNode.buffer = buffer;
                     if (dryGainNode) dryGainNode.gain.value = settings.reverb.mainGain;
                     if (wetGainNode) wetGainNode.gain.value = settings.reverb.sendGain;
-                }).catch(error => console.warn('[SoundEffects] Reverb load failed:', error));
+                }).catch(error => {
+                    if (context === audioContext) console.warn('[SoundEffects] Reverb load failed:', error);
+                });
         }
     }
 
@@ -465,29 +484,6 @@ window.soundEffects = (function () {
         }
     }
 
-    function animateSlider(id, targetValue, duration = 300) {
-        const slider = document.getElementById(id);
-        if (!slider) return;
-        const startValue = parseFloat(slider.value);
-        const startTime = performance.now();
-
-        function update(currentTime) {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const ease = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-            const currentValue = startValue + (targetValue - startValue) * ease;
-            slider.value = currentValue;
-
-            // Trigger the oninput handler to update labels and logic
-            if (slider.oninput) slider.oninput({ target: slider });
-
-            if (progress < 1) {
-                requestAnimationFrame(update);
-            }
-        }
-        requestAnimationFrame(update);
-    }
-
     function applyPitch() {
         if (canProcessLocally() && pitchFactorParam) {
             // Use setTargetAtTime for immediate and smooth Web Audio update
@@ -498,13 +494,25 @@ window.soundEffects = (function () {
     }
 
     function renderStatus() {
-        const enabled = settings.enabled !== false;
+        const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
+        const native = preferNativePlayback || (isMobileDevice() && !isGraphBuilt && !mobileEffectsEnabled);
+        const enabled = settings.enabled !== false && !native && !remote;
         const toggle = document.getElementById('sound-effects-enable');
-        if (toggle) toggle.checked = enabled;
+        if (toggle) {
+            toggle.checked = enabled;
+            toggle.disabled = remote;
+        }
         const title = document.getElementById('sound-effects-state');
-        if (title) title.textContent = enabled ? '音效已开启' : '音效已暂停';
+        if (title) title.textContent = enabled ? '音效已开启' : '音效已关闭';
         const switchLabel = document.getElementById('sound-effects-switch-label');
         if (switchLabel) switchLabel.textContent = enabled ? '音效开' : '音效关';
+        const mode = document.getElementById('sound-effects-mode');
+        if (mode) {
+            mode.hidden = enabled;
+            mode.textContent = remote ? '无线投播 · 本机音效未启用' : native ? '原生播放 · 音效未接管' : '音效已旁路';
+        }
+        const controls = document.getElementById('sound-effects-controls');
+        if (controls) controls.disabled = !enabled;
 
         const tagsContainer = document.getElementById('sound-effects-tags');
         if (tagsContainer) {
@@ -587,24 +595,31 @@ window.soundEffects = (function () {
                 }
                 tagsContainer.innerHTML = html;
             }
+            tagsContainer.querySelectorAll('button').forEach(button => { button.disabled = !enabled; });
         }
     }
 
     function renderUI() {
         renderStatus();
-        const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
+        const wireless = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless;
+        const remote = wireless || !!window.LXPlayback?.isRemote;
+        const captured = needsNativeRestore();
         const status = document.getElementById('sound-effects-status');
-        if (status) status.textContent = remote
-            ? 'AirPlay / 投放中：仅保存音效配置'
+        if (status) status.textContent = wireless && captured
+            ? '请恢复原生播放后，重新选择 AirPlay 设备'
+            : remote
+            ? '已保留音效配置；结束投播后可开启本机音效'
+            : preferNativePlayback || (isMobileDevice() && !isGraphBuilt && !mobileEffectsEnabled)
+                ? '已保留全部配置，仅供预览；打开音效开关后按当前配置接管本机音频'
             : settings.enabled === false
-                ? '正在播放原始音色，重新开启即可恢复以上设置'
-                : isGraphBuilt
-                    ? (isMobileDevice() ? '本机音效已开启' : '')
+                ? '已保留全部配置，仅供预览；打开音效开关后恢复当前配置'
+                : captured
+                    ? '本机音效或可视化已开启；使用 AirPlay 前请恢复原生播放'
                     : isMobileDevice()
                         ? '选择音效后立即生效'
                         : '';
         const nativeButton = document.getElementById('sound-effects-native');
-        if (nativeButton) nativeButton.hidden = !isGraphBuilt || !isMobileDevice();
+        if (nativeButton) nativeButton.hidden = !captured;
         // EQ Presets
         const presetContainer = document.getElementById('eq-presets');
         if (presetContainer) {
@@ -734,10 +749,19 @@ window.soundEffects = (function () {
         }
     }
 
-    function ensureLocalGraph() {
+    function ensureLocalGraph(explicitEnable = false) {
         const audio = document.getElementById('audio-player');
         if (audio?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return false;
-        if (isMobileDevice() && hasActiveEffects()) mobileEffectsEnabled = true;
+        if ((explicitEnable || hasActiveEffects()) && preferNativePlayback) {
+            // Only an explicit local edit opts back into processing. Remote edits
+            // and saved/server-loaded settings must leave native output alone.
+            try {
+                sessionStorage.removeItem('lx_native_audio_mode');
+                sessionStorage.removeItem('lx_native_audio_restore');
+            } catch (_) { }
+            preferNativePlayback = false;
+        }
+        if (isMobileDevice() && (explicitEnable || hasActiveEffects())) mobileEffectsEnabled = true;
         if (!canProcessLocally()) return false;
         if (!audioContext || !isGraphBuilt) init(true);
         if (audioContext && ['suspended', 'interrupted'].includes(audioContext.state)) {
@@ -746,13 +770,41 @@ window.soundEffects = (function () {
         return !!audioContext && isGraphBuilt;
     }
 
+    function releaseAudioGraph() {
+        ++reverbRequest;
+        impulseBuffers.clear();
+        if (pannerInfo.interval) clearInterval(pannerInfo.interval);
+        pannerInfo.interval = null;
+        window.iOSBackgroundAudio?.dispose();
+        window.musicVisualizer?.releaseAudio();
+        for (const node of [mediaSource, analyser, ...eqFilters, convolverNode, dryGainNode,
+            wetGainNode, mixerNode, pannerNode, effectsGain, bypassGain, pitchShifterNode]) {
+            try { node?.disconnect(); } catch (_) { }
+        }
+        const context = audioContext || window._sharedAudioContext;
+        audioContext = mediaSource = analyser = null;
+        convolverNode = dryGainNode = wetGainNode = mixerNode = pannerNode = null;
+        effectsGain = bypassGain = pitchShifterNode = pitchFactorParam = null;
+        pitchShifterInitPromise = null;
+        eqFilters = [];
+        isGraphBuilt = mobileEffectsEnabled = false;
+        for (const key of ['_sharedAudioContext', '_sharedAudioSourceNode', '_sharedAudioAnalyser',
+            '_sharedSplitterNode', '_sharedAnalyserL', '_sharedAnalyserR', '_soundEffectsGains']) window[key] = null;
+        try { context?.close()?.catch(() => {}); } catch (_) { }
+    }
+
     const manager = {
         init,
         setEnabled: function (enabled) {
             if (!isGraphBuilt) loadSettings();
             settings.enabled = !!enabled;
             saveSettings();
-            if (enabled) ensureLocalGraph();
+            if (!enabled && !window.LXPlayback?.isRemote) {
+                this.restoreNativePlayback();
+                renderUI();
+                return;
+            }
+            if (enabled) ensureLocalGraph(true);
             if (canProcessLocally() && isGraphBuilt) {
                 applyMaster();
                 updatePanner();
@@ -834,11 +886,10 @@ window.soundEffects = (function () {
             if (rev) {
                 settings.reverb.mainGain = rev.main;
                 settings.reverb.sendGain = rev.send;
-                animateSlider('reverb-main-gain', rev.main * 100);
-                animateSlider('reverb-send-gain', rev.send * 100);
             }
             saveSettings();
-            if (ensureLocalGraph()) updateReverb();
+            // Disabling one effect must not activate other saved effects in native mode.
+            if (id === 'none' ? canProcessLocally() && isGraphBuilt : ensureLocalGraph()) updateReverb();
             renderUI();
         },
         resetReverb: function () {
@@ -849,8 +900,6 @@ window.soundEffects = (function () {
             settings.reverb.id = 'none';
             settings.reverb.mainGain = 1.0;
             settings.reverb.sendGain = 0;
-            animateSlider('reverb-main-gain', 100);
-            animateSlider('reverb-send-gain', 0);
             settings.eq = Array(10).fill(0);
             activePresetName = '';
             settings.pitch = 1.0;
@@ -911,13 +960,26 @@ window.soundEffects = (function () {
             renderUI();
         },
         isGraphBuilt: () => isGraphBuilt,
-        needsNativeReload: () => isMobileDevice() && isGraphBuilt,
+        isNativePlaybackPreferred: () => preferNativePlayback,
+        needsNativeRestore,
         restoreNativePlayback: function () {
-            if (!this.needsNativeReload()) return;
-            // Disconnecting nodes cannot release a captured media element.
-            window.savePlaybackState?.();
-            sessionStorage.setItem('lx_native_audio_restore', '1');
-            window.location.reload();
+            if (window.LXPlayback?.isRemote) return false;
+            const captured = needsNativeRestore();
+            if (captured && !window.LXPlayback?.replaceLocalElement) {
+                window.showError?.('无法切换音频输出，请重新打开播放器后重试。');
+                return false;
+            }
+            preferNativePlayback = true;
+            // Persistence is optional: live handoff must work even if storage is blocked.
+            try {
+                sessionStorage.setItem('lx_native_audio_mode', '1');
+                sessionStorage.removeItem('lx_native_audio_restore');
+            } catch (_) { }
+            if (captured) {
+                window.LXPlayback.replaceLocalElement(releaseAudioGraph);
+            }
+            renderUI();
+            return true;
         },
         getContext: () => audioContext || window._sharedAudioContext || null,
         getSourceNode: () => mediaSource || window._sharedAudioSourceNode || null,
@@ -1015,7 +1077,8 @@ window.soundEffects = (function () {
             if (isGraphBuilt && canProcessLocally()) applySettings();
             renderUI();
         };
-        document.getElementById('audio-player')?.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', restoreLocalEffects);
+        (window.LXPlayback || document.getElementById('audio-player'))?.addEventListener('webkitcurrentplaybacktargetiswirelesschanged', restoreLocalEffects);
+        window.addEventListener('lx-audio-replaced', renderUI);
         window.addEventListener('lx-cast-route', restoreLocalEffects);
         // Reverb Gain Sliders
         const mainGain = document.getElementById('reverb-main-gain');
