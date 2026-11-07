@@ -1852,6 +1852,7 @@ function switchTab(tabId) {
     if (tabId !== 'search') window.SearchRequests?.cancel();
 
     activeView.classList.remove('hidden');
+    window.refreshSearchStatusVisibility?.();
     // small delay to allow display block to apply before opacity transition
     setTimeout(() => {
         activeView.classList.remove('opacity-0');
@@ -1902,6 +1903,7 @@ function switchTab(tabId) {
     if (tabId === 'search') {
         initGlobalListSearch(); // [New] 强制重置 ListSearch 为 'global' 模式
         currentSearchScope = 'network';
+        window.refreshSearchStatusVisibility?.();
         document.getElementById('search-source').classList.remove('hidden');
         document.getElementById('search-type').classList.remove('hidden');
         document.getElementById('page-title').innerText = "搜索音乐";
@@ -2400,6 +2402,7 @@ function performSearch(query, source = null) {
     // 重置搜索范围到全网搜索
     if (typeof currentSearchScope !== 'undefined') {
         currentSearchScope = 'network';
+        window.refreshSearchStatusVisibility?.();
     }
 
     // 设置搜索框内容
@@ -4766,6 +4769,7 @@ function goBackToSearch(fromPopState = false) {
     window.searchDetailOrigin = null;
     if (origin) {
         currentSearchScope = origin.scope;
+        window.refreshSearchStatusVisibility?.();
         lastSearchResultList = origin.list;
         lastSearchType = origin.type;
         currentArtistId = null;
@@ -12043,6 +12047,7 @@ function handleArtistLibraryClick() {
     document.getElementById('search-type').classList.add('hidden');
 
     currentSearchScope = 'lib_artists';
+    window.refreshSearchStatusVisibility?.();
     window.currentViewingListId = '__lib_artists__';
     renderLibraryArtists(window.libraryData.artists);
 }
@@ -12075,6 +12080,7 @@ function handleAlbumLibraryClick() {
     document.getElementById('search-type').classList.add('hidden');
 
     currentSearchScope = 'lib_albums';
+    window.refreshSearchStatusVisibility?.();
     window.currentViewingListId = '__lib_albums__';
     renderLibraryAlbums(window.libraryData.albums);
 }
@@ -13469,6 +13475,7 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     // Set current viewing list ID for batch operations
     window.currentViewingListId = listId;
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
 
     let list = [];
     let title = '';
@@ -13511,6 +13518,7 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
 
     // Set Scope
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
     document.getElementById('search-source').classList.add('hidden'); // Hide selector
     document.getElementById('search-type').classList.add('hidden');
 
@@ -13743,6 +13751,7 @@ function handleDislikeArtistsClick() {
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_artists';
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
     
     // Highlight Header
     document.querySelectorAll('[id^="tab-"]').forEach(el => {
@@ -13783,6 +13792,7 @@ function handleDislikeAlbumsClick() {
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_albums';
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
     
     // Highlight Header
     document.querySelectorAll('[id^="tab-"]').forEach(el => {

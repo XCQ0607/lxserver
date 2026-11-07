@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v61';
+const CACHE_NAME = 'lx-music-web-v62';
 // Refresh cached assets after organizing JavaScript modules by feature.
 const ASSETS_TO_CACHE = [
     './',

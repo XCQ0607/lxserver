@@ -1075,7 +1075,7 @@ const musicVisualizer = (function () {
     let standaloneFooterVU = null;
     let standaloneDetailVU = null;
 
-    const audio = document.getElementById('audio-player');
+    const audio = window.LXPlayback || document.getElementById('audio-player');
     const footerCanvas = document.getElementById('footer-visualizer');
     const detailCanvas = document.getElementById('detail-visualizer');
     const playerFooter = document.getElementById('player-footer');
@@ -1305,7 +1305,7 @@ const musicVisualizer = (function () {
                 audioSource = window.soundEffects.getSourceNode ? window.soundEffects.getSourceNode() : window._sharedAudioSourceNode;
                 console.log('[Visualizer] Using analyser from SoundEffectsManager (exclusive output)');
             } else {
-                audioSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(audio));
+                audioSource = window._sharedAudioSourceNode || (window._sharedAudioSourceNode = audioContext.createMediaElementSource(document.getElementById('audio-player')));
                 audioAnalyser = window._sharedAudioAnalyser || (window._sharedAudioAnalyser = audioContext.createAnalyser());
                 
                 try { audioSource.disconnect(); } catch (_) { }
@@ -1704,7 +1704,21 @@ const musicVisualizer = (function () {
         if (vContainer) resizeObserver.observe(vContainer);
     }
 
-    return { init, applySettings, syncSize, clear };
+    function releaseAudio() {
+        waveFooter?.dispose();
+        waveDetail?.dispose();
+        if (standaloneRafId) cancelAnimationFrame(standaloneRafId);
+        standaloneRafId = null;
+        for (const node of [audioSource, audioAnalyser, splitterNode, analyserL, analyserR]) {
+            try { node?.disconnect(); } catch (_) { }
+        }
+        audioContext = audioSource = audioAnalyser = null;
+        splitterNode = analyserL = analyserR = null;
+        waveFooter = waveDetail = null;
+        isInitialized = false;
+    }
+    window.addEventListener('lx-audio-replaced', () => { init(); applySettings(); });
+    return { init, applySettings, syncSize, clear, releaseAudio };
 })();
 
 window.musicVisualizer = musicVisualizer;

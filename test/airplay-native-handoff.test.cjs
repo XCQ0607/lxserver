@@ -7,16 +7,21 @@ const vm = require('node:vm');
 // Exercise the real routing modules together. Fake Web Audio records capture and
 // connections; these tests do not establish physical receiver/audio delivery.
 const playerRoot = path.resolve(__dirname, '../public/music/js/player');
-const sources = ['visualizer', 'ios-background-audio', 'sound-effects', 'airplay']
+const sources = ['playback', 'visualizer', 'ios-background-audio', 'sound-effects', 'airplay']
     .map(name => [name, readFileSync(path.join(playerRoot, `${name}.js`), 'utf8')]);
 
 class Events {
     constructor() { this.listeners = new Map(); }
-    addEventListener(name, listener) {
+    addEventListener(name, listener, options) {
+        if (options?.once) {
+            const original = listener;
+            listener = event => { this.removeEventListener(name, listener); original(event); };
+        }
         if (!this.listeners.has(name)) this.listeners.set(name, new Set());
         this.listeners.get(name).add(listener);
     }
     removeEventListener(name, listener) { this.listeners.get(name)?.delete(listener); }
+    dispatchEvent(event) { this.dispatch(event.type, event); return true; }
     dispatch(name, event = {}) {
         for (const listener of this.listeners.get(name) || []) listener(event);
     }
@@ -37,10 +42,15 @@ function classes(initial = []) {
 
 function mediaElement() {
     return Object.assign(new Events(), {
-        paused: true, style: {}, attributes: {},
+        paused: true, style: {}, attributes: {}, src: '', currentSrc: '', currentTime: 0,
+        duration: 180, volume: 0.7, muted: false, playbackRate: 1, defaultPlaybackRate: 1,
+        readyState: 0,
         setAttribute(name, value) { this.attributes[name] = value; },
-        play() { this.paused = false; return Promise.resolve(); },
-        pause() { this.paused = true; }, remove() {}
+        play() { this.paused = false; this.dispatch('play'); return Promise.resolve(); },
+        removeAttribute(name) { delete this.attributes[name]; if (name === 'src') this.src = ''; },
+        cloneNode() { const next = mediaElement(); next.attributes = { ...this.attributes }; return next; },
+        load() { this.playbackRate = this.defaultPlaybackRate; },
+        pause() { this.paused = true; this.dispatch('pause'); }, remove() {}
     });
 }
 
@@ -49,7 +59,7 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     local = new Map(), session = new Map(), sliders = false } = {}) {
     let frames = [];
     const observations = { captures: 0, picked: 0, reloads: 0, saves: 0,
-        errors: [], info: [], userErrors: [], waveAnalysers: [] };
+        errors: [], info: [], userErrors: [], waveAnalysers: [], closedContexts: 0, worklets: [] };
     if (nativeMode) session.set('lx_native_audio_mode', '1');
     const storage = map => ({
         getItem: key => map.get(key) ?? null,
@@ -73,6 +83,11 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
         'sound-effects-enable': {}, 'sound-effects-switch-label': {},
         'sound-effects-mode': {}, 'sound-effects-controls': {}
     };
+    const install = media => {
+        media.replaceWith = next => { elements['audio-player'] = next; install(next); };
+        media.webkitShowPlaybackTargetPicker = () => observations.picked++;
+    };
+    install(audio);
     if (sliders) {
         for (const type of ['main', 'send']) {
             elements[`reverb-${type}-gain`] = { value: type === 'main' ? 100 : 0, style: {} };
@@ -104,10 +119,11 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
         constructor() {
             super(); this.state = 'running'; this.currentTime = 0; this.destination = node();
             // Loading DSP code is outside the native-routing seam under test.
-            this.audioWorklet = { addModule: () => new Promise(() => {}) };
+            this.audioWorklet = { addModule: () => new Promise(resolve => observations.worklets.push(resolve)) };
         }
+        close() { this.state = 'closed'; observations.closedContexts++; return Promise.resolve(); }
         createMediaElementSource(media) {
-            assert.equal(media, audio, 'capture must use the actual player media element');
+            assert.equal(media, elements['audio-player'], 'capture must use the actual player media element');
             observations.captures++; return node();
         }
         createAnalyser() { return node(); }
@@ -121,7 +137,7 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     }
     class Wave {
         constructor(analyser) { observations.waveAnalysers.push(analyser); }
-        clearAnimations() {} addAnimation() {}
+        clearAnimations() {} addAnimation() {} dispose() {}
     }
     const mobile = device !== 'desktop';
     const window = Object.assign(new Events(), {
@@ -139,7 +155,8 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
         error: (...args) => observations.errors.push(args.join(' ')) };
     const context = vm.createContext({
         window, document, navigator: { userAgent, platform: device === 'iphone' ? 'iPhone' : 'MacIntel', maxTouchPoints: mobile ? 5 : 0 },
-        console: quiet, Wave, localStorage: storage(local), sessionStorage: storage(session),
+        console: quiet, Wave, Event, EventTarget,
+        CustomEvent: class extends Event {}, localStorage: storage(local), sessionStorage: storage(session),
         fetch: () => new Promise(() => {}),
         performance: { now: () => 0 },
         requestAnimationFrame: callback => { frames.push(callback); return frames.length; }, cancelAnimationFrame() {},
@@ -148,18 +165,19 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     });
     for (const [name, source] of sources) {
         vm.runInContext(source, context, { filename: path.join(playerRoot, `${name}.js`) });
+        if (name === 'playback' && cast) window.LXPlayback.connectRemote({});
     }
     document.dispatch('DOMContentLoaded');
     return {
-        audio, button, modal, nativeButton, window, elements, effects: window.soundEffects,
+        get audio() { return elements['audio-player']; }, button, modal, nativeButton, window, elements, effects: window.soundEffects,
         observations, local, session,
         flushFrames() {
             const pending = frames; frames = [];
             for (const callback of pending) callback(400);
         },
-        play() { audio.dispatch('play'); audio.dispatch('playing'); audio.dispatch('timeupdate'); },
+        play() { const media = elements['audio-player']; media.paused = false; media.dispatch('play'); media.dispatch('playing'); media.dispatch('timeupdate'); },
         clickAirPlay() {
-            audio.dispatch('webkitplaybacktargetavailabilitychanged', { availability: 'available' });
+            elements['audio-player'].dispatch('webkitplaybacktargetavailabilitychanged', { availability: 'available' });
             assert.equal(button.disabled, false, 'available picker must be reachable');
             button.dispatch('click');
         },
@@ -174,6 +192,149 @@ function savedEffects() {
         reverb: { id: 'none', mainGain: 1, sendGain: 0 }
     }, customPresets: [{ name: 'Retained preset', values: Array(10).fill(0) }] });
 }
+
+test('vendored Wave dispose cancels RAF and ignores already queued callbacks', () => {
+    const frames = new Map(); let nextId = 0, draws = 0;
+    class Analyser { constructor() { this.frequencyBinCount = 8; } getByteFrequencyData() {} }
+    const canvas = { getContext: () => ({ canvas: { width: 100, height: 50 }, clearRect() { draws++; } }) };
+    const context = {
+        HTMLAudioElement: class {}, AnalyserNode: Analyser,
+        window: { requestAnimationFrame(callback) { frames.set(++nextId, callback); return nextId; },
+            cancelAnimationFrame(id) { frames.delete(id); } }
+    };
+    vm.runInNewContext(readFileSync(path.join(playerRoot, '../vendor/wave.js'), 'utf8'), context);
+    const wave = new context.Wave(new Analyser(), canvas);
+    assert.equal(frames.size, 1);
+    const queued = [...frames.values()][0];
+    wave.dispose(); assert.equal(frames.size, 0);
+    queued(); assert.equal(draws, 1); assert.equal(frames.size, 0);
+});
+
+for (const paused of [true, false]) {
+    test(`live native handoff preserves state and event listeners (paused: ${paused})`, () => {
+        const f = fixture({ device: 'desktop', adaptive: false });
+        const playback = f.window.LXPlayback;
+        f.audio.src = '/music/current.mp3'; f.audio.currentTime = 37;
+        f.audio.volume = 0.4; f.audio.muted = true; f.audio.playbackRate = 1.25;
+        f.play(); f.audio.paused = paused;
+        const previous = f.audio;
+        let pauses = 0, ends = 0, errors = 0, ticks = 0;
+        playback.addEventListener('pause', () => pauses++);
+        playback.addEventListener('ended', () => ends++);
+        playback.addEventListener('error', () => errors++);
+        playback.addEventListener('timeupdate', () => ticks++);
+        f.effects.setEnabled(false);
+        assert.notEqual(f.audio, previous);
+        assert.equal(playback, f.window.LXPlayback, 'public proxy identity remains stable');
+        assert.equal(f.audio.src, '/music/current.mp3');
+        assert.equal(playback.currentTime, 37, 'progress is retained while metadata loads');
+        f.audio.dispatch('loadedmetadata');
+        assert.equal(f.audio.currentTime, 37);
+        assert.equal(f.audio.paused, paused);
+        assert.equal(f.audio.volume, 0.4); assert.equal(f.audio.muted, true);
+        assert.equal(f.audio.playbackRate, 1.25);
+        previous.dispatch('pause'); previous.dispatch('ended'); previous.dispatch('error');
+        assert.deepEqual([pauses, ends, errors], [0, 0, 0]);
+        f.audio.dispatch('timeupdate');
+        assert.equal(ticks, 1);
+        assert.equal(f.effects.needsNativeRestore(), false);
+        assert.equal(f.observations.closedContexts, 1);
+        assert.equal(f.observations.reloads, 0);
+        f.clickAirPlay(); assert.equal(f.observations.picked, 1);
+        f.healthy();
+    });
+}
+
+test('repeated rapid master toggles capture each new element once and retain pending position', () => {
+    const f = fixture({ device: 'desktop' });
+    f.audio.src = '/music/current.mp3'; f.audio.currentTime = 42;
+    for (let i = 0; i < 3; i++) {
+        f.effects.setEnabled(true);
+        assert.equal(f.effects.isGraphBuilt(), true);
+        f.effects.setEnabled(false);
+        f.window.dispatch('resize'); f.play();
+        assert.equal(f.effects.isGraphBuilt(), false);
+        assert.equal(f.window.LXPlayback.currentTime, 42);
+    }
+    f.audio.dispatch('loadedmetadata');
+    assert.equal(f.audio.currentTime, 42);
+    assert.equal(f.observations.captures, 3);
+    assert.equal(f.observations.closedContexts, 3);
+    f.healthy();
+});
+
+test('track change during handoff cancels old position restoration', () => {
+    const f = fixture({ device: 'desktop' });
+    f.audio.src = '/old.mp3'; f.audio.currentTime = 120; f.play();
+    f.effects.restoreNativePlayback();
+    f.window.LXPlayback.src = '/new.mp3';
+    f.audio.currentTime = 0; f.audio.dispatch('loadedmetadata');
+    assert.equal(f.audio.currentTime, 0);
+    assert.equal(f.window.LXPlayback.src, '/new.mp3');
+    f.healthy();
+});
+
+test('browser rejection of handoff playback prompts manual play without reporting a media error', async () => {
+    const f = fixture({ device: 'desktop' });
+    f.audio.src = '/current.mp3'; f.play();
+    f.audio.cloneNode = () => {
+        const next = mediaElement();
+        next.play = () => Promise.reject(Object.assign(new Error('Gesture required'), { name: 'NotAllowedError' }));
+        return next;
+    };
+    let errors = 0;
+    f.window.LXPlayback.addEventListener('error', () => errors++);
+    f.effects.restoreNativePlayback();
+    await Promise.resolve();
+    assert.equal(f.audio.paused, true);
+    assert.equal(errors, 0);
+    assert.match(f.observations.info[0], /点击播放/);
+    assert.equal(f.observations.reloads, 0);
+    f.healthy();
+});
+
+test('new src wins over stale currentSrc when native handoff starts during loading', () => {
+    const f = fixture({ device: 'desktop' }); f.play();
+    f.audio.src = '/new.mp3'; f.audio.currentSrc = '/old.mp3';
+    f.effects.restoreNativePlayback();
+    assert.equal(f.audio.src, '/new.mp3');
+    f.healthy();
+});
+
+test('native handoff disposes the iOS bridge and later master enable builds a fresh bridge', () => {
+    const f = fixture(); f.effects.setEQ(0, 5);
+    assert.equal(f.window.iOSBackgroundAudio.isActive(), true);
+    f.effects.setEnabled(false);
+    assert.equal(f.window.iOSBackgroundAudio.isActive(), false);
+    assert.equal(f.effects.getContext(), null);
+    f.effects.setEnabled(true);
+    assert.equal(f.window.iOSBackgroundAudio.isActive(), true);
+    assert.equal(f.observations.captures, 2);
+    f.healthy();
+});
+
+test('a pending worklet from the old graph cannot initialize in the new graph', async () => {
+    const f = fixture({ device: 'desktop' }); f.effects.setEnabled(true);
+    const oldWorklet = f.observations.worklets[0];
+    f.effects.setEnabled(false); f.effects.setEnabled(true);
+    oldWorklet(); await Promise.resolve(); await Promise.resolve();
+    assert.equal(f.observations.worklets.length, 2);
+    f.healthy();
+});
+
+test('Cast is not disconnected by a native handoff request and still restores to the new local element', () => {
+    const f = fixture({ device: 'desktop' }); f.play();
+    f.effects.restoreNativePlayback();
+    const current = f.audio;
+    const snapshot = f.window.LXPlayback.connectRemote({ src: '/cast.mp3', currentTime: 12, paused: true });
+    assert.equal(f.effects.restoreNativePlayback(), false);
+    assert.equal(f.audio, current);
+    assert.equal(f.window.LXPlayback.isRemote, true);
+    f.window.LXPlayback.restoreLocal(); f.audio.dispatch('loadedmetadata');
+    assert.equal(f.audio.src, '/cast.mp3'); assert.equal(f.audio.currentTime, 12);
+    assert.ok(snapshot);
+    f.healthy();
+});
 
 for (const device of ['iphone', 'desktop']) {
     test(`${device} native mode previews saved effects until master explicitly enables them`, () => {
@@ -192,7 +353,7 @@ for (const device of ['iphone', 'desktop']) {
         assert.equal(f.observations.captures, 1);
         f.effects.setEnabled(false);
         assert.equal(f.elements['sound-effects-controls'].disabled, true);
-        assert.match(f.elements['sound-effects-mode'].textContent, /旁路/);
+        assert.match(f.elements['sound-effects-mode'].textContent, /原生播放/);
         assert.equal(JSON.parse(f.local.get('lx_sound_effects')).settings.eq[0], 5);
         f.healthy();
     });
@@ -247,7 +408,7 @@ for (const route of ['AirPlay', 'Cast']) {
             wireless: route === 'AirPlay', cast: route === 'Cast' });
         f.effects.setReverb('hall');
         f.audio.webkitCurrentPlaybackTargetIsWireless = false;
-        f.window.LXPlayback.isRemote = false;
+        f.window.LXPlayback.restoreLocal();
         f.flushFrames();
         assert.equal(f.effects.isNativePlaybackPreferred(), true);
         assert.equal(f.observations.captures, 0);
@@ -256,32 +417,16 @@ for (const route of ['AirPlay', 'Cast']) {
     });
 }
 
-test('failed playback save prevents native reload and session flags', () => {
-    const f = fixture({ device: 'desktop' }); f.play();
-    f.window.savePlaybackState = () => false;
+test('native handoff works without saving playback or writing session storage', () => {
+    const f = fixture({ device: 'desktop', failSessionWrites: true }); f.play();
+    const previous = f.audio;
+    f.window.savePlaybackState = () => { throw new Error('Must not save'); };
     f.effects.restoreNativePlayback();
+    assert.notEqual(f.audio, previous);
     assert.equal(f.observations.reloads, 0);
-    assert.equal(f.session.size, 0);
-    assert.equal(f.effects.isNativePlaybackPreferred(), false);
-    assert.equal(f.observations.userErrors.length, 1);
-});
-
-test('empty playback state allows native reload without forcing old playback restoration', () => {
-    const f = fixture({ device: 'desktop' }); f.play();
-    f.window.savePlaybackState = () => null;
-    f.effects.restoreNativePlayback();
-    assert.equal(f.observations.reloads, 1);
-    assert.equal(f.session.get('lx_native_audio_mode'), '1');
-    assert.equal(f.session.has('lx_native_audio_restore'), false);
-});
-
-test('partial session write is rolled back without reloading or enabling native mode', () => {
-    const f = fixture({ device: 'desktop', failSessionWrites: 'lx_native_audio_restore' }); f.play();
-    f.effects.restoreNativePlayback();
-    assert.equal(f.observations.reloads, 0);
-    assert.equal(f.session.size, 0);
-    assert.equal(f.effects.isNativePlaybackPreferred(), false);
-    assert.equal(f.observations.userErrors.length, 1);
+    assert.equal(f.effects.isNativePlaybackPreferred(), true);
+    assert.equal(f.effects.needsNativeRestore(), false);
+    assert.equal(f.observations.userErrors.length, 0);
     f.healthy();
 });
 
@@ -352,7 +497,7 @@ for (const device of ['iphone', 'android', 'desktop']) {
         const f = fixture({ device, adaptive: false }); f.play();
         assert.equal(f.observations.captures, 1);
         assert.equal(f.effects.isGraphBuilt(), false);
-        assert.equal(f.effects.needsNativeReload(), true);
+        assert.equal(f.effects.needsNativeRestore(), true);
         f.clickAirPlay();
         assert.equal(f.observations.picked, 0);
         assert.equal(f.modal.classList.contains('hidden'), false);
@@ -361,7 +506,7 @@ for (const device of ['iphone', 'android', 'desktop']) {
         f.healthy();
     });
 
-    test(`${device} native restoration preserves settings and prevents recapture after reload`, () => {
+    test(`${device} live restoration preserves settings and native preference after a later reload`, () => {
         const local = new Map([
             ['lx_sound_effects', savedEffects()],
             ['lx_playback_state', JSON.stringify({ song: { id: 'fixture-song' }, time: 37, playlist: [{ id: 'fixture-song' }] })]
@@ -369,10 +514,10 @@ for (const device of ['iphone', 'android', 'desktop']) {
         const before = [...local.entries()];
         const f = fixture({ device, adaptive: false, local }); f.play();
         f.effects.restoreNativePlayback();
-        assert.equal(f.observations.saves, 1, 'save the current queue before reloading');
-        assert.equal(f.observations.reloads, 1);
+        assert.equal(f.observations.saves, 0, 'live handoff retains the queue in memory');
+        assert.equal(f.observations.reloads, 0);
         assert.equal(f.session.get('lx_native_audio_mode'), '1');
-        assert.equal(f.session.get('lx_native_audio_restore'), '1');
+        assert.equal(f.session.has('lx_native_audio_restore'), false);
         assert.deepEqual([...local.entries()], before, 'retained effects and queue must not be cleared');
         f.healthy();
 
@@ -461,17 +606,6 @@ test('Control Center handoff after capture opens an actionable restore prompt on
     f.healthy();
 });
 
-test('native restore reports unavailable storage and does not reload', () => {
-    const f = fixture({ device: 'desktop', failSessionWrites: true }); f.play();
-    f.effects.restoreNativePlayback();
-    assert.equal(f.observations.reloads, 0);
-    assert.equal(f.observations.userErrors.length, 1);
-    assert.match(f.observations.userErrors[0], /存储|storage/i);
-    assert.equal(f.effects.isNativePlaybackPreferred(), false);
-    assert.equal(f.session.has('lx_native_audio_mode'), false);
-    f.healthy();
-});
-
 test('explicit iPhone EQ supplies the adaptive visualizer with its existing analyser', () => {
     const f = fixture({ nativeMode: true }); f.play();
     assert.equal(f.observations.captures, 0);
@@ -488,12 +622,12 @@ test('explicit iPhone EQ supplies the adaptive visualizer with its existing anal
     f.healthy();
 });
 
-test('native preference survives consumption of the one-time playback restore flag', () => {
+test('live native preference persists without writing the legacy restore flag', () => {
     const local = new Map([['lx_sound_effects', savedEffects()]]);
     const f = fixture({ device: 'desktop', local }); f.play();
     f.effects.restoreNativePlayback();
-    assert.equal(f.session.get('lx_native_audio_restore'), '1');
-    // restorePlaybackState consumes this one-time queue/resume signal.
+    assert.equal(f.session.has('lx_native_audio_restore'), false);
+    // Live handoff no longer writes the legacy one-time queue/resume signal.
     f.session.delete('lx_native_audio_restore');
     assert.deepEqual([...f.session.entries()], [['lx_native_audio_mode', '1']]);
     const restored = fixture({ device: 'desktop', local, session: f.session });
