@@ -73,33 +73,92 @@ export default {
    * 获取歌手信息
    * @param {*} id
    */
+  // Legacy implementation retained for reference; inactive.
+  // getInfo(id) {
+  //     return createMusicuFetch({
+  //       singer: {
+  //         method: 'get_singer_detail_info',
+  //         param: {
+  //           sort: 5,
+  //           singermid: id,
+  //           sin: 0,
+  //           num: 50,
+  //         },
+  //         module: 'music.web_singer_info_svr',
+  //       },
+  //     }).then(body => {
+  //       if (body.singer.code != 0) throw new Error('get singer info faild.')
+  //
+  //       const data = body.singer.data
+  //       return {
+  //         source: 'tx',
+  //         id: data.singer_info.mid,
+  //         info: {
+  //           name: data.singer_info.name,
+  //           desc: data.singer_info.desc || '',
+  //           avatar: `https://y.gtimg.cn/music/photo_new/T001R300x300M000${data.singer_info.mid}.jpg`,
+  //         },
+  //         count: {
+  //           music: data.total_song || 0,
+  //           album: data.total_album || 0,
+  //         },
+  //       }
+  //     })
+  //   }
   getInfo(id) {
     return createMusicuFetch({
-      singer: {
-        method: 'get_singer_detail_info',
+      req_1: {
+        module: 'music.musichallSinger.SingerInfoInter',
+        method: 'GetSingerDetail',
         param: {
-          sort: 5,
-          singermid: id,
-          sin: 0,
-          num: 50,
+          singer_mids: [id],
+          ex_singer: 1,
+          wiki_singer: 1,
+          group_singer: 0,
+          pic: 1,
+          photos: 0,
         },
-        module: 'music.web_singer_info_svr',
+      },
+      req_2: {
+        module: 'music.musichallAlbum.AlbumListServer',
+        method: 'GetAlbumList',
+        param: {
+          singerMid: id,
+          order: 0,
+          begin: 0,
+          num: 1,
+          songNumTag: 0,
+          singerID: 0,
+        },
+      },
+      req_3: {
+        module: 'musichall.song_list_server',
+        method: 'GetSingerSongList',
+        param: {
+          singerMid: id,
+          order: 1,
+          begin: 0,
+          num: 1,
+        },
       },
     }).then(body => {
-      if (body.singer.code != 0) throw new Error('get singer info faild.')
+      if (body.req_1.code != 0 || body.req_2.code != 0 || body.req_3.code != 0) throw new Error('get singer info faild.')
 
-      const data = body.singer.data
+      const info = body.req_1.data.singer_list[0]
+      const music = body.req_3.data
+      const album = body.req_2.data
       return {
         source: 'tx',
-        id: data.singer_info.mid,
+        id: info.basic_info.singer_mid,
         info: {
-          name: data.singer_info.name,
-          desc: data.singer_info.desc || '',
-          avatar: `https://y.gtimg.cn/music/photo_new/T001R300x300M000${data.singer_info.mid}.jpg`,
+          name: info.basic_info.name,
+          desc: info.ex_info.desc,
+          avatar: info.pic.pic,
+          gender: info.ex_info.genre === 1 ? 'man' : 'woman',
         },
         count: {
-          music: data.total_song || 0,
-          album: data.total_album || 0,
+          music: music.totalNum,
+          album: album.total,
         },
       }
     })
@@ -124,28 +183,56 @@ export default {
    * @param {*} page
    * @param {*} limit
    */
-  getAlbumList(id, page = 1, limit = 10, order = 'hot') {
+  // Legacy implementation retained for reference; inactive.
+  // getAlbumList(id, page = 1, limit = 10, order = 'hot') {
+  //     return createMusicuFetch({
+  //       singerAlbum: {
+  //         method: 'get_singer_album',
+  //         param: {
+  //           singermid: id,
+  //           begin: (page - 1) * limit,
+  //           num: limit,
+  //           order: 'time',
+  //         },
+  //         module: 'music.web_singer_info_svr',
+  //       },
+  //     }).then(body => {
+  //       if (body.singerAlbum.code != 0) throw new Error('get singer album faild.')
+  //
+  //       const list = this.filterAlbumList(body.singerAlbum.data.list)
+  //       return {
+  //         source: 'tx',
+  //         list,
+  //         limit,
+  //         page,
+  //         total: body.singerAlbum.data.total,
+  //       }
+  //     })
+  //   }
+  getAlbumList(id, page = 1, limit = 10) {
     return createMusicuFetch({
-      singerAlbum: {
-        method: 'get_singer_album',
+      req: {
+        module: 'music.musichallAlbum.AlbumListServer',
+        method: 'GetAlbumList',
         param: {
-          singermid: id,
+          singerMid: id,
+          order: 0,
           begin: (page - 1) * limit,
           num: limit,
-          order: 'time',
+          songNumTag: 0,
+          singerID: 0,
         },
-        module: 'music.web_singer_info_svr',
       },
     }).then(body => {
-      if (body.singerAlbum.code != 0) throw new Error('get singer album faild.')
+      if (body.req.code != 0) throw new Error('get singer album faild.')
 
-      const list = this.filterAlbumList(body.singerAlbum.data.list)
+      const list = this.filterAlbumList(body.req.data.albumList)
       return {
         source: 'tx',
         list,
         limit,
         page,
-        total: body.singerAlbum.data.total,
+        total: body.req.data.total,
       }
     })
   },

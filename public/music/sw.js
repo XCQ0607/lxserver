@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v62';
+const CACHE_NAME = 'lx-music-web-v64';
 // Refresh cached assets after organizing JavaScript modules by feature.
 const ASSETS_TO_CACHE = [
     './',
@@ -10,6 +10,8 @@ const ASSETS_TO_CACHE = [
     './css/utilities.css',
     './css/app.css',
     './js/library/search_requests.js',
+    './js/library/paged_music_search.js',
+    './js/library/search_suggestions.js',
     './js/ui/ui_accessibility.js',
     './assets/fontawesome/css/all.min.css',
     // 核心 JS

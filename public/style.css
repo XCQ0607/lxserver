@@ -1,4 +1,9 @@
 :root {
+    color-scheme: dark;
+    --scrollbar-track: #141b30;
+    --scrollbar-thumb: #46516d;
+    --scrollbar-thumb-hover: #68799c;
+    --scrollbar-thumb-active: #8b83ed;
     --bg-primary: #0a0e27;
     --bg-secondary: #121729;
     --bg-tertiary: #1a1f3a;
@@ -8971,16 +8976,31 @@ body::-webkit-scrollbar,
 }
 
 ::-webkit-scrollbar-track {
-    background: transparent;
+    background: var(--scrollbar-track);
+    border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb {
-    background: rgba(255, 255, 255, 0.15);
+    background: var(--scrollbar-thumb);
     border-radius: 999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-    background: rgba(255, 255, 255, 0.3);
+    background: var(--scrollbar-thumb-hover);
+}
+
+::-webkit-scrollbar-thumb:active {
+    background: var(--scrollbar-thumb-active);
+}
+
+::-webkit-scrollbar-corner {
+    background: var(--scrollbar-track);
+}
+
+::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 .ol-restore-task {
@@ -9574,4 +9594,112 @@ button.olb-stat-card:focus-visible, .olb-filter-chip:focus-visible, .olb-active-
     #view-backups .ol-restore-source-banner { padding: 10px; gap: 8px; font-size: .75rem; }
     #view-backups .bm-subnav { gap: 6px; }
     #view-backups .bm-subnav a { min-height: 38px; display: inline-flex; align-items: center; padding: 6px 10px; font-size: .75rem; }
+}
+.admin-overflow-label {
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: clip;
+    min-width: 0;
+}
+
+.admin-overflow-track {
+    display: inline-block;
+    width: max-content;
+    max-width: none;
+    vertical-align: bottom;
+    transform: translateX(0);
+}
+
+@keyframes admin-list-overflow {
+    0%, 15% { transform: translateX(0); }
+    85%, 100% { transform: translateX(var(--admin-overflow-distance)); }
+}
+
+.admin-is-overflowing > .admin-overflow-track {
+    animation: admin-list-overflow var(--admin-overflow-duration) linear infinite alternate;
+}
+
+@media (min-width: 768px) and (hover: hover) and (pointer: fine) {
+    .admin-is-overflowing > .admin-overflow-track {
+        animation: none;
+    }
+
+    .admin-is-overflowing:hover > .admin-overflow-track {
+        animation: admin-list-overflow var(--admin-overflow-duration) linear infinite alternate;
+    }
+}
+
+/* Standard fallback; Chromium/WebKit use the rounded pseudo-elements above. */
+:root * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+@supports selector(::-webkit-scrollbar) {
+    :root * {
+        scrollbar-width: auto;
+        scrollbar-color: auto;
+    }
+}
+
+/* Record details need room for paths, hashes and metadata. */
+#modal .modal-content:has(.olb-record-detail-table) {
+    width: 1080px;
+    max-width: calc(100vw - 48px);
+    max-height: calc(100dvh - 48px);
+    padding: 28px 32px;
+    background: linear-gradient(145deg, #191f36, #12182b);
+}
+#modal:has(.olb-record-detail-table) .modal-header {
+    align-items: flex-start;
+    gap: 24px;
+}
+#modal:has(.olb-record-detail-table) .modal-header h3 {
+    flex: 1;
+    min-width: 0;
+    font-size: 1.3rem;
+    line-height: 1.5;
+}
+.olb-detail-subtitle {
+    display: block;
+    margin-top: 6px;
+    color: var(--text-secondary);
+    font-size: .82rem;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+}
+#modal:has(.olb-record-detail-table) .modal-close { flex-shrink: 0; }
+#modal:has(.olb-record-detail-table) .modal-body { min-width: 0; }
+.olb-record-detail-table {
+    table-layout: fixed;
+    line-height: 1.65;
+}
+#modal .olb-record-detail-table .olb-detail-key {
+    width: 180px;
+    white-space: normal;
+    vertical-align: top;
+    color: #94a3b8;
+}
+#modal .olb-record-detail-table td {
+    padding: 12px 16px;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+.olb-record-detail-table tr:nth-child(odd) { background: rgba(148, 163, 184, .035); }
+.olb-record-detail-table .ol-meta-cover-preview,
+.olb-record-detail-table .ol-meta-tag { max-width: 100%; min-width: 0; }
+.olb-record-detail-table .ol-meta-tag-val {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+@media (max-width: 640px) {
+    #modal .modal-content:has(.olb-record-detail-table) {
+        width: calc(100% - 24px);
+        max-width: calc(100% - 24px);
+        max-height: calc(100dvh - 24px);
+        padding: 18px 14px;
+    }
+    #modal .olb-record-detail-table .olb-detail-key { width: 100px; }
+    #modal .olb-record-detail-table td { padding: 10px 8px; }
 }

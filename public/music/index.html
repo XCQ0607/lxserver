@@ -360,18 +360,19 @@
                     <!-- Search Input Area -->
                     <div id="music-search-toolbar" class="flex flex-col md:flex-row gap-2 md:gap-4 mb-2">
                         <!-- Search Input -->
-                        <form role="search" onsubmit="event.preventDefault(); doSearch();" class="flex-1 relative rounded-xl" id="search-input-wrapper" autocomplete="off">
+                        <form role="search" onsubmit="handleSearchSubmit(event)" class="flex-1 relative rounded-xl" id="search-input-wrapper" autocomplete="off">
                             <i class="fas fa-search absolute left-4 top-3.5 t-text-muted pointer-events-none"></i>
                             <input type="search" id="search-input" name="lx_music_search_query"
                                 class="w-full pl-10 pr-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm text-sm md:text-base"
                                 placeholder="搜索歌曲、歌手..."
-                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-suggestions-list">
                             <!-- 搜索波浪流光动效条（搜索中从头到尾波动） -->
                             <div id="search-progress-wave" class="search-wave-bar"></div>
                             <!-- Search Suggestions Dropdown -->
                             <div id="search-suggestions"
                                 class="absolute top-full left-0 w-full mt-2 t-bg-panel border t-border-main rounded-xl shadow-xl z-50 hidden overflow-hidden animate-fade-in">
-                                <div id="search-suggestions-list" class="py-2">
+                                <div id="search-suggestions-list" class="py-2" role="listbox" aria-label="搜索联想">
                                     <!-- Suggestions appear here -->
                                 </div>
                             </div>
@@ -595,6 +596,10 @@
                             </div>
                         </div>
                         <!-- Pagination -->
+                        <div id="network-search-more" class="hidden network-search-more" aria-busy="false">
+                            <span id="network-search-count" class="t-text-muted" aria-live="polite"></span>
+                            <button id="network-search-load-more" type="button" onclick="loadMoreNetworkSongs()">加载更多</button>
+                        </div>
                         <div id="search-pagination-bar"
                             class="border-t t-border-main flex items-center justify-between px-3 md:px-6 t-bg-main flex-shrink-0" style="min-height: 3.5rem; padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));">
                             <div class="flex items-center gap-2">
@@ -2672,7 +2677,7 @@
                                                 <input type="checkbox" id="setting-enable-remaster" class="sr-only peer"
                                                     onchange="toggleRemasterFeature(this.checked)">
                                                 <div
-                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500 transition-all">
+                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
                                                 </div>
                                             </label>
                                         </div>
@@ -6286,6 +6291,8 @@
     <script src="js/local/auto_link.js"></script>
     <script src="js/local/customDir.js"></script>
     <script src="js/ui/common_ui.js"></script>
+    <script src="js/library/paged_music_search.js"></script>
+    <script src="js/library/search_suggestions.js"></script>
     <script src="js/download/sync_download.js"></script>
     <script src="js/library/search_requests.js"></script>
     <script src="js/ui/ui_accessibility.js"></script>

@@ -37,6 +37,10 @@
         const searchView = document.getElementById('view-search');
         const visible = window.currentSearchScope === 'network' &&
             !!searchView && !searchView.classList.contains('hidden');
+        if (!visible) {
+            document.getElementById('network-search-more')?.classList.add('hidden');
+            window.SearchSuggestions?.hide();
+        }
         const status = document.getElementById('search-status');
         const wave = document.getElementById('search-progress-wave');
         if (wave) wave.classList.toggle('is-active', visible && !!loading);

@@ -71,6 +71,7 @@ window.addEventListener('lx-cast-track', event => {
 
 // Initialize Unified Search for Global (Favorites/Search)
 window.goToPage = function (page) {
+    if (isPagedNetworkResult(window.viewingPlaylist)) return window.goToNetworkResultPage(page);
     currentPage = page;
     window.currentPage = page;
     // 歌曲搜索的结果已一次性取回，跳页只需本地重渲染；歌手/专辑仍要向后端追加
@@ -2371,6 +2372,7 @@ window.clearQueue = clearQueue;
 
 // Search Logic
 function handleSearchKeyPress(e) {
+    if (e.isComposing || e.keyCode === 229 || window.SearchSuggestions?.composing) return;
     if (e.key === 'Enter') {
         if (typeof hideSearchSuggestions === 'function') hideSearchSuggestions();
         doSearch();
@@ -2442,6 +2444,120 @@ window.handleSearchTypeChange = handleSearchTypeChange;
 
 const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
+function isPagedNetworkResult(list) {
+    const detailVisible = ['artist-detail-header', 'album-detail-header'].some(id => {
+        const header = document.getElementById(id);
+        return header && !header.classList.contains('hidden');
+    });
+    return window.currentSearchScope === 'network' && !!window.networkSongSearch &&
+        !detailVisible && !window.glSortMode && window.networkSongSearch.state.list === list;
+}
+
+function renderNetworkSearchFooter(visible) {
+    const footer = document.getElementById('network-search-more');
+    if (!footer) return;
+    footer.classList.toggle('hidden', !visible);
+    if (!visible) return;
+    const state = window.networkSongSearch.state;
+    const remaining = state.providers.filter(provider => !provider.done);
+    const failed = state.providers.filter(provider => provider.error);
+    const info = document.getElementById('network-search-count');
+    if (info) info.textContent = `已加载 ${state.list.length} 首` + (failed.length ? ` · ${failed.map(p => getSourceName(p.source)).join('、')}暂未加载成功` : '');
+    const button = document.getElementById('network-search-load-more');
+    if (button) {
+        button.disabled = state.loading || window.networkSongSearch.navigating || !remaining.length;
+        button.textContent = state.loading ? '正在加载…' : !remaining.length ? '已加载全部可用结果' : failed.length ? '加载更多 / 重试失败音源' : '加载更多';
+    }
+    footer.setAttribute('aria-busy', String(state.loading));
+    if (state.loading || window.networkSongSearch.navigating) {
+        const next = document.getElementById('search-btn-next');
+        if (next) next.disabled = true;
+    }
+}
+
+async function searchNetworkSongs(keyword, source, headers, request, append = false) {
+    const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
+        keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
+    });
+    if (!append) window.networkSongSearch = search;
+    const current = () => request.current() && window.networkSongSearch === search &&
+        window.currentSearchScope === 'network';
+    window.serverPagedSearch = false;
+    window.lastSearchMeta = null;
+    const loading = search.load({
+        current,
+        fetchPage: (provider, page, limit) => request.json(`${API_BASE}/search?name=${encodeURIComponent(keyword)}&source=${provider}&page=${page}&limit=${limit}&type=song`, headers, 10000),
+        progress: (done, total) => window.setSearchStatus(`正在加载：${done}/${total} 个音源已完成`, true),
+    });
+    renderNetworkSearchFooter(append);
+    await loading;
+    if (!current()) {
+        if (isPagedNetworkResult(window.viewingPlaylist)) renderNetworkSearchFooter(true);
+        return;
+    }
+    const state = search.state;
+    const failed = state.providers.filter(provider => provider.error);
+    const message = `已加载 ${state.list.length} 首 · ${state.providers.filter(p => p.page > 0).length}/${state.providers.length} 个音源已返回` +
+        (failed.length ? ` · ${failed.map(p => getSourceName(p.source)).join('、')}可重试` : '');
+    window.setSearchStatus(message, false);
+    if (!append) currentPage = 1;
+    window.currentPage = currentPage;
+    window.savedNetworkSearchState = {
+        keyword, source, type: 'song', list: state.list, page: currentPage, meta: null, serverPagedSearch: false,
+    };
+    // The new round stays behind existing rows. Preserve scroll and selected IDs.
+    const container = document.getElementById('search-results');
+    const scrollTop = container?.scrollTop || 0;
+    window.viewingPlaylist = state.list;
+    if (append && window.ListSearch?.state.active) window.ListSearch.handleSearch();
+    else renderResults(state.list);
+    if (!state.list.length && failed.length && container) container.textContent = '暂未获得结果，可点击下方按钮重试失败音源。';
+    if (append && container) container.scrollTop = scrollTop;
+    renderNetworkSearchFooter(true);
+}
+
+window.loadMoreNetworkSongs = async function ({ navigation = false } = {}) {
+    const search = window.networkSongSearch;
+    if (!search || search.state.loading || (search.navigating && !navigation) || !isPagedNetworkResult(window.viewingPlaylist)) return;
+    if (document.getElementById('search-input')?.value.trim() !== search.state.keyword) return;
+    const request = window.SearchRequests.begin();
+    const headers = { ...getUserAuthHeaders() };
+    if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
+    await searchNetworkSongs(search.state.keyword, window.savedNetworkSearchState?.source || 'all', headers, request, true);
+    return request.current() && window.networkSongSearch === search;
+};
+
+window.goToNetworkResultPage = async function (page) {
+    const search = window.networkSongSearch;
+    if (!search || search.state.loading || search.navigating || !isPagedNetworkResult(window.viewingPlaylist)) return;
+    const displayCount = () => window.ListSearch ? window.ListSearch.getDisplayList(search.state.list).length : search.state.list.length;
+    const showAll = settings.itemsPerPage === 'all';
+    const size = Math.max(1, parseInt(settings.itemsPerPage) || 20);
+    const target = Math.max(1, Math.floor(Number(page) || 1));
+    const originPage = currentPage;
+    const current = () => window.networkSongSearch === search && isPagedNetworkResult(window.viewingPlaylist);
+    search.navigating = true;
+    try {
+        // Fill a partial page before moving onto it, so newly fetched rows are
+        // not silently skipped between the old last page and the next one.
+        while ((showAll || displayCount() < target * size) && search.state.providers.some(p => !p.done)) {
+            const before = search.state.list.length;
+            const beforeDisplay = displayCount();
+            const committed = await window.loadMoreNetworkSongs({ navigation: true });
+            if (!committed || !current() || currentPage !== originPage) return;
+            if (showAll || search.state.list.length === before || displayCount() === beforeDisplay || search.state.providers.some(p => p.error)) break;
+        }
+        if (!current()) return;
+        const maxPage = showAll ? 1 : Math.max(1, Math.ceil(displayCount() / size));
+        goToResultPage(Math.min(target, maxPage));
+    } finally {
+        search.navigating = false;
+        if (current()) {
+            renderResults(search.state.list);
+            renderNetworkSearchFooter(true);
+        }
+    }
+};
 
 //搜索歌曲
 async function doSearch(page = 1, append = false) {
@@ -2452,6 +2568,7 @@ async function doSearch(page = 1, append = false) {
     }
     const request = window.SearchRequests.begin();
     window.setSearchStatus();
+    renderNetworkSearchFooter(false);
     const typeEl = document.getElementById('search-type');
     const type = typeEl ? typeEl.value : 'song';
 
@@ -2525,7 +2642,7 @@ async function doSearch(page = 1, append = false) {
     const source = document.getElementById('search-source').value;
     localStorage.setItem('search-source', source);
 
-    // 只有歌手/专辑/歌单搜索还是「一次一页」，需要靠下一页追加；歌曲搜索一次取回全量后纯本地分页
+    // 歌手/专辑/歌单沿用原分页；网络歌曲由独立状态管理器分批加载。
     const appendableServerSearch = type !== 'song';
     window.serverPagedSearch = appendableServerSearch;
 
@@ -2555,6 +2672,12 @@ async function doSearch(page = 1, append = false) {
         const headers = {};
         if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
         Object.assign(headers, getUserAuthHeaders());
+
+        if (type === 'song') {
+            clearSearchDetailView();
+            await searchNetworkSongs(input, source, headers, request);
+            return;
+        }
 
         const pageInfoEl = document.getElementById('page-info');
         let list = [];
@@ -2895,8 +3018,11 @@ function handleHotSearchClick(keyword) {
 
 function showInitialSearchState() {
     window.showInitialSearchState = showInitialSearchState;
+    hideSearchSuggestions();
     const initialRequest = window.SearchRequests?.begin();
     window.setSearchStatus?.();
+    window.networkSongSearch = null;
+    renderNetworkSearchFooter(false);
     document.getElementById('search-pagination-bar')?.classList.add('hidden');
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
@@ -3177,6 +3303,8 @@ window.currentArtistSource = 'wy';
 window.currentArtistOrder = 'hot';
 
 async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBack = false) {
+    window.SearchRequests?.cancel();
+    renderNetworkSearchFooter(false);
     rememberSearchDetailOrigin();
     const typeEl = document.getElementById('search-type');
 
@@ -4625,6 +4753,8 @@ window.navigateToAlbumArtist = navigateToAlbumArtist;
 window.searchSingerByName = navigateToAlbumArtist;
 
 async function enterAlbum(id, source = 'wy', initialInfo = null, isBack = false) {
+    window.SearchRequests?.cancel();
+    renderNetworkSearchFooter(false);
     rememberSearchDetailOrigin();
     // 保存进入专辑前的上下文，如果是从歌手页进入，则记录歌手 ID
     const artistHeader = document.getElementById('artist-detail-header');
@@ -4795,7 +4925,11 @@ function goBackToSearch(fromPopState = false) {
         } else if (lastSearchType === 'album') {
             renderAlbumResults(lastSearchResultList);
         } else {
-            renderResults(lastSearchResultList);
+            const savedSongs = window.networkSongSearch?.state.list;
+            const restorePaged = currentSearchScope === 'network' && savedSongs &&
+                savedSongs.length === lastSearchResultList.length &&
+                savedSongs.every((song, index) => song.id === lastSearchResultList[index].id);
+            renderResults(restorePaged ? savedSongs : lastSearchResultList);
         }
 
         const pageInfoEl = document.getElementById('page-info');
@@ -5050,6 +5184,8 @@ function renderResults(list) {
     // 搜索歌曲时恢复底部分页栏显示（非排序模式下）
     const paginationBar = document.getElementById('search-pagination-bar');
     if (paginationBar && !window.glSortMode) paginationBar.classList.remove('hidden');
+    const pagedNetwork = isPagedNetworkResult(list);
+    renderNetworkSearchFooter(pagedNetwork);
     // 重置歌手详情分页（进入歌曲搜索视图时清空）
     window.artistSongsPage = 1;
     // Update Header
@@ -5407,7 +5543,7 @@ function applyMarqueeChecks(root = document) {
                 wrapper.className = 'w-full relative';
                 wrapper.setAttribute('style', maskStyle);
                 const track = document.createElement('div');
-                track.className = 'inline-block whitespace-nowrap animate-marquee hover:pause-animation';
+                track.className = 'inline-block whitespace-nowrap animate-marquee';
                 const firstText = document.createElement('span');
                 firstText.textContent = text;
                 const firstGap = document.createElement('span');
@@ -17982,164 +18118,15 @@ window.togglePlay = function () {
 
 document.addEventListener('click', initAudioEngine, { once: true });
 
-// --- Search Suggestions Logic ---
-let searchTipsDebounceTimer = null;
-let currentSelectedTipIndex = -1;
-let currentTipAbortController = null;
-
-function initSearchTips() {
-    const searchInput = document.getElementById('search-input');
-    const suggestionsContainer = document.getElementById('search-suggestions');
-
-    if (!searchInput || !suggestionsContainer) return;
-
-    searchInput.addEventListener('input', (e) => {
-        const query = e.target.value.trim();
-        clearTimeout(searchTipsDebounceTimer);
-
-        if (!query) {
-            hideSearchSuggestions();
-            return;
-        }
-
-        searchTipsDebounceTimer = setTimeout(() => {
-            fetchSearchTips(query);
-        }, 300);
-    });
-
-    searchInput.addEventListener('focus', () => {
-        const query = searchInput.value.trim();
-        if (query) {
-            suggestionsContainer.classList.remove('hidden');
-        }
-    });
-
-    searchInput.addEventListener('keydown', (e) => {
-        const list = document.getElementById('search-suggestions-list');
-        const items = list ? list.querySelectorAll('.search-tip-item') : [];
-
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            if (items.length === 0) return;
-            currentSelectedTipIndex = (currentSelectedTipIndex + 1) % items.length;
-            updateTipSelection(items);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            if (items.length === 0) return;
-            currentSelectedTipIndex = (currentSelectedTipIndex - 1 + items.length) % items.length;
-            updateTipSelection(items);
-        } else if (e.key === 'Enter') {
-            if (currentSelectedTipIndex >= 0 && items[currentSelectedTipIndex]) {
-                e.preventDefault();
-                const text = items[currentSelectedTipIndex].textContent.trim();
-                searchInput.value = text;
-                hideSearchSuggestions();
-                doSearch();
-            }
-        } else if (e.key === 'Escape') {
-            hideSearchSuggestions();
-        }
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!searchInput.contains(e.target) && !suggestionsContainer.contains(e.target)) {
-            hideSearchSuggestions();
-        }
-    });
-}
-
-function updateTipSelection(items) {
-    items.forEach((item, index) => {
-        if (index === currentSelectedTipIndex) {
-            item.classList.add('t-bg-muted');
-            item.scrollIntoView({ block: 'nearest' });
-        } else {
-            item.classList.remove('t-bg-muted');
-        }
-    });
-}
-
-async function fetchSearchTips(query) {
-    if (currentTipAbortController) currentTipAbortController.abort();
-    currentTipAbortController = new AbortController();
-    const signal = currentTipAbortController.signal;
-
-    const source = (document.getElementById('search-source')) ? document.getElementById('search-source').value : 'kw';
-    try {
-        const resp = await fetch(`/api/music/tipSearch?name=${encodeURIComponent(query)}&source=${source}`, { signal });
-        if (!resp.ok) return;
-        const tips = await resp.json();
-        renderSearchTips(tips);
-    } catch (err) {
-        if (err.name === 'AbortError') return;
-        console.error('[TipSearch] Fetch error:', err);
-    } finally {
-        if (currentTipAbortController && currentTipAbortController.signal === signal) {
-            currentTipAbortController = null;
-        }
-    }
-}
-
-function renderSearchTips(tips) {
-    const container = document.getElementById('search-suggestions');
-    const list = document.getElementById('search-suggestions-list');
-    const input = document.getElementById('search-input');
-    if (!container || !list || !input) return;
-
-    // 如果输入框已失去焦点（除非是操作建议列表），或者已经触发了正式搜索，则不再渲染
-    if (document.activeElement !== input) {
-        container.classList.add('hidden');
-        return;
-    }
-
-    list.innerHTML = '';
-    currentSelectedTipIndex = -1;
-
-    if (!tips || tips.length === 0) {
-        container.classList.add('hidden');
-        return;
-    }
-
-    tips.forEach((tip, index) => {
-        const div = document.createElement('div');
-        div.className = 'search-tip-item px-4 py-2.5 hover:t-bg-muted cursor-pointer transition-colors text-sm flex items-center gap-3';
-        div.innerHTML = `<i class="fas fa-search t-text-muted text-xs"></i><span class="truncate">${tip}</span>`;
-        div.onclick = (e) => {
-            e.stopPropagation(); // 防止触发 document click
-            input.value = tip;
-            hideSearchSuggestions();
-            doSearch();
-        };
-        list.appendChild(div);
-    });
-
-    container.classList.remove('hidden');
-}
-
+// Search suggestion requests, IME and keyboard interactions live in their own module.
 function hideSearchSuggestions() {
-    const container = document.getElementById('search-suggestions');
-    if (container) container.classList.add('hidden');
-    currentSelectedTipIndex = -1;
-
-    // 清除待执行的防抖定时器
-    if (searchTipsDebounceTimer) {
-        clearTimeout(searchTipsDebounceTimer);
-        searchTipsDebounceTimer = null;
-    }
-
-    // 中止正在进行的请求
-    if (currentTipAbortController) {
-        currentTipAbortController.abort();
-        currentTipAbortController = null;
-    }
+    window.SearchSuggestions?.hide();
 }
 
-// Ensure initSearchTips runs on load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initSearchTips);
-} else {
-    initSearchTips();
+function handleSearchSubmit(event) {
+    window.SearchSuggestions.submit(event);
 }
+
 // ===== 持久化 Token 管理逻辑 =====
 
 /**

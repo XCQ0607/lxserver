@@ -6493,7 +6493,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           if (!musicSdk[source] || !musicSdk[source].tipSearch) {
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('[]'); return
           }
-          const tips = await musicSdk[source].tipSearch.search(name)
+          // SDK modules keep a requestObj; isolate it so one user's typing does
+          // not cancel another user's in-flight suggestions for the same source.
+          const tipApi = { ...musicSdk[source].tipSearch, requestObj: null }
+          const tips = await tipApi.search(name)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(tips || []))
         } catch (err: any) {

@@ -4736,7 +4736,13 @@ class App {
         const body = document.getElementById('modal-body')
         if (modal && title && body) {
             const nmBase = String(f.name || '').trim().split(/[\\/]/).pop() || ''
-            title.textContent = '记录详情 #' + f.id + (nmBase ? ' · ' + nmBase : '')
+            title.replaceChildren(document.createTextNode('记录详情 #' + f.id))
+            if (nmBase) {
+                const subtitle = document.createElement('span')
+                subtitle.className = 'olb-detail-subtitle'
+                subtitle.textContent = nmBase
+                title.appendChild(subtitle)
+            }
             body.innerHTML = html
             modal.classList.remove('hidden')
         } else {
@@ -7339,3 +7345,48 @@ document.addEventListener('click', (e) => {
 
 // 初始化应用
 const app = new App();
+
+// Shared overflow handling for admin list labels. Keep existing nodes and events.
+(() => {
+    const selectors = [
+        '.olb-filename-text', '.olb-err-text', '.user-name-text', '.col-id-text',
+        '.playlist-name', '.playlist-id', '.song-title-text', '.song-singer-mobile',
+        '.song-col-album', '.song-col-playlist', '.song-col-source',
+        '.album-title', '.artist-name', '.lx-select-text', '.lx-select-item-label'
+    ].join(',');
+    let pending = false;
+    function refresh() {
+        pending = false;
+        document.querySelectorAll(selectors).forEach(el => {
+            if (!el.clientWidth || el.querySelector('button, input, select')) return;
+            let track = el.querySelector(':scope > .admin-overflow-track');
+            if (!track) {
+                if (el.scrollWidth <= el.clientWidth + 1) return;
+                track = document.createElement('span');
+                track.className = 'admin-overflow-track';
+                track.append(...el.childNodes);
+                el.appendChild(track);
+                el.classList.add('admin-overflow-label');
+            }
+            const distance = Math.max(0, track.scrollWidth - el.clientWidth);
+            el.style.setProperty('--admin-overflow-distance', `-${distance}px`);
+            el.style.setProperty('--admin-overflow-duration', `${Math.max(5, distance / 30 + 3)}s`);
+            const overflowing = distance > 1;
+            if (el.classList.contains('admin-is-overflowing') !== overflowing) {
+                el.classList.toggle('admin-is-overflowing', overflowing);
+            }
+        });
+    }
+    function schedule() {
+        if (pending) return;
+        pending = true;
+        requestAnimationFrame(refresh);
+    }
+    new MutationObserver(schedule).observe(document.body, {
+        childList: true, subtree: true, characterData: true,
+        attributes: true, attributeFilter: ['class', 'hidden']
+    });
+    window.addEventListener('resize', schedule);
+    document.fonts?.ready.then(schedule);
+    schedule();
+})();
