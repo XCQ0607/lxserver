@@ -475,29 +475,6 @@ window.soundEffects = (function () {
         }
     }
 
-    function animateSlider(id, targetValue, duration = 300) {
-        const slider = document.getElementById(id);
-        if (!slider) return;
-        const startValue = parseFloat(slider.value);
-        const startTime = performance.now();
-
-        function update(currentTime) {
-            const elapsed = currentTime - startTime;
-            const progress = Math.min(elapsed / duration, 1);
-            const ease = 1 - Math.pow(1 - progress, 3); // easeOutCubic
-            const currentValue = startValue + (targetValue - startValue) * ease;
-            slider.value = currentValue;
-
-            // Trigger the oninput handler to update labels and logic
-            if (slider.oninput) slider.oninput({ target: slider });
-
-            if (progress < 1) {
-                requestAnimationFrame(update);
-            }
-        }
-        requestAnimationFrame(update);
-    }
-
     function applyPitch() {
         if (canProcessLocally() && pitchFactorParam) {
             // Use setTargetAtTime for immediate and smooth Web Audio update
@@ -508,13 +485,25 @@ window.soundEffects = (function () {
     }
 
     function renderStatus() {
-        const enabled = settings.enabled !== false;
+        const remote = !!document.getElementById('audio-player')?.webkitCurrentPlaybackTargetIsWireless || !!window.LXPlayback?.isRemote;
+        const native = preferNativePlayback || (isMobileDevice() && !isGraphBuilt && !mobileEffectsEnabled);
+        const enabled = settings.enabled !== false && !native && !remote;
         const toggle = document.getElementById('sound-effects-enable');
-        if (toggle) toggle.checked = enabled;
+        if (toggle) {
+            toggle.checked = enabled;
+            toggle.disabled = remote;
+        }
         const title = document.getElementById('sound-effects-state');
-        if (title) title.textContent = enabled ? '音效已开启' : '音效已暂停';
+        if (title) title.textContent = enabled ? '音效已开启' : '音效已关闭';
         const switchLabel = document.getElementById('sound-effects-switch-label');
         if (switchLabel) switchLabel.textContent = enabled ? '音效开' : '音效关';
+        const mode = document.getElementById('sound-effects-mode');
+        if (mode) {
+            mode.hidden = enabled;
+            mode.textContent = remote ? '无线投播 · 本机音效未启用' : native ? '原生播放 · 音效未接管' : '音效已旁路';
+        }
+        const controls = document.getElementById('sound-effects-controls');
+        if (controls) controls.disabled = !enabled;
 
         const tagsContainer = document.getElementById('sound-effects-tags');
         if (tagsContainer) {
@@ -597,6 +586,7 @@ window.soundEffects = (function () {
                 }
                 tagsContainer.innerHTML = html;
             }
+            tagsContainer.querySelectorAll('button').forEach(button => { button.disabled = !enabled; });
         }
     }
 
@@ -609,11 +599,11 @@ window.soundEffects = (function () {
         if (status) status.textContent = wireless && captured
             ? '请刷新并恢复原生播放后，重新选择 AirPlay 设备'
             : remote
-            ? 'AirPlay / 投放中：仅保存音效配置'
-            : preferNativePlayback
-                ? '正在使用原生播放，可直接选择 AirPlay；已保留音效设置'
+            ? '已保留音效配置；结束投播后可开启本机音效'
+            : preferNativePlayback || (isMobileDevice() && !isGraphBuilt && !mobileEffectsEnabled)
+                ? '已保留全部配置，仅供预览；打开音效开关后按当前配置接管本机音频'
             : settings.enabled === false
-                ? '正在播放原始音色，重新开启即可恢复以上设置'
+                ? '已保留全部配置，仅供预览；打开音效开关后恢复当前配置'
                 : captured
                     ? '本机音效或可视化已开启；使用 AirPlay 前请恢复原生播放'
                     : isMobileDevice()
@@ -750,10 +740,10 @@ window.soundEffects = (function () {
         }
     }
 
-    function ensureLocalGraph() {
+    function ensureLocalGraph(explicitEnable = false) {
         const audio = document.getElementById('audio-player');
         if (audio?.webkitCurrentPlaybackTargetIsWireless || window.LXPlayback?.isRemote) return false;
-        if (hasActiveEffects() && preferNativePlayback) {
+        if ((explicitEnable || hasActiveEffects()) && preferNativePlayback) {
             // Only an explicit local edit opts back into processing. Remote edits
             // and saved/server-loaded settings must leave native output alone.
             try {
@@ -762,7 +752,7 @@ window.soundEffects = (function () {
             } catch (_) { }
             preferNativePlayback = false;
         }
-        if (isMobileDevice() && hasActiveEffects()) mobileEffectsEnabled = true;
+        if (isMobileDevice() && (explicitEnable || hasActiveEffects())) mobileEffectsEnabled = true;
         if (!canProcessLocally()) return false;
         if (!audioContext || !isGraphBuilt) init(true);
         if (audioContext && ['suspended', 'interrupted'].includes(audioContext.state)) {
@@ -777,7 +767,7 @@ window.soundEffects = (function () {
             if (!isGraphBuilt) loadSettings();
             settings.enabled = !!enabled;
             saveSettings();
-            if (enabled) ensureLocalGraph();
+            if (enabled) ensureLocalGraph(true);
             if (canProcessLocally() && isGraphBuilt) {
                 applyMaster();
                 updatePanner();
@@ -859,11 +849,10 @@ window.soundEffects = (function () {
             if (rev) {
                 settings.reverb.mainGain = rev.main;
                 settings.reverb.sendGain = rev.send;
-                animateSlider('reverb-main-gain', rev.main * 100);
-                animateSlider('reverb-send-gain', rev.send * 100);
             }
             saveSettings();
-            if (ensureLocalGraph()) updateReverb();
+            // Disabling one effect must not activate other saved effects in native mode.
+            if (id === 'none' ? canProcessLocally() && isGraphBuilt : ensureLocalGraph()) updateReverb();
             renderUI();
         },
         resetReverb: function () {
@@ -874,8 +863,6 @@ window.soundEffects = (function () {
             settings.reverb.id = 'none';
             settings.reverb.mainGain = 1.0;
             settings.reverb.sendGain = 0;
-            animateSlider('reverb-main-gain', 100);
-            animateSlider('reverb-send-gain', 0);
             settings.eq = Array(10).fill(0);
             activePresetName = '';
             settings.pitch = 1.0;
@@ -941,11 +928,20 @@ window.soundEffects = (function () {
         restoreNativePlayback: function () {
             if (!this.needsNativeReload()) return;
             // Disconnecting nodes cannot release a captured media element.
-            window.savePlaybackState?.();
             try {
+                const saved = window.savePlaybackState?.();
+                if (saved !== true && saved !== null) {
+                    window.showError?.('无法保存当前播放状态，请检查网站存储后重试。');
+                    return;
+                }
                 sessionStorage.setItem('lx_native_audio_mode', '1');
-                sessionStorage.setItem('lx_native_audio_restore', '1');
+                if (saved) sessionStorage.setItem('lx_native_audio_restore', '1');
+                else sessionStorage.removeItem('lx_native_audio_restore');
             } catch (_) {
+                try {
+                    sessionStorage.removeItem('lx_native_audio_mode');
+                    sessionStorage.removeItem('lx_native_audio_restore');
+                } catch (_) { }
                 window.showError?.('无法保存原生播放状态，请允许网站存储后重试。');
                 return;
             }

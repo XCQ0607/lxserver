@@ -5537,6 +5537,7 @@
                         <div class="min-w-0 flex-1">
                             <div class="flex items-center gap-2 flex-wrap">
                                 <strong id="sound-effects-state" class="text-sm font-bold t-text-main">音效已开启</strong>
+                                <span id="sound-effects-mode" class="effects-mode-tag" role="status" hidden></span>
                                 <span id="sound-effects-status" role="status" class="text-xs t-text-dim"></span>
                             </div>
                             <p id="sound-effects-summary" class="hidden"></p>
@@ -5557,7 +5558,7 @@
                         class="mt-2 px-3 py-1.5 text-xs rounded-lg t-bg-track t-text-main hover:t-bg-item-hover transition-colors"
                         onclick="window.soundEffects.restoreNativePlayback()">刷新并恢复原生播放 / AirPlay</button>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 md:divide-x t-border-main">
+                <fieldset id="sound-effects-controls" class="effects-controls grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 md:divide-x t-border-main" aria-label="音效配置">
 
                     <!-- Left Column -->
                     <div class="space-y-3.5 pr-0 md:pr-4">
@@ -5672,7 +5673,7 @@
                         </section>
                     </div>
 
-                </div>
+                </fieldset>
             </div>
         </div>
     </div>

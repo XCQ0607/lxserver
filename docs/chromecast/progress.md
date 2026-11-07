@@ -1,5 +1,11 @@
 # Chromecast progress
 
+## Native recovery follow-up review — 2026-11-07
+
+- Fixed reverb reset leaving native mode when saved EQ remains active. Removed synthetic slider input animations that could enable DSP after remote playback returns local or overwrite a later gain edit.
+- Playback saving now reports failure separately from an empty queue. Native reload is blocked on save failure; empty states do not set the one-time playback restore flag. Partial session writes are cleaned up, and recovery toasts honor their display duration.
+- Added nine recovery regressions plus six native-preview/master-switch regressions. Native mode displays a prominent tag, an off master switch and read-only saved controls; explicit enable applies the retained configuration. Wireless controls stay locked. Player cache advances to v61. Physical Safari/AirPlay receiver validation remains outstanding; the maintainer will check the rendered UI.
+
 ## Native AirPlay capture recovery — 2026-11-07
 
 - [x] Detect any captured media source, including visualizer-only capture on desktop, and expose native restoration on all platforms. System/Control Center handoffs show recovery once per connection without automatically reloading.

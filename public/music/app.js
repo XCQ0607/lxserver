@@ -8235,7 +8235,7 @@ audio.addEventListener('pause', () => {
 // ========================================
 
 function savePlaybackState() {
-    if (!currentPlayingSong && !currentPlaylist?.length) return;
+    if (!currentPlayingSong && !currentPlaylist?.length) return null;
     try {
         const state = {
             song: currentPlayingSong,
@@ -8251,8 +8251,10 @@ function savePlaybackState() {
             timestamp: Date.now()
         };
         localStorage.setItem('lx_playback_state', JSON.stringify(state));
+        return true;
     } catch (e) {
         console.error('[Resume] 无法保存播放状态:', e);
+        return false;
     }
 }
 
@@ -17136,7 +17138,7 @@ function showToast(type, message, duration = 3000) {
 
 // 封装旧 API
 function showSuccess(message) { showToast('success', message, 2000); }
-function showInfo(message) { showToast('info', message, 2000); }
+function showInfo(message, duration = 2000) { showToast('info', message, duration); }
 function showError(message) { showToast('error', message, 2000); }
 
 /**

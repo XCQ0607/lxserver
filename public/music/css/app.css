@@ -2156,6 +2156,12 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 
 /* Active Effect Tags in Status Bar */
 .effects-tags-wrapper { min-height: 24px; }
+.effects-mode-tag { display: inline-flex; align-items: center; padding: 4px 9px; border: 1px solid #38bdf880; border-radius: 6px; background: #38bdf81a; color: var(--text-main); font-size: 12px; font-weight: 700; }
+.effects-mode-tag[hidden] { display: none; }
+.effects-controls { min-width: 0; margin: 0; padding: 0; border: 0; }
+.effects-controls:disabled { opacity: .7; }
+.effects-controls:disabled :is(input, button, label), .effects-tags-wrapper button:disabled { cursor: not-allowed; }
+.effects-tags-wrapper button:disabled { opacity: .35; pointer-events: none; }
 .effects-tag {
     display: inline-flex;
     align-items: center;

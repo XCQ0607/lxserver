@@ -46,14 +46,15 @@ function mediaElement() {
 
 function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     wireless = false, cast = false, failSessionWrites = false,
-    local = new Map(), session = new Map() } = {}) {
+    local = new Map(), session = new Map(), sliders = false } = {}) {
+    let frames = [];
     const observations = { captures: 0, picked: 0, reloads: 0, saves: 0,
         errors: [], info: [], userErrors: [], waveAnalysers: [] };
     if (nativeMode) session.set('lx_native_audio_mode', '1');
     const storage = map => ({
         getItem: key => map.get(key) ?? null,
         setItem(key, value) {
-            if (map === session && failSessionWrites) throw new Error('Storage unavailable');
+            if (map === session && (failSessionWrites === true || failSessionWrites === key)) throw new Error('Storage unavailable');
             map.set(key, String(value));
         },
         removeItem: key => map.delete(key)
@@ -68,8 +69,16 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     const elements = {
         'audio-player': audio, 'btn-airplay': button,
         'sound-effects-modal': modal, 'sound-effects-native': nativeButton,
-        'sound-effects-status': {}
+        'sound-effects-status': {}, 'sound-effects-state': {},
+        'sound-effects-enable': {}, 'sound-effects-switch-label': {},
+        'sound-effects-mode': {}, 'sound-effects-controls': {}
     };
+    if (sliders) {
+        for (const type of ['main', 'send']) {
+            elements[`reverb-${type}-gain`] = { value: type === 'main' ? 100 : 0, style: {} };
+            elements[`reverb-${type}-gain-val`] = {};
+        }
+    }
     const document = Object.assign(new Events(), {
         readyState: 'loading', visibilityState: 'visible',
         getElementById: id => elements[id] || null,
@@ -119,7 +128,7 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
         innerWidth: mobile ? 390 : 1440, innerHeight: 900,
         settings: { showFooterVisualizer: true, iosAdaptiveVisualizer: adaptive },
         AudioContext: Context, Wave, LXPlayback: { isRemote: cast },
-        savePlaybackState: () => observations.saves++,
+        savePlaybackState: () => { observations.saves++; return true; },
         showInfo: message => observations.info.push(message),
         showError: message => observations.userErrors.push(message),
         location: { reload: () => observations.reloads++ }
@@ -131,7 +140,9 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     const context = vm.createContext({
         window, document, navigator: { userAgent, platform: device === 'iphone' ? 'iPhone' : 'MacIntel', maxTouchPoints: mobile ? 5 : 0 },
         console: quiet, Wave, localStorage: storage(local), sessionStorage: storage(session),
-        requestAnimationFrame: () => 1, cancelAnimationFrame() {},
+        fetch: () => new Promise(() => {}),
+        performance: { now: () => 0 },
+        requestAnimationFrame: callback => { frames.push(callback); return frames.length; }, cancelAnimationFrame() {},
         getComputedStyle: () => ({ getPropertyValue: () => '' }),
         setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1, clearInterval() {}
     });
@@ -140,8 +151,12 @@ function fixture({ device = 'iphone', adaptive = true, nativeMode = false,
     }
     document.dispatch('DOMContentLoaded');
     return {
-        audio, button, modal, nativeButton, window, effects: window.soundEffects,
+        audio, button, modal, nativeButton, window, elements, effects: window.soundEffects,
         observations, local, session,
+        flushFrames() {
+            const pending = frames; frames = [];
+            for (const callback of pending) callback(400);
+        },
         play() { audio.dispatch('play'); audio.dispatch('playing'); audio.dispatch('timeupdate'); },
         clickAirPlay() {
             audio.dispatch('webkitplaybacktargetavailabilitychanged', { availability: 'available' });
@@ -159,6 +174,171 @@ function savedEffects() {
         reverb: { id: 'none', mainGain: 1, sendGain: 0 }
     }, customPresets: [{ name: 'Retained preset', values: Array(10).fill(0) }] });
 }
+
+for (const device of ['iphone', 'desktop']) {
+    test(`${device} native mode previews saved effects until master explicitly enables them`, () => {
+        const f = fixture({ device, nativeMode: true, local: new Map([['lx_sound_effects', savedEffects()]]) });
+        f.effects.open();
+        assert.equal(f.elements['sound-effects-enable'].checked, false);
+        assert.equal(f.elements['sound-effects-controls'].disabled, true);
+        assert.equal(f.elements['sound-effects-mode'].hidden, false);
+        assert.match(f.elements['sound-effects-mode'].textContent, /原生播放/);
+        assert.equal(f.observations.captures, 0);
+        assert.equal(JSON.parse(f.local.get('lx_sound_effects')).settings.eq[0], 5);
+        f.effects.setEnabled(true);
+        assert.equal(f.elements['sound-effects-enable'].checked, true);
+        assert.equal(f.elements['sound-effects-controls'].disabled, false);
+        assert.equal(f.elements['sound-effects-mode'].hidden, true);
+        assert.equal(f.observations.captures, 1);
+        f.effects.setEnabled(false);
+        assert.equal(f.elements['sound-effects-controls'].disabled, true);
+        assert.match(f.elements['sound-effects-mode'].textContent, /旁路/);
+        assert.equal(JSON.parse(f.local.get('lx_sound_effects')).settings.eq[0], 5);
+        f.healthy();
+    });
+
+    test(`${device} explicit master enable exits native mode even with neutral settings`, () => {
+        const f = fixture({ device, nativeMode: true });
+        f.effects.open(); f.effects.setEnabled(true);
+        assert.equal(f.effects.isNativePlaybackPreferred(), false);
+        assert.equal(f.elements['sound-effects-enable'].checked, true);
+        assert.equal(f.elements['sound-effects-controls'].disabled, false);
+        assert.equal(f.observations.captures, 1);
+        f.healthy();
+    });
+}
+
+test('default mobile native playback presents a read-only preview with master off', () => {
+    const f = fixture(); f.effects.open();
+    assert.equal(f.elements['sound-effects-enable'].checked, false);
+    assert.equal(f.elements['sound-effects-controls'].disabled, true);
+    assert.match(f.elements['sound-effects-mode'].textContent, /原生播放/);
+    assert.equal(f.observations.captures, 0);
+    f.healthy();
+});
+
+test('wireless playback locks local effect controls and master switch', () => {
+    const f = fixture({ wireless: true }); f.effects.open();
+    assert.equal(f.elements['sound-effects-enable'].checked, false);
+    assert.equal(f.elements['sound-effects-enable'].disabled, true);
+    assert.equal(f.elements['sound-effects-controls'].disabled, true);
+    assert.match(f.elements['sound-effects-mode'].textContent, /无线投播/);
+    f.audio.webkitCurrentPlaybackTargetIsWireless = false;
+    f.audio.dispatch('webkitcurrentplaybacktargetiswirelesschanged');
+    assert.equal(f.elements['sound-effects-enable'].disabled, false);
+    assert.equal(f.elements['sound-effects-controls'].disabled, true);
+    f.healthy();
+});
+
+test('resetting reverb with saved EQ retains native output, including slider callbacks', () => {
+    const f = fixture({ device: 'desktop', nativeMode: true, sliders: true,
+        local: new Map([['lx_sound_effects', savedEffects()]]) });
+    f.effects.resetReverb();
+    f.flushFrames();
+    assert.equal(f.effects.isNativePlaybackPreferred(), true);
+    assert.equal(f.observations.captures, 0);
+    assert.equal(JSON.parse(f.local.get('lx_sound_effects')).settings.reverb.id, 'none');
+    f.healthy();
+});
+
+for (const route of ['AirPlay', 'Cast']) {
+    test(`${route} reverb animation cannot enable DSP after returning local`, () => {
+        const f = fixture({ device: 'desktop', nativeMode: true, sliders: true,
+            wireless: route === 'AirPlay', cast: route === 'Cast' });
+        f.effects.setReverb('hall');
+        f.audio.webkitCurrentPlaybackTargetIsWireless = false;
+        f.window.LXPlayback.isRemote = false;
+        f.flushFrames();
+        assert.equal(f.effects.isNativePlaybackPreferred(), true);
+        assert.equal(f.observations.captures, 0);
+        assert.equal(JSON.parse(f.local.get('lx_sound_effects')).settings.reverb.id, 'hall');
+        f.healthy();
+    });
+}
+
+test('failed playback save prevents native reload and session flags', () => {
+    const f = fixture({ device: 'desktop' }); f.play();
+    f.window.savePlaybackState = () => false;
+    f.effects.restoreNativePlayback();
+    assert.equal(f.observations.reloads, 0);
+    assert.equal(f.session.size, 0);
+    assert.equal(f.effects.isNativePlaybackPreferred(), false);
+    assert.equal(f.observations.userErrors.length, 1);
+});
+
+test('empty playback state allows native reload without forcing old playback restoration', () => {
+    const f = fixture({ device: 'desktop' }); f.play();
+    f.window.savePlaybackState = () => null;
+    f.effects.restoreNativePlayback();
+    assert.equal(f.observations.reloads, 1);
+    assert.equal(f.session.get('lx_native_audio_mode'), '1');
+    assert.equal(f.session.has('lx_native_audio_restore'), false);
+});
+
+test('partial session write is rolled back without reloading or enabling native mode', () => {
+    const f = fixture({ device: 'desktop', failSessionWrites: 'lx_native_audio_restore' }); f.play();
+    f.effects.restoreNativePlayback();
+    assert.equal(f.observations.reloads, 0);
+    assert.equal(f.session.size, 0);
+    assert.equal(f.effects.isNativePlaybackPreferred(), false);
+    assert.equal(f.observations.userErrors.length, 1);
+    f.healthy();
+});
+
+test('reverb presets and reset update sliders without overwriting later local edits', () => {
+    const f = fixture({ device: 'desktop', sliders: true });
+    f.effects.setReverb('hall');
+    assert.equal(f.effects.isGraphBuilt(), true);
+    assert.equal(f.observations.captures, 1);
+    assert.equal(f.elements['reverb-main-gain'].value, 80);
+    assert.equal(f.elements['reverb-send-gain'].value, 240);
+    f.effects.setReverbGain('send', 0.25);
+    f.flushFrames();
+    assert.equal(JSON.parse(f.local.get('lx_sound_effects')).settings.reverb.sendGain, 0.25);
+    f.effects.resetReverb(); f.flushFrames();
+    const reverb = JSON.parse(f.local.get('lx_sound_effects')).settings.reverb;
+    assert.deepEqual(reverb, { id: 'none', mainGain: 1, sendGain: 0 });
+    assert.equal(f.elements['reverb-main-gain'].value, 100);
+    assert.equal(f.elements['reverb-send-gain'].value, 0);
+    assert.equal(f.observations.captures, 1, 'existing local graph is reused');
+    f.healthy();
+});
+
+function appFunction(declaration) {
+    const source = readFileSync(path.join(playerRoot, '../../app.js'), 'utf8');
+    const start = source.indexOf(declaration);
+    const end = source.indexOf('\n}', start);
+    assert.ok(start >= 0 && end > start);
+    return source.slice(start, end + 2);
+}
+
+test('actual playback saver reports write failure, success and empty state separately', () => {
+    const context = {
+        currentPlayingSong: { id: 'current' }, currentPlaylist: [{ id: 'current' }],
+        currentIndex: 0, audio: { currentTime: 37 }, currentPlayingScope: 'network',
+        window: {}, playMode: 'list', currentQuality: '128k',
+        console: { error() {} }, localStorage: { setItem() { throw new Error('Quota exceeded'); } }
+    };
+    vm.runInNewContext(appFunction('function savePlaybackState()'), context);
+    assert.equal(context.savePlaybackState(), false);
+    let state;
+    context.localStorage.setItem = (_key, value) => { state = JSON.parse(value); };
+    assert.equal(context.savePlaybackState(), true);
+    assert.equal(state.time, 37);
+    assert.equal(state.song.id, 'current');
+    context.currentPlayingSong = null; context.currentPlaylist = [];
+    assert.equal(context.savePlaybackState(), null);
+});
+
+test('actual info toast honors AirPlay duration and keeps its default', () => {
+    const calls = [];
+    const source = readFileSync(path.join(playerRoot, '../../app.js'), 'utf8');
+    const definition = source.match(/^function showInfo\([^\n]+/m)[0];
+    const context = { showToast: (...args) => calls.push(args) };
+    vm.runInNewContext(definition, context);
+    context.showInfo('AirPlay', 6500); context.showInfo('normal');
+    assert.deepEqual(calls, [['info', 'AirPlay', 6500], ['info', 'normal', 2000]]);
+});
 
 test('default iPhone visualization preserves native AirPlay playback', () => {
     const f = fixture(); f.play(); f.effects.init(true); f.clickAirPlay();
