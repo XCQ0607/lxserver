@@ -1,3 +1,7 @@
+import { getOpenlistRuntimeStatus } from './openlist/openlistBackup'
+import * as webdavRestoreTasks from './backup/webdavRestoreTasks'
+import { lookupLocalLyrics } from './music/localLyrics'
+import { resolveOpenlistCacheEntry } from './openlist/openlistBackup'
 import http, { type IncomingMessage } from 'node:http'
 import { resolveCollectionUser } from './auth/collectionAccess'
 import fs from 'node:fs'
@@ -19,16 +23,19 @@ import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
+import { invalidateSubsonicPlaylistCache } from '@/server/integrations/subsonic'
 import { createMsg2call } from 'message2call'
 import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
-import { initUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
-import { startVerifyScheduler, runSyncNow, listBackups, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData } from '@/server/openlistBackup'
-import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes } from '@/utils/backupPolicy'
-import { OpenListClient } from '@/server/openlistClient'
+import { initUserApis, unloadUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
+import { startVerifyScheduler, runSyncNow, listBackups, startOpenlistMetadata, openlistMetadataStatus, cancelMetadata, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete } from '@/server/openlist/openlistBackup'
+import { getOpenlistRecoveryHistory, startOpenlistRestore, listRestoreTasks, cancelRestoreTask, rollbackRestoreTask, deleteRestoreTask } from '@/server/openlist/openlistBackup'
+import { prepareOpenlistIntegrity, startOpenlistIntegrity, integrityStatus, cancelIntegrity } from '@/server/openlist/openlistBackup'
+import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes, isCloudBackupRunning } from '@/utils/backupPolicy'
+import { OpenListClient } from '@/server/openlist/openlistClient'
 
 async function validateOpenListConfig(newConfig: any): Promise<void> {
   const c: any = global.lx.config
@@ -76,6 +83,7 @@ function scheduleOpenlistSync(): void {
   }, 8000)
 }
 import * as customSourceHandlers from './sources/customSourceHandlers'
+import { deleteUserSourceFiles } from './sources/userSourceCleanup'
 import * as fileCache from './music/fileCache'
 import { withCacheBrowseLocation } from './music/cacheBrowseLocation'
 import { remasterStaging } from './task/remasterStaging'
@@ -798,7 +806,8 @@ const saveUsers = () => {
 }
 
 /** [新增] 服务器内部热重载数据 */
-const reloadServerData = async () => {
+export const reloadServerData = async (strict = false) => {
+  if (strict) for (const user of global.lx.config.users || []) releaseUserSpace(user.name, true)
   startupLog.info('Hot-reloading server data (users and config)...')
 
   // 1. 重新加载配置文件 (必须先加载基础配置)
@@ -818,11 +827,14 @@ const reloadServerData = async () => {
       // 如果有 WebDAV 同步实例，手动同步其配置
       if (global.lx.webdavSync) {
         global.lx.webdavSync.updateConfig({
+          enable: global.lx.config['webdav.enable'],
           url: global.lx.config['webdav.url'],
           username: global.lx.config['webdav.username'],
           password: global.lx.config['webdav.password'],
           syncPath: global.lx.config['webdav.syncPath'],
           backupPath: global.lx.config['webdav.backupPath'],
+          retentionCount: global.lx.config['webdav.retentionCount'],
+          retentionDays: global.lx.config['webdav.retentionDays'],
           interval: global.lx.config['sync.interval'],
           backupInterval: global.lx.config['sync.backupInterval'],
           types: getBackupTypes('webdav', global.lx.config as any),
@@ -831,9 +843,11 @@ const reloadServerData = async () => {
       }
       // 刷新缓存位置映射，使 _open 等未自定义位置的用户回退到最新的全局 serverCacheLocation
       fileCache.invalidateUserCacheLocations()
+      global.lx.rescheduleConfigBackup?.()
       startupLog.info(`Config re-loaded and merged from ${configPath}.`)
     } catch (err: any) {
       startupLog.error('Failed to reload config file:', err.message)
+      if (strict) throw err
     }
   }
 
@@ -859,6 +873,7 @@ const reloadServerData = async () => {
       }
     } catch (err: any) {
       startupLog.error('Failed to reload users.json:', err.message)
+      if (strict) throw err
     }
   }
 
@@ -868,6 +883,7 @@ const reloadServerData = async () => {
     startupLog.info('User APIs re-initialized.')
   } catch (err: any) {
     startupLog.error('Failed to re-init user APIs:', err.message)
+    if (strict) throw err
   }
 
   startVerifyScheduler()
@@ -1246,6 +1262,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     const urlObj = new URL(req.url ?? '', `http://${req.headers.host}`)
     accessLog.info(`${req.method} ${urlObj.pathname} from ${ip}`)
     const pathname = urlObj.pathname
+    if (global.lx.restoreMaintenance && !pathname.startsWith('/api/openlist/restore') && !pathname.startsWith('/api/webdav/restore') && !['/api/restart', '/api/admin/verify', '/api/config', '/api/status', '/api/backup/status'].includes(pathname) && (pathname.startsWith('/api/') || !['GET', 'HEAD'].includes(req.method || ''))) {
+      res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '5' })
+      res.end(JSON.stringify({ error: '恢复已进入维护状态，请重启服务后继续操作' })); return
+    }
+    if (global.lx.restoreMaintenance && pathname === '/api/config' && req.method !== 'GET') {
+      res.writeHead(503); res.end('恢复维护期间不能保存配置，请先重启服务'); return
+    }
 
     // 读取路径配置（每次请求都重新读取，保存后立刻生效）
     const normalizePath = (p: string) => (p || '').replace(/\/+$/, '')
@@ -1255,6 +1278,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     // 而本段判断先于下方的 Subsonic 路由执行，导致自定义 subsonic.path 会被当成播放器请求、后端接口整个失效。
     const subsonicPath = normalizePath(global.lx.config['subsonic.path'] || '/rest') || '/rest'
     const isSubsonicRequest = pathname === subsonicPath || pathname.startsWith(subsonicPath + '/')
+    if (global.lx.restoreMaintenance && isSubsonicRequest) { res.writeHead(503); res.end('恢复维护中，请重启服务'); return }
 
     // [修复] 判断是否为 LX 同步客户端协议路由 (如 /hello, /id, /ah 以及 /<username>/hello, /<username>/ah 等)
     const isSyncProtocolRequest = /^\/([^/]+\/)?(hello|id|ah)$/.test(pathname)
@@ -1496,6 +1520,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
 
       // [新增] 获取服务器状态
+      if (pathname === '/api/backup/status' && req.method === 'GET') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) { res.writeHead(401); res.end('Unauthorized'); return }
+        try {
+          const config = global.lx.config
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+          res.end(JSON.stringify({ success: true, maintenance: global.lx.restoreMaintenance === true,
+            webdav: config['webdav.enable'] ? global.lx.webdavSync?.getRuntimeStatus() : null,
+            openlist: config['openlist.enable'] ? getOpenlistRuntimeStatus() : null }))
+        } catch (error: any) { res.writeHead(500); res.end(JSON.stringify({ success: false, message: error.message })) }
+        return
+      }
+
       if (pathname === '/api/status' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
         if (auth !== global.lx.config['admin.password']) {
@@ -1553,6 +1589,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           cpuModel: os.cpus()[0]?.model || 'Unknown',
           cpuSpeed: os.cpus()[0]?.speed || 0,
           isWebDAVConfigured: !!(global.lx.config['webdav.url'] && global.lx.config['webdav.url'].trim() !== '' && global.lx.config['webdav.enable']),
+          restoreMaintenance: global.lx.restoreMaintenance === true,
           sourcesCount: getLoadedApisCount ? getLoadedApisCount() : 0,
           nodeVersion: process.version,
           platform: `${os.type()} ${os.arch()}`,
@@ -1788,7 +1825,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
 
               let deletedCount = 0
-              const deletedUsers: { name: string, dataPath: string }[] = []
+              const deletedUsers: { name: string, dataPath?: string }[] = []
 
               for (const targetName of targets) {
                 const idx = global.lx.config.users.findIndex(u => u.name === targetName)
@@ -1797,7 +1834,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                   // 保存用户数据路径（如果需要删除）
                   console.log(`[用户管理] 删除数据选项: ${deleteData}, 用户数据路径: ${user.dataPath}`)
-                  if (deleteData && user.dataPath) {
+                  if (deleteData) {
                     deletedUsers.push({ name: targetName, dataPath: user.dataPath })
                   } else {
                     console.log(`[用户管理] 跳过删除用户 ${targetName} 的数据目录 (deleteData=${deleteData}, 数据目录存在=${!!user.dataPath})`)
@@ -1811,6 +1848,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   }
                   revokeUserSessions(targetName)
                   releaseUserSpace(targetName, true)
+                  unloadUserApis(targetName)
                   global.lx.config.users.splice(idx, 1)
                   deletedCount++
                 }
@@ -1824,6 +1862,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   console.log(`[用户管理] 正在清理 ${deletedUsers.length} 个用户的数据目录...`)
                   for (const user of deletedUsers) {
                     try {
+                      deleteUserSourceFiles(user.name)
+                    } catch (err) {
+                      console.error(`[用户管理] 删除用户 ${user.name} 的音源目录失败:`, err)
+                    }
+                    try {
+                      if (!user.dataPath) continue
                       console.log(`[用户管理] 检查并清理目录: ${user.dataPath}`)
                       if (fs.existsSync(user.dataPath)) {
                         fs.rmSync(user.dataPath, { recursive: true, force: true })
@@ -1945,7 +1989,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         const userSpace = getUserSpace(verifiedUser)
         try {
-          const list = await userSpace.listManage.getSnapshotList()
+          const listSnaps = await userSpace.listManage.getSnapshotList()
+          const dislikeSnaps = userSpace.dislikeManage ? await userSpace.dislikeManage.snapshotDataManage.getSnapshotListWithMeta() : []
+          const list = [
+            ...listSnaps.map(s => ({ ...s, kind: 'list' })),
+            ...dislikeSnaps.map(s => ({ ...s, kind: 'dislike' })),
+          ].sort((a, b) => (b.time || 0) - (a.time || 0))
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
@@ -1992,7 +2041,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         try {
-          const data = await userSpace.listManage.getSnapshot(id)
+          const kind = urlObj.searchParams.get('kind')
+          if (kind && kind !== 'list' && kind !== 'dislike') throw new Error('Invalid snapshot kind')
+          let data: any = kind === 'dislike' ? null : await userSpace.listManage.getSnapshot(id)
+          if (!data && kind !== 'list' && userSpace.dislikeManage) {
+            data = await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)
+          }
           if (!data) {
             res.writeHead(404)
             res.end('Not Found')
@@ -2039,10 +2093,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userSpace = getUserSpace(verifiedUser)
         try {
           const body = await readBody(req)
-          const { id } = JSON.parse(body)
+          const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
 
-          await userSpace.listManage.restoreSnapshot(id)
+          if (kind === 'dislike' && userSpace.dislikeManage) {
+            await userSpace.dislikeManage.restoreSnapshot(id)
+            invalidateDislikeCache(verifiedUser)
+          } else {
+            await userSpace.listManage.restoreSnapshot(id)
+            invalidateSubsonicPlaylistCache()
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -2236,11 +2296,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userSpace = getUserSpace(verifiedUser)
         try {
           const body = await readBody(req)
-          const { id } = JSON.parse(body)
+          const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
 
-          // 调用刚刚在 ListManage 中添加的方法
-          await userSpace.listManage.removeSnapshot(id)
+          if (kind && kind !== 'list' && kind !== 'dislike') throw new Error('Invalid snapshot kind')
+          if (kind === 'dislike') {
+            if (!await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)) throw new Error('快照不存在')
+            await userSpace.dislikeManage.snapshotDataManage.removeSnapshot(id)
+          } else if (await userSpace.listManage.getSnapshot(id)) {
+            await userSpace.listManage.removeSnapshot(id)
+          } else if (!kind && await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)) {
+            await userSpace.dislikeManage.snapshotDataManage.removeSnapshot(id)
+          } else {
+            throw new Error('快照不存在')
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true }))
@@ -3201,7 +3270,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             // [核心逻辑] 如果是受限的公开用户，仅允许保存特定的 3 项设置
             if (resolvedUsername === '_open' && global.lx.config['user.enablePublicRestriction']) {
               const restrictedSettings: any = {}
-              const allowedKeys = ['enableServerCache', 'enableServerLyricCache', 'serverCacheLocation', 'serverCacheNamingPattern', 'downloadConcurrency', 'enableRemaster', 'preferredQuality', 'enableOnlyDownloadMode', 'enablePublicSources', 'embedLyricToFile', 'preferServerCache']
+              const allowedKeys = ['preferLocalLyrics', 'enableServerCache', 'enableServerLyricCache', 'serverCacheLocation', 'serverCacheNamingPattern', 'downloadConcurrency', 'enableRemaster', 'preferredQuality', 'enableOnlyDownloadMode', 'enablePublicSources', 'embedLyricToFile', 'preferServerCache']
               allowedKeys.forEach(key => {
                 if (settings[key] !== undefined) restrictedSettings[key] = settings[key]
               })
@@ -4172,8 +4241,18 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        const result = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
-        if (result && result.exists && username !== '_open' && username !== 'default') {
+        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
+        if (!result.exists && urlObj.searchParams.get('includeOpenlist') === '1') {
+          const id = fileCache.normalizeSongId({ source, songmid, id: songId })
+          const song = { source, songmid, id, name, singer }
+          const q = quality || '128k'
+          const playbackSignal = AbortSignal.timeout(4000)
+          for (const folder of ['music', 'cache'] as const) {
+            const hit = await resolveOpenlistCacheEntry(username, folder, fileCache.getFileName(song, q, folder === 'music', username), { id, source, quality: q }, playbackSignal)
+            if (hit) { result = { exists: true, url: hit.url, filename: hit.filename, quality: hit.quality, folder, origin: 'openlist' }; break }
+          }
+        }
+        if (result && result.exists && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
           const token = req.headers['x-user-token']
           if (token) {
             result.url += `&token=${encodeURIComponent(token as string)}`
@@ -5476,7 +5555,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const verified = verifyUserAuth(req)
           if (verified) lyricUsername = verified
         }
-        const localLyricResult = fileCache.checkLyricCache({
+        const localLyricResult = urlObj.searchParams.get('preferLocal') === '0' ? { exists: false, content: null } : lookupLocalLyrics({
           source,
           songmid,
           id: urlObj.searchParams.get('songId') || urlObj.searchParams.get('id') || songmid,
@@ -5526,7 +5605,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           console.error('[歌词服务] 获取歌词失败:', source, songmid, err.message || err)
 
           // [Fallback] 网络请求失败时，再次尝试本地 .lrc 文件（防止 Step2 miss 但物理文件存在的情况）
-          const fallbackResult = fileCache.checkLyricCache({
+          const fallbackResult = urlObj.searchParams.get('preferLocal') === '0' ? { exists: false, content: null } : lookupLocalLyrics({
             source,
             songmid,
             id: urlObj.searchParams.get('songId') || urlObj.searchParams.get('id') || songmid,
@@ -5567,7 +5646,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        if (!source || (!songmid && !songId)) {
+        if ((!source || (!songmid && !songId)) && !urlObj.searchParams.get('filename')) {
           res.writeHead(400)
           res.end('Missing source or songmid')
           return
@@ -5575,7 +5654,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         const name = urlObj.searchParams.get('name') || ''
         const singer = urlObj.searchParams.get('singer') || ''
-        const result = fileCache.checkLyricCache({ source, songmid, id: songId, name, singer }, username)
+        let result: { exists: boolean; content?: any }
+        try { result = lookupLocalLyrics({ source, songmid, id: songId, name, singer, filename: urlObj.searchParams.get('filename'), folder: urlObj.searchParams.get('folder') || 'cache' }, username) }
+        catch { res.writeHead(400); res.end(JSON.stringify({ success: false, message: '本地歌词路径无效' })); return }
         if (result.exists) {
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true, data: result.content }))
@@ -6743,7 +6824,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (!musicSdk[source] || !musicSdk[source].getLyric) {
               throw new Error(`Source ${source} not supported`)
             }
-            const result = await musicSdk[source].getLyric(songInfo)
+            const request = musicSdk[source].getLyric(songInfo)
+            const result = await (request.promise || request)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
           } catch (err: any) {
@@ -7244,6 +7326,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'webdav.password': global.lx.config['webdav.password'] || '',
             'webdav.syncPath': global.lx.config['webdav.syncPath'] || '/lx-sync',
             'webdav.backupPath': global.lx.config['webdav.backupPath'] || '/lx-sync-backups',
+            'webdav.retentionCount': global.lx.config['webdav.retentionCount'] ?? 5,
+            'webdav.retentionDays': global.lx.config['webdav.retentionDays'] ?? 0,
             'sync.interval': global.lx.config['sync.interval'] || 60,
             'sync.backupInterval': global.lx.config['sync.backupInterval'] || 24,
             'webdav.excludeCache': global.lx.config['webdav.excludeCache'] ?? false,
@@ -7302,22 +7386,27 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'system.allowUnsafeVM': global.lx.config['system.allowUnsafeVM'] || false,
             'configBackup.enable': global.lx.config['configBackup.enable'] ?? true,
             'configBackup.retentionDays': global.lx.config['configBackup.retentionDays'] ?? 7,
+            'configBackup.intervalHours': global.lx.config['configBackup.intervalHours'] ?? 24,
+            'configBackup.scheduleTime': global.lx.config['configBackup.scheduleTime'] ?? '00:00',
             'configBackup.dir': global.lx.config['configBackup.dir'] ?? '',
             'snapshot.backupPath': global.lx.config['snapshot.backupPath'] ?? '',
+            openlistRestoreVersion: 2,
+            'openlist.playback.enable': global.lx.config['openlist.playback.enable'] === true,
             'openlist.enable': global.lx.config['openlist.enable'] ?? false,
             'openlist.endpoint': global.lx.config['openlist.endpoint'] || '',
             'openlist.username': global.lx.config['openlist.username'] || '',
             'openlist.password': global.lx.config['openlist.password'] || '',
             'openlist.token': global.lx.config['openlist.token'] || '',
             'openlist.root': global.lx.config['openlist.root'] || '/lx_music',
-            'openlist.keepLocalAfterUpload': global.lx.config['openlist.keepLocalAfterUpload'] !== false,
             'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 5,
             'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
+            'openlist.historyRetentionDays': global.lx.config['openlist.historyRetentionDays'] || 7,
             'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
             'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
             'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
             'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
             subsonicPortConflict: global.lx.subsonicPortConflict || null,
+            restoreMaintenance: global.lx.restoreMaintenance === true,
             configFilePath: global.lx.configPath || process.env.CONFIG_PATH || path.join(global.lx.dataPath, 'config.js'),
           }
           res.writeHead(200, {
@@ -7396,6 +7485,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['webdav.password'] !== undefined) global.lx.config['webdav.password'] = newConfig['webdav.password']
               if (newConfig['webdav.syncPath'] !== undefined) global.lx.config['webdav.syncPath'] = newConfig['webdav.syncPath']
               if (newConfig['webdav.backupPath'] !== undefined) global.lx.config['webdav.backupPath'] = newConfig['webdav.backupPath']
+              if (newConfig['webdav.retentionCount'] !== undefined) global.lx.config['webdav.retentionCount'] = Math.max(1, Math.min(1000, Math.floor(Number(newConfig['webdav.retentionCount']) || 5)))
+              if (newConfig['webdav.retentionDays'] !== undefined) global.lx.config['webdav.retentionDays'] = Math.max(0, Math.min(3650, Math.floor(Number(newConfig['webdav.retentionDays']) || 0)))
               if (newConfig['sync.interval'] !== undefined) global.lx.config['sync.interval'] = parseInt(newConfig['sync.interval'])
               if (newConfig['sync.backupInterval'] !== undefined) global.lx.config['sync.backupInterval'] = parseInt(newConfig['sync.backupInterval']) || 24
               if (newConfig['webdav.excludeCache'] !== undefined) global.lx.config['webdav.excludeCache'] = !!newConfig['webdav.excludeCache']
@@ -7497,15 +7588,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   warning = (warning ? warning + '；' : '') + 'OpenList 配置校验未通过（已保存，但同步可能因不可达而失败）：' + (ve?.message || ve)
                 }
               }
+              if (newConfig['openlist.playback.enable'] !== undefined) global.lx.config['openlist.playback.enable'] = newConfig['openlist.playback.enable'] === true
               if (newConfig['openlist.enable'] !== undefined) global.lx.config['openlist.enable'] = newConfig['openlist.enable']
               if (newConfig['openlist.endpoint'] !== undefined) global.lx.config['openlist.endpoint'] = newConfig['openlist.endpoint']
               if (newConfig['openlist.username'] !== undefined) global.lx.config['openlist.username'] = newConfig['openlist.username']
               if (newConfig['openlist.password'] !== undefined) global.lx.config['openlist.password'] = newConfig['openlist.password']
               if (newConfig['openlist.token'] !== undefined) global.lx.config['openlist.token'] = newConfig['openlist.token']
               if (newConfig['openlist.root'] !== undefined) global.lx.config['openlist.root'] = newConfig['openlist.root']
-              if (newConfig['openlist.keepLocalAfterUpload'] !== undefined) global.lx.config['openlist.keepLocalAfterUpload'] = newConfig['openlist.keepLocalAfterUpload']
               if (newConfig['openlist.verifyInterval'] !== undefined) global.lx.config['openlist.verifyInterval'] = parseInt(newConfig['openlist.verifyInterval']) || 5
               if (newConfig['openlist.syncInterval'] !== undefined) global.lx.config['openlist.syncInterval'] = parseInt(newConfig['openlist.syncInterval']) || 60
+              if (newConfig['openlist.historyRetentionDays'] !== undefined) global.lx.config['openlist.historyRetentionDays'] = Math.min(3650, Math.max(1, Math.floor(Number(newConfig['openlist.historyRetentionDays']) || 7)))
               if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
               if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
               if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
@@ -7533,11 +7625,24 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
               if (newConfig['subsonic.enableDebug'] !== undefined) global.lx.config['subsonic.enableDebug'] = newConfig['subsonic.enableDebug']
               // [本地配置备份] configBackup 配置
-              if (newConfig['configBackup.enable'] !== undefined) global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']
+              let configBackupChanged = false
+              if (newConfig['configBackup.enable'] !== undefined) { global.lx.config['configBackup.enable'] = !!newConfig['configBackup.enable']; configBackupChanged = true }
               if (newConfig['configBackup.retentionDays'] !== undefined) {
                 const rd = Number(newConfig['configBackup.retentionDays'])
                 global.lx.config['configBackup.retentionDays'] = Number.isFinite(rd) && rd > 0 ? Math.floor(rd) : 7
+                configBackupChanged = true
               }
+              if (newConfig['configBackup.intervalHours'] !== undefined) {
+                const ih = parseInt(newConfig['configBackup.intervalHours'])
+                global.lx.config['configBackup.intervalHours'] = Number.isFinite(ih) && ih >= 1 && ih <= 8760 ? Math.floor(ih) : 24
+                configBackupChanged = true
+              }
+              if (newConfig['configBackup.scheduleTime'] !== undefined) {
+                const st = String(newConfig['configBackup.scheduleTime']).trim()
+                global.lx.config['configBackup.scheduleTime'] = /^([01]?\d|2[0-3]):[0-5]\d$/.test(st) ? st : ''
+                configBackupChanged = true
+              }
+              if (configBackupChanged) global.lx.rescheduleConfigBackup?.()
               if (newConfig['subsonic.onlineSearch'] !== undefined) global.lx.config['subsonic.onlineSearch'] = newConfig['subsonic.onlineSearch']
               if (newConfig['subsonic.onlineSearchMode'] !== undefined) global.lx.config['subsonic.onlineSearchMode'] = newConfig['subsonic.onlineSearchMode']
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
@@ -7578,9 +7683,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 const raw = global.lx.config['openlist.userBackups']
                 let rules: any[] = []
                 try { rules = typeof raw === 'string' ? JSON.parse(raw) : raw || [] } catch { /* 校验警告已返回 */ }
-                if (Array.isArray(rules) && rules.some(r => r?.enabled && (global.lx.config['backup.openlist.types'] === undefined || r.backupCache === true) && (r.mode === 'upload-delete' || (!r.mode && global.lx.config['openlist.keepLocalAfterUpload'] === false)))) {
-                  global.lx.config['subsonic.playCacheFirst'] = true
-                  global.lx.config['subsonic.playCacheFirstUseOpenlist'] = true
+                const udRules = Array.isArray(rules) ? rules.filter(r => r?.enabled && (global.lx.config['backup.openlist.types'] === undefined || r.backupCache === true) && r.mode === 'upload-delete') : []
+                if (udRules.length) {
+                  // 保存为 upload-delete 时，对存量本地文件触发一次性迁移（异步，不阻塞保存响应）
+                  for (const r of udRules) void triggerBackfillUploadDelete(r.user).catch(err => console.warn('[OpenList] 存量缓存迁移失败:', err?.message || err))
                 }
               }
               if (newConfig['subsonic.quality.enabled'] !== undefined) global.lx.config['subsonic.quality.enabled'] = !!newConfig['subsonic.quality.enabled']
@@ -7608,6 +7714,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   password: global.lx.config['webdav.password'],
                   syncPath: global.lx.config['webdav.syncPath'],
                   backupPath: global.lx.config['webdav.backupPath'],
+                  retentionCount: global.lx.config['webdav.retentionCount'],
+                  retentionDays: global.lx.config['webdav.retentionDays'],
                   interval: global.lx.config['sync.interval'],
                   backupInterval: global.lx.config['sync.backupInterval'],
                   excludeCache: global.lx.config['webdav.excludeCache'],
@@ -7673,15 +7781,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 // 优先从文件名解析精确时间戳
                 let timestamp = 0
-                const manualMatch = file.match(/^config-manual-(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})\.js$/)
-                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})\.js$/)
+                const manualMatch = file.match(/^config-manual-(\d{4})-(\d{2})-(\d{2})_(\d{2})(\d{2})(\d{2})(?:-\d+)?\.js$/)
+                const autoMatch = file.match(/^config-(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2}))?\.js$/)
 
                 if (manualMatch) {
                   const [, y, m, d, h, min, s] = manualMatch
                   timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), Number(s)).getTime()
                 } else if (autoMatch) {
-                  // 自动备份若与 mtime/birthtime 在同一天，优先使用文件修改时间以展示具体时刻；否则取日期当天 00:00
-                  timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                  // 带时分后缀的文件解析为精确时刻；否则使用文件修改时间以展示具体时刻
+                  if (autoMatch[4] !== undefined) {
+                    const [, y, m, d, h, min] = autoMatch
+                    timestamp = new Date(Number(y), Number(m) - 1, Number(d), Number(h), Number(min), 0).getTime()
+                  } else {
+                    timestamp = stat.mtimeMs || stat.birthtimeMs || 0
+                  }
                 }
 
                 if (!timestamp) {
@@ -7710,6 +7823,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             backupDir,
             autoBackupEnabled: global.lx.config['configBackup.enable'] !== false,
             retentionDays: global.lx.config['configBackup.retentionDays'] || 7,
+            intervalHours: global.lx.config['configBackup.intervalHours'] || 24,
+            scheduleTime: global.lx.config['configBackup.scheduleTime'] ?? '00:00',
+            nextBackupAt: global.lx.nextConfigBackupAt || 0,
+            lastBackupAt: global.lx.lastConfigBackupAt || 0,
+            lastError: global.lx.lastConfigBackupError || null,
             list,
           }))
         } catch (err: any) {
@@ -7783,14 +7901,43 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      if (pathname === '/api/openlist/restore/history' || pathname === '/api/openlist/restore/jobs' || pathname.startsWith('/api/openlist/restore/jobs/')) {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return
+        }
+        void (async () => {
+          try {
+            let result: any
+            if (pathname.endsWith('/history') && req.method === 'GET') result = await getOpenlistRecoveryHistory()
+            else if (pathname.endsWith('/jobs') && req.method === 'GET') result = { tasks: listRestoreTasks(), maintenance: global.lx.restoreMaintenance === true }
+            else if (pathname.endsWith('/jobs/start') && req.method === 'POST') {
+              const options = JSON.parse(await readBody(req) || '{}')
+              if (!options.planToken) throw new Error('请先扫描预览')
+              result = { taskId: startOpenlistRestore(options) }
+            } else {
+              const match = /^\/api\/openlist\/restore\/jobs\/([0-9a-f-]{36})(?:\/(cancel|resume|rollback))?$/.exec(pathname)
+              if (!match) throw new Error('恢复任务路径无效')
+              const [, id, action] = match
+              if (req.method === 'DELETE' && !action) { deleteRestoreTask(id); result = {} }
+              else if (req.method === 'POST' && action === 'cancel') { cancelRestoreTask(id); result = {} }
+              else if (req.method === 'POST' && action === 'resume') result = { taskId: startOpenlistRestore({}, id) }
+              else if (req.method === 'POST' && action === 'rollback') result = rollbackRestoreTask(id)
+              else throw new Error('不支持的恢复任务操作')
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+          } catch (e: any) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: e.message })) }
+        })()
+        return
+      }
+
       // [OpenList 同步 API] 手动触发同步（upload/download/sync 全量）
       if (pathname === '/api/openlist/restore' && req.method === 'POST') {
         if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: 'Unauthorized' })); return
         }
-        void restoreOpenlistData().then(result => {
+        void readBody(req).then(body => restoreOpenlistData(JSON.parse(body || '{}'))).then(result => {
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: result.errors.length === 0 && result.restored > 0, ...result, restartRequired: true }))
+          res.end(JSON.stringify({ success: result.errors.length === 0 && result.scanned > 0, ...result, restartRequired: !result.preview && (result.restored > 0 || global.lx.restoreMaintenance === true) }))
         }).catch((e: any) => {
           res.writeHead(500, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: e.message }))
         })
@@ -7819,6 +7966,39 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       }
 
       // [OpenList 同步 API] 备份/同步状态列表
+      if (pathname === '/api/openlist/integrity' || pathname.startsWith('/api/openlist/integrity/')) {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return
+        }
+        void (async () => {
+          try {
+            let result: any
+            if (pathname === '/api/openlist/integrity' && req.method === 'GET') result = integrityStatus()
+            else if (pathname === '/api/openlist/integrity/preview' && req.method === 'POST') result = prepareOpenlistIntegrity(JSON.parse(await readBody(req) || '{}'))
+            else if (pathname === '/api/openlist/integrity/start' && req.method === 'POST') result = startOpenlistIntegrity(JSON.parse(await readBody(req) || '{}').token)
+            else if (pathname === '/api/openlist/integrity/cancel' && req.method === 'POST') { cancelIntegrity(); result = { stopped: true } }
+            else { res.writeHead(404); res.end(); return }
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+          } catch (e: any) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: e.message })) }
+        })()
+        return
+      }
+      if (['/api/openlist/metadata', '/api/openlist/metadata/start', '/api/openlist/metadata/cancel'].includes(pathname)) {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return
+        }
+        void (async () => {
+          try {
+            let result: any
+            if (pathname === '/api/openlist/metadata' && req.method === 'GET') result = openlistMetadataStatus()
+            else if (pathname === '/api/openlist/metadata/start' && req.method === 'POST') result = startOpenlistMetadata(JSON.parse(await readBody(req) || '{}'))
+            else if (pathname === '/api/openlist/metadata/cancel' && req.method === 'POST') { cancelMetadata(); result = { stopped: true } }
+            else { res.writeHead(405); res.end(); return }
+            res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+          } catch (error: any) { res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: error.message })) }
+        })()
+        return
+      }
       if (pathname === '/api/openlist/backups' && req.method === 'GET') {
         const auth = req.headers['x-frontend-auth']
         if (auth !== global.lx.config['admin.password']) {
@@ -7885,6 +8065,42 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const r = await deleteOpenlistBackups(ids)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, deleted: r.deleted, remoteRemoved: r.remoteRemoved, remoteFailed: r.remoteFailed }))
+          } catch (e: any) {
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })
+        return
+      }
+
+      // [OpenList 同步 API] 批量重试备份记录（对选中的失败/异常项逐一提交重试）
+      if (pathname === '/api/openlist/retry-batch' && req.method === 'POST') {
+        const auth = req.headers['x-frontend-auth']
+        if (auth !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, error: 'Unauthorized' }))
+          return
+        }
+        void readBody(req).then(async (body) => {
+          try {
+            const cfg = JSON.parse(body || '{}')
+            const ids = Array.isArray(cfg.ids) ? cfg.ids.map((x: any) => Number(x)).filter((x: number) => x > 0) : []
+            if (!ids.length) {
+              res.writeHead(422, { 'Content-Type': 'application/json' })
+              res.end(JSON.stringify({ success: false, error: '缺少有效的 id 列表' }))
+              return
+            }
+            let ok = 0
+            let fail = 0
+            for (const id of ids) {
+              try {
+                const rb = await retryBackup(id)
+                if (rb && rb.ok) ok++
+                else fail++
+              } catch { fail++ }
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, retried: ok, failed: fail }))
           } catch (e: any) {
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
@@ -7997,7 +8213,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             // 先自动备份一份当前的 config.js 防止回滚失误
             if (typeof global.lx.backupConfigNow === 'function') {
-              global.lx.backupConfigNow()
+              const beforeRestore = global.lx.backupConfigNow()
+              if (!beforeRestore.success) throw new Error(beforeRestore.error || '无法保存恢复前的配置，已取消恢复')
             }
 
             // 复制备份文件覆盖当前 config.js
@@ -8310,6 +8527,21 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      if (pathname.startsWith('/api/webdav/restore/tasks')) {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) { res.writeHead(401); res.end('Unauthorized'); return }
+        try {
+          res.setHeader('Content-Type', 'application/json')
+          const match = pathname.match(/^\/api\/webdav\/restore\/tasks\/([0-9a-f-]{36})(\/rollback)?$/)
+          if (pathname === '/api/webdav/restore/tasks' && req.method === 'GET') res.end(JSON.stringify({ success: true, tasks: webdavRestoreTasks.listRestoreTasks() }))
+          else if (match && !global.lx.webdavSync?.isBusy && !isCloudBackupRunning()) {
+            if (match[2] && req.method === 'POST') res.end(JSON.stringify({ success: true, ...webdavRestoreTasks.rollbackRestoreTask(match[1]) }))
+            else if (!match[2] && req.method === 'DELETE') { webdavRestoreTasks.deleteRestoreTask(match[1]); res.end(JSON.stringify({ success: true })) }
+            else throw new Error('不支持的恢复操作')
+          } else throw new Error('请等待当前任务完成，或检查恢复记录地址')
+        } catch (error: any) { res.writeHead(400); res.end(JSON.stringify({ success: false, message: error.message })) }
+        return
+      }
+
       // WebDAV Restore API
       if (pathname === '/api/webdav/restore' && req.method === 'POST') {
         const auth = req.headers['x-frontend-auth']
@@ -8326,22 +8558,23 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
 
-        void readBody(req).then((body) => {
-          let payload: any = {}
-          try {
-            payload = JSON.parse(body || '{}')
-          } catch (e) { }
-
-          const mode = payload.mode || 'auto'
-          const targetFilename = payload.targetFilename
-
-          void webdavSync.restoreFromRemote({ mode, targetFilename }).then(async (success: boolean) => {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ success, restartRequired: true, message: success ? '已恢复所选类型；请重启服务完整加载用户、歌单和音乐索引。' : '恢复失败或云端没有所选类型的文件' }))
-          }).catch((err: any) => {
-            res.writeHead(500)
-            res.end(JSON.stringify({ success: false, message: err.message }))
-          })
+        void readBody(req).then(async (body) => {
+          const payload = JSON.parse(body || '{}')
+          res.setHeader('Content-Type', 'application/json')
+          if (payload.cancel === true && typeof payload.token === 'string') {
+            webdavSync.discardRestorePreview(payload.token)
+            res.end(JSON.stringify({ success: true }))
+          } else if (payload.preview === true) {
+            const preview = await webdavSync.previewRestore({ mode: payload.mode, targetFilename: payload.targetFilename, strategy: payload.strategy, keepCopies: payload.keepCopies })
+            res.end(JSON.stringify({ success: true, ...preview }))
+          } else {
+            if (typeof payload.token !== 'string') throw new Error('请先预览恢复范围，再确认恢复')
+            const success = await webdavSync.restorePlanned(payload.token)
+            res.end(JSON.stringify({ success, ...webdavSync.lastRestoreResult, restartRequired: global.lx.restoreMaintenance === true, message: success ? '恢复完成，请重启服务加载数据' : webdavSync.lastRestoreResult?.errors?.join('；') || '恢复失败' }))
+          }
+        }).catch((error: any) => {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: error.message }))
         })
         return
       }
@@ -8780,6 +9013,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
     noServer: true,
     perMessageDeflate: false,
   }) as unknown as LX.SocketServer
+  global.lx.pauseForRestore = () => {
+    scheduler.stopScheduler()
+    for (const client of wss?.clients || []) client.close(1013, '数据恢复维护中，请重启服务')
+  }
 
   // WebDAV Sync Progress & Log Broadcast
   if (global.lx.webdavSync) {
@@ -8822,6 +9059,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
   }
 
   wss.on('connection', function (socket: any, request) {
+    if (global.lx.restoreMaintenance) { socket.close(1013, '恢复维护中，请重启服务'); return }
     socket.isReady = false
     socket.moduleReadys = {
       list: false,
@@ -9000,6 +9238,7 @@ const startSubsonicStandaloneServer = () => {
   // 不绑定特定 IP：监听所有网卡，访问控制交由防火墙处理
   const subBindIP = '0.0.0.0'
   const subServer = http.createServer(async (req, res) => {
+    if (global.lx.restoreMaintenance) { res.writeHead(503); res.end('恢复维护中，请重启服务'); return }
     // 与主端口一致的 CORS 头，兼容跨域 Subsonic 客户端
     res.setHeader('Access-Control-Allow-Origin', '*')
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS')
@@ -9149,6 +9388,12 @@ export const startServer = async (port: number, ip: string) => {
   // if (status.status) await handleStopServer()
 
   startupLog.info(`starting sync server in ${process.env.NODE_ENV == 'production' ? 'production' : 'development'}`)
+  let appVersion = 'unknown'
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'package.json'), 'utf8'))
+    if (pkg && pkg.version) appVersion = String(pkg.version)
+  } catch { }
+  startupLog.info(`LX Music Server version: v${appVersion}`)
   const proxyEnabled = global.lx.config['proxy.all.enabled']
   const proxyAddress = global.lx.config['proxy.all.address']
   console.log(`[网络代理] 音乐 SDK 代理状态: ${proxyEnabled ? `已启用 (${proxyAddress})` : '未启用'}`)
@@ -9228,7 +9473,7 @@ export const startServer = async (port: number, ip: string) => {
     // console.log('sync server started')
     status.status = true
     status.message = ''
-    scheduler.startScheduler()
+    if (!global.lx.restoreMaintenance) scheduler.startScheduler()
     status.address = ip == '0.0.0.0' ? getAddress() : [ip]
 
     // [Subsonic 独立端口] 主端口就绪后启动（独立端口失败不影响主服务）

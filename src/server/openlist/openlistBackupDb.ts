@@ -14,6 +14,7 @@ export type AttachmentCategory = 'image' | 'lyric' | 'other'
 export type AttachmentStatus = 'pending' | 'uploading' | 'completed' | 'verified' | 'failed' | 'deleted'
 
 export interface AttachmentRow {
+  local_hash: string | null
   id: number
   backup_file_id: number
   user: string
@@ -147,6 +148,7 @@ export function getBackupDb(): DatabaseSync {
     deleted_at INTEGER,
     UNIQUE(user, folder_type, local_path)
   )`)
+  try { db.exec('ALTER TABLE openlist_backup_attachments ADD COLUMN local_hash TEXT') } catch { /* 已存在 */ }
   // 老库兼容：补齐附件唯一约束（已存在重复行则忽略，手动 upsert 仍能去重）
   try {
     db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_ol_att_uniq ON openlist_backup_attachments(user, folder_type, local_path)')
@@ -331,13 +333,14 @@ export function upsertAttachment(input: UpsertAttachmentInput): AttachmentRow {
 export function setAttachmentStatus(
   id: number,
   status: AttachmentStatus,
-  opts: { error?: string | null; size?: number | null } = {},
+  opts: { error?: string | null; size?: number | null; localHash?: string | null } = {},
 ): void {
   const db = getBackupDb()
   const sets: string[] = ['status = ?', 'updated_at = ?']
   const params: any[] = [status, Date.now()]
   if (opts.error !== undefined) { sets.push('error = ?'); params.push(opts.error) }
   if (opts.size !== undefined) { sets.push('size = ?'); params.push(opts.size) }
+  if (opts.localHash !== undefined) { sets.push('local_hash = ?'); params.push(opts.localHash) }
   params.push(id)
   db.prepare(`UPDATE openlist_backup_attachments SET ${sets.join(', ')} WHERE id = ?`).run(...params)
 }

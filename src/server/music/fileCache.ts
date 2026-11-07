@@ -1,3 +1,4 @@
+import { beginCloudBackup } from '@/utils/backupPolicy'
 import { resolveContainedPath } from '../auth/security'
 import { serveFile } from '../http/serveFile'
 import { getCacheBrowseLocation } from './cacheBrowseLocation'
@@ -291,6 +292,7 @@ class CacheIndexManager {
     }
 
     save(username: string, folder: 'cache' | 'music', location?: string) {
+        if (global.lx?.restoreMaintenance) return
         const loc = location || getUserCacheLocation(username)
         const key = this.getKey(username, folder, loc)
         const index = this.indexes.get(key)
@@ -2211,7 +2213,10 @@ export const downloadAndCache = (...args: Parameters<typeof downloadAndCacheImpl
             throw err
         })
     }
+    let releaseWrite: () => void
+    try { releaseWrite = beginCloudBackup() } catch (error) { return Promise.reject(error) }
     const job = downloadAndCacheImpl(...args).finally(() => {
+        releaseWrite()
         if (downloadJobs.get(key)?.promise === job) downloadJobs.delete(key)
     })
     // 文件成功落盘后，发一个与 openlist 无关的通用事件，供各模块（如 openlist 备份）订阅
@@ -2356,7 +2361,7 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
     // 该路径对「原生客户端 / Web / Subsonic」等走 lx-server 的请求统一生效——
     // 因为 OpenList 上传备份本身也是全局触发（见 downloadAndCacheImpl 的 fileCachedUploadListeners），
     // 故「优先使用 OpenList 取回」不限定 Subsonic。是否启用由 openlist 自身开关（enable + 用户备份配置）决定，
-    // 并受 subsonic.playCacheFirst / subsonic.playCacheFirstUseOpenlist 控制（见 isOpenlistCacheFirstEnabled）。
+    // 由 openlist.playback.enable 总开关控制；Subsonic 的入口开关不影响 Web 下载器。
     if (username) {
       const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
       const restoreResolver = (globalThis as any).lx?.cacheRestoreResolver

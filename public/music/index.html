@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
@@ -906,7 +906,7 @@
                                                 <!-- Description (collapsible) -->
                                                 <div class="relative mb-3 max-w-4xl">
                                                     <p id="sl-detail-desc"
-                                                        class="text-xs md:text-sm t-text-muted leading-relaxed line-clamp-2 md:line-clamp-3 hover:line-clamp-none cursor-pointer bg-black/5 dark:bg-white/5 p-2.5 rounded-xl transition-all select-none"
+                                                        class="text-xs md:text-sm t-text-muted leading-relaxed line-clamp-2 md:line-clamp-3 cursor-pointer bg-black/5 dark:bg-white/5 p-2.5 rounded-xl transition-all select-none"
                                                         onclick="toggleSongListDesc()" title="点击展开/收起完整简介">
                                                         暂无介绍
                                                     </p>
@@ -2563,6 +2563,11 @@
                                         </label>
                                     </div>
 
+                                    <div class="flex items-center justify-between pb-3 border-b t-border-main">
+                                        <div><div class="text-sm font-bold t-text-main flex items-center">优先使用服务器本地歌词<span class="setting-tooltip-trigger ml-1" tabindex="0" role="button" aria-label="优先使用服务器本地歌词说明"><i class="fas fa-question-circle" aria-hidden="true"></i><span class="setting-tooltip-content">开启：当前用户 music / cache 的 LRC → 浏览器歌词缓存 → 在线歌词；关闭：浏览器缓存 → 在线歌词。自定义曲库支持同名 LRC，本地未关联歌曲可用内嵌歌词兜底。只控制读取，不控制保存。</span></span></div></div>
+                                        <label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="setting-prefer-local-lyrics" class="sr-only peer" onchange="updateSetting('preferLocalLyrics', this.checked)"><div class="w-11 h-6 bg-gray-200 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div></label>
+                                    </div>
+
                                     <!-- Server Lyric Cache Setting -->
                                     <div class="flex items-center justify-between pb-3 border-b t-border-main">
                                         <div>
@@ -2571,7 +2576,7 @@
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
                                                     <span
-                                                        class="setting-tooltip-content">将歌词文件缓存到同服务器配置的缓存目录下，优先供多端同步极速加载。</span>
+                                                        class="setting-tooltip-content">只控制写入：在线获取歌词及后台保存音频时，是否保存独立 LRC；已有音频时歌词与其同目录同名。读取已有歌词由“优先使用服务器本地歌词”控制。</span>
                                                 </span>
                                             </div>
                                         </div>
@@ -2593,8 +2598,7 @@
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
                                                     <span
-                                                        class="setting-tooltip-content">开启后，下载或缓存歌曲时将自动获取歌词并写入音频文件标签（USLT），同时保存
-                                                        .lrc 文件。支持浏览器下载与服务器缓存两种模式。</span>
+                                                        class="setting-tooltip-content">开启后，下载或缓存歌曲时将自动获取歌词并写入音频文件标签（USLT）。独立 .lrc 文件由“缓存歌词文件”开关单独控制。支持浏览器下载与服务器缓存两种模式。</span>
                                                 </span>
                                             </div>
                                         </div>
@@ -2611,11 +2615,11 @@
                                     <div class="flex items-center justify-between pb-3 border-b t-border-main">
                                         <div>
                                             <div class="text-sm font-bold t-text-main flex items-center">
-                                                优先播放缓存歌曲
+                                                优先播放服务器已有歌曲
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
                                                     <span
-                                                        class="setting-tooltip-content">如果歌曲已缓存，则优先从本地加载。即使“缓存歌曲文件”关闭，已存在的缓存仍可使用。</span>
+                                                        class="setting-tooltip-content">按当前用户查询 music 下载目录和 cache 缓存目录（使用设置的运行目录或 DATA_PATH）。同音质先 music 后 cache；未命中且后台允许时查 OpenList，再用浏览器链接缓存、在线音源。关闭缓存歌曲文件只停止新写入，不禁止读取已有文件。自定义曲库通过本地音乐入口播放。</span>
                                                 </span>
                                             </div>
                                         </div>

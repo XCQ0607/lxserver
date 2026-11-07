@@ -12,6 +12,7 @@ const doc = (path: string) => {
 }
 const asset = (name: string) => withBase(`/showcase/${name}.jpg`)
 const clipNames: Record<string, string> = { 'player-library': 'playlists', search: 'search', charts: 'charts', themes: 'themes', 'admin-dashboard': 'console' }
+const mobileShot = (image: string) => image === 'local-library' ? asset('local-library-mobile') : ''
 const clipFor = (image: string) => clipNames[image] || ''
 const posterFor = (image: string) => asset(clipFor(image) ? `${clipFor(image)}-poster` : image)
 const copy = computed(() => english.value ? {
@@ -142,10 +143,10 @@ function chooseClient(index: number, focus = false) {
           <div class="music-collection-heading"><h2 id="music-collection-title"><span v-for="line in copy.libraryTitle" :key="line">{{ line }}</span></h2><p>{{ copy.libraryIntro }}</p></div>
           <div class="music-collection-content">
             <div class="music-view-panels">
-              <article v-for="(view, i) in copy.views" :key="view.image" class="music-view-copy" :class="{ 'is-current': activeView === i }"><h3>{{ view.title }}</h3><p>{{ view.text }}</p><a class="music-text-link" :href="doc(view.path)">{{ view.link }} <span aria-hidden="true">↗</span></a><img class="music-rest-shot" :src="posterFor(view.image)" :alt="view.alt" width="1596" height="820" loading="lazy" /></article>
+              <article v-for="(view, i) in copy.views" :key="view.image" class="music-view-copy" :class="{ 'is-current': activeView === i }"><h3>{{ view.title }}</h3><p>{{ view.text }}</p><a class="music-text-link" :href="doc(view.path)">{{ view.link }} <span aria-hidden="true">↗</span></a><picture><source v-if="mobileShot(view.image)" media="(max-width: 759px)" :srcset="mobileShot(view.image)" /><img class="music-rest-shot" :src="posterFor(view.image)" :alt="view.alt" width="1596" height="820" loading="lazy" /></picture></article>
               <div class="music-view-track" aria-hidden="true"><span v-for="(view, i) in copy.views" :key="view.short" :class="{ 'is-current': activeView === i }">{{ view.short }}</span></div>
             </div>
-            <figure class="music-product-window"><div class="music-window-bar" aria-hidden="true"><span class="music-window-dots"><i></i><i></i><i></i></span><span>lxserver / {{ copy.views[activeView].short }}</span><span>↗</span></div><div class="music-product-images"><div v-for="(view, i) in copy.views" :key="view.image" class="music-product-shot" data-ui :class="{ 'is-current': activeView === i }" :aria-hidden="activeView !== i"><img :src="posterFor(view.image)" :alt="view.alt" width="1600" height="798" loading="lazy" /><video v-if="clipFor(view.image)" :data-film-clip="clipFor(view.image)" :poster="posterFor(view.image)" preload="none" muted playsinline disablepictureinpicture aria-hidden="true"></video></div></div><figcaption>{{ copy.interfaceNote }}</figcaption></figure>
+            <figure class="music-product-window"><div class="music-window-bar" aria-hidden="true"><span class="music-window-dots"><i></i><i></i><i></i></span><span>lxserver / {{ copy.views[activeView].short }}</span><span>↗</span></div><div class="music-product-images"><div v-for="(view, i) in copy.views" :key="view.image" class="music-product-shot" data-ui :class="{ 'is-current': activeView === i }" :aria-hidden="activeView !== i"><picture><source v-if="mobileShot(view.image)" media="(max-width: 759px)" :srcset="mobileShot(view.image)" /><img :src="posterFor(view.image)" :alt="view.alt" width="1600" height="798" loading="lazy" /></picture><video v-if="clipFor(view.image)" :data-film-clip="clipFor(view.image)" :poster="posterFor(view.image)" preload="none" muted playsinline disablepictureinpicture aria-hidden="true"></video></div></div><figcaption>{{ copy.interfaceNote }}</figcaption></figure>
           </div>
         </div>
       </section>

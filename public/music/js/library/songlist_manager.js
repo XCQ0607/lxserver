@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Song List Manager for LX Music Web
  * Handles fetching, rendering and interactions for the "Song List" (Playlist) feature.
  */
@@ -1383,11 +1383,11 @@ function toggleSongListDesc() {
 
     const isExpanded = descEl.dataset.expanded === 'true';
     if (isExpanded) {
-        descEl.classList.add('line-clamp-3', 'md:line-clamp-4');
+        descEl.classList.add('line-clamp-2', 'md:line-clamp-3');
         descEl.dataset.expanded = 'false';
         descBtn.innerHTML = '展开全部 <i class="fas fa-chevron-down text-[10px] ml-0.5"></i>';
     } else {
-        descEl.classList.remove('line-clamp-3', 'md:line-clamp-4');
+        descEl.classList.remove('line-clamp-2', 'md:line-clamp-3');
         descEl.dataset.expanded = 'true';
         descBtn.innerHTML = '收起 <i class="fas fa-chevron-up text-[10px] ml-0.5"></i>';
     }

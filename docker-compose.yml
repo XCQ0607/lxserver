@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   lx-sync-server:
     build: .
@@ -7,13 +5,29 @@ services:
     restart: always
     ports:
       - "9527:9527"
-      # Subsonic 独立监听端口：仅当 subsonic.standalone 启用时按需取消注释以暴露到主机
+      # Subsonic 独立服务端口：仅当 subsonic.standalone 启用时取消注释
       # - "4050:4050"
     volumes:
-      # 数据持久化
+      # 数据持久化（配置、快照、日志等均落在此目录）
       - ./data:/server/data
     environment:
-      # 环境变量配置，优先级高于 config.js
       - NODE_ENV=production
-      # 示例：通过环境变量设置用户
+      # 通过环境变量覆盖配置，优先级高于 config.js
+      # 用户：LX_USER_<用户名>=<密码 或 JSON 配置>
       # - LX_USER_myuser=mypassword
+      # 管理员密码：覆盖默认 123456（强烈建议设置为强密码）
+      # - ADMIN_PASSWORD=your-strong-password
+      # Subsonic 独立服务
+      # - SUBSONIC_STANDALONE=true
+      # - SUBSONIC_PORT=4050
+      # WebDAV 备份目标
+      # - WEBDAV_URL=
+      # - WEBDAV_USERNAME=
+      # - WEBDAV_PASSWORD=
+      # 网页播放器鉴权
+      # - ENABLE_WEBPLAYER_AUTH=true
+      # - WEBPLAYER_PASSWORD=123456
+      # 其他常用项
+      # - SYNC_INTERVAL=60
+      # - CONFIG_PATH=/server/data/config.js
+      # - SERVER_NAME=My Sync Server

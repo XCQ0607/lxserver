@@ -201,6 +201,8 @@ declare namespace LX {
     /**
      * WebDAV 全量备份远端路径（默认 /lx-sync-backups）
      */
+    'webdav.retentionCount'?: number
+    'webdav.retentionDays'?: number
     'webdav.backupPath'?: string
 
     /**
@@ -237,6 +239,18 @@ declare namespace LX {
      * 本地配置备份目录，留空则使用 <data>/backups；相对路径基于 data 目录，绝对路径直接使用
      */
     'configBackup.dir'?: string
+
+    /**
+     * 本地配置自动备份周期（小时），默认 24；留空或非法值回退为 24
+     */
+    'configBackup.intervalHours'?: number
+
+    /**
+     * 本地配置自动备份锚点时间（HH:MM），默认 00:00（即每天 0 点）。
+     * 若设置，则在该时刻首次触发，之后每 intervalHours 小时循环；
+     * 留空（或清除）则从保存配置/启动时起每 intervalHours 小时触发
+     */
+    'configBackup.scheduleTime'?: string
 
     /**
      * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
@@ -533,6 +547,7 @@ declare namespace LX {
 
     // ===== OpenList 备份/同步 =====
     /** 是否启用 OpenList 备份/同步 */
+    'openlist.playback.enable'?: boolean
     'openlist.enable'?: boolean
     /** OpenList 地址(如 http://127.0.0.1:5244) */
     'openlist.endpoint'?: string
@@ -544,12 +559,11 @@ declare namespace LX {
     'openlist.token'?: string
     /** OpenList 中 lx-music 备份根目录 */
     'openlist.root'?: string
-    /** 上传 OpenList 后是否保留本地文件 */
-    'openlist.keepLocalAfterUpload'?: boolean
     /** 远端可用性校验周期(分钟) */
     'openlist.verifyInterval'?: number
     /** 双向同步周期(分钟) */
     'openlist.syncInterval'?: number
+    'openlist.historyRetentionDays'?: number
     /** 各用户备份目录配置(JSON 数组) */
     'openlist.userBackups'?: string
     /** 是否同步非音频文件(图片/封面等) */

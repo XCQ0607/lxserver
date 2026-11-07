@@ -6,7 +6,7 @@ import crypto from 'crypto'
 const { MusicTagger, MetaPicture } = require('music-tag-native')
 import { getUserConfig } from '@/user'
 import { formatPlayTime } from '@/utils/common'
-import { buildLyrics } from '@/utils/lrcTool'
+import { buildLyrics, parseLyrics } from '@/utils/lrcTool'
 import { getLyricFetcher, embedLyricsIntoFile, getAudioMetadataUnsupportedStatus } from './fileCache'
 import * as fileCache from './fileCache'
 import { remasterStaging } from '../task/remasterStaging'
@@ -791,6 +791,23 @@ export const batchEmbedLyric = async (filenames: string[], username: string) => 
 }
 
 // 为自定义目录保存歌词缓存 (.lrc 文件并同步索引)
+export const checkCustomLyricCache = (song: any, username: string): { exists: boolean; content?: any } => {
+    try {
+        const root = getCustomMusicDir(username)
+        if (!root) return { exists: false }
+        const items = Array.from(customIndexManager.load(username).values())
+        const item = items.find(item => (song.id && item.id === song.id) || (song.source && item.source === song.source && song.songmid && item.songmid === song.songmid))
+            || items.find(item => song.name && song.singer && item.name === song.name && item.singer === song.singer)
+        if (!item) return { exists: false }
+        const file = resolveSafePath(root, item.filename.replace(/\.[^.]+$/, '.lrc'))
+        if (!file || !fs.existsSync(file)) return { exists: false }
+        const real = fs.realpathSync(file), base = fs.realpathSync(root)
+        if (!real.startsWith(base + path.sep)) return { exists: false }
+        const content = parseLyrics(fs.readFileSync(real, 'utf8').replace(/^\uFEFF/, ''))
+        return content.lyric?.trim() ? { exists: true, content } : { exists: false }
+    } catch { return { exists: false } }
+}
+
 export const saveCustomLyricCache = (songInfo: any, lyricsObj: any, username: string): boolean => {
     try {
         const customDir = getCustomMusicDir(username)
