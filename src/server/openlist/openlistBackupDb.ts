@@ -95,6 +95,9 @@ export function getBackupDb(): DatabaseSync {
   const db = new DatabaseSync(dbPath)
   db.exec('PRAGMA journal_mode = WAL')
   db.exec('PRAGMA synchronous = NORMAL')
+  // WAL 允许多读单写：不设置 busy_timeout 时第二个写事务会立刻抛 SQLITE_BUSY(database is locked)，
+  // 多进程共用同一数据目录（多开 dev 实例、备份进程与页面同时写）时会频繁撞锁，这里改为等待重试。
+  db.exec('PRAGMA busy_timeout = 8000')
   db.exec(`CREATE TABLE IF NOT EXISTS openlist_backup_files (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user TEXT NOT NULL,

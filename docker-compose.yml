@@ -20,13 +20,14 @@ services:
       # Subsonic 独立服务
       # - SUBSONIC_STANDALONE=true
       # - SUBSONIC_PORT=4050
-      # WebDAV 备份目标
+      # WebDAV 备份目标（仅填地址与凭据不会启动同步，需显式开启 WEBDAV_ENABLE）
+      # - WEBDAV_ENABLE=true
       # - WEBDAV_URL=
       # - WEBDAV_USERNAME=
       # - WEBDAV_PASSWORD=
       # 网页播放器鉴权
       # - ENABLE_WEBPLAYER_AUTH=true
-      # - WEBPLAYER_PASSWORD=123456
+      # - WEBPLAYER_PASSWORD=<请设置强密码，勿使用默认值>
       # 其他常用项
       # - SYNC_INTERVAL=60
       # - CONFIG_PATH=/server/data/config.js

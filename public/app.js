@@ -3361,6 +3361,9 @@ class App {
             if (form.elements['subsonic.dislikeRequireSinger']) {
                 form.elements['subsonic.dislikeRequireSinger'].checked = config['subsonic.dislikeRequireSinger'] !== false;
             }
+            if (form.elements['subsonic.ratingPlaylists']) {
+                form.elements['subsonic.ratingPlaylists'].checked = config['subsonic.ratingPlaylists'] !== false;
+            }
             if (form.elements['subsonic.linkRatingToDislike']) {
                 form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
             }
@@ -3392,6 +3395,9 @@ class App {
 
             this.initCustomSelects();
             this.syncCustomSelects();
+            this.bindLinkSyncToggles();
+            this.updateLinkSyncUI();
+            void this.loadLinkSyncUsers();
         } catch (e) {
             console.error('Failed to load subsonic config:', e);
         }
@@ -3430,6 +3436,7 @@ class App {
             'subsonic.dislikeDuetMode': formData.get('subsonic.dislikeDuetMode') || 'any',
             'subsonic.dislikeNormalizeName': formData.get('subsonic.dislikeNormalizeName') === 'on',
             'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
+            'subsonic.ratingPlaylists': formData.get('subsonic.ratingPlaylists') === 'on',
             'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
             'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
             'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
@@ -3492,6 +3499,137 @@ class App {
             showError('Subsonic 配置保存失败: ' + err.message);
             throw err;
         }
+    }
+
+    // ---- Subsonic 联动数据手动同步（与导入 / 回滚链路解耦） ----
+
+    bindLinkSyncToggles() {
+        if (this._linkSyncBound) return;
+        const form = document.getElementById('subsonic-form');
+        if (!form) return;
+        ['subsonic.linkRatingToDislike', 'subsonic.linkDislikeToRating'].forEach(key => {
+            const el = form.elements[key];
+            if (el) el.addEventListener('change', () => this.updateLinkSyncUI());
+        });
+        this._linkSyncBound = true;
+    }
+
+    updateLinkSyncUI() {
+        const form = document.getElementById('subsonic-form');
+        [
+            ['subsonic.linkRatingToDislike', 'sync-rating-to-dislike-btn'],
+            ['subsonic.linkDislikeToRating', 'sync-dislike-to-rating-btn'],
+        ].forEach(([key, btnId]) => {
+            const btn = document.getElementById(btnId);
+            if (btn) btn.classList.toggle('hidden', !form?.elements[key]?.checked);
+        });
+    }
+
+    async loadLinkSyncUsers() {
+        const select = document.getElementById('subsonic-sync-user');
+        if (!select) return;
+        try {
+            const users = await this.request('/api/users');
+            const names = (Array.isArray(users) ? users : []).map(u => u.name).filter(Boolean);
+            const wanted = this.pendingLinkSyncUser || select.value;
+            select.innerHTML = '';
+            names.forEach(n => {
+                const opt = document.createElement('option');
+                opt.value = n;
+                opt.textContent = n;
+                select.appendChild(opt);
+            });
+            if (names.includes(wanted)) select.value = wanted;
+            else if (names.length) select.value = names[0];
+            this.pendingLinkSyncUser = null;
+            // 动态填充后同步自定义下拉显示（菜单在展开时会重新渲染）
+            this.initCustomSelects();
+            this.syncCustomSelects();
+        } catch (e) {
+            console.warn('[LinkSync] 加载用户列表失败:', e);
+        }
+    }
+
+    async syncLink(direction) {
+        if (this._linkSyncBusy) return;
+        const isRatingToDislike = direction === 'ratingToDislike';
+        const key = isRatingToDislike ? 'subsonic.linkRatingToDislike' : 'subsonic.linkDislikeToRating';
+        const label = isRatingToDislike ? '评星 → 不喜欢' : '不喜欢 → 评星';
+        const btn = document.getElementById(isRatingToDislike ? 'sync-rating-to-dislike-btn' : 'sync-dislike-to-rating-btn');
+        const form = document.getElementById('subsonic-form');
+        // 开关以服务端已保存的配置为准，避免「表单勾了但没保存」时后端拒绝
+        const checked = !!form?.elements[key]?.checked;
+        const saved = (this.loadedSubsonicConfig || {})[key] === true;
+        if (!checked || !saved) {
+            showError(`请先开启「${label} 自动联动」并保存配置，再执行同步。`);
+            return;
+        }
+        const user = document.getElementById('subsonic-sync-user')?.value || '';
+        if (!user) {
+            showError('请先选择联动同步目标用户');
+            return;
+        }
+        const confirmed = await showSelect('手动联动同步',
+            `将对用户 ${this.escapeHtml(user)} 执行「${label}」补数据：只补目标侧缺失的数据，不覆盖已有数据，也不会改动导入 / 回滚逻辑。\n\n确定继续吗？`,
+            { confirmText: '开始同步', cancelText: '取消' });
+        if (!confirmed) return;
+
+        this._linkSyncBusy = true;
+        const oldText = btn?.textContent;
+        if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
+        try {
+            const res = await this.request('/api/subsonic/sync-link', {
+                method: 'POST',
+                body: JSON.stringify({ user, direction })
+            });
+            const text = `同步完成（${label} · 用户 ${user}）：扫描 ${res.scanned} 条，新增 ${res.added} 条，已存在 ${res.skipped} 条` +
+                (res.failed ? `，失败 ${res.failed} 条` : '') +
+                (res.batches > 1 ? `，分 ${res.batches} 批处理（全量）` : '') + '。';
+            const box = document.getElementById('link-sync-result');
+            if (box) {
+                box.textContent = text;
+                box.classList.remove('hidden');
+            }
+            showSuccess(text);
+        } catch (err) {
+            showError('同步失败: ' + err.message);
+        } finally {
+            this._linkSyncBusy = false;
+            if (btn) { btn.disabled = false; btn.textContent = oldText || '同步'; }
+        }
+    }
+
+    async maybeOfferLinkSync(user, kindLabel) {
+        try {
+            // 用服务端已保存的配置校验开关，只提供手动操作入口，绝不自动执行联动
+            const config = await this.request('/api/config');
+            const ratingToDislike = config['subsonic.linkRatingToDislike'] === true;
+            const dislikeToRating = config['subsonic.linkDislikeToRating'] === true;
+            const threshold = Number(config['subsonic.dislikeRating'] ?? 1);
+            if ((!ratingToDislike && !dislikeToRating) || !(threshold > 0)) return;
+            const dirs = [ratingToDislike ? '评星 → 不喜欢' : '', dislikeToRating ? '不喜欢 → 评星' : '']
+                .filter(Boolean).join(' / ');
+            const go = await showSelect('回滚完成，联动数据未自动同步',
+                `已回滚用户 ${this.escapeHtml(user)} 的「${this.escapeHtml(kindLabel)}」数据。\n\n` +
+                `检测到联动开关已开启（${dirs}）。导入 / 回滚不会自动补另一侧数据，如需对齐请前往 Subsonic 配置页手动点击「同步」。`,
+                { confirmText: '前往配置', cancelText: '稍后处理' });
+            if (go) await this.jumpToLinkSync(user);
+        } catch (e) {
+            console.warn('[LinkSync] 联动提示检查失败:', e);
+        }
+    }
+
+    async jumpToLinkSync(user) {
+        this.pendingLinkSyncUser = user;
+        await this.switchView('subsonic');
+        setTimeout(() => {
+            const target = document.getElementById('link-sync-field');
+            if (!target) return;
+            target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            target.style.outline = '2px solid var(--accent-primary)';
+            target.style.outlineOffset = '4px';
+            setTimeout(() => { target.style.outline = 'none'; }, 2000);
+        }, 350);
     }
 
     async loadLogs(isAuto = false) {
@@ -6194,9 +6332,10 @@ class App {
             return;
         }
 
-        // 确保「全部 / 歌单快照 / 不喜欢」子页签存在
+        // 确保「类型 / 来源」筛选条件存在
         this.ensureSnapshotKindTabs();
         const kind = this._snapshotKind || 'all';
+        const origin = this._snapshotOrigin || 'all';
 
         // 添加加载状态
         container.classList.add('content-loading');
@@ -6204,19 +6343,33 @@ class App {
         try {
             // 添加 user 参数
             const all = await this.request(`/api/data/snapshots?user=${encodeURIComponent(username)}`);
-            const list = kind === 'all' ? all : all.filter(i => (i.kind || 'list') === kind);
+            const list = all.filter(i =>
+                (kind === 'all' || (i.kind || 'list') === kind) &&
+                (origin === 'all' || (i.origin || 'auto') === origin));
 
             if (!list.length) {
-                const emptyText = kind === 'dislike' ? '该用户暂无「不喜欢」快照' : '暂无快照';
+                const emptyText = origin === 'imported' ? '该用户暂无导入的备份快照'
+                    : kind === 'dislike' ? '该用户暂无「不喜欢」快照'
+                        : kind === 'rating' ? '该用户暂无「我的评分」快照' : '暂无快照';
                 container.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">${emptyText}</div>`;
                 container.classList.remove('content-loading');
                 return;
             }
 
-            container.innerHTML = list.map(item => `
+            container.innerHTML = list.map(item => {
+                const imported = item.origin === 'imported';
+                const originTag = imported
+                    ? '<span class="kind-tag" style="color:#a78bfa;font-size:.7rem;border:1px solid #a78bfa;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem;" title="用户上传导入的备份；列表时间取自该文件原始修改时间">导入备份</span>'
+                    : '<span class="kind-tag" style="color:#94a3b8;font-size:.7rem;border:1px solid #94a3b8;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem;" title="服务端在数据变更时自动生成">系统快照</span>';
+                const kindTag = item.kind === 'dislike'
+                    ? '<span class="kind-tag" style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我不喜欢</span>'
+                    : item.kind === 'rating'
+                        ? '<span class="kind-tag" style="color:#f59e0b;font-size:.7rem;border:1px solid #f59e0b;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的评分</span>'
+                        : '<span class="kind-tag" style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的歌单</span>';
+                return `
             <div class="snapshot-row">
-                <div class="col-time">${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
-                <div class="col-id"><span class="col-id-text" title="snapshot_${item.id}">snapshot_${item.id}</span>${item.kind === 'dislike' ? '<span class="kind-tag" style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我不喜欢</span>' : '<span class="kind-tag" style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的歌单</span>'}</div>
+                <div class="col-time"${imported ? ' title="时间取自备份文件的原始修改时间"' : ''}>${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
+                <div class="col-id"><span class="col-id-text" title="snapshot_${item.id}">snapshot_${item.id}</span>${kindTag}${originTag}</div>
                 <div class="col-size">${this.formatFileSize(item.size)}</div>
                 <div class="col-actions snapshot-actions">
                     <button class="btn-download" onclick="app.downloadSnapshot('${item.id}', '${item.kind || 'list'}')">
@@ -6246,7 +6399,7 @@ class App {
                     </button>
                 </div>
             </div>
-        `).join('');
+        `; }).join('');
 
             // 移除加载状态并添加淡入动画
             container.classList.remove('content-loading');
@@ -6264,19 +6417,20 @@ class App {
         }
     }
 
-    // 在「歌单快照」面板顶部注入「类型」下拉查询条件，便于按 我的歌单 / 我不喜欢 过滤
+    // 在「歌单快照」面板顶部注入「类型 / 来源」两个下拉查询条件
     ensureSnapshotKindTabs() {
-        if (document.getElementById('snapshot-kind-filter')) return;
         const container = document.getElementById('snapshots-list');
         const toolbar = document.getElementById('snapshot-toolbar-actions');
         if (!container || !toolbar) return;
+        // loadSnapshots 会被反复调用（切用户 / 上传 / 删除后），避免重复注入多个筛选框
+        if (document.getElementById('snapshot-kind-filter')) return;
         const sel = document.createElement('select');
         sel.id = 'snapshot-kind-filter';
         sel.className = 'form-input config-input olb-select';
         sel.setAttribute('aria-label', '快照类型');
         sel.style.width = 'auto';
         const cur = this._snapshotKind || 'all';
-        sel.innerHTML = '<option value="all">全部类型</option><option value="list">我的歌单</option><option value="dislike">我不喜欢</option>';
+        sel.innerHTML = '<option value="all">全部类型</option><option value="list">我的歌单</option><option value="dislike">我不喜欢</option><option value="rating">我的评分</option>';
         sel.value = cur;
         sel.addEventListener('change', () => {
             this._snapshotKind = sel.value;
@@ -6295,24 +6449,97 @@ class App {
         document.getElementById('snapshot-upload-input').click();
     }
 
+    // 导入时由超管从用户清单显式选择目标用户，选择结果即最终目标
+    async showImportTargetDialog({ filename, kindLabel, defaultUser }) {
+        let users = this.allUsers;
+        if (!Array.isArray(users) || !users.length) {
+            try {
+                users = await this.request('/api/users');
+                this.allUsers = users;
+            } catch (err) {
+                showError('获取用户清单失败: ' + err.message);
+                return null;
+            }
+        }
+        if (!users.length) {
+            showError('用户清单为空，无法导入');
+            return null;
+        }
+        const options = users.map(u => {
+            const label = u.name === '_open' ? '公开用户 (_open)' : u.name;
+            return `<option value="${this.escapeHtml(u.name)}"${u.name === defaultUser ? ' selected' : ''}>${this.escapeHtml(label)}</option>`;
+        }).join('');
+        return new Promise(resolve => {
+            const modal = document.createElement('div');
+            modal.id = 'snapshot-import-target-modal';
+            modal.className = 'fixed inset-0 z-[3000] flex items-center justify-center p-6 animate-fade-in';
+            modal.innerHTML = `
+                <div class="absolute inset-0 bg-black/40 backdrop-blur-[4px]"></div>
+                <div class="lx-glass rounded-[28px] w-full max-w-md overflow-hidden relative shadow-2xl">
+                    <div class="p-8">
+                        <h3 class="text-xl font-bold text-white mb-4">选择导入目标用户</h3>
+                        <p class="text-sm text-white/60 leading-relaxed mb-5">
+                            备份文件：${this.escapeHtml(filename)}<br>
+                            备份类型：${kindLabel}
+                        </p>
+                        <label class="text-sm text-white/70" for="snapshot-import-target-user">导入到用户</label>
+                        <select id="snapshot-import-target-user" class="lx-input w-full px-4 py-3 rounded-2xl mt-2">${options}</select>
+                    </div>
+                    <div class="p-5 flex gap-3">
+                        <button id="snapshot-import-target-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-2xl">取消</button>
+                        <button id="snapshot-import-target-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl">继续</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(modal);
+            const close = (result) => { modal.remove(); resolve(result); };
+            modal.querySelector('#snapshot-import-target-ok').onclick = () => close(modal.querySelector('#snapshot-import-target-user').value);
+            modal.querySelector('#snapshot-import-target-cancel').onclick = () => close(null);
+            modal.querySelector('.absolute.inset-0').onclick = () => close(null);
+        });
+    }
+
     // [新增] 处理快照上传
     async handleSnapshotUpload(event) {
         const file = event.target.files[0];
         if (!file) return;
-
-        const username = document.getElementById('snapshot-user-select')?.value;
-        if (!username) return;
-
         // 重置 input，允许重复上传同名文件
         event.target.value = '';
 
+        const panelUser = document.getElementById('snapshot-user-select')?.value || '';
+        let content;
         try {
-            const content = await file.text();
-            // 使用文件最后修改时间
-            const time = file.lastModified;
-            const filename = file.name;
+            content = await file.text();
+        } catch (err) {
+            showError('读取备份文件失败: ' + err.message);
+            return;
+        }
+        let jsonData = null;
+        try { jsonData = JSON.parse(content); } catch { /* 非 JSON 也可按原生歌单快照导入 */ }
+        const isRatingBackup = jsonData && (jsonData.type === 'lxRating_v1' || (
+            jsonData.ratings && typeof jsonData.ratings === 'object' && !Array.isArray(jsonData.ratings) &&
+            !Array.isArray(jsonData.dislikeList) && !Array.isArray(jsonData.defaultList) && !Array.isArray(jsonData.userList)
+        ));
+        const kindLabel = isRatingBackup ? '我的评分'
+            : jsonData && Array.isArray(jsonData.dislikeList) &&
+                !Array.isArray(jsonData.defaultList) && !Array.isArray(jsonData.userList) ? '我不喜欢' : '我的歌单';
 
-            const response = await fetch(`/api/data/upload-snapshot?user=${encodeURIComponent(username)}&time=${time}&filename=${encodeURIComponent(filename)}`, {
+        // 目标用户由超管在清单中选择，选择结果即最终目标
+        const targetUser = await this.showImportTargetDialog({ filename: file.name, kindLabel, defaultUser: panelUser });
+        if (!targetUser) return;
+
+        // 「导入后立即恢复」默认开启：回滚会覆盖目标用户的数据，操作前二次确认
+        const restore = document.getElementById('snapshot-upload-restore')?.checked !== false;
+        if (restore) {
+            const safeTarget = this.escapeHtml(targetUser);
+            const confirmed = await showSelect('导入并恢复备份',
+                `导入到用户：${safeTarget}\n\n导入后将以该文件覆盖 ${safeTarget} 当前的对应数据。\n系统会自动把导入前的状态保存为一份「系统快照」，之后可随时回滚。是否继续？`,
+                { danger: true, confirmText: '导入并恢复' });
+            if (!confirmed) return;
+        }
+
+        try {
+            const time = file.lastModified;
+            const response = await fetch(`/api/data/upload-snapshot?user=${encodeURIComponent(targetUser)}&time=${time}&filename=${encodeURIComponent(file.name)}&restore=${restore ? 1 : 0}`, {
                 method: 'POST',
                 headers: {
                     'X-Frontend-Auth': this.password
@@ -6325,8 +6552,16 @@ class App {
                 throw new Error(text || 'Upload failed');
             }
 
-            showSuccess('上传成功');
-            this.loadSnapshots();
+            const result = await response.json().catch(() => ({}));
+            const resultKindLabel = result.kind === 'rating' ? '我的评分' : result.kind === 'dislike' ? '我不喜欢' : '我的歌单';
+            showSuccess(result.restored
+                ? `已导入「${resultKindLabel}」备份到用户 ${targetUser} 并恢复成功${result.safetySnapshot ? '（已自动保存导入前快照）' : ''}`
+                : `已导入「${resultKindLabel}」备份到用户 ${targetUser}（仅保存为快照，可稍后手动恢复）`);
+            // 仅提示 + 提供手动操作入口，不在此处调用联动同步
+            if (result.restored) void this.maybeOfferLinkSync(targetUser, resultKindLabel);
+            // 目标用户与面板用户不同时切换面板，便于立刻看到导入结果（selectUser 内部会刷新列表）
+            if (targetUser !== panelUser) this.selectUser('snapshot', targetUser);
+            else this.loadSnapshots();
         } catch (err) {
             console.error(err);
             showError('上传失败: ' + err.message);
@@ -6373,7 +6608,11 @@ class App {
             const data = await this.request(`/api/data/snapshot?id=${encodeURIComponent(id)}&kind=${kind || 'list'}&user=${encodeURIComponent(username)}`);
 
             let backupData, fname;
-            if (kind === 'dislike') {
+            if (kind === 'rating') {
+                // 评分快照导出为 lxRating_v1（含完整 subsonic-meta 结构），导入时按 type 识别
+                backupData = { ...data, type: 'lxRating_v1' };
+                fname = `lx_rating_${username}_${id.substring(0, 8)}.json`;
+            } else if (kind === 'dislike') {
                 // 不喜欢快照直接导出原始规则（{ dislikeList: [...] }），不要套 playList_v2（否则内容会被清空成空壳）
                 backupData = data;
                 fname = `lx_dislike_${username}_${id.substring(0, 8)}.json`;
@@ -6507,6 +6746,8 @@ class App {
                 body: JSON.stringify({ id, kind })
             });
             showSuccess('回滚成功！请重启客户端或重新连接同步服务。');
+            // 仅提示 + 提供手动操作入口，不在此处调用联动同步
+            void this.maybeOfferLinkSync(username, kind === 'rating' ? '我的评分' : kind === 'dislike' ? '我不喜欢' : '我的歌单');
             this.loadDashboard(); // 刷新数据概览
         } catch (err) {
             showError('回滚失败: ' + err.message);

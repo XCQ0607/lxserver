@@ -4847,6 +4847,7 @@ input:-webkit-autofill:active {
     border-radius: 6px;
     border: 1px solid rgba(255, 255, 255, 0.06);
     display: flex;
+    flex-wrap: wrap; /* 窄视口下让类型/来源标签换行，而不是被 overflow 裁掉 */
     align-items: center;
     gap: 0.4rem;
     min-width: 0;
