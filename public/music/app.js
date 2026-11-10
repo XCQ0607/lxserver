@@ -10481,9 +10481,11 @@ let scrollLockTimeout = null; // 滚动锁定计时器
 let isProgrammaticScroll = false; // 标记是否为程序自动滚动
 const SCROLL_LOCK_DURATION = 5000; // 5秒后解除锁定
 
+let lyricHistoryClosing = false;
 function toggleLyrics(fromPopState = false) {
     if (!fromPopState && isLyricViewOpen) {
         if (window.history.state && window.history.state.page === 'player-detail') {
+            lyricHistoryClosing = true;
             window.history.back();
         }
     }
@@ -10547,6 +10549,11 @@ function toggleLyrics(fromPopState = false) {
 
 // 监听浏览器返回，用于在移动端通过物理返回键/手势关闭歌词详情页及搜索详情页
 window.addEventListener('popstate', (e) => {
+    // Closing the player overlay does not navigate the underlying library again.
+    if (isLyricViewOpen || lyricHistoryClosing) {
+        e.playerDetailHandled = true;
+        lyricHistoryClosing = false;
+    }
     // 1. 优先处理歌词页
     if (isLyricViewOpen) {
         toggleLyrics(true);

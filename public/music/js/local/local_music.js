@@ -793,8 +793,7 @@ window.LocalMusicManager = {
             }
             if (tabId === 'localmusic') {
                 if (window.CustomDirManager && window.CustomDirManager.isActive) {
-                    window.CustomDirManager.loadFilters();
-                    window.CustomDirManager.fetchData(true);
+                    window.CustomDirManager.ensureLoaded();
                 } else {
                     window.LocalMusicManager.syncLocationSelector();
                     window.LocalMusicManager.loadFilters();
@@ -2586,7 +2585,7 @@ window.LocalMusicManager = {
                 if (typeof showInfo === 'function') showInfo('关联成功！文件名及标签已更新');
                 this.closeManualIndexModal();
                 if (isCustom && window.CustomDirManager) {
-                    window.CustomDirManager.refresh();
+                    await window.CustomDirManager.reloadItems([result.data.filename]);
                 } else {
                     this.refresh();
                 }

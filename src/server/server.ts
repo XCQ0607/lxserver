@@ -4940,7 +4940,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       // ===== [新增] Custom Music APIs (独立于 cache/music) =====
       // A. 获取自定义目录歌曲列表
-      if (pathname === '/api/music/custom/list' && req.method === 'GET') {
+      if (pathname === '/api/music/custom/list' && (req.method === 'GET' || req.method === 'POST')) {
         const verified = verifyUserAuth(req)
         if (!verified) {
           res.writeHead(401, { 'Content-Type': 'application/json' })
@@ -4948,14 +4948,24 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         const userCfg = getUserConfig(verified)
-        void customMusicManager.getCustomMusicList(verified).then(list => {
+        void (async () => {
+          // Capture before reading the list so a concurrent save can only cause an extra refresh.
+          const version = `${customMusicManager.getCustomMusicVersion(verified)}:${!!userCfg?.allowOperateCustomMusicDir}:${!!userCfg?.allowWriteCustomMusicDir}`
+          if (req.method === 'GET') return {
+            version,
+            data: urlObj.searchParams.get('versionOnly') === '1' ? undefined : await customMusicManager.getCustomMusicList(verified)
+          }
+          const { filenames } = JSON.parse(await readBody(req))
+          if (!Array.isArray(filenames) || filenames.some(name => typeof name !== 'string')) throw new Error('Invalid filenames')
+          return { version, data: await customMusicManager.getCustomMusicList(verified, filenames) }
+        })().then(snapshot => {
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate',
           })
           res.end(JSON.stringify({
             success: true,
-            data: list,
+            ...snapshot,
             allowOperateCustomMusicDir: !!userCfg?.allowOperateCustomMusicDir,
             allowWriteCustomMusicDir: !!userCfg?.allowWriteCustomMusicDir
           }))
@@ -5077,11 +5087,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               : (payload.filenames ? (Array.isArray(payload.filenames) ? payload.filenames : [payload.filenames]) : [])
 
             let deletedCount = 0
-            for (const item of rawItems) {
-              const filename = typeof item === 'string' ? item : item?.filename
-              if (filename && customMusicManager.removeCustomFile(filename, verified)) {
-                deletedCount++
+            try {
+              for (const item of rawItems) {
+                const filename = typeof item === 'string' ? item : item?.filename
+                if (filename && customMusicManager.removeCustomFile(filename, verified, false)) {
+                  deletedCount++
+                }
               }
+            } finally {
+              if (deletedCount) customMusicManager.customIndexManager.save(verified)
             }
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: true, deletedCount }))

@@ -21,6 +21,47 @@ window.CustomDirManager = {
     listEventsBound: false,
     coverRenderTimer: null,
     enableReMapping: false,
+    loadedContext: null,
+    pendingFetch: null,
+    needsFilter: false,
+    loadedVersion: null,
+    pendingVersionCheck: null,
+    fetchGeneration: 0,
+
+    getDataContext() {
+        return JSON.stringify([this.getCurrentUsername(), this.getAuthHeaders()]);
+    },
+
+    ensureLoaded(render = false) {
+        if (this.loadedContext === this.getDataContext()) {
+            if (this.needsFilter) {
+                this.needsFilter = false;
+                this.applyFilters();
+            } else if (render) this.render();
+            return this.checkVersion();
+        }
+        return this.fetchData();
+    },
+
+    checkVersion() {
+        if (!this.loadedVersion) return Promise.resolve();
+        const context = this.getDataContext();
+        if (this.pendingVersionCheck?.context === context) return this.pendingVersionCheck.promise;
+        const request = { context };
+        request.promise = Promise.resolve().then(async () => {
+            const res = await fetch('/api/music/custom/list?versionOnly=1', {
+                headers: this.getAuthHeaders(), cache: 'no-store'
+            });
+            if (!res.ok) return;
+            const result = await res.json();
+            if (context !== this.getDataContext() || !result.success) return;
+            if (result.version && result.version !== this.loadedVersion) await this.fetchData(true, true);
+        }).catch(err => console.warn('[CustomDir] Version check failed:', err)).finally(() => {
+            if (this.pendingVersionCheck === request) this.pendingVersionCheck = null;
+        });
+        this.pendingVersionCheck = request;
+        return request.promise;
+    },
 
     // 目录树筛选状态
     dirFilterAll: true,
@@ -335,7 +376,7 @@ window.CustomDirManager = {
         if (this.isActive) {
             this.bindEvents();
             this.loadFilters();
-            this.fetchData();
+            this.ensureLoaded(true);
         } else {
             if (window.LocalMusicManager) {
                 if (typeof window.LocalMusicManager.loadFilters === 'function') {
@@ -509,7 +550,20 @@ window.CustomDirManager = {
         this.render();
     },
 
-    async fetchData(silent = false) {
+    async fetchData(silent = false, preservePage = false) {
+        const context = this.getDataContext();
+        if (this.pendingFetch?.context === context) return this.pendingFetch.promise;
+        const request = { context };
+        // Defer execution until pendingFetch has been installed, including fetch failures.
+        const generation = ++this.fetchGeneration;
+        request.promise = Promise.resolve().then(() => this._fetchData(silent, context, preservePage, generation)).finally(() => {
+            if (this.pendingFetch === request) this.pendingFetch = null;
+        });
+        this.pendingFetch = request;
+        return request.promise;
+    },
+
+    async _fetchData(silent, context, preservePage, generation) {
         if (!silent) {
             const container = document.getElementById('lm-list-container');
             if (container) {
@@ -533,6 +587,7 @@ window.CustomDirManager = {
             }
 
             const result = await res.json();
+            if (context !== this.getDataContext() || generation !== this.fetchGeneration) return;
             if (result.success) {
                 if (result.allowOperateCustomMusicDir !== undefined) {
                     window.userAllowOperateCustomDir = !!result.allowOperateCustomMusicDir;
@@ -547,14 +602,21 @@ window.CustomDirManager = {
                 }
 
                 this.originalData = result.data || [];
+                this.loadedContext = context;
+                this.loadedVersion = result.version || null;
+                const present = new Set(this.originalData.map(item => item.filename));
+                for (const filename of this.selectedItems) if (!present.has(filename)) this.selectedItems.delete(filename);
                 this.originalData.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
-                this.applyFilters();
+                this.needsFilter = !this.isActive;
+                if (this.isActive) this.applyFilters(!preservePage);
             } else {
                 throw new Error(result.message || '加载自定义目录失败');
             }
         } catch (err) {
+            if (context !== this.getDataContext() || generation !== this.fetchGeneration || !this.isActive) return;
             if (typeof showError === 'function') showError(err.message || '获取自定义目录歌曲失败');
             console.error('[CustomDir] Fetch Error:', err);
+            if (silent && this.loadedContext === context) return;
             const container = document.getElementById('lm-list-container');
             if (container) {
                 container.innerHTML = `
@@ -568,6 +630,8 @@ window.CustomDirManager = {
     },
 
     async refresh() {
+        // Do not reuse a list request started before the explicit synchronization.
+        if (this.pendingFetch) await this.pendingFetch.promise;
         const btn = document.querySelector('button[title="同步并刷新"] i');
         if (btn) btn.classList.add('fa-spin');
 
@@ -592,9 +656,31 @@ window.CustomDirManager = {
         if (btn) btn.classList.remove('fa-spin');
     },
 
-    applyFilters() {
+    // File operations already update the server index. Read only their affected entries.
+    async reloadItems(filenames) {
+        const context = this.getDataContext();
+        if (this.pendingFetch) await this.pendingFetch.promise;
+        if (context !== this.getDataContext()) return;
+        const targets = [...new Set(filenames)];
+        const res = await fetch('/api/music/custom/list', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...this.getAuthHeaders() },
+            body: JSON.stringify({ filenames: targets })
+        });
+        const result = await res.json();
+        if (context !== this.getDataContext()) return;
+        if (!res.ok || !result.success) throw new Error(result.message || '更新自定义目录列表失败');
+        const affected = new Set(targets);
+        this.originalData = this.originalData.filter(item => !affected.has(item.filename)).concat(result.data || []);
+        const present = new Set(this.originalData.map(item => item.filename));
+        for (const filename of targets) if (!present.has(filename)) this.selectedItems.delete(filename);
+        if (this.isActive) this.applyFilters(false);
+        else this.needsFilter = true;
+    },
+
+    applyFilters(resetPage = true) {
         let current = this.originalData;
-        this.currentPage = 1;
+        if (resetPage) this.currentPage = 1;
 
         // 关键词过滤（高级筛选面板关键词）
         const searchInput = document.getElementById('lm-search-input');
@@ -744,6 +830,7 @@ window.CustomDirManager = {
         });
 
         this.displayData = current;
+        this.currentPage = Math.min(this.currentPage, this.getTotalPages());
 
         // 保存筛选状态到 localStorage
         this.saveFilters();
@@ -1275,10 +1362,8 @@ window.CustomDirManager = {
             });
             const result = await res.json();
             if (result.success) {
-                if (typeof showInfo === 'function') showInfo(`成功删除 ${result.deletedCount || filenames.length} 个文件`);
-                for (const f of filenames) this.selectedItems.delete(f);
-                this.updateBatchUI();
-                await this.refresh();
+                if (typeof showInfo === 'function') showInfo(`成功删除 ${result.deletedCount ?? 0} 个文件`);
+                await this.reloadItems(filenames);
             } else {
                 throw new Error(result.message || '删除失败');
             }
@@ -1424,7 +1509,7 @@ window.CustomDirManager = {
         if (typeof showInfo === 'function') {
             showInfo(`补全操作完成。成功 ${success} 项，失败/未关联 ${fail} 项`);
         }
-        await this.refresh();
+        await this.reloadItems(targets.map(item => item.filename));
     },
 
     // 批量嵌入歌词到音频文件 USLT 标签
@@ -1471,7 +1556,7 @@ window.CustomDirManager = {
                         }
                     }
                 }
-                await this.refresh();
+                await this.reloadItems(targetFilenames);
             } else {
                 throw new Error(result.message || '服务器返回错误');
             }
@@ -1509,7 +1594,7 @@ window.CustomDirManager = {
             const result = await res.json();
             if (result.success) {
                 if (typeof showInfo === 'function') showInfo(`元信息补全完成。成功 ${result.successCount} 项，失败 ${result.failCount} 项`);
-                await this.refresh();
+                await this.reloadItems(targetFilenames);
             } else {
                 throw new Error(result.message || '服务器返回错误');
             }

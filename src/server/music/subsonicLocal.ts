@@ -4,7 +4,7 @@ import crypto from 'node:crypto'
 import type http from 'node:http'
 import { getUserDirname } from '@/user'
 import { getCacheList, getCacheDir, getUserCacheLocation, syncCacheIndex } from './fileCache'
-import { getCustomMusicDir, syncCustomIndex } from './customMusicManager'
+import { getCustomMusicDir, getCustomMusicList, syncCustomIndex } from './customMusicManager'
 import { withCacheBrowseLocation } from './cacheBrowseLocation'
 
 const { MusicTagger } = require('music-tag-native')
@@ -92,7 +92,8 @@ const duration = (value: unknown) => {
 }
 
 /** Main roots follow persistent user settings; browsing overrides never affect this catalog. */
-export function getLocalTracks(user: string, force = false, browseLocation?: string): Promise<LocalTrack[]> {
+const customScanTimes = new Map<string, { root: string; at: number }>()
+export function getLocalTracks(user: string, force = false, browseLocation?: string, customIndexOnly = false): Promise<LocalTrack[]> {
   return withCacheBrowseLocation('/rest/', () => {
     const location = browseLocation || getUserCacheLocation(user)
     const custom = getCustomMusicDir(user)
@@ -110,7 +111,13 @@ export function getLocalTracks(user: string, force = false, browseLocation?: str
           item, root: getCacheDir(user, item.folder === 'music', location),
         }))
         if (custom) {
-          for (const item of await syncCustomIndex(user)) items.push({ item, root: custom })
+          const lastScan = customScanTimes.get(user)
+          // Catalog expiry must not scan the entire custom directory every 30 seconds.
+          // Retain periodic discovery of externally changed files; explicit scans bypass it.
+          const shouldScan = !customIndexOnly && (force || lastScan?.root !== custom || Date.now() - lastScan.at >= 5 * 60_000)
+          const customItems = shouldScan ? await syncCustomIndex(user) : await getCustomMusicList(user)
+          if (shouldScan) customScanTimes.set(user, { root: custom, at: Date.now() })
+          for (const item of customItems) items.push({ item, root: custom })
           if (getCustomMusicDir(user) !== custom) throw new Error('Custom music directory changed during scan; retry the request')
         }
         const file = userFile(user, 'subsonic-local-registry.json')
