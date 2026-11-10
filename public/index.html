@@ -1294,6 +1294,16 @@
                             .config-subpanel>.config-field:first-child {
                                 margin-top: 0;
                             }
+
+                            #subsonic-custom-playlist-options>.config-toggle-row {
+                                min-height: 44px;
+                            }
+
+                            #subsonic-custom-playlist-options>.config-toggle-row+.config-toggle-row {
+                                margin-top: 8px;
+                                padding-top: 8px;
+                                border-top: 1px solid rgba(148, 163, 184, .14);
+                            }
                         </style>
                         <!-- 保存操作栏 -->
                         <div class="config-actions-bar glass">
@@ -1424,6 +1434,17 @@
                                 </div>
                                 <div id="subsonic-custom-playlist-options" class="config-subpanel"
                                     style="display: none;">
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">返回缓存目录歌曲 <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="默认关闭，本地歌曲歌单仅返回当前账号所选存储位置 music 目录中的歌曲。开启后将 cache 目录歌曲一并加入本地歌曲歌单。">?</button></span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="subsonic.cachePlaylist" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
                                             <span class="config-toggle-label">返回自定义目录歌曲 <button type="button"

@@ -7518,6 +7518,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.onlineSearchSources': global.lx.config['subsonic.onlineSearchSources'] ?? 'wy,tx,kw,kg,mg',
             'subsonic.localPlaylist': global.lx.config['subsonic.localPlaylist'] ?? true,
             'subsonic.customPlaylist': global.lx.config['subsonic.customPlaylist'] ?? true,
+            'subsonic.cachePlaylist': global.lx.config['subsonic.cachePlaylist'] ?? false,
             'subsonic.publicLeaderboards': global.lx.config['subsonic.publicLeaderboards'] ?? false,
             'subsonic.leaderboardSource': global.lx.config['subsonic.leaderboardSource'] ?? 'tx',
             'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'] ?? 'leaderboard',
@@ -7808,6 +7809,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.onlineSearchSources'] !== undefined) global.lx.config['subsonic.onlineSearchSources'] = newConfig['subsonic.onlineSearchSources']
               if (typeof newConfig['subsonic.localPlaylist'] === 'boolean') global.lx.config['subsonic.localPlaylist'] = newConfig['subsonic.localPlaylist']
               if (typeof newConfig['subsonic.customPlaylist'] === 'boolean') global.lx.config['subsonic.customPlaylist'] = newConfig['subsonic.customPlaylist']
+              if (typeof newConfig['subsonic.cachePlaylist'] === 'boolean') global.lx.config['subsonic.cachePlaylist'] = newConfig['subsonic.cachePlaylist']
               if (newConfig['subsonic.publicLeaderboards'] !== undefined) global.lx.config['subsonic.publicLeaderboards'] = newConfig['subsonic.publicLeaderboards']
               if (newConfig['subsonic.leaderboardSource'] !== undefined) {
                 const s = String(newConfig['subsonic.leaderboardSource']).trim().toLowerCase()

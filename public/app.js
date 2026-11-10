@@ -3641,6 +3641,9 @@ class App {
             if (form.elements['subsonic.customPlaylist']) {
                 form.elements['subsonic.customPlaylist'].checked = config['subsonic.customPlaylist'] !== false;
             }
+            if (form.elements['subsonic.cachePlaylist']) {
+                form.elements['subsonic.cachePlaylist'].checked = config['subsonic.cachePlaylist'] === true;
+            }
             this.toggleSubsonicCustomPlaylistVisibility();
             if (form.elements['subsonic.publicLeaderboards']) {
                 form.elements['subsonic.publicLeaderboards'].checked = config['subsonic.publicLeaderboards'] === true;
@@ -3755,6 +3758,7 @@ class App {
             'subsonic.onlineSearchSources': (formData.get('subsonic.onlineSearchSources') || '').trim() || 'wy,tx,kw,kg,mg',
             'subsonic.localPlaylist': formData.get('subsonic.localPlaylist') === 'on',
             'subsonic.customPlaylist': formData.get('subsonic.customPlaylist') === 'on',
+            'subsonic.cachePlaylist': formData.get('subsonic.cachePlaylist') === 'on',
             'subsonic.publicLeaderboards': formData.get('subsonic.publicLeaderboards') === 'on',
             'subsonic.leaderboardSource': (formData.get('subsonic.leaderboardSource') || '').trim() || 'tx',
             'subsonic.sharedListMode': (formData.get('subsonic.sharedListMode') || '').trim() || 'leaderboard',
