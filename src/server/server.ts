@@ -4632,7 +4632,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
         try {
-          const stats = fileCache.getCacheStats(username)
+          const stats = await fileCache.getCacheStats(username)
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: true, data: stats }))
         } catch (e: any) {
@@ -7868,6 +7868,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (typeof global.lx?.saveConfig === 'function') {
                 global.lx.saveConfig()
               }
+              if (['user.enableCacheSizeLimit', 'user.cacheSizeLimit', 'cache.maxAgeDays'].some(key => newConfig[key] !== undefined)) {
+                setImmediate(() => void fileCache.cleanupAllCaches())
+              }
 
               // 动态热迁移所有活跃用户空间的快照目录
               if (newConfig['snapshot.backupPath'] !== undefined) {
@@ -9649,69 +9652,6 @@ export const removeDevice = async (userName: string, clientId: string) => {
   await userSpace.removeDevice(clientId)
 }
 
-// ===== 缓存生命周期自动过期清理任务 (支持 0 永久保留) =====
-const getCacheRetentionMs = () => {
-  const daysConfig = global.lx.config && typeof global.lx.config['cache.maxAgeDays'] !== 'undefined'
-    ? Number(global.lx.config['cache.maxAgeDays'])
-    : 14
-  if (isNaN(daysConfig) || daysConfig <= 0) return 0 // 0 表示永久保留，不清理
-  return daysConfig * 24 * 60 * 60 * 1000
-}
-
-const cleanExpiredCacheFiles = async () => {
-  try {
-    const retentionMs = getCacheRetentionMs()
-    if (retentionMs === 0) {
-      // 设置为 0，永久保留缓存
-      return
-    }
-
-    const cacheDirs = [
-      path.join(process.cwd(), 'cache'),
-      path.join(global.lx.dataPath, 'cache'),
-    ]
-    const now = Date.now()
-    let totalCleaned = 0
-    let totalBytesFreed = 0
-
-    const scanAndCleanAsync = async (dir: string) => {
-      try {
-        const exists = await fs.promises.access(dir).then(() => true).catch(() => false)
-        if (!exists) return
-        const entries = await fs.promises.readdir(dir, { withFileTypes: true })
-        for (const entry of entries) {
-          const fullPath = path.join(dir, entry.name)
-          if (entry.isDirectory()) {
-            await scanAndCleanAsync(fullPath)
-            await new Promise(resolve => setImmediate(resolve))
-          } else if (entry.isFile()) {
-            if (entry.name === 'cache_index.json' || entry.name.endsWith('.json')) continue
-            try {
-              const stats = await fs.promises.stat(fullPath)
-              const fileTime = Math.max(stats.atimeMs || 0, stats.mtimeMs || 0)
-              if (now - fileTime > retentionMs) {
-                await fs.promises.unlink(fullPath)
-                totalCleaned++
-                totalBytesFreed += stats.size
-              }
-            } catch (e) { }
-          }
-        }
-      } catch (e) { }
-    }
-
-    const uniqueDirs = Array.from(new Set(cacheDirs))
-    for (const d of uniqueDirs) {
-      await scanAndCleanAsync(d)
-    }
-    if (totalCleaned > 0) {
-      const retentionDays = Math.round(retentionMs / (24 * 60 * 60 * 1000))
-      console.log(`[文件缓存] [${retentionDays}天过期清理] 成功清理 ${totalCleaned} 个过期缓存音频/歌词文件 (释放 ${(totalBytesFreed / 1024 / 1024).toFixed(2)} MB)`)
-    }
-  } catch (err) {
-    console.error('[文件缓存] 自动清理异常:', err)
-  }
-}
-
-setTimeout(() => void cleanExpiredCacheFiles(), 10000)
-setInterval(() => void cleanExpiredCacheFiles(), 12 * 60 * 60 * 1000)
+// Cache-only expiration and size sweeps share backup and index protection.
+setTimeout(() => void fileCache.cleanupAllCaches(), 10000)
+setInterval(() => void fileCache.cleanupAllCaches(), 12 * 60 * 60 * 1000)

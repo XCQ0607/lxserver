@@ -80,6 +80,9 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `SYSTEM_ALLOW_UNSAFE_VM` | `system.allowUnsafeVM` | Allow VM mode custom source scripts (note security risks) | `false` |
 | `LX_USER_<username>` | `users` | Create account using a password string | — |
 
+Cache cleanup applies only to `cache/` (including subdirectories), never to `music/`. Each user at each location (working directory and data directory) has an independent size quota. Cleanup runs after downloads, on startup, after changing cleanup settings, and every 12 hours. Oldest access/modification time is used; same-name audio and lyrics are grouped, active backups are protected, and indexes/partial files are excluded. Set `cache.maxAgeDays` in config.js or the admin UI (default 14); 0 disables expiration only, not size-based cleanup.
+
+
 Boolean values are case-insensitive: `true/1/yes/y/on` and `false/0/no/n/off`.
 
 `LX_USER_<username>` accepts a password string. Use user management for advanced account settings; JSON in that environment variable is not an advanced-account configuration format.

@@ -1,3 +1,5 @@
+import { AsyncLocalStorage } from 'node:async_hooks'
+import { collectCacheMediaAsync, cleanupCacheDirectory, CacheUsageGuard } from './cacheCleanup'
 import { withRatingIdentityLock } from '../rating/ratingIdentityLock'
 import { beginCloudBackup } from '@/utils/backupPolicy'
 import { resolveContainedPath } from '../auth/security'
@@ -154,6 +156,13 @@ export const setUserCacheLocation = (username: string | undefined, location: unk
 export const cacheProgress: Map<string, { progress: number; status: string; total?: number; received?: number; speed?: number; updatedAt?: number; errorMsg?: string }> = new Map()
 
 export const getProgressKey = (songKey: string, username?: string) => JSON.stringify([username && username !== 'default' ? username : '_open', songKey])
+const cacheUsageGuard = new CacheUsageGuard()
+const cacheWriteScope = new AsyncLocalStorage<Map<string, () => void>>()
+const protectCachePath = (file: string) => {
+    const scope = cacheWriteScope.getStore()
+    const resolved = path.resolve(file)
+    if (scope && !scope.has(resolved)) scope.set(resolved, cacheUsageGuard.acquire(file))
+}
 const downloadJobs = new Map<string, { promise: Promise<void>; signature: string }>()
 const expireProgress = (key: string) => {
     const value = cacheProgress.get(key)
@@ -273,6 +282,8 @@ class CacheIndexManager {
     load(username: string, folder: 'cache' | 'music', location?: string) {
         const loc = location || getUserCacheLocation(username)
         const key = this.getKey(username, folder, loc)
+        const cached = this.indexes.get(key)
+        if (cached) return cached
         if (isRemasterStage(username)) {
             const index = new Map(Object.entries(remasterStaging.readIndex(username, folder)))
             this.indexes.set(key, index)
@@ -862,7 +873,11 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
             if (!extensions.includes(ext)) continue
 
             const filePath = path.join(dir, file)
-            const stats = await fs.promises.stat(filePath)
+            let stats: Stats
+            try { stats = await fs.promises.stat(filePath) } catch (error: any) {
+                if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue
+                throw error
+            }
 
             // Try to find if this file is already known in index by its filename
             let existingEntry = filenameToItemMap.get(file)
@@ -1085,6 +1100,8 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                 updated = true
             }
 
+            // Cleanup may have removed this file while metadata/lyrics were being inspected.
+            if (!fs.existsSync(filePath)) continue
             const compositeKey = `${normalizedId}_${finalQuality || 'unknown'}`
             foundKeysOnDisk.add(compositeKey)
 
@@ -2240,7 +2257,14 @@ export const downloadAndCache = (...args: Parameters<typeof downloadAndCacheImpl
     }
     let releaseWrite: () => void
     try { releaseWrite = beginCloudBackup() } catch (error) { return Promise.reject(error) }
-    const job = downloadAndCacheImpl(...args).finally(() => {
+    const protectedFiles = new Map<string, () => void>()
+    const cleanupLocation = getUserCacheLocation(username)
+    const job = cacheWriteScope.run(protectedFiles, () => downloadAndCacheImpl(...args)).finally(() => {
+        for (const release of protectedFiles.values()) release()
+        // Let promise consumers open the file before it becomes eligible for eviction.
+        if (!onlyDownload && !provenance.customTargetDir && !isRemasterStage(username)) {
+            setTimeout(() => void cleanupUserCache(username && username !== 'default' ? username : '_open', cleanupLocation, false).catch(error => console.error('[cache] deferred cleanup failed:', error)), 31000).unref()
+        }
         releaseWrite()
         if (downloadJobs.get(key)?.promise === job) downloadJobs.delete(key)
     })
@@ -2269,6 +2293,7 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
     const sourceName = provenance.sourceName || songInfo.sourceName
 
     const result = checkCache({ ...songInfo, quality, exactQuality: true }, username, false)
+    if (result.path) protectCachePath(result.path)
     if (result.exists && !result.isCollision) {
         const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
         if (result.folder === targetFolder && result.path) {
@@ -2289,6 +2314,7 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
             const ext = inspection.extension || sourceExt
             const finalBaseName = getFileName(songInfo, actualQuality, isOnlyDownload, username)
             const finalPath = path.join(dir, finalBaseName + ext)
+            protectCachePath(finalPath)
             if (!fs.existsSync(finalPath)) {
                 fs.copyFileSync(result.path, finalPath)
             }
@@ -2390,6 +2416,7 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
     if (username) {
       const targetFolder: 'cache' | 'music' = isOnlyDownload ? 'music' : 'cache'
       const restoreResolver = (globalThis as any).lx?.cacheRestoreResolver
+      protectCachePath(path.join(dir, baseName + '.mp3'))
       const restored = restoreResolver ? await restoreResolver(username, targetFolder, dir, baseName, quality || 'unknown', signal) : null
       if (restored) {
         cacheProgress.set(songKey, { progress: 100, status: 'finished', total: restored.size, received: restored.size })
@@ -2581,6 +2608,7 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
 
                 const finalBaseName = getFileName(songInfo, actualQuality, isOnlyDownload, username)
                 const finalPath = path.join(dir, finalBaseName + ext)
+                protectCachePath(finalPath)
                 fs.rename(tempPath, finalPath, async (err) => {
                     if (err) {
                         safeUnlink(fileStream, tempPath)
@@ -3018,25 +3046,17 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     res.writeHead(404); res.end('Not Found')
 }
 
-export const getCacheStats = (username?: string) => {
+export const getCacheStats = async (username?: string) => {
     const roots = ['cache', 'music']
     const result: any = { cache: { totalSize: 0, fileCount: 0 }, music: { totalSize: 0, fileCount: 0 }, totalSize: 0, fileCount: 0 }
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
     for (const folder of roots) {
         const dir = getCacheDir(normalizedUsername, folder === 'music')
         if (!fs.existsSync(dir)) continue
-        const files = fs.readdirSync(dir)
-        const extensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav', '.lrc']
-        for (const file of files) {
-            const ext = path.extname(file).toLowerCase()
-            if (extensions.includes(ext)) {
-                try {
-                    const stats = fs.statSync(path.join(dir, file))
-                    result[folder].totalSize += stats.size
-                    result.totalSize += stats.size
-                    if (ext !== '.lrc') { result[folder].fileCount++; result.fileCount++ }
-                } catch (e) { }
-            }
+        for (const file of await collectCacheMediaAsync(dir)) {
+            result[folder].totalSize += file.size
+            result.totalSize += file.size
+            if (path.extname(file.path).toLowerCase() !== '.lrc') { result[folder].fileCount++; result.fileCount++ }
         }
     }
     return result
@@ -3198,50 +3218,95 @@ export const cleanupStaleTempFiles = async (username?: string, maxAgeMs: number 
     return cleanedCount
 }
 
+const cacheCleanupJobs = new Map<string, { expire: boolean, promise: Promise<void> }>()
+const cleanupUserCache = (username: string, location: string, expire: boolean): Promise<void> => {
+    const directory = getCacheDir(username, false, location)
+    const key = path.resolve(directory)
+    const pending = cacheCleanupJobs.get(key)
+    if (pending) { pending.expire ||= expire; return pending.promise }
+    const state = { expire, promise: Promise.resolve() }
+    state.promise = Promise.resolve().then(async () => {
+        do {
+            const runExpiration = state.expire
+            state.expire = false
+            await runUserCacheCleanup(username, location, directory, runExpiration)
+        } while (state.expire)
+    }).finally(() => { cacheCleanupJobs.delete(key) })
+    cacheCleanupJobs.set(key, state)
+    return state.promise
+}
+
+const runUserCacheCleanup = async (username: string, location: string, directory: string, expire: boolean) => {
+    if (global.lx?.restoreMaintenance) return
+    const config = global.lx.config
+    const limit = Number(config['user.cacheSizeLimit'])
+    const days = Number(config['cache.maxAgeDays'] ?? 14)
+    const limitBytes = config['user.enableCacheSizeLimit'] && Number.isFinite(limit) && limit > 0 ? limit * 1024 * 1024 : undefined
+    const retentionMs = expire && Number.isFinite(days) && days > 0 ? days * 86400000 : undefined
+    if (limitBytes === undefined && retentionMs === undefined) return
+    const lx = (globalThis as any).lx
+    const getProtectedPaths = () => {
+        const activePaths: Set<string> = lx.getActiveBackupLocalPaths?.() || new Set<string>()
+        return new Set(Array.from(activePaths, file => path.resolve(file)))
+    }
+    const deleted = new Set<string>()
+    try {
+        const result = await cleanupCacheDirectory(directory, {
+            limitBytes, retentionMs, protectedPaths: getProtectedPaths(), refreshProtectedPaths: getProtectedPaths,
+            isProtected: file => cacheUsageGuard.protects(file),
+            shouldStop: () => !!global.lx?.restoreMaintenance,
+            onDeleted(file) {
+                deleted.add(path.relative(directory, file).replace(/\\/g, '/'))
+                try { lx.softDeleteLocalFileByPath?.(file) } catch (error) {
+                    console.error('[cache] backup deletion notification failed:', error)
+                }
+            },
+        })
+        if (result.deletedCount) console.log(`[cache] ${location}/${username}: removed ${result.deletedCount} cache files`)
+    } finally {
+        // Process the shared, current index once, including entries added during asynchronous traversal.
+        if (deleted.size) {
+            const index = indexManager.load(username, 'cache', location)
+            let changed = false
+            for (const [key, item] of index) {
+                if (deleted.has(item.filename) && !fs.existsSync(path.join(directory, item.filename))) {
+                    index.delete(key); changed = true
+                } else if (item.lyricFilename && deleted.has(item.lyricFilename) && !fs.existsSync(path.join(directory, item.lyricFilename))) {
+                    item.lyricFilename = undefined
+                    item.hasLyric = false
+                    changed = true
+                }
+            }
+            if (changed) indexManager.save(username, 'cache', location)
+        }
+    }
+}
+
 export const checkAndCleanupCache = async (username?: string) => {
-    if (isRemasterStage(username)) return // The replacement transaction owns all staging cleanup.
-    void cleanupStaleTempFiles(username)
-    const config = (global as any).lx.config
-    if (!config || !config['user.enableCacheSizeLimit']) return
-    const { totalSize } = getCacheStats(username)
-    const limitBytes = (config['user.cacheSizeLimit'] || 2000) * 1024 * 1024
-    if (totalSize <= limitBytes) return
-    const roots: Array<'cache' | 'music'> = ['cache', 'music']
-    const allFiles: Array<{ path: string, size: number, mtime: number }> = []
-    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
-    for (const folder of roots) {
-        const dir = getCacheDir(normalizedUsername, folder === 'music')
-        if (!fs.existsSync(dir)) continue
-        const files = fs.readdirSync(dir)
-        for (const file of files) {
-            try {
-                const filePath = path.join(dir, file)
-                const stats = fs.statSync(filePath)
-                allFiles.push({ path: filePath, size: stats.size, mtime: stats.mtime.getTime() })
-            } catch (e) { }
-        }
+    if (isRemasterStage(username)) return
+    const normalized = username && username !== 'default' ? username : '_open'
+    try { await cleanupUserCache(normalized, getUserCacheLocation(normalized), false) } catch (error) {
+        console.error('[文件缓存] 空间清理失败:', error)
     }
-    allFiles.sort((a, b) => a.mtime - b.mtime)
-    // 跳过「仍有活跃备份记录」的文件，避免本地缓存被清理后 OpenList 上传因源文件不存在而失败
-    let activeBackupPaths: Set<string> | null = null
-    try { activeBackupPaths = (globalThis as any).lx?.getActiveBackupLocalPaths?.() ?? null } catch { activeBackupPaths = null }
-    let currentSize = totalSize
-    const targetSize = limitBytes * 0.95
-    let deletedCount = 0
-    for (const file of allFiles) {
-        if (currentSize <= targetSize) break
-        if (activeBackupPaths && activeBackupPaths.has(file.path)) {
-            if ((global as any).lx?.config?.['debug.enabled']) console.log(`[文件缓存] 跳过清理（仍有活跃备份记录）: ${file.path}`)
-            continue
-        }
+}
+
+// Sweep both locations and inactive users. Each user/location has an independent quota.
+export const cleanupAllCaches = async () => {
+    const seen = new Set<string>()
+    for (const location of [CACHE_ROOTS.ROOT, CACHE_ROOTS.DATA]) {
+        const root = path.resolve(location === CACHE_ROOTS.DATA ? global.lx.dataPath : process.cwd(), 'cache')
+        if (seen.has(root)) continue
+        seen.add(root)
         try {
-            fs.unlinkSync(file.path)
-            ;(globalThis as any).lx?.softDeleteLocalFileByPath?.(file.path)
-            currentSize -= file.size
-            deletedCount++
-        } catch (e) { }
+            if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink()) continue
+            for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
+                if (!entry.isDirectory() || entry.name === 'default') continue
+                try { await cleanupUserCache(entry.name, location, true) } catch (error) {
+                    console.error('[文件缓存] 自动清理失败:', error)
+                }
+            }
+        } catch (error) { console.error('[文件缓存] 扫描缓存目录失败:', error) }
     }
-    console.log(`[文件缓存] 用户 ${normalizedUsername} 缓存空间清理完成，已删除 ${deletedCount} 个过期文件`)
 }
 
 // 启动 5 秒后自动扫描并清理系统遗留的过期 .tmp 文件
