@@ -6762,7 +6762,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
             } else {
               // isSourceSupported = false: 无任何自定义源支持此平台，立即通知前端
-              void pushProgress({ name: '系统', status: 'fail', message: `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源` })
+              const hasAvailableSource = getLoadedApis().some(api =>
+                Object.keys(api.sources || {}).some(platform => isSourceSupported(platform, verifiedUsername)))
+              const err: any = new Error(hasAvailableSource
+                ? `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
+                : '暂无可用音源，请在设置中添加或启用自定义源')
+              err.errorCode = hasAvailableSource ? 'PLATFORM_SOURCE_UNAVAILABLE' : 'NO_AVAILABLE_SOURCE'
+              // 配置问题由请求响应统一提示，不再额外推送一条 SSE 错误。
+              throw err
             }
 
             // 自定义源失败则直接报错（内置 SDK 无独立解析能力，回退无意义）
@@ -6844,7 +6851,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             console.error('[歌曲播放] 音频地址解析失败:', err.message)
             // [Fix] Return 500 but with specific error JSON to let frontend show detailed toast
             res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: err.message, code: 500, attempts: err.attempts }))
+            res.end(JSON.stringify({ error: err.message, code: 500, errorCode: err.errorCode, attempts: err.attempts }))
           }
         })
         return

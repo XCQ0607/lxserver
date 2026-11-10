@@ -5754,7 +5754,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
         if (result.errorMsg) throw new Error(result.errorMsg);
         return result;
     } catch (error) {
-        if (disableFallback) {
+        if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
             throw error;
         }
 
@@ -5842,6 +5842,7 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
             if (result.errorMsg) throw new Error(result.errorMsg);
             return result;
         } catch (err) {
+            if (err.errorCode === 'NO_AVAILABLE_SOURCE') throw err;
             lastError = err;
             console.warn(`[DownloadResolve] 解析失败: ${candidateSong.name} via ${candidateSong.source} (${targetQuality})`, err);
             return null;
@@ -6316,7 +6317,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
                 result = await res.json();
                 if (result.error) errorMsg = result.error;
             } catch (e) { }
-            throw { message: errorMsg, status: res.status, attempts: result.attempts };
+            throw { message: errorMsg, status: res.status, errorCode: result.errorCode, attempts: result.attempts };
         }
 
         const result = await res.json();
@@ -6436,6 +6437,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
     } catch (e) {
         // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
         console.warn(`[Prefetch] Could not preload [${nextSong.name}]:`, e.message);
+        if (e.errorCode === 'NO_AVAILABLE_SOURCE') return;
 
         // 递归探测
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
@@ -7115,6 +7117,21 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     }
     if (state !== currentRecoveryState) return;
 
+    // 无源是账号配置问题，换音质、换歌曲均无法修复；保留已完成的本地/缓存尝试。
+    if (error?.errorCode === 'NO_AVAILABLE_SOURCE') {
+        if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
+        window._autoSkipTimer = null;
+        shouldAutoRecoverPlayback = false;
+        setPlayerStatus('暂无可用音源，请在设置中添加或启用');
+        RecoveryToast.error(error.message);
+        updatePlayButton(false);
+        return;
+    }
+
+    if (error?.errorCode === 'PLATFORM_SOURCE_UNAVAILABLE') {
+        state.samePlatformExhausted = true;
+    }
+
     const currentPlatform = state.currentSong?.source || state.originalSong?.source;
 
     // 1. 记录当前失败的音源脚本
@@ -7208,6 +7225,11 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     console.log(`[Recovery] Executing recovery step: ${currentStep} (${currentStepIndex + 1}/${steps.length})`);
 
     if (currentStep === 'degrade') {
+        if (error?.errorCode === 'PLATFORM_SOURCE_UNAVAILABLE') {
+            state.currentStepIndex++;
+            await runRecoveryFlow(error, effectiveResumeTime, state);
+            return;
+        }
         const nextQuality = window.QualityManager.getNextLowerQuality(state.currentQuality, state.currentSong);
         if (nextQuality && !state.triedQualities.includes(nextQuality)) {
             state.currentQuality = nextQuality;
