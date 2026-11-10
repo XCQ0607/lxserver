@@ -212,7 +212,7 @@ docker build -t lxserver:local .
 
 ### Subsonic 客户端
 
-支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 状态](docs/subsonic-status.md)。
+支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 协议支持](docs/api/subsonic.md)。
 
 默认连接信息：
 
@@ -238,7 +238,7 @@ docker build -t lxserver:local .
 
 Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓存，并加入该账号已启用的自定义目录。网页中临时切换浏览目录，不会改变 Subsonic 的曲库范围。
 
-默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](docs/subsonic-local-library.md)。
+默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](docs/guide/subsonic-local-library.md)。
 
 <p align="center">
   <img src="md/subsonic.png" width="500" alt="Subsonic 客户端连接">

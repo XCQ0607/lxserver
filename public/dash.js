@@ -46,7 +46,7 @@
   var busy = false;
   async function refresh() {
     var view = $('view-dashboard');
-    if (busy || !view || !view.classList.contains('active') || document.hidden || typeof app === 'undefined') return;
+    if (busy || !view || !view.classList.contains('active') || document.hidden || typeof app === 'undefined' || !app.password) return;
     busy = true;
     try {
       var r = await Promise.all([app.request('/api/dashboard/overview'), app.request('/api/users'), app.request('/api/backup/status').catch(function () { return {}; })]);

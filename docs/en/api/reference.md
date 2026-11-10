@@ -289,6 +289,26 @@ Success is an **object**, not an array. Read `data.list`:
 - **`GET /api/stats`**: Performance and memory usage statistics.
 - **`POST /api/utils/check-dir`**: Validate if a local directory exists and is accessible.
 
+#### Dashboard overview {#dashboard-overview}
+
+
+`GET /api/dashboard/overview` requires `x-frontend-auth: <administrator-password>` and no query parameters. Invalid authentication returns HTTP 401. Successful responses are JSON with `Cache-Control: no-store`.
+
+| Response field | Meaning |
+| --- | --- |
+| `success` | `true` on success |
+| `logs.totals` | `info`, `warn` and `error` counts within the last 24-hour window |
+| `logs.buckets` | Twelve rolling hourly buckets with millisecond timestamp `t` and per-level counts |
+| `logs.recent` | Up to eight recent warnings/errors, newest first, with `time`, `level` and `msg`; messages are limited to 200 characters |
+| `disk` | `total` and `free` bytes on the data directory's filesystem, or `null` when unavailable |
+| `heap` | `used` is process RSS, `total` is system memory and `external` is process external memory, all in bytes; these are not V8 heap usage and heap limits |
+| `services` | WebDAV, OpenList and public-favorites enablement settings, plus restore-maintenance state; not remote connectivity checks |
+| `node`, `pid` | Node.js version and process ID |
+
+Logs are filtered by time after reading at most the last 512 KiB of `app.log`; rotated files are not read. High log volume may prevent full 24-hour coverage. Unreadable or unrecognized logs can produce empty statistics, which do not establish the absence of errors. Buckets roll back from request time rather than aligning to clock hours.
+
+See [Subsonic local music library](../guide/subsonic-local-library.md) and [protocol support](./subsonic.md) for Subsonic behavior and coverage.
+
 ### 9.2 Local Config Backups
 - **`GET /api/config/backups`**: List configuration snapshots.
 - **`POST /api/config/backup-now`**: Create immediate config snapshot.

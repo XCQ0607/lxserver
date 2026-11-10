@@ -1,8 +1,12 @@
-const CACHE_NAME = 'lx-sync-server-v4';
+const CACHE_NAME = 'lx-sync-server-v5';
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
     './style.css',
+    './css/tokens.css',
+    './css/dashboard.css',
+    './theme.js',
+    './dash.js',
     './app.js',
     './js/ui-utils.js',
     './js/notification-engine.js',

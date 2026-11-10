@@ -24,7 +24,7 @@ Do not use `/admin`, `/rest` or the player access password for LX sync. Review m
 
 ### Subsonic clients
 
-Compatible clients include Yinliu, Feishin and Symfonium. The server implements Subsonic/OpenSubsonic endpoints for library browsing, search, playback and related features; the UI and available features vary by client.
+Compatible clients include Yinliu, Feishin and Symfonium. The server implements Subsonic/OpenSubsonic endpoints for library browsing, search, playback and related features; the UI and available features vary by client. See [Subsonic protocol support](../api/subsonic.md) for coverage and limits.
 
 | Field | Value |
 | --- | --- |
@@ -38,7 +38,7 @@ By default Subsonic shares the main port. Separate listening requires `subsonic.
 
 Online search uses `subsonic.onlineSearch` and `subsonic.onlineSearchMode`: `fallback` supplements insufficient local results; `merge` combines local and online results; `local_only` stays local. Query prefixes include `wy:`, `tx:`, `kw:`, `kg:`, `mg:`, `online:` and `local:`. Online playback still needs a working custom source.
 
-Local library selection follows the account's saved storage location plus its enabled custom directory. A temporary browsing switch in the web UI does not change that library. Read-only local/custom playlists can be exposed separately. Pure local playlists stay on the server; only the online portion of mixed playlists enters LX native sync.
+Local library selection follows the account's saved storage location plus its enabled custom directory. A temporary browsing switch in the web UI does not change that library. Read-only local/custom playlists can be exposed separately. Pure local playlists stay on the server; only the online portion of mixed playlists enters LX native sync. See [Subsonic local music library](./subsonic-local-library.md).
 
 
 
@@ -64,6 +64,7 @@ For scripts, use the personal Token management UI to create, name, expire, disab
 | --- | --- |
 | Local music folder | Explicit local-folder selection uses the local library; the default recommendation pool is not the entire NAS library |
 | `subsonic.localPlaylist` / `subsonic.customPlaylist` | Read-only local and separate custom-directory playlists; custom depends on the local switch and account directory enablement |
+| `subsonic.cachePlaylist` | Include cache-directory tracks in the local playlist, default false; does not shrink the complete library used by other endpoints |
 | `subsonic.cacheOnPlay` | Save online audio during playback, default false |
 | `subsonic.playCacheFirst` | Prefer an existing server file, default false; server carries the file traffic |
 | `subsonic.quality.*` / `subsonic.source.*` | Quality and platform/script candidate selection, not guaranteed availability |
@@ -74,7 +75,7 @@ For scripts, use the personal Token management UI to create, name, expire, disab
 
 Local tracks have independent IDs; associating a platform does not make them online tracks. Updating at the same path generally retains identity, while moving/renaming externally can assign a new ID. Mixed playlists preserve local members/order separately. Deleting a playlist does not delete its audio files.
 
-Artwork, word lyrics, scan display and folders depend on both protocol and client support. A web setting does not imply an equivalent control exists in every third-party client.
+Artwork, word lyrics, scan display and folders depend on both protocol and client support. A web setting does not imply an equivalent control exists in every third-party client. See [Subsonic local music library](./subsonic-local-library.md) for details.
 
 ## Console modules
 

@@ -336,7 +336,43 @@ GET /api/music/search?name=周杰伦&source=kw&page=2&limit=20
 - `POST /api/webdav/backup`、`GET /api/webdav/backups`、`DELETE /api/webdav/backup`、`POST /api/webdav/restore`：远程备份管理。
 - `GET /api/webdav/logs`、`GET /api/webdav/progress`：同步日志与 SSE 进度。
 
-Subsonic 的协议范围与本地库行为另见 [本地音乐库说明](../subsonic-local-library.md) 和 [协议状态](../subsonic-status.md)。
+### 评分与不喜欢联动 {#rating-api}
+
+| 方法 / 路径 | 认证 | 请求与返回要点 |
+| --- | --- | --- |
+| `GET /api/music/ratings` | 用户认证 | 返回 `version,pending,ratings,origins,songs`，只读取当前账号 |
+| `POST /api/music/ratings` | 用户认证 | 默认写入 `song` 与整数 `rating`（0–5，0 清除）；返回保存结果，可带 `warning`，警告不代表评分未保存 |
+| `GET /api/music/rating-preferences` | 用户认证 | 返回 `dislikeAutoRating`，默认 false |
+| `POST /api/music/rating-preferences` | 用户认证 | JSON `dislikeAutoRating` 必须是布尔值；保存后返回设置 |
+| `GET /api/data/rating-sync?user=<账号>` | 管理员认证 | 返回该账号的 `pending,version` |
+| `POST /api/data/rating-sync?user=<账号>` | 管理员认证 | 重试该账号待处理的评分同步任务 |
+| `POST /api/subsonic/sync-link` | 管理员认证 | JSON `user,direction,preview,reconcile`，执行或预览评分与不喜欢规则同步 |
+
+`POST /api/music/ratings` 也接受 `operation`：`version` 查询版本，`retryFailed` 重试任务，`exportBackup` 导出评分备份，`resolve` 批量解析最多 100 个 `songs`，可用 `includeDetails=true` 请求详情。各操作的响应结构不同，不统一包装为 `success`。
+
+`sync-link` 的 `direction` 必须为 `ratingToDislike` 或 `dislikeToRating`，前者要求启用并保存 `subsonic.linkRatingToDislike`。建议显式使用 `preview:true` 检查候选，再明确执行：普通同步仅在 `preview===true` 时预览；`ratingToDislike` 且 `reconcile:true` 时默认预览，只有 `preview:false` 执行。该端点的 HTTP 400 错误体可为纯文本，不能假定为 JSON。
+
+### OpenList 连接状态 {#openlist-connection}
+
+`GET /api/openlist/connection` 使用管理员认证，读取已记录的连接状态；`POST` 使用已保存配置主动探测。成功返回 `{ success: true, connection }`。POST 探测在线时还会在后台触发待检查记录核验，不是无副作用的查询。连接状态与历史文件内容校验结果是不同维度；探测失败返回 HTTP 500 与 `error`，其他方法返回 405。
+
+### 仪表盘概览 {#dashboard-overview}
+`GET /api/dashboard/overview` 使用 `x-frontend-auth: <管理员密码>`，无需查询参数，认证失败返回 HTTP 401。成功响应为 JSON，并设置 `Cache-Control: no-store`。
+
+| 响应字段 | 含义 |
+| --- | --- |
+| `success` | 成功时为 `true` |
+| `logs.totals` | 最近 24 小时窗口内的 `info`、`warn`、`error` 计数 |
+| `logs.buckets` | 最近 12 个滚动小时桶，含毫秒时间戳 `t` 与各级别计数 |
+| `logs.recent` | 最多 8 条近期警告/错误，按新到旧返回；含 `time`、`level`、`msg`，消息最多 200 字符 |
+| `disk` | 数据目录所在文件系统的 `total`、`free`，单位字节；无法读取时为 `null` |
+| `heap` | `used` 为进程 RSS，`total` 为系统总内存，`external` 为进程外部内存，均为字节；并非 V8 堆使用量与堆上限 |
+| `services` | WebDAV、OpenList、公共收藏的启用配置，以及恢复维护状态；不是远端连通性检查 |
+| `node`、`pid` | Node.js 版本与进程 ID |
+
+日志只读取 `app.log` 末尾最多 512 KiB 后按时间筛选，不读取轮转文件。高日志量时统计可能不覆盖完整 24 小时；日志不可读取或格式不匹配时，可返回空统计，不能据此判断没有发生错误。小时桶按请求时刻向前滚动，不对齐整点。
+
+Subsonic 的协议范围与本地库行为另见 [本地音乐库说明](../guide/subsonic-local-library.md) 和 [协议支持](./subsonic.md)。
 
 ## 备份与恢复接口 {#backup-api}
 

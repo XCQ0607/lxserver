@@ -18,13 +18,12 @@
 const API_BASE = '';
 
 function stringToColor(str) {
-    if (!str) return 'var(--accent-primary)';
+    if (!str) return 'var(--accent)';
     let hash = 0;
     for (let i = 0; i < str.length; i++) {
         hash = str.charCodeAt(i) + ((hash << 5) - hash);
     }
-    const h = Math.abs(hash) % 360;
-    return `hsl(${h}, 70%, 45%)`;
+    return ['var(--avatar-1)', 'var(--avatar-2)', 'var(--avatar-3)', 'var(--avatar-4)'][Math.abs(hash) % 4];
 }
 
 class App {
@@ -74,7 +73,7 @@ class App {
                 const isPassword = pwdInput.type === 'password';
                 pwdInput.type = isPassword ? 'text' : 'password';
                 if (icon) {
-                    icon.className = isPassword ? 'fas fa-eye-slash text-indigo-400' : 'far fa-eye';
+                    icon.className = isPassword ? 'fas fa-eye-slash tone-accent' : 'far fa-eye';
                 }
             }
         });
@@ -140,7 +139,7 @@ class App {
             const statusEl = document.getElementById('user-custom-dir-status');
             if (statusEl) {
                 statusEl.textContent = '目录路径已修改，请点击右侧「检测」验证可用性';
-                statusEl.style.color = 'var(--text-secondary, #94a3b8)';
+                statusEl.style.color = 'var(--text-2)';
             }
         });
 
@@ -351,7 +350,7 @@ class App {
                     x: Math.random() * width,
                     y: Math.random() * height,
                     radius: Math.random() * 2 + 0.8,
-                    color: Math.random() > 0.5 ? 'rgba(99, 102, 241, ' : 'rgba(6, 182, 212, ',
+                    color: Math.random() > 0.5 ? 'accent' : 'info',
                     alpha: Math.random() * 0.45 + 0.1,
                     speedY: Math.random() * 0.4 + 0.15,
                     speedX: (Math.random() - 0.5) * 0.2,
@@ -362,6 +361,7 @@ class App {
             const animateParticles = () => {
                 if (document.getElementById('login-overlay')?.classList.contains('hidden')) return;
                 ctx.clearRect(0, 0, width, height);
+                const colors = themeColors();
                 for (const p of particles) {
                     p.y -= p.speedY;
                     p.x += p.speedX;
@@ -377,13 +377,16 @@ class App {
                     const currentAlpha = p.alpha * (0.6 + 0.4 * Math.sin(p.pulse));
                     ctx.beginPath();
                     ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
-                    ctx.fillStyle = p.color + currentAlpha + ')';
+                    ctx.globalAlpha = currentAlpha;
+                    ctx.fillStyle = colors[p.color];
                     ctx.shadowBlur = 8;
-                    ctx.shadowColor = p.color + '0.5)';
+                    ctx.shadowColor = colors[p.color];
                     ctx.fill();
                 }
-                requestAnimationFrame(animateParticles);
+                ctx.globalAlpha = 1;
+                this._loginParticlesFrame = requestAnimationFrame(animateParticles);
             };
+            this._resumeLoginParticles = animateParticles;
             animateParticles();
         }
 
@@ -441,7 +444,7 @@ class App {
                 if (btnText) btnText.textContent = '验证成功，正在进入...';
                 if (btn) {
                     btn.classList.remove('admin-btn-submit');
-                    btn.classList.add('bg-emerald-600');
+                    btn.classList.add('tone-fill-success');
                 }
 
                 if (card) {
@@ -477,10 +480,32 @@ class App {
 
     logout() {
         localStorage.removeItem('lx_auth');
-        location.reload();
+        this.password = null;
+        for (const timer of ['monitorTimer', 'logsRefreshTimer', '_openlistRestoreTimer', '_olbConnectionTimer', '_olIntegrityTimer']) {
+            clearInterval(this[timer]);
+            this[timer] = null;
+        }
+        document.getElementById('app')?.classList.add('hidden');
+        document.getElementById('login-overlay')?.classList.remove('hidden');
+        const card = document.getElementById('admin-login-card');
+        if (card) { card.style.removeProperty('transform'); card.style.removeProperty('opacity'); }
+        const button = document.getElementById('login-btn');
+        if (button) {
+            button.disabled = false;
+            button.classList.remove('tone-fill-success');
+            button.classList.add('admin-btn-submit');
+            const icon = button.querySelector('i');
+            if (icon) icon.className = 'fas fa-right-to-bracket text-sm';
+        }
+        const text = document.getElementById('login-btn-text');
+        if (text) text.textContent = '登录控制台';
+        if (!this._loginEffectsInited) this.initLoginScreenEffects();
+        else if (!this._loginParticlesFrame) this._resumeLoginParticles?.();
     }
 
     showApp() {
+        cancelAnimationFrame(this._loginParticlesFrame);
+        this._loginParticlesFrame = null;
         document.getElementById('login-overlay').classList.add('hidden');
         document.getElementById('app').classList.remove('hidden');
     }
@@ -613,7 +638,7 @@ class App {
             }
         } catch (e) {
             console.error('Failed to load about content:', e);
-            container.innerHTML = '<p style="color: var(--accent-error); text-align: center;">加载关于页面失败</p>';
+            container.innerHTML = '<p class="tone-danger" style="text-align: center">加载关于页面失败</p>';
         }
     }
 
@@ -718,7 +743,7 @@ class App {
     }
 
     startMonitor() {
-        if (this.monitorTimer) return;
+        if (this.monitorTimer || !this.password) return;
         this.monitorTimer = setInterval(async () => {
             if (this.currentView !== 'dashboard' || !this.password) {
                 clearInterval(this.monitorTimer);
@@ -766,24 +791,26 @@ class App {
             {
                 label: '系统 CPU (%)',
                 data: this.systemCpuHistory,
-                borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.08)',
+                themeSeries: 0,
+                borderColor: themeColors().series[0],
+                backgroundColor: themeColors().series[0],
                 borderWidth: 2,
                 pointRadius: 2,
                 pointHoverRadius: 5,
                 tension: 0.35,
-                fill: true
+                fill: false
             },
             {
                 label: '本服务 CPU (%)',
                 data: this.processCpuHistory,
-                borderColor: '#c084fc',
-                backgroundColor: 'rgba(192, 132, 252, 0.08)',
+                themeSeries: 2,
+                borderColor: themeColors().series[2],
+                backgroundColor: themeColors().series[2],
                 borderWidth: 2,
                 pointRadius: 2,
                 pointHoverRadius: 5,
                 tension: 0.35,
-                fill: true
+                fill: false
             }
         ]);
 
@@ -827,24 +854,26 @@ class App {
             {
                 label: '系统内存 (%)',
                 data: this.systemMemHistory,
-                borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.08)',
+                themeSeries: 1,
+                borderColor: themeColors().series[1],
+                backgroundColor: themeColors().series[1],
                 borderWidth: 2,
                 pointRadius: 2,
                 pointHoverRadius: 5,
                 tension: 0.35,
-                fill: true
+                fill: false
             },
             {
                 label: '本服务内存 (%)',
                 data: this.processMemHistory,
-                borderColor: '#60a5fa',
-                backgroundColor: 'rgba(96, 165, 250, 0.08)',
+                themeSeries: 3,
+                borderColor: themeColors().series[3],
+                backgroundColor: themeColors().series[3],
                 borderWidth: 2,
                 pointRadius: 2,
                 pointHoverRadius: 5,
                 tension: 0.35,
-                fill: true
+                fill: false
             }
         ]);
 
@@ -876,16 +905,12 @@ class App {
 
         const webdavPill = document.getElementById('dash-webdav-status-pill');
         if (webdavPill) {
+            webdavPill.classList.toggle('is-ready', status.isWebDAVConfigured);
+            webdavPill.classList.toggle('is-unconfigured', !status.isWebDAVConfigured);
             if (status.isWebDAVConfigured) {
                 webdavPill.textContent = 'WebDAV 已就绪';
-                webdavPill.style.background = 'rgba(16, 185, 129, 0.15)';
-                webdavPill.style.color = '#34d399';
-                webdavPill.style.borderColor = 'rgba(16, 185, 129, 0.3)';
             } else {
                 webdavPill.textContent = 'WebDAV 未配置';
-                webdavPill.style.background = 'rgba(245, 158, 11, 0.15)';
-                webdavPill.style.color = '#fbbf24';
-                webdavPill.style.borderColor = 'rgba(245, 158, 11, 0.3)';
             }
         }
     }
@@ -929,10 +954,10 @@ class App {
                             display: false
                         },
                         tooltip: {
-                            backgroundColor: __themeColors().tipBg,
-                            titleColor: __themeColors().tipText,
-                            bodyColor: __themeColors().tipText,
-                            borderColor: __themeColors().grid,
+                            backgroundColor: themeColors().tipBg,
+                            titleColor: themeColors().tipText,
+                            bodyColor: themeColors().tipText,
+                            borderColor: themeColors().border,
                             borderWidth: 1,
                             padding: 10,
                             boxPadding: 4,
@@ -948,11 +973,11 @@ class App {
                         x: {
                             display: true,
                             grid: {
-                                color: __themeColors().grid,
+                                color: themeColors().grid,
                                 drawBorder: false
                             },
                             ticks: {
-                                color: __themeColors().tick,
+                                color: themeColors().tick,
                                 font: { size: 10 },
                                 maxTicksLimit: 6,
                                 maxRotation: 0
@@ -963,11 +988,11 @@ class App {
                             suggestedMin: 0,
                             suggestedMax: suggestedMax,
                             grid: {
-                                color: __themeColors().grid,
+                                color: themeColors().grid,
                                 drawBorder: false
                             },
                             ticks: {
-                                color: __themeColors().tick,
+                                color: themeColors().tick,
                                 font: { size: 10 },
                                 callback: function (value) {
                                     return value + '%';
@@ -1033,11 +1058,10 @@ class App {
             const isPublic = user.name === '_open';
             const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
             const avatarChar = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
-            const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size:12px;' : '';
             return `
             <div class="dropdown-item ${user.name === currentSelected ? 'active' : ''}"
                  onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
-                <div class="dropdown-avatar" style="${avatarStyle}">${avatarChar}</div>
+                <div class="dropdown-avatar${isPublic ? ' avatar-public' : ''}">${avatarChar}</div>
                 <span>${displayName}</span>
                 ${user.name === currentSelected ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" style="width:14px;height:14px;margin-left:auto;"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}
             </div>
@@ -1073,11 +1097,10 @@ class App {
             const isPublic = user.name === '_open';
             const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
             const roleText = isPublic ? '公共数据与歌单' : '用户数据';
-            const avatarStyle = isPublic ? 'background: linear-gradient(135deg, #10b981, #059669); font-size: 1.5rem;' : '';
             const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
             return `
                     <div class="user-select-card" onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
-                        <div class="avatar" style="${avatarStyle}">${avatarHtml}</div>
+                        <div class="avatar${isPublic ? ' avatar-public' : ''}">${avatarHtml}</div>
                         <div class="name">${displayName}</div>
                         <div class="role">${roleText}</div>
                     </div>
@@ -1160,7 +1183,7 @@ class App {
                             <input type="checkbox" id="batch-delete-user-data-checkbox" style="margin-right: 0.5rem;">
                             <span>同时删除用户数据及音源文件</span>
                         </label>
-                        <small style="color: var(--text-secondary); display: block; margin-top: 0.5rem; margin-left: 1.5rem;">
+                        <small class="tone-secondary" style="display: block;margin-top: 0.5rem;margin-left: 1.5rem">
                             ⚠️ 勾选后将永久删除所有选中用户的数据（歌单、收藏、音源脚本及配置等），不可恢复！
                         </small>
                     </div>
@@ -1225,7 +1248,7 @@ class App {
         if (!this.users.length) {
             container.innerHTML = `
                 <div class="glass" style="padding: 3rem; text-align: center; width: 100%;">
-                    <p style="color: var(--text-secondary);">暂无用户，点击上方按钮添加用户</p>
+                    <p class="tone-secondary">暂无用户，点击上方按钮添加用户</p>
                 </div>
             `;
             return;
@@ -1426,7 +1449,7 @@ class App {
                             <input type="checkbox" id="delete-user-data-checkbox" style="margin-right: 0.5rem;">
                             <span>同时删除用户数据及音源文件</span>
                         </label>
-                        <small style="color: var(--text-secondary); display: block; margin-top: 0.5rem; margin-left: 1.5rem;">
+                        <small class="tone-secondary" style="display: block;margin-top: 0.5rem;margin-left: 1.5rem">
                             ⚠️ 勾选后将永久删除该用户的所有数据（歌单、收藏、音源脚本及配置等），不可恢复！
                         </small>
                     </div>
@@ -1472,7 +1495,7 @@ class App {
                 const statusEl = document.getElementById('user-custom-dir-status');
                 if (statusEl) {
                     statusEl.textContent = '请输入自定义歌曲目录地址';
-                    statusEl.style.color = '#ef4444';
+                    statusEl.style.color = 'var(--danger-text)';
                 }
             } else {
                 // 如果已有固定目录，建议先检测或设为需要检测
@@ -1480,7 +1503,7 @@ class App {
                 const statusEl = document.getElementById('user-custom-dir-status');
                 if (statusEl) {
                     statusEl.textContent = '请点击右侧「检测」按钮进行可用性验证';
-                    statusEl.style.color = 'var(--text-secondary, #94a3b8)';
+                    statusEl.style.color = 'var(--text-2)';
                 }
             }
         } else {
@@ -1498,7 +1521,7 @@ class App {
         if (!dirPath) {
             if (statusEl) {
                 statusEl.textContent = '请输入自定义歌曲目录地址';
-                statusEl.style.color = '#ef4444';
+                statusEl.style.color = 'var(--danger-text)';
             }
             this.setUserConfigConfirmBtnState(false);
             return;
@@ -1506,7 +1529,7 @@ class App {
 
         if (statusEl) {
             statusEl.textContent = '正在检测目录可用性...';
-            statusEl.style.color = '#38bdf8';
+            statusEl.style.color = 'var(--info-text)';
         }
 
         try {
@@ -1518,20 +1541,20 @@ class App {
             if (res && res.success) {
                 if (statusEl) {
                     statusEl.textContent = `✓ 目录可用 (${res.path || dirPath})`;
-                    statusEl.style.color = '#10b981';
+                    statusEl.style.color = 'var(--success-text)';
                 }
                 this.setUserConfigConfirmBtnState(true);
             } else {
                 if (statusEl) {
                     statusEl.textContent = `✕ ${res?.message || '目录不可用'}`;
-                    statusEl.style.color = '#ef4444';
+                    statusEl.style.color = 'var(--danger-text)';
                 }
                 this.setUserConfigConfirmBtnState(false);
             }
         } catch (err) {
             if (statusEl) {
                 statusEl.textContent = `✕ 检测失败: ${err.message}`;
-                statusEl.style.color = '#ef4444';
+                statusEl.style.color = 'var(--danger-text)';
             }
             this.setUserConfigConfirmBtnState(false);
         }
@@ -1749,7 +1772,7 @@ class App {
             if (this._dataRequestId !== requestId) return;
             statsContainer.classList.remove('content-loading');
             contentContainer.classList.remove('content-loading');
-            contentContainer.innerHTML = '<p style="color: var(--accent-error); padding: 2rem; text-align: center;">加载数据失败</p>';
+            contentContainer.innerHTML = '<p class="tone-danger" style="padding: 2rem;text-align: center">加载数据失败</p>';
         } finally {
             applyMarqueeChecks();
         }
@@ -2035,7 +2058,7 @@ class App {
         const avg = items.length ? (items.reduce((a, x) => a + x.rating, 0) / items.length).toFixed(2) : '–';
         const cell = (k, label, v) => `<button type="button" class="${(f.kind || '') === k ? 'on' : ''}" onclick="app.filterRatingData('kind','${k}')"><b>${v}</b><span>${label}</span></button>`;
         const dist = [5, 4, 3, 2, 1].map(s => { const c = items.filter(x => x.rating === s).length; return `<button type="button" class="admin-dist-row ${f.stars === String(s) ? 'on' : ''}" aria-label="筛选 ${s} 星，共 ${c} 条" aria-pressed="${f.stars === String(s)}" onclick="app.filterRatingData('stars','${f.stars === String(s) ? '' : s}')"><span>${s}★</span><i><u style="width:${items.length ? c / items.length * 100 : 0}%"></u></i><em>${c}</em></button>`; }).join('');
-        return `<div class="admin-flat-stats">${cell('', '全部', items.length)}${cell('song', '歌曲', n('song'))}${cell('album', '专辑', n('album'))}${cell('artist', '歌手', n('artist'))}<div class="static"><b>${avg}</b><span>平均分</span></div></div><div class="admin-rating-insights"><div class="admin-insight-main"><span class="admin-eyebrow">评分分布 · 点击筛选 / 再次点击取消</span><div class="admin-dist">${dist}</div></div><div class="admin-insight-score" style="--score:${Number(avg) || 0}"><div class="admin-score-ring"><b>${avg}</b><span>平均评分</span></div><p>当前匹配 <strong>${selected}</strong> / ${total} 条</p></div></div>`;
+        return `<div class="admin-flat-stats">${cell('', '全部', items.length)}${cell('song', '歌曲', n('song'))}${cell('album', '专辑', n('album'))}${cell('artist', '歌手', n('artist'))}<div class="static"><b>${avg}</b><span>平均分</span></div></div><div class="admin-rating-insights"><div class="admin-insight-main"><span class="admin-eyebrow">评分分布 · 点击筛选 / 再次点击取消</span><div class="admin-dist">${dist}</div></div><div class="admin-insight-score" style="--score:${Number(avg) || 0}"><div class="admin-score-ring"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="admin-score-track" cx="50" cy="50" r="46.5"/><circle class="admin-score-value" cx="50" cy="50" r="46.5" pathLength="100"/></svg><b>${avg}</b><span>平均评分</span></div><p>当前匹配 <strong>${selected}</strong> / ${total} 条</p></div></div>`;
     }
 
     refreshRatingStats() {
@@ -2140,7 +2163,7 @@ class App {
         let html = `
             <div class="data-section-header">
                 <div class="section-header-title">
-                    <div class="section-icon-box" style="background: linear-gradient(135deg, #3b82f6, #6366f1);">
+                    <div class="tone-fill-info section-icon-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M9 18V5l12-2v13"/>
                             <circle cx="6" cy="18" r="3"/>
@@ -2193,7 +2216,7 @@ class App {
             });
             html += '</div>';
         } else {
-            html += '<p style="color: var(--text-secondary); padding: 1.5rem; text-align: center;">暂无自定义列表</p>';
+            html += '<p class="tone-secondary" style="padding: 1.5rem;text-align: center">暂无自定义列表</p>';
         }
 
         return html;
@@ -2204,7 +2227,7 @@ class App {
         let html = `
             <div class="data-section-header ${withMarginTop ? 'with-margin-top' : ''}">
                 <div class="section-header-title">
-                    <div class="section-icon-box" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">
+                    <div class="tone-fill-accent section-icon-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <circle cx="12" cy="12" r="10"/>
                             <circle cx="12" cy="12" r="3"/>
@@ -2266,7 +2289,7 @@ class App {
             });
             html += '</div>';
         } else {
-            html += '<p style="color: var(--text-secondary); padding: 1.5rem; text-align: center;">暂无收藏专辑</p>';
+            html += '<p class="tone-secondary" style="padding: 1.5rem;text-align: center">暂无收藏专辑</p>';
         }
 
         return html;
@@ -2277,7 +2300,7 @@ class App {
         let html = `
             <div class="data-section-header ${withMarginTop ? 'with-margin-top' : ''}">
                 <div class="section-header-title">
-                    <div class="section-icon-box" style="background: linear-gradient(135deg, #10b981, #06b6d4);">
+                    <div class="tone-fill-success section-icon-box">
                         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
                             <circle cx="12" cy="7" r="4"/>
@@ -2322,7 +2345,7 @@ class App {
             });
             html += '</div>';
         } else {
-            html += '<p style="color: var(--text-secondary); padding: 1.5rem; text-align: center;">暂无收藏歌手</p>';
+            html += '<p class="tone-secondary" style="padding: 1.5rem;text-align: center">暂无收藏歌手</p>';
         }
 
         return html;
@@ -2400,7 +2423,7 @@ class App {
                         <div class="song-col-index">${songIndex + 1}</div>
                         ${this.renderSongNameCell(song, picUrl)}
                         <div class="song-col-artist">${this.escapeHtml(song.singer || artist || '未知歌手')}</div>
-                        <div class="song-col-actions" style="text-align:right; font-size:0.85rem; color:var(--text-secondary); font-family:monospace;">
+                        <div class="tone-secondary song-col-actions" style="text-align:right;font-size:0.85rem;font-family:monospace">
                             ${this.escapeHtml(song.interval || '--:--')}
                         </div>
                     </div>
@@ -2409,7 +2432,7 @@ class App {
 
             content += '</div>';
         } else {
-            content += '<p style="color: var(--text-secondary); padding: 2rem; text-align: center;">此专辑暂无曲目</p>';
+            content += '<p class="tone-secondary" style="padding: 2rem;text-align: center">此专辑暂无曲目</p>';
         }
 
         document.getElementById('data-content').innerHTML = content;
@@ -2514,7 +2537,7 @@ class App {
 
             content += '</div>';
         } else {
-            content += '<p style="color: var(--text-secondary); padding: 2rem; text-align: center;">此歌单暂无歌曲</p>';
+            content += '<p class="tone-secondary" style="padding: 2rem;text-align: center">此歌单暂无歌曲</p>';
         }
 
         document.getElementById('data-content').innerHTML = content;
@@ -2652,7 +2675,7 @@ class App {
 
             content += '</div>';
         } else {
-            content += '<p style="color: var(--text-secondary); padding: 2rem; text-align: center;">此列表暂无歌曲</p>';
+            content += '<p class="tone-secondary" style="padding: 2rem;text-align: center">此列表暂无歌曲</p>';
         }
 
         document.getElementById('data-content').innerHTML = content;
@@ -2919,7 +2942,7 @@ class App {
 
             content += '</div>';
         } else {
-            content += '<p style="color: var(--text-secondary); padding: 2rem; text-align: center;">暂无歌曲</p>';
+            content += '<p class="tone-secondary" style="padding: 2rem;text-align: center">暂无歌曲</p>';
         }
 
         document.getElementById('data-content').innerHTML = content;
@@ -3984,7 +4007,7 @@ class App {
             const target = document.getElementById('link-sync-field');
             if (!target) return;
             target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            target.style.outline = '2px solid var(--accent-primary)';
+            target.style.outline = '2px solid var(--accent)';
             target.style.outlineOffset = '4px';
             setTimeout(() => { target.style.outline = 'none'; }, 2000);
         }, 350);
@@ -4030,11 +4053,11 @@ class App {
                     container.scrollTop = container.scrollHeight;
                 }
             } else {
-                container.innerHTML = '<p style="color: var(--text-secondary); text-align: center; padding: 2rem;">暂无日志数据</p>';
+                container.innerHTML = '<p class="tone-secondary" style="text-align: center;padding: 2rem">暂无日志数据</p>';
             }
         } catch (err) {
             if (!isAuto) {
-                document.getElementById('logs-content').innerHTML = '<p style="color: var(--accent-error); text-align: center; padding: 2rem;">加载日志失败</p>';
+                document.getElementById('logs-content').innerHTML = '<p class="tone-danger" style="text-align: center;padding: 2rem">加载日志失败</p>';
             }
         }
     }
@@ -4141,28 +4164,28 @@ class App {
         const saved = config['backup.openlist.types'] || [];
         const typeMeta = {
             music: {
-                bg: 'rgba(139, 92, 246, 0.14)',
-                color: '#a78bfa',
+                bg: 'var(--accent-soft)',
+                color: 'var(--accent-text)',
                 svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>'
             },
             userFiles: {
-                bg: 'rgba(6, 182, 212, 0.14)',
-                color: '#38bdf8',
+                bg: 'var(--success-soft)',
+                color: 'var(--info-text)',
                 svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>'
             },
             snapshots: {
-                bg: 'rgba(16, 185, 129, 0.14)',
-                color: '#34d399',
+                bg: 'var(--success-soft)',
+                color: 'var(--success-text)',
                 svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect><circle cx="8.5" cy="8.5" r="1.5"></circle><polyline points="21 15 16 10 5 21"></polyline></svg>'
             },
             userData: {
-                bg: 'rgba(99, 102, 241, 0.14)',
-                color: '#818cf8',
+                bg: 'var(--accent-soft)',
+                color: 'var(--accent-text)',
                 svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>'
             },
             system: {
-                bg: 'rgba(245, 158, 11, 0.14)',
-                color: '#fbbf24',
+                bg: 'var(--danger-soft)',
+                color: 'var(--warning-text)',
                 svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>'
             }
         };
@@ -4170,7 +4193,7 @@ class App {
         const typesContainer = document.getElementById('openlist-restore-types');
         if (typesContainer) {
             typesContainer.innerHTML = types.map(type => {
-                const meta = typeMeta[type.id] || { bg: 'rgba(99, 102, 241, 0.14)', color: '#818cf8', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon></svg>' };
+                const meta = typeMeta[type.id] || { bg: 'var(--accent-soft)', color: 'var(--accent-text)', svg: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon></svg>' };
                 const isChecked = saved.includes(type.id);
                 return '<label class="ol-restore-type' + (isChecked ? ' is-checked' : '') + '">' +
                     '<input type="checkbox" class="lx-checkbox" name="types" value="' + this.escapeHtml(type.id) + '"' + (isChecked ? ' checked' : '') + '>' +
@@ -4909,7 +4932,7 @@ class App {
             this._olbCurrentList = list
             // 状态指标卡：基于当前页签过滤后的列表统计各状态数量（deleted 不计入 list，通常为 0）
             const STATUS_LABEL = { pending: '待上传', download: '待下载', uploading: '传输中', completed: '已备份', attention: '需处理', paused: '已暂停', failed: '失败', deleted: '已删除' }
-            const STATUS_COLOR = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', download: '#a78bfa', attention: '#f59e0b', paused: '#94a3b8', failed: '#ef4444', deleted: '#94a3b8' }
+            const STATUS_COLOR = { pending: 'var(--text-2)', uploading: 'var(--info-text)', completed: 'var(--info-text)', download: 'var(--accent-text)', attention: 'var(--warning-text)', paused: 'var(--text-2)', failed: 'var(--danger-text)', deleted: 'var(--text-2)' }
             const statusOrder = ['pending', 'download', 'uploading', 'completed', 'attention', 'failed', 'paused']
             const statusCounts = {}
             for (const s of statusOrder) statusCounts[s] = 0
@@ -4919,7 +4942,7 @@ class App {
                 const activeStatus = (document.getElementById('olb-filter-status') || {}).value || ''
                 cardsBox.innerHTML = statusOrder.map((st) => {
                     const n = statusCounts[st] || 0
-                    const color = STATUS_COLOR[st] || '#64748b'
+                    const color = STATUS_COLOR[st] || 'var(--text-2)'
                     const label = STATUS_LABEL[st] || st
                     const isActive = activeStatus === st ? ' active' : ''
                     return '<button type="button" class="olb-stat-card' + isActive + '" aria-pressed="' + (activeStatus === st) + '" data-status="' + st + '" title="点击按「' + label + '」筛选" onclick="app.filterOpenlistByStatus(\'' + st + '\')" style="--stat-color:' + color + ';">' +
@@ -4976,7 +4999,7 @@ class App {
                 return
             }
             const statusMap = { pending: '待上传', download: '待下载', uploading: '传输中', completed: '已备份', attention: '需处理', paused: '已暂停', failed: '失败', deleted: '已删除' }
-            const badgeColor = { pending: '#64748b', uploading: '#3b82f6', completed: '#0ea5e9', download: '#a78bfa', attention: '#f59e0b', paused: '#94a3b8', failed: '#ef4444', deleted: '#94a3b8' }
+            const badgeColor = { pending: 'var(--text-2)', uploading: 'var(--info-text)', completed: 'var(--info-text)', download: 'var(--accent-text)', attention: 'var(--warning-text)', paused: 'var(--text-2)', failed: 'var(--danger-text)', deleted: 'var(--text-2)' }
             const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
             const fmtName = (f) => {
                 const nm = (f.name || '').toString().trim()
@@ -4992,7 +5015,7 @@ class App {
             this._olbPageIds = list.slice(start, start + pageSize).map(f => f.id)
             const rows = list.slice(start, start + pageSize).map(f => {
                 const d = new Date(f.updated_at || f.created_at || Date.now())
-                const color = badgeColor[f.status] || '#64748b'
+                const color = badgeColor[f.status] || 'var(--text-2)'
                 const label = statusMap[f.status] || f.status || ''
                 let typeLabel
                 if (this._olbFolderScope && this._olbFolderScope.split(',').includes('list')) {
@@ -5069,7 +5092,7 @@ class App {
             this.updateOlbSelCount()
         } catch (e) {
             console.error(e)
-            box.innerHTML = '<div class="config-hint" style="color:var(--danger);">加载失败: ' + (e && e.message || e) + '</div>'
+            box.innerHTML = '<div class="tone-danger config-hint">加载失败: ' + (e && e.message || e) + '</div>'
         }
     }
 
@@ -5133,7 +5156,7 @@ class App {
         if (!f) { if (window.showError) window.showError('未找到该记录详情'); return }
         const esc = (s) => String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
         const fmtSize = (n) => { n = Number(n) || 0; if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(1) + ' MB' }
-        const row = (k, v) => '<tr><td class="olb-detail-key">' + esc(k) + '</td><td class="olb-detail-val">' + (v === '' || v == null ? '<span style="color:var(--text-secondary)">—</span>' : esc(v)) + '</td></tr>'
+        const row = (k, v) => '<tr><td class="olb-detail-key">' + esc(k) + '</td><td class="olb-detail-val">' + (v === '' || v == null ? '<span class="tone-secondary">—</span>' : esc(v)) + '</td></tr>'
         const optional = (k, v) => v == null || String(v).trim() === '' ? '' : row(k, v)
         const fmtTime = value => {
             if (value == null || value === '') return ''
@@ -5451,7 +5474,7 @@ class App {
                 const cls = resultBadgeCls[key] || '';
                 return `<span class="ol-integrity-stat-pill ${cls}"><b>${esc(labels[key] || key)}</b> ${n}</span>`;
             }).join('');
-            document.getElementById('ol-integrity-results').innerHTML = rows.length ? '<div class="ol-integrity-summary-line">' + countPills + '<span class="config-hint" style="margin:0 0 0 auto;">当前备份版本的全部最近校验结果（包含历史任务，不受上方校验范围限制）</span></div><table class="backup-policy-table olb-records-table"><thead><tr><th style="min-width:320px;">文件名 / 云端路径</th><th style="width:120px;text-align:center;">校验结果</th><th style="width:170px;">最近校验时间</th><th>说明</th></tr></thead><tbody>' + rows.slice((page - 1) * 50, page * 50).map(row => '<tr><td style="overflow-wrap:anywhere"><div class="ol-integrity-filename">' + esc(row.name) + '</div><div class="config-hint" style="font-size:0.75rem;font-family:monospace;opacity:0.8;">' + esc(row.remote) + '</div></td><td style="text-align:center;"><span class="ol-integrity-badge ' + (resultBadgeCls[row.result] || '') + '">' + esc(labels[row.result] || row.result) + '</span></td><td style="white-space:nowrap;font-size:0.78rem;color:var(--text-secondary);font-family:monospace;">' + esc(new Date(row.checkedAt).toLocaleString()) + '</td><td style="font-size:0.8rem;color:var(--text-secondary);">' + esc(row.result === 'stale' ? '云端状态在上次校验后发生变化，请重新校验' : (row.error || (row.result === 'matched' ? '匹配该次备份的 SHA-256' : '暂无详细说明'))) + '</td></tr>').join('') + '</tbody></table><div class="backup-policy-actions olb-pager" style="margin-top:0.75rem;"><button type="button" class="btn-secondary olb-pager-btn" ' + (page <= 1 ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page - 1) + ')">上一页</button><span class="olb-pager-info">' + page + ' / ' + pages + ' 页，共 ' + rows.length + ' 条</span><button type="button" class="btn-secondary olb-pager-btn" ' + (page >= pages ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page + 1) + ')">下一页</button></div>' : '<div class="olb-empty-state"><div class="olb-empty-title">暂无符合条件的校验结果</div><div class="olb-empty-desc">历史版本生成与普通后台检查不会自动触发完整校验</div></div>';
+            document.getElementById('ol-integrity-results').innerHTML = rows.length ? '<div class="ol-integrity-summary-line">' + countPills + '<span class="config-hint" style="margin:0 0 0 auto;">当前备份版本的全部最近校验结果（包含历史任务，不受上方校验范围限制）</span></div><table class="backup-policy-table olb-records-table"><thead><tr><th style="min-width:320px;">文件名 / 云端路径</th><th style="width:120px;text-align:center;">校验结果</th><th style="width:170px;">最近校验时间</th><th>说明</th></tr></thead><tbody>' + rows.slice((page - 1) * 50, page * 50).map(row => '<tr><td style="overflow-wrap:anywhere"><div class="ol-integrity-filename">' + esc(row.name) + '</div><div class="config-hint" style="font-size:0.75rem;font-family:monospace;opacity:0.8;">' + esc(row.remote) + '</div></td><td style="text-align:center;"><span class="ol-integrity-badge ' + (resultBadgeCls[row.result] || '') + '">' + esc(labels[row.result] || row.result) + '</span></td><td class="tone-secondary" style="white-space:nowrap;font-size:0.78rem;font-family:monospace">' + esc(new Date(row.checkedAt).toLocaleString()) + '</td><td class="tone-secondary" style="font-size:0.8rem">' + esc(row.result === 'stale' ? '云端状态在上次校验后发生变化，请重新校验' : (row.error || (row.result === 'matched' ? '匹配该次备份的 SHA-256' : '暂无详细说明'))) + '</td></tr>').join('') + '</tbody></table><div class="backup-policy-actions olb-pager" style="margin-top:0.75rem;"><button type="button" class="btn-secondary olb-pager-btn" ' + (page <= 1 ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page - 1) + ')">上一页</button><span class="olb-pager-info">' + page + ' / ' + pages + ' 页，共 ' + rows.length + ' 条</span><button type="button" class="btn-secondary olb-pager-btn" ' + (page >= pages ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page + 1) + ')">下一页</button></div>' : '<div class="olb-empty-state"><div class="olb-empty-title">暂无符合条件的校验结果</div><div class="olb-empty-desc">历史版本生成与普通后台检查不会自动触发完整校验</div></div>';
             if (active && !this._olIntegrityTimer) this._olIntegrityTimer = setInterval(() => {
                 if (this.currentView !== 'backups' || !document.getElementById('openlist-pane-integrity')?.classList.contains('active')) { clearInterval(this._olIntegrityTimer); this._olIntegrityTimer = null; return; }
                 this.loadOpenlistIntegrity();
@@ -5537,6 +5560,8 @@ class App {
 
 
     async request(url, options = {}) {
+        const requestPassword = this.password;
+        if (url !== '/api/login' && !requestPassword) throw new Error('Unauthorized');
         const defaultOptions = {
             headers: {
                 'Content-Type': 'application/json',
@@ -5547,7 +5572,9 @@ class App {
         const response = await fetch(API_BASE + url, { ...defaultOptions, ...options });
 
         if (response.status === 401) {
-            this.logout();
+            if (url === '/api/login') return { success: false };
+            // A failed login stays on the form. Ignore stale failures from an older session.
+            if (url !== '/api/login' && requestPassword && this.password === requestPassword) this.logout();
             throw new Error('Unauthorized');
         }
 
@@ -5669,7 +5696,7 @@ class App {
 
         const statusEl = document.getElementById('sync-status-content');
         if (statusEl) {
-            statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-primary);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在扫描本地文件并打包上传...</span></div>';
+            statusEl.innerHTML = '<div class="tone-accent" style="display:flex;align-items:center;gap:0.6rem"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在扫描本地文件并打包上传...</span></div>';
         }
         this.showProgress(true, '全量 ZIP 备份与云端归档', '正在扫描并打包服务器数据...');
 
@@ -5680,17 +5707,17 @@ class App {
             });
             if (result.success) {
                 if (statusEl) {
-                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 全量备份已成功上传至 WebDAV 云端！</p>';
+                    statusEl.innerHTML = '<p class="tone-success" style="font-weight: 600">✅ 全量备份已成功上传至 WebDAV 云端！</p>';
                 }
                 this.loadSyncLogs();
             } else {
                 if (statusEl) {
-                    statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 备份失败: 服务器返回异常</p>';
+                    statusEl.innerHTML = '<p class="tone-danger">❌ 备份失败: 服务器返回异常</p>';
                 }
             }
         } catch (err) {
             if (statusEl) {
-                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 备份失败: ' + this.escapeHtml(err.message) + '</p>';
+                statusEl.innerHTML = '<p class="tone-danger">❌ 备份失败: ' + this.escapeHtml(err.message) + '</p>';
             }
         }
     }
@@ -5735,7 +5762,7 @@ class App {
         if (!container) return;
 
         container.innerHTML = `
-            <div style="text-align:center; padding: 2rem; color: var(--text-muted);">
+            <div class="tone-muted" style="text-align:center;padding: 2rem">
                 <span class="task-spinner" style="width:20px;height:20px;display:inline-block;vertical-align:middle;margin-right:6px;"></span>
                 正在获取云端备份列表...
             </div>
@@ -5783,7 +5810,7 @@ class App {
                 container.innerHTML = html;
             } else {
                 container.innerHTML = `
-                    <div style="text-align:center; padding: 2rem; color: var(--text-muted); background: rgba(0,0,0,0.2); border-radius: 12px;">
+                    <div class="tone-muted-inset" style="text-align:center;padding: 2rem;border-radius: 12px">
                         <p style="margin: 0; font-size: 0.9rem;">⚠️ 云端备份目录暂无可恢复的 ZIP 备份文件</p>
                         <p style="margin: 6px 0 0 0; font-size: 0.78rem;">您可以先点击主页的「立即全量备份」进行首次归档。</p>
                     </div>
@@ -5791,7 +5818,7 @@ class App {
             }
         } catch (err) {
             container.innerHTML = `
-                <div style="text-align:center; padding: 1.5rem; color: var(--accent-error);">
+                <div class="tone-danger" style="text-align:center;padding: 1.5rem">
                     获取云端备份列表失败: ${this.escapeHtml(err.message)}
                 </div>
             `;
@@ -5980,7 +6007,7 @@ class App {
 
         const statusEl = document.getElementById('sync-status-content');
         if (statusEl) {
-            statusEl.innerHTML = '<div style="display:flex;align-items:center;gap:0.6rem;color:var(--accent-primary);"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在比对本地与云端散文件...</span></div>';
+            statusEl.innerHTML = '<div class="tone-accent" style="display:flex;align-items:center;gap:0.6rem"><span class="task-spinner" style="width:18px;height:18px;"></span><span>正在比对本地与云端散文件...</span></div>';
         }
         this.showProgress(true, '批量文件多线程同步', '正在比对本地散文件并同步至云端...');
 
@@ -5988,17 +6015,17 @@ class App {
             const result = await this.request('/api/webdav/sync', { method: 'POST' });
             if (result.success) {
                 if (statusEl) {
-                    statusEl.innerHTML = '<p style="color: var(--accent-success); font-weight: 600;">✅ 散文件已全部同步至云端！</p>';
+                    statusEl.innerHTML = '<p class="tone-success" style="font-weight: 600">✅ 散文件已全部同步至云端！</p>';
                 }
                 this.loadSyncLogs();
             } else {
                 if (statusEl) {
-                    statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 同步失败</p>';
+                    statusEl.innerHTML = '<p class="tone-danger">❌ 同步失败</p>';
                 }
             }
         } catch (err) {
             if (statusEl) {
-                statusEl.innerHTML = '<p style="color: var(--accent-error);">❌ 同步失败: ' + this.escapeHtml(err.message) + '</p>';
+                statusEl.innerHTML = '<p class="tone-danger">❌ 同步失败: ' + this.escapeHtml(err.message) + '</p>';
             }
         }
     }
@@ -6101,8 +6128,8 @@ class App {
     renderSongNameCell(song, defaultCover = '') {
         const picUrl = song.img || song.picUrl || song.cover || song.meta?.picUrl || defaultCover || '';
         const coverHtml = picUrl
-            ? `<img src="${this.escapeHtml(picUrl)}" class="song-cover" loading="lazy" referrerpolicy="no-referrer" alt="cover" onerror="this.onerror=null; this.style.display='none'; this.parentElement.insertAdjacentHTML('afterbegin', '<div class=\\'song-cover\\' style=\\'background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center;\\'>🎵</div>');">`
-            : `<div class="song-cover" style="background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center;">🎵</div>`;
+            ? `<img src="${this.escapeHtml(picUrl)}" class="song-cover" loading="lazy" referrerpolicy="no-referrer" alt="cover" onerror="this.onerror=null; this.style.display='none'; this.parentElement.insertAdjacentHTML('afterbegin', '<div class=\\'song-cover song-cover-placeholder\\'>🎵</div>');">`
+            : `<div class="tone-inset song-cover" style="display: flex;align-items: center;justify-content: center">🎵</div>`;
 
         const singerHtml = song.singer
             ? `<span class="song-singer-mobile">${this.escapeHtml(song.singer)}</span>`
@@ -6238,7 +6265,7 @@ class App {
             <div class="log-info">
                 <span class="log-type log-type-${log.type}">${this.getLogTypeText(log.type)}</span>
                 <span class="log-file">${this.escapeHtml(log.file)}</span>
-                ${log.message ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">${this.escapeHtml(log.message)}</div>` : ''}
+                ${log.message ? `<div class="tone-muted" style="font-size: 0.75rem;margin-top: 0.25rem">${this.escapeHtml(log.message)}</div>` : ''}
             </div>
             <div style="display: flex; align-items: center; gap: 1rem;">
                 <span class="log-status log-status-${log.status}">${log.status === 'success' ? '成功' : '失败'}</span>
@@ -6261,7 +6288,7 @@ class App {
             if (!container) return;
 
             if (!data.logs || data.logs.length === 0) {
-                container.innerHTML = '<p class="sync-empty-tip" style="color: var(--text-secondary); padding: 2.5rem; text-align: center;">暂无同步日志</p>';
+                container.innerHTML = '<p class="tone-secondary sync-empty-tip" style="padding: 2.5rem;text-align: center">暂无同步日志</p>';
                 return;
             }
 
@@ -6270,7 +6297,7 @@ class App {
                 <div class="log-info">
                     <span class="log-type log-type-${log.type}">${this.getLogTypeText(log.type)}</span>
                     <span class="log-file">${this.escapeHtml(log.file)}</span>
-                    ${log.message ? `<div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">${this.escapeHtml(log.message)}</div>` : ''}
+                    ${log.message ? `<div class="tone-muted" style="font-size: 0.75rem;margin-top: 0.25rem">${this.escapeHtml(log.message)}</div>` : ''}
                 </div>
                 <div style="display: flex; align-items: center; gap: 1rem;">
                     <span class="log-status log-status-${log.status}">${log.status === 'success' ? '成功' : '失败'}</span>
@@ -6321,7 +6348,7 @@ class App {
             this.updateBreadcrumb(path);
         } catch (err) {
             console.error('Failed to load files:', err);
-            document.getElementById('file-items').innerHTML = '<p style="padding: 2rem; text-align: center; color: var(--accent-error);">加载文件失败</p>';
+            document.getElementById('file-items').innerHTML = '<p class="tone-danger" style="padding: 2rem;text-align: center">加载文件失败</p>';
         }
     }
 
@@ -6329,7 +6356,7 @@ class App {
         const container = document.getElementById('file-items');
 
         if (items.length === 0) {
-            container.innerHTML = '<p style="padding: 2rem; text-align: center; color: var(--text-secondary);">此文件夹为空</p>';
+            container.innerHTML = '<p class="tone-secondary" style="padding: 2rem;text-align: center">此文件夹为空</p>';
             return;
         }
 
@@ -6351,7 +6378,7 @@ class App {
             <div class="file-item-actions">
                 ${!item.isDirectory ? `<button onclick="app.editFile('${item.path}')">编辑</button>` : ''}
                 <button onclick="app.downloadFile('${item.path}')">下载</button>
-                <button onclick="app.deleteFile('${item.path}', ${item.isDirectory})" style="color: var(--accent-error);">删除</button>
+                <button class="tone-danger" onclick="app.deleteFile('${item.path}', ${item.isDirectory})">删除</button>
             </div>
         </div>
     `).join('');
@@ -6608,7 +6635,7 @@ class App {
             }
 
             if (!list.length) {
-                container.innerHTML = '<div style="padding: 2.5rem; text-align: center; color: var(--text-secondary);">暂无系统配置备份文件。可点击上方【立即备份配置】手动创建第一份备份。</div>';
+                container.innerHTML = '<div class="tone-secondary" style="padding: 2.5rem;text-align: center">暂无系统配置备份文件。可点击上方【立即备份配置】手动创建第一份备份。</div>';
                 container.classList.remove('content-loading');
                 return;
             }
@@ -6764,7 +6791,7 @@ class App {
                 const emptyText = origin === 'imported' ? '该用户暂无导入的备份快照'
                     : kind === 'dislike' ? '该用户暂无「不喜欢」快照'
                         : kind === 'rating' ? '该用户暂无「我的评分」快照' : '暂无快照';
-                container.innerHTML = `<div style="padding: 2rem; text-align: center; color: var(--text-secondary);">${emptyText}</div>`;
+                container.innerHTML = `<div class="tone-secondary" style="padding: 2rem;text-align: center">${emptyText}</div>`;
                 container.classList.remove('content-loading');
                 return;
             }
@@ -6772,13 +6799,13 @@ class App {
             container.innerHTML = list.map(item => {
                 const imported = item.origin === 'imported';
                 const originTag = imported
-                    ? '<span class="kind-tag" style="color:#a78bfa;font-size:.7rem;border:1px solid #a78bfa;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem;" title="用户上传导入的备份；列表时间取自该文件原始修改时间">导入备份</span>'
-                    : '<span class="kind-tag" style="color:#94a3b8;font-size:.7rem;border:1px solid #94a3b8;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem;" title="服务端在数据变更时自动生成">系统快照</span>';
+                    ? '<span class="badge-accent kind-tag" style="font-size:.7rem;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem" title="用户上传导入的备份；列表时间取自该文件原始修改时间">导入备份</span>'
+                    : '<span class="badge-neutral kind-tag" style="font-size:.7rem;border-radius:4px;padding:0 .3rem;vertical-align:middle;margin-left:.25rem" title="服务端在数据变更时自动生成">系统快照</span>';
                 const kindTag = item.kind === 'dislike'
-                    ? '<span class="kind-tag" style="color:#ef4444;font-size:.7rem;border:1px solid #ef4444;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我不喜欢</span>'
+                    ? '<span class="badge-danger kind-tag" style="font-size:.7rem;border-radius:4px;padding:0 .3rem;vertical-align:middle">我不喜欢</span>'
                     : item.kind === 'rating'
-                        ? '<span class="kind-tag" style="color:#f59e0b;font-size:.7rem;border:1px solid #f59e0b;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的评分</span>'
-                        : '<span class="kind-tag" style="color:#3b82f6;font-size:.7rem;border:1px solid #3b82f6;border-radius:4px;padding:0 .3rem;vertical-align:middle;">我的歌单</span>';
+                        ? '<span class="badge-warning kind-tag" style="font-size:.7rem;border-radius:4px;padding:0 .3rem;vertical-align:middle">我的评分</span>'
+                        : '<span class="badge-info kind-tag" style="font-size:.7rem;border-radius:4px;padding:0 .3rem;vertical-align:middle">我的歌单</span>';
                 return `
             <div class="snapshot-row">
                 <div class="col-time"${imported ? ' title="时间取自备份文件的原始修改时间"' : ''}>${new Date(item.time).toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</div>
@@ -6887,20 +6914,20 @@ class App {
             modal.id = 'snapshot-import-target-modal';
             modal.className = 'fixed inset-0 z-[3000] flex items-center justify-center p-6 animate-fade-in';
             modal.innerHTML = `
-                <div class="absolute inset-0 bg-black/40 backdrop-blur-[4px]"></div>
+                <div class="absolute inset-0 modal-backdrop backdrop-blur-[4px]"></div>
                 <div class="lx-glass rounded-[28px] w-full max-w-md overflow-hidden relative shadow-2xl">
                     <div class="p-8">
-                        <h3 class="text-xl font-bold text-white mb-4">选择导入目标用户</h3>
-                        <p class="text-sm text-white/60 leading-relaxed mb-5">
+                        <h3 class="text-xl font-bold tone-text mb-4">选择导入目标用户</h3>
+                        <p class="text-sm tone-secondary leading-relaxed mb-5">
                             备份文件：${this.escapeHtml(filename)}<br>
                             备份类型：${kindLabel}
                         </p>
-                        <label class="text-sm text-white/70" for="snapshot-import-target-user">导入到用户</label>
+                        <label class="text-sm tone-secondary" for="snapshot-import-target-user">导入到用户</label>
                         <select id="snapshot-import-target-user" class="lx-input w-full px-4 py-3 rounded-2xl mt-2">${options}</select>
                     </div>
                     <div class="p-5 flex gap-3">
-                        <button id="snapshot-import-target-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-2xl">取消</button>
-                        <button id="snapshot-import-target-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-emerald-400 to-teal-500 rounded-2xl">继续</button>
+                        <button id="snapshot-import-target-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold tone-muted text-hover tone-inset surface-hover rounded-2xl">取消</button>
+                        <button id="snapshot-import-target-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold tone-fill-success rounded-2xl">继续</button>
                     </div>
                 </div>`;
             document.body.appendChild(modal);
@@ -7105,12 +7132,12 @@ class App {
         // 创建临时加载提示
         const loadingOverlay = document.createElement('div');
         loadingOverlay.className = 'overlay';
-        loadingOverlay.style.background = 'rgba(0,0,0,0.8)';
+        loadingOverlay.style.background = 'var(--overlay)';
         loadingOverlay.innerHTML = `
             <div class="login-box glass" style="padding: 3rem;">
                 <div class="status-dot" style="margin: 0 auto 1.5rem; width: 12px; height: 12px;"></div>
                 <h2>正在还原数据...</h2>
-                <p style="color: var(--text-secondary); margin-top: 1rem;">正在解压并恢复文件，请勿关闭或刷新页面。</p>
+                <p class="tone-secondary" style="margin-top: 1rem">正在解压并恢复文件，请勿关闭或刷新页面。</p>
             </div>
         `;
         document.body.appendChild(loadingOverlay);
@@ -7278,7 +7305,7 @@ class App {
             const target = document.getElementById(elementId);
             if (!target) return;
             target.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            target.style.outline = '2px solid var(--accent-primary)';
+            target.style.outline = '2px solid var(--accent)';
             target.style.outlineOffset = '4px';
             setTimeout(() => { target.style.outline = 'none'; }, 1800);
         }, 80);

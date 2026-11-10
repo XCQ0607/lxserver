@@ -206,7 +206,7 @@ Do not use `/admin`, `/rest` or the player access password for LX sync. Review m
 
 ### Subsonic clients
 
-Compatible clients include Yinliu, Feishin and Symfonium. The server implements Subsonic/OpenSubsonic endpoints for library browsing, search, playback and related features; the UI and available features vary by client.
+Compatible clients include Yinliu, Feishin and Symfonium. The server implements Subsonic/OpenSubsonic endpoints for library browsing, search, playback and related features; the UI and available features vary by client. See [Subsonic protocol support](docs/en/api/subsonic.md) for coverage and limits.
 
 | Field | Value |
 | --- | --- |
@@ -220,7 +220,7 @@ By default Subsonic shares the main port. Separate listening requires `subsonic.
 
 Online search uses `subsonic.onlineSearch` and `subsonic.onlineSearchMode`: `fallback` supplements insufficient local results; `merge` combines local and online results; `local_only` stays local. Query prefixes include `wy:`, `tx:`, `kw:`, `kg:`, `mg:`, `online:` and `local:`. Online playback still needs a working custom source.
 
-Local library selection follows the account's saved storage location plus its enabled custom directory. A temporary browsing switch in the web UI does not change that library. Read-only local/custom playlists can be exposed separately. Pure local playlists stay on the server; only the online portion of mixed playlists enters LX native sync.
+Local library selection follows the account's saved storage location plus its enabled custom directory. A temporary browsing switch in the web UI does not change that library. Read-only local/custom playlists can be exposed separately. Pure local playlists stay on the server; only the online portion of mixed playlists enters LX native sync. See [Subsonic local music library](docs/en/guide/subsonic-local-library.md).
 
 <p align="center">
   <img src="md/subsonic.png" width="500" alt="Subsonic connection">

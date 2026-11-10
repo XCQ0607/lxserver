@@ -26,7 +26,7 @@
 
 ### Subsonic 客户端
 
-支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 状态](../subsonic-status.md)。
+支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 协议支持](../api/subsonic.md)。
 
 默认连接信息：
 
@@ -52,7 +52,7 @@
 
 Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓存，并加入该账号已启用的自定义目录。网页中临时切换浏览目录，不会改变 Subsonic 的曲库范围。
 
-默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](../subsonic-local-library.md)。
+默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](./subsonic-local-library.md)。
 
 
 
@@ -91,6 +91,7 @@ Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓�
 | --- | --- |
 | 本地音乐文件夹 | 明确选择本地文件夹时使用本地库分支；默认推荐池不等同于 NAS 全部专辑 |
 | `subsonic.localPlaylist` / `subsonic.customPlaylist` | 分别控制只读本地歌单和独立自定义目录歌单，后者依赖前者及账号目录启用 |
+| `subsonic.cachePlaylist` | 是否在本地歌单中包含缓存目录歌曲，默认 false；不缩减其他接口共用的完整曲库 |
 | `subsonic.cacheOnPlay` | 播放在线资源时触发落盘缓存，默认 false |
 | `subsonic.playCacheFirst` | 优先通过服务器已有文件播放，默认 false；使用时服务器承担文件传输 |
 | `subsonic.quality.*` / `subsonic.source.*` | 控制候选音质和跨平台/脚本优选，不保证每首都有目标音质 |
@@ -101,7 +102,7 @@ Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓�
 
 本地歌曲使用独立 ID，关联平台不会把它变成在线歌曲。文件在原路径更新通常保留身份，外部移动或重命名文件则可能产生新 ID。混合歌单的本地成员与顺序单独保存；删除歌单不等于删除音频文件。
 
-客户端封面、逐字歌词、扫描进度与可用的目录展示受协议和客户端能力共同影响。网页版有某个设置不代表第三方客户端会提供同名控件。详细本地库行为见 [Subsonic 本地音乐库](../subsonic-local-library.md)。
+客户端封面、逐字歌词、扫描进度与可用的目录展示受协议和客户端能力共同影响。网页版有某个设置不代表第三方客户端会提供同名控件。详细本地库行为见 [Subsonic 本地音乐库](./subsonic-local-library.md)。
 
 ## 后台各模块的用途
 

@@ -16,6 +16,33 @@
 | --- | --- | --- |
 | GET | `/api/status` | — |
 
+## dashboard
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/dashboard/overview` | — |
+
+## ratings
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/subsonic/sync-link` | `user`, `direction`, `preview`, `reconcile` |
+| GET / POST | `/api/data/rating-sync` | 查询参数 `user` |
+| GET / POST | `/api/music/rating-preferences` | `dislikeAutoRating` |
+| GET / POST | `/api/music/ratings` | `operation`, `songs`, `includeDetails`, `song`, `rating` |
+
+## openlist/connection
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / POST | `/api/openlist/connection` | — |
+
+## files
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / HEAD | `/api/files` | 查询参数 `path`；委托 VueFinder，详见 API 参考 |
+
 ## users
 
 | 方法 | 路径 | 直接读取字段（部分） |

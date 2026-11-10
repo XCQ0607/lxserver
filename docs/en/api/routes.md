@@ -16,6 +16,33 @@ See [API reference](./reference.md). File operations are delegated to VueFinder 
 | --- | --- | --- |
 | GET | `/api/status` | — |
 
+## dashboard
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| GET | `/api/dashboard/overview` | — |
+
+## ratings
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| POST | `/api/subsonic/sync-link` | `user`, `direction`, `preview`, `reconcile` |
+| GET / POST | `/api/data/rating-sync` | Query parameter `user` |
+| GET / POST | `/api/music/rating-preferences` | `dislikeAutoRating` |
+| GET / POST | `/api/music/ratings` | `operation`, `songs`, `includeDetails`, `song`, `rating` |
+
+## openlist/connection
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| GET / POST | `/api/openlist/connection` | — |
+
+## files
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| GET / HEAD | `/api/files` | Query parameter `path`; delegated to VueFinder, see API reference |
+
 ## users
 
 | Method | Path | Direct fields (partial) |
