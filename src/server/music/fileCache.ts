@@ -166,7 +166,7 @@ export const activeTasks: Map<string, Array<{ songKey: string, controller: Abort
 
 // [新增] 歌词获取钩子：由 server.ts 在启动时注入，避免 fileCache 直接依赖 musicSdk
 // 调用时会通过 /api/music/lyric 接口逻辑（先查本地 .lrc 缓存，再去源站）获取歌词文本
-type LyricFetcher = (songInfo: any) => Promise<string | null>
+type LyricFetcher = (songInfo: any, username?: string) => Promise<string | null>
 let _lyricFetcher: LyricFetcher | null = null
 export const setLyricFetcher = (fn: LyricFetcher) => { _lyricFetcher = fn }
 
@@ -1826,6 +1826,25 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
     return { exists: false }
 }
 
+export const readCachedEmbeddedLyrics = (songInfo: any, username?: string) => {
+    const owner = username && username !== 'default' ? username : '_open'
+    const id = normalizeSongId(songInfo)
+    for (const folder of ['cache', 'music'] as const) {
+        const item = indexManager.get(owner, id, folder, songInfo.quality)
+        if (!item) continue
+        let tagger: any
+        try {
+            const file = resolveContainedPath(getCacheDir(owner, folder === 'music'), item.filename)
+            tagger = new MusicTagger()
+            tagger.loadPath(file)
+            const lyric = tagger.lyrics
+            if (lyric?.trim()) return { exists: true, content: parseLyrics(lyric) }
+        } catch { /* Try the next exact-ID file. */ }
+        finally { try { tagger?.dispose() } catch {} }
+    }
+    return { exists: false }
+}
+
 export const checkLyricCache = (songInfo: any, username?: string) => {
     const id = normalizeSongId(songInfo)
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
@@ -1850,7 +1869,7 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
 
     // [Fix] Index-based name+singer fallback for the simple naming pattern
     // When the lrc filename does not contain a song ID, match by name + singer from the index
-    if (songInfo.name && songInfo.singer) {
+    if (!songInfo.strictIdentity && songInfo.name && songInfo.singer) {
         const targetName = String(songInfo.name).toLowerCase()
         const targetSinger = String(songInfo.singer).toLowerCase()
         for (const folder of folderTypes) {
@@ -1905,6 +1924,7 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
             const fileNameWithoutExt = file.substring(0, file.lastIndexOf('.'))
             const segments = fileNameWithoutExt.split('_-_')
             if (segments.length >= 2) {
+                if (songInfo.strictIdentity && segments[segments.length - 3] !== songInfo.source) continue
                 const fileId = segments[segments.length - 2]
                 const fileCleanId = cleanId(fileId)
                 if (fileId === id || fileCleanId === id || fileId === targetCleanId || fileCleanId === targetCleanId) {
@@ -2139,7 +2159,7 @@ const ensureCachedLyrics = async (
     }
 
     try {
-        const lyricText = await _lyricFetcher({ ...songInfo, quality: resolvedQuality })
+        const lyricText = await _lyricFetcher({ ...songInfo, quality: resolvedQuality }, username)
         if (!lyricText) return
 
         if (shouldCacheLyric && !hasCachedLyric) {

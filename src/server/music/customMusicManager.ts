@@ -761,7 +761,7 @@ export const batchEmbedLyric = async (filenames: string[], username: string) => 
             } else if (item && item.source && item.source !== 'unknown' && item.source !== 'local' && item.source !== 'custom') {
                 const lyricFetcherFn = getLyricFetcher()
                 if (lyricFetcherFn) {
-                    lyricText = await lyricFetcherFn(item)
+                    lyricText = await lyricFetcherFn(item, username)
                 }
             }
 
@@ -800,11 +800,23 @@ export const checkCustomLyricCache = (song: any, username: string): { exists: bo
         const root = getCustomMusicDir(username)
         if (!root) return { exists: false }
         const items = Array.from(customIndexManager.load(username).values())
-        const item = items.find(item => (song.id && item.id === song.id) || (song.source && item.source === song.source && song.songmid && item.songmid === song.songmid))
-            || items.find(item => song.name && song.singer && item.name === song.name && item.singer === song.singer)
+        const item = items.find(item => (song.id && item.id === song.id && (!song.strictIdentity || item.source === song.source)) || (song.source && item.source === song.source && song.songmid && String(item.songmid) === String(song.songmid)))
+            || (!song.strictIdentity && items.find(item => song.name && song.singer && item.name === song.name && item.singer === song.singer))
         if (!item) return { exists: false }
         const file = resolveSafePath(root, item.filename.replace(/\.[^.]+$/, '.lrc'))
-        if (!file || !fs.existsSync(file)) return { exists: false }
+        if (!file || !fs.existsSync(file)) {
+            if (song.includeEmbedded) {
+                const audio = resolveSafePath(root, item.filename)
+                let tagger: any
+                try {
+                    if (!audio) return { exists: false }
+                    tagger = new MusicTagger()
+                    tagger.loadPath(audio)
+                    if (tagger.lyrics?.trim()) return { exists: true, content: parseLyrics(tagger.lyrics) }
+                } finally { try { tagger?.dispose() } catch {} }
+            }
+            return { exists: false }
+        }
         const real = fs.realpathSync(file), base = fs.realpathSync(root)
         if (!real.startsWith(base + path.sep)) return { exists: false }
         const content = parseLyrics(fs.readFileSync(real, 'utf8').replace(/^\uFEFF/, ''))

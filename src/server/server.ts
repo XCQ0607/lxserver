@@ -3,6 +3,10 @@ import { ratingVersion, readRatingTasks, retryRatingTasks, ratingIdentityDetails
 import { getOpenlistRuntimeStatus, getOpenlistConnection, probeOpenlistConnection, verifyPending } from './openlist/openlistBackup'
 import * as webdavRestoreTasks from './backup/webdavRestoreTasks'
 import { lookupLocalLyrics } from './music/localLyrics'
+import { resolveDownloadLyrics, resolveSongLyricData } from './music/downloadLyrics'
+import { getVerifiedAudioSize } from './music/audioProbe'
+import { downloadInRanges } from './music/parallelDownload'
+import { buildLyrics } from '../utils/lrcTool'
 import { resolveOpenlistCacheEntry } from './openlist/openlistBackup'
 import http, { type IncomingMessage } from 'node:http'
 import { resolveCollectionUser } from './auth/collectionAccess'
@@ -947,26 +951,6 @@ const formatBytes = (bytes: number): string => {
   return `${(bytes / Math.pow(1024, index)).toFixed(2)} ${units[index]}`
 }
 
-const getHeaderValue = (headers: Record<string, any>, key: string): string | undefined => {
-  const value = headers[key] ?? headers[key.toLowerCase()]
-  if (Array.isArray(value)) return value[0]
-  return value == null ? undefined : String(value)
-}
-
-const parseContentLength = (headers: Record<string, any>): number | null => {
-  const range = getHeaderValue(headers, 'content-range')
-  const total = range?.match(/\/(\d+)$/)?.[1]
-  if (total) {
-    const parsed = Number(total)
-    if (Number.isFinite(parsed) && parsed > 0) return parsed
-  }
-
-  const length = Number(getHeaderValue(headers, 'content-length'))
-  if (Number.isFinite(length) && length > 0) return length
-
-  return null
-}
-
 const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
   if (!/^https?:\/\//i.test(audioUrl)) return null
 
@@ -986,7 +970,7 @@ const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
 
   try {
     const resp = await needle('head', audioUrl, null, options)
-    const size = parseContentLength(resp.headers || {})
+    const size = getVerifiedAudioSize(resp.statusCode || 0, resp.headers || {})
     if (size) return size
   } catch (e: any) {
     console.warn(`[音质探测] HEAD 请求探测文件大小失败: ${e.message}`)
@@ -1000,7 +984,7 @@ const getAudioRemoteSize = async (audioUrl: string): Promise<number | null> => {
         Range: 'bytes=0-0',
       },
     })
-    return parseContentLength(resp.headers || {})
+    return getVerifiedAudioSize(resp.statusCode || 0, resp.headers || {})
   } catch (e: any) {
     console.warn(`[音质探测] Range 分段探测文件大小失败: ${e.message}`)
   }
@@ -4774,7 +4758,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 7. Get Cache Progress
       if (pathname === '/api/music/cache/progress' && req.method === 'GET') {
         const ids = urlObj.searchParams.get('ids')?.split(',') || []
-        const owner = getCacheRequestUsername(req)
+        // Native downloads also authenticate with the player session cookie.
+        // Resolve the same owner here as /api/music/download.
+        const cookieSession = playerSessions.get(parseCookies(req.headers.cookie)[SESSION_COOKIE_NAME])
+        const cookieOwner = cookieSession && Date.now() - cookieSession.createdAt <= SESSION_TTL && global.lx.config.users.some(u => u.name === cookieSession.user) ? cookieSession.user : null
+        const owner = verifyUserAuth(req) || cookieOwner || getCacheRequestUsername(req)
         if (!owner) { res.writeHead(401); res.end('Unauthorized'); return }
         const progress: any = {}
         ids.forEach(id => {
@@ -5492,7 +5480,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   // 没有 .lrc 文件，尝试通过 SDK 获取
                   const lyricFetcherFn = fileCache.getLyricFetcher()
                   if (lyricFetcherFn) {
-                    lyricText = await lyricFetcherFn(songInfo)
+                    lyricText = await lyricFetcherFn(songInfo, username)
                   }
                   if (lyricText) {
                     console.log(`[嵌入歌词] 从音源获取到歌词: ${filename}`)
@@ -5618,95 +5606,17 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       // [New] Fetch Lyrics
       if (pathname === '/api/music/lyric' && req.method === 'GET') {
-        const source = urlObj.searchParams.get('source')
-        // [Optimization] Accept multiple ID param names for better client compatibility
-        let songmid = urlObj.searchParams.get('songmid') || urlObj.searchParams.get('songId') || urlObj.searchParams.get('id')
-
-        if (!source || !songmid) {
-          res.writeHead(400)
-          res.end('Missing source or songmid')
-          return
+        const songInfo: any = Object.fromEntries(urlObj.searchParams)
+        if (!songInfo.source || !(songInfo.songmid || songInfo.songId || songInfo.id)) {
+          res.writeHead(400); res.end('Missing source or songmid'); return
         }
-
-        // [Fix] Normalize ID by stripping source prefix if present (e.g., "tx_001..." -> "001...")
-        const sourcePrefix = `${source}_`
-        if (songmid.startsWith(sourcePrefix)) {
-          songmid = songmid.slice(sourcePrefix.length)
-        }
-
-        // [优化] 先检查本地 .lrc 文件缓存，命中则直接返回，无需网络请求（断网也可用）
-        const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
-        let lyricUsername = '_open'
-        if (!isPublic) {
-          const verified = verifyUserAuth(req)
-          if (verified) lyricUsername = verified
-        }
-        const localLyricResult = urlObj.searchParams.get('preferLocal') === '0' ? { exists: false, content: null } : lookupLocalLyrics({
-          source,
-          songmid,
-          id: urlObj.searchParams.get('songId') || urlObj.searchParams.get('id') || songmid,
-          name: urlObj.searchParams.get('name') || '',
-          singer: urlObj.searchParams.get('singer') || '',
-        }, lyricUsername)
-
-        if (localLyricResult.exists && localLyricResult.content) {
-          console.log(`[歌词服务] 命中本地 .lrc 缓存: ${source}_${songmid}`)
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'public, max-age=86400' })
-          res.end(JSON.stringify({ ...localLyricResult.content, _fromLocalCache: true }))
-          return
-        }
-
+        const owner = verifyUserAuth(req) || '_open'
         try {
-          if (!musicSdk[source]) {
-            throw new Error('Source not supported')
-          }
-
-          // console.log('[歌词服务] 正在从音源获取歌词:', source, songmid)
-
-          // Construct complete songInfo object for SDK compatibility
-          // KuGou (kg) needs: name, hash, interval
-          // MiGu (mg) needs: copyrightId, lrcUrl, mrcUrl, trcUrl (优先，避免调用getMusicInfo API)
-          const songInfo = {
-            songmid,
-            name: urlObj.searchParams.get('name') || '',
-            singer: urlObj.searchParams.get('singer') || '',
-            hash: urlObj.searchParams.get('hash') || '',
-            interval: urlObj.searchParams.get('interval') || '',
-            copyrightId: urlObj.searchParams.get('copyrightId') || '',
-            albumId: urlObj.searchParams.get('albumId') || '',
-            lrcUrl: urlObj.searchParams.get('lrcUrl') || '',
-            mrcUrl: urlObj.searchParams.get('mrcUrl') || '',
-            trcUrl: urlObj.searchParams.get('trcUrl') || ''
-          }
-
-          const requestObj = musicSdk[source].getLyric(songInfo)
-          const lyricInfo = await requestObj.promise
-
-          res.writeHead(200, {
-            'Content-Type': 'application/json',
-            'Cache-Control': 'public, max-age=86400' // Cache lyrics for 1 day
-          })
-          res.end(JSON.stringify(lyricInfo))
+          const result = await resolveSongLyricData(songInfo, owner, lookupLocalLyrics, musicSdk,
+            urlObj.searchParams.get('preferLocal') !== '0', false)
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' })
+          res.end(JSON.stringify(result))
         } catch (err: any) {
-          console.error('[歌词服务] 获取歌词失败:', source, songmid, err.message || err)
-
-          // [Fallback] 网络请求失败时，再次尝试本地 .lrc 文件（防止 Step2 miss 但物理文件存在的情况）
-          const fallbackResult = urlObj.searchParams.get('preferLocal') === '0' ? { exists: false, content: null } : lookupLocalLyrics({
-            source,
-            songmid,
-            id: urlObj.searchParams.get('songId') || urlObj.searchParams.get('id') || songmid,
-            name: urlObj.searchParams.get('name') || '',
-            singer: urlObj.searchParams.get('singer') || '',
-          }, lyricUsername)
-          if (fallbackResult.exists && fallbackResult.content) {
-            console.log(`[歌词服务] 网络获取失败，回退到本地 .lrc: ${source}_${songmid}`)
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ ...fallbackResult.content, _fromLocalCache: true }))
-            return
-          }
-
-          // Avoid circular structure error - only send message
           res.writeHead(500, { 'Content-Type': 'text/plain' })
           res.end(err.message || 'Failed to fetch lyric')
         }
@@ -5826,11 +5736,32 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const isTaggingMode = urlObj.searchParams.get('tag') === '1'
           const rawTaskId = urlObj.searchParams.get('taskId')
           const taskId = rawTaskId ? fileCache.getProgressKey(rawTaskId, proxyUser || '_open') : null
+          const downloadAbort = new AbortController()
+          res.once('close', () => downloadAbort.abort())
+          let preparedDownload: Awaited<ReturnType<typeof downloadInRanges>> = null
+          let progressBytes = 0, progressTime = Date.now()
+          const updateDownloadProgress = (received: number, total: number) => {
+            if (!taskId) return
+            const now = Date.now()
+            const elapsed = (now - progressTime) / 1000
+            const speed = elapsed > 0 ? Math.max(0, (received - progressBytes) / elapsed) : 0
+            if (elapsed < 0.5 && received !== total) return
+            progressBytes = received; progressTime = now
+            fileCache.cacheProgress.set(taskId, { progress: Math.min(99, Math.round(received / total * 100)), status: 'downloading', total, received, speed, updatedAt: now })
+          }
           console.log(`[${proxyLabel}] 正在获取${filename === 'cover.jpg' ? '封面图片' : '媒体流'} (写入标签: ${isTaggingMode}, 任务ID: ${taskId})`)
 
           // 使用原生 http/https 模块以获得最高的流媒体转发性能
           const http = require('http')
           const https = require('https')
+
+          if (req.method === 'GET' && isTaggingMode && !isInline && (!req.headers.range || req.headers.range === 'bytes=0-')) {
+            if (taskId) fileCache.cacheProgress.set(taskId, { progress: 0, status: 'downloading', total: 0, received: 0, speed: 0, updatedAt: Date.now() })
+            try {
+              preparedDownload = await downloadInRanges(urlStr, { signal: downloadAbort.signal, progress: updateDownloadProgress })
+            } catch { return }
+            if (downloadAbort.signal.aborted) { preparedDownload?.cleanup(); return }
+          }
 
           // Manual redirect handling for maximum control and stability
           const doFetch = async (targetUrl: string, attempt: number) => {
@@ -5845,7 +5776,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
             try {
               const { url: parsedUrl, address, family } = await resolvePublicUrl(targetUrl)
-              if (res.destroyed || res.writableEnded) return
+              if (res.destroyed || res.writableEnded) { preparedDownload?.cleanup(); return }
               const options: any = {
                 method: req.method,
                 lookup: (_host: string, opts: any, callback: any) => opts.all ? callback(null, [{ address, family }]) : callback(null, address, family),
@@ -5864,13 +5795,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               const lib = parsedUrl.protocol === 'https:' ? https : http
 
               const failProxy = (err: Error) => {
+                if (taskId) {
+                  const previous = fileCache.cacheProgress.get(taskId)
+                  fileCache.cacheProgress.set(taskId, { ...previous, progress: previous?.progress || 0, status: 'error', speed: 0, errorMsg: `下载连接中断：${(err as any).code || err.message}`, updatedAt: Date.now() })
+                  setTimeout(() => fileCache.cacheProgress.delete(taskId), 30000)
+                }
                 if (res.destroyed || res.writableEnded) return
                 if (res.headersSent) res.destroy(err)
                 else { res.writeHead(502); res.end('Request Error') }
               }
-              const proxyReq = lib.request(targetUrl, options, (proxyRes: any) => {
+              let proxyReq: any
+              const handleResponse = (proxyRes: any) => {
                 // The timeout protects connection/headers, not paused or backpressured audio.
-                proxyReq.setTimeout(0)
+                proxyReq?.setTimeout(0)
                 proxyRes.once('error', failProxy)
                 proxyRes.once('aborted', () => failProxy(new Error('Upstream response aborted')))
                 // 处理重定向
@@ -5885,6 +5822,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 }
 
                 // 处理最终响应
+                if (isTaggingMode && ![200, 206].includes(proxyRes.statusCode)) {
+                  proxyRes.resume()
+                  failProxy(new Error(`上游返回 HTTP ${proxyRes.statusCode}`))
+                  return
+                }
                 let contentType = (req as any).castContentType || proxyRes.headers['content-type'] || 'application/octet-stream'
                 // Some audio CDNs label M4A bytes as form data. Safari needs a media MIME type.
                 // Only repair generic labels on successful responses; preserve explicit error documents.
@@ -5933,19 +5875,19 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   const lyricInterval = urlObj.searchParams.get('interval') || ''
 
                   const chunks: any[] = []
-                  let received = 0
+                  let received = preparedDownload?.total || 0
                   const total = parseInt(proxyRes.headers['content-length'] as string || '0', 10)
                   let lastSpeedAt = Date.now()
                   let lastSpeedBytes = 0
                   let currentSpeed = 0
 
-                  if (taskId) {
+                  if (taskId && !preparedDownload) {
                     fileCache.cacheProgress.set(taskId, { progress: 0, status: 'downloading', total, received: 0, speed: 0, updatedAt: Date.now() })
                   }
 
                   proxyRes.on('data', (c: any) => {
-                    chunks.push(c)
-                    if (taskId) {
+                    if (!preparedDownload) chunks.push(c)
+                    if (taskId && !preparedDownload) {
                       received += c.length
                       const now = Date.now()
                       if (now - lastSpeedAt >= 1000) {
@@ -5969,13 +5911,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                     let tempPath = ''
                     let tagger: any = null
                     try {
-                      const buffer = Buffer.concat(chunks)
-                      if (buffer.length < 100) throw new Error('File too small, possibly invalid');
+                      const buffer = preparedDownload ? null : Buffer.concat(chunks)
+                      if (buffer && buffer.length < 100) throw new Error('File too small, possibly invalid');
 
                       // Use filename extension for temp file so MusicTagger can identify container format
                       const ext = path.extname(filename) || '.mp3'
                       tempPath = path.join(os.tmpdir(), `lx_tag_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${ext}`)
-                      fs.writeFileSync(tempPath, new Uint8Array(buffer))
+                      if (preparedDownload) fs.copyFileSync(preparedDownload.filePath, tempPath)
+                      else fs.writeFileSync(tempPath, new Uint8Array(buffer!))
 
                       tagger = new MusicTagger()
                       tagger.loadPath(tempPath)
@@ -6008,41 +5951,59 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                         }
                       }
                       // [新增] 嵌入歌词 USLT 标签：SDK 返回 { promise, cancel }，必须 await .promise
-                      if (embedLyric && lyricSource && lyricSongmid && musicSdk[lyricSource]?.getLyric) {
+                      let expectedLyrics = ''
+                      if (embedLyric) {
                         try {
-                          const lyricReqObj = musicSdk[lyricSource].getLyric({
+                          expectedLyrics = await resolveDownloadLyrics({
+                            source: lyricSource,
                             songmid: lyricSongmid,
                             name: songName,
                             singer: artist,
                             hash: lyricHash,
                             interval: lyricInterval,
-                          })
-                          const lyricResult = await lyricReqObj.promise
-                          const lyricText = lyricResult?.lyric || lyricResult?.lrc || ''
-                          if (lyricText) tagger.lyrics = lyricText
-                        } catch (e) { /* 歌词获取失败不影响下载 */ }
+                            copyrightId: urlObj.searchParams.get('copyrightId') || '',
+                            albumId: urlObj.searchParams.get('albumId') || '',
+                            lrcUrl: urlObj.searchParams.get('lrcUrl') || '',
+                            mrcUrl: urlObj.searchParams.get('mrcUrl') || '',
+                            trcUrl: urlObj.searchParams.get('trcUrl') || '',
+                          }, proxyUser || '_open', lookupLocalLyrics, musicSdk)
+                          tagger.lyrics = expectedLyrics
+                        } catch (e: any) {
+                          console.warn('[下载代理] 歌词嵌入失败:', lyricSource, lyricSongmid, e.message || e)
+                        }
                       }
                       tagger.save()
                       console.log('[下载代理] 音频元数据标签保存成功:', songName)
                       tagger.dispose()
                       tagger = null
 
+                      if (expectedLyrics) {
+                        const verification = new MusicTagger()
+                        try {
+                          verification.loadPath(tempPath)
+                          if (verification.lyrics !== expectedLyrics) throw new Error('歌词标签写入后校验失败')
+                        } finally { verification.dispose() }
+                      }
+
                       const tagged = fs.readFileSync(tempPath)
                       headers['Content-Length'] = tagged.length.toString()
-                      if (!res.headersSent) {
+                      if (!res.destroyed && !res.headersSent) {
                         res.writeHead(200, headers)
                         res.end(tagged)
                       }
                       finishProgress()
                     } catch (e: any) {
-                      if (!res.headersSent) {
+                      console.warn('[下载代理] 标签处理失败，返回原始音频:', e.message || e)
+                      if (!res.destroyed && !res.headersSent) {
                         res.writeHead(200, headers)
-                        res.end(Buffer.concat(chunks))
+                        if (preparedDownload) res.end(fs.readFileSync(preparedDownload.filePath))
+                        else res.end(Buffer.concat(chunks))
                       }
                       finishProgress()
                     } finally {
                       if (tagger) tagger.dispose()
                       if (tempPath) fs.unlink(tempPath, () => { })
+                      preparedDownload?.cleanup()
                     }
                   })
                   return
@@ -6052,7 +6013,22 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   res.writeHead(proxyRes.statusCode || 200, headers)
                   proxyRes.pipe(res)
                 }
-              })
+              }
+
+              if (preparedDownload) {
+                const stream: any = fs.createReadStream(preparedDownload.filePath)
+                stream.statusCode = 200
+                stream.headers = { 'content-type': 'application/octet-stream', 'content-length': String(preparedDownload.total) }
+                stream.once('error', () => preparedDownload?.cleanup())
+                res.once('close', () => {
+                  stream.destroy()
+                  if (stream.closed) preparedDownload?.cleanup()
+                  else stream.once('close', () => preparedDownload?.cleanup())
+                })
+                handleResponse(stream)
+                return
+              }
+              proxyReq = lib.request(targetUrl, options, handleResponse)
 
               proxyReq.on('error', (err: any) => {
                 console.error(`[${proxyLabel}] 请求异常:`, err)
@@ -6070,6 +6046,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               proxyReq.end()
 
             } catch (err: any) {
+              preparedDownload?.cleanup()
+              if (taskId) {
+                fileCache.cacheProgress.set(taskId, { progress: 0, status: 'error', speed: 0, errorMsg: `下载失败：${err.code || err.message}`, updatedAt: Date.now() })
+                setTimeout(() => fileCache.cacheProgress.delete(taskId), 30000)
+              }
               if (err.code === 'ERR_PRIVATE_UPSTREAM') {
                 console.warn(`[${proxyLabel}] 已拒绝受限地址: ${err.hostname} -> ${err.addresses.join(', ')}`)
               } else console.error(`[${proxyLabel}] 代理请求捕获异常:`, err)
@@ -6879,6 +6860,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             const result = await resolveServerSong(songInfo, quality, verifiedUsername, false)
+            if (result.quality !== quality) throw new Error('音源返回的音质与请求音质不一致')
             const bytes = await getAudioRemoteSize(result.url)
             if (!bytes) throw new Error('无法读取真实文件大小')
 
@@ -9524,35 +9506,12 @@ export const startServer = async (port: number, ip: string) => {
 
   // [新增] 注入歌词获取钩子：用于服务器缓存时自动嵌入 USLT 标签
   // SDK 的 getLyric() 返回 { promise, cancel }，必须 await .promise
-  fileCache.setLyricFetcher(async (songInfo: any) => {
+  fileCache.setLyricFetcher(async (songInfo: any, owner = '_open') => {
     try {
-      const source = songInfo.source
-      if (!source || !musicSdk[source] || !musicSdk[source].getLyric) {
-        console.log(`[歌词抓取] 跳过: 不支持的音源 "${source}"`)
-        return null
-      }
-      // [Fix] Strip source prefix from songmid (e.g. "tx_004bd0..." -> "004bd0...")
-      let songmid: string = songInfo.songmid || songInfo.id || ''
-      const sourcePrefix = `${source}_`
-      if (songmid.startsWith(sourcePrefix)) songmid = songmid.slice(sourcePrefix.length)
-      if (!songmid) {
-        console.log(`[歌词抓取] 跳过: 歌曲 songmid 为空`)
-        return null
-      }
-      console.log(`[歌词抓取] 正在获取歌词: ${source}_${songmid} (${songInfo.name})`)
-      const requestObj = musicSdk[source].getLyric({
-        songmid,
-        name: songInfo.name || '',
-        singer: songInfo.singer || '',
-        hash: songInfo.hash || '',
-        interval: songInfo.interval || '',
-      })
-      const result = await requestObj.promise
-      const lyricText = result?.lyric || result?.lrc || null
-      console.log(`[歌词抓取] 获取结果: ${lyricText ? lyricText.length + ' 字符' : '无歌词'}`)
-      return lyricText
+      const result = await resolveSongLyricData(songInfo, owner, lookupLocalLyrics, musicSdk)
+      return buildLyrics(result)
     } catch (e: any) {
-      console.warn(`[歌词抓取] 抓取失败 (${songInfo.name}):`, e.message || e)
+      console.warn('[Lyric] Download lyric lookup failed:', songInfo.source, songInfo.songmid || songInfo.id, e.message || e)
       return null
     }
   })

@@ -76,6 +76,7 @@ test('local sidecar lyrics cover music, cache and custom directories without cro
         export function getCacheDir(user,music){return path.join(${JSON.stringify(temp)},user,music?'music':'cache')}
         export function getCustomMusicDir(user){return path.join(${JSON.stringify(temp)},user,'custom')}
         export function checkLyricCache(){return {exists:false}}
+        export function readCachedEmbeddedLyrics(){return {exists:false}}
         export function checkCustomLyricCache(){return {exists:false}}
       ` }))
     } }],

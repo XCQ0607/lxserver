@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { resolveContainedPath } from '../auth/security'
 import { parseLyrics } from '@/utils/lrcTool'
-import { checkLyricCache, getCacheDir } from './fileCache'
+import { checkLyricCache, getCacheDir, readCachedEmbeddedLyrics } from './fileCache'
 import { getCustomMusicDir, checkCustomLyricCache } from './customMusicManager'
 
 /** All roots are resolved from the authenticated user, never from a supplied absolute path. */
@@ -22,5 +22,8 @@ export function lookupLocalLyrics(song: any, user: string): { exists: boolean; c
     return { exists: false }
   }
   const cached = checkLyricCache(song, user)
-  return cached.exists && (cached.content?.lyric || cached.content?.lrc)?.trim() ? cached : checkCustomLyricCache(song, user)
+  if (cached.exists && (cached.content?.lyric || cached.content?.lrc)?.trim()) return cached
+  const custom = checkCustomLyricCache(song, user)
+  if (custom.exists) return custom
+  return song.includeEmbedded ? readCachedEmbeddedLyrics(song, user) : { exists: false }
 }
