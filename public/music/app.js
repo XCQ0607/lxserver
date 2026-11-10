@@ -7455,11 +7455,21 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         await fadeVolume(0, 300);
     }
 
+    if (currentLoadingRequestId !== thisRequestId) return;
     if (!noPlay) {
         try { audio.pause(); } catch (e) { }
     }
+    // A fresh request must not expose the previous track's position while resolving.
+    // Keep _resumeInfo intact: refresh/reconnect resumes are validated by song below.
+    if (!isRetry) {
+        try { audio.currentTime = 0; } catch (e) { }
+        lastKnownPlaybackTime = 0;
+        document.getElementById('time-current').innerText = formatTime(0);
+        document.getElementById('progress-bar').style.width = '0%';
+    }
     updatePlayButton(false);
 
+    let sourceAssigned = false;
     try {
         // 1. 智能音质选择与 URL 解析
         if (!urlResult) {
@@ -7585,6 +7595,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
 
         audio.src = finalUrl;
+        sourceAssigned = true;
 
         if (window._resumeInfo && window._resumeInfo.time > 0) {
             const resumeInfo = window._resumeInfo;
@@ -7710,7 +7721,10 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
-            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
+            // Before src is assigned the media element still belongs to the old song.
+            const savedTime = sourceAssigned
+                ? Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0)
+                : (currentRecoveryState.savedResumeTime || 0);
             await runRecoveryFlow(error, savedTime);
         } else {
             setPlayerStatus('播放失败');
