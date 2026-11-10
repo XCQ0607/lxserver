@@ -191,9 +191,8 @@ export function localMusic(track: LocalTrack): LX.Music.MusicInfo {
   return { id: track.id, name: track.title, singer: track.artist, source: 'local', interval: String(track.duration),
     meta: { albumName: track.album, localTrack: track } } as any
 }
-export function localSong(track: LocalTrack, user: string) {
+export function localSong(track: LocalTrack, user: string, state = readLocalState(user)) {
   const { root, filename, platformId, mtime, ...data } = track
-  const state = readLocalState(user)
   return { ...data, duration: Math.floor(track.duration), name: track.title, parent: track.albumId, isDir: false, isVideo: false, type: 'music',
     coverArt: track.id, path: filename.replace(/\\/g, '/'), created: new Date(mtime).toISOString(),
     comment: platformId ? 'NAS 本地 · 已关联在线平台' : 'NAS 本地 · 未关联在线平台',

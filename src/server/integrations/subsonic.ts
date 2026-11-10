@@ -9,7 +9,7 @@ import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { createRatingSnapshot, withMetaLock } from '../rating/ratingSnapshot'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
-import { downloadAndCache, checkCache, serveCacheFile, getFileName } from '@/server/music/fileCache'
+import { downloadAndCache, checkCache, serveCacheFile, getFileName, getCacheDir } from '@/server/music/fileCache'
 import { resolveOpenlistCacheEntry } from '@/server/openlist/openlistBackup'
 import {
     getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
@@ -1964,13 +1964,22 @@ class SubsonicHandler {
         }, format)
     }
 
-    private async getLocalLibraryPlaylist(username: string, customOnly = false) {
+    private async getLocalLibraryPlaylist(username: string, customOnly = false, includeSongs = true) {
         const customDir = getCustomMusicDir(username)
+        const musicDir = path.resolve(getCacheDir(username, true))
+        const cacheDir = path.resolve(getCacheDir(username, false))
+        const customRoot = customDir ? path.resolve(customDir) : null
+        const includeCache = global.lx.config['subsonic.cachePlaylist'] === true
         const id = customOnly ? 'custom-library' : 'local-library'
         const tracks = (await getLocalTracks(username)).filter(t => {
-            const isCustom = !!customDir && path.resolve(t.root) === path.resolve(customDir)
-            return customOnly ? isCustom : !isCustom
+            const root = path.resolve(t.root)
+            // Built-in storage takes precedence when a custom directory points at it.
+            const isMusic = root === musicDir
+            const isCache = root === cacheDir
+            const isCustom = root === customRoot && !isMusic && !isCache
+            return customOnly ? isCustom : isMusic || (includeCache && isCache)
         }).sort((a, b) => a.title.localeCompare(b.title, 'zh-Hans-CN') || a.id.localeCompare(b.id))
+        const state = includeSongs && tracks.length ? readLocalState(username) : undefined
         return {
             meta: {
                 id, name: `${customOnly ? '自定义目录' : '本地歌曲'}(${username})`, owner: username, public: false,
@@ -1981,7 +1990,10 @@ class SubsonicHandler {
                 changed: new Date(tracks.reduce((n, t) => Math.max(n, t.mtime), 0)).toISOString(),
                 readonly: true,
             },
-            songs: tracks.map(t => this.musicToSongFlat(localMusic(t), id, undefined, username)),
+            songs: includeSongs ? tracks.map(t => ({
+                ...localSong(t, username, state), parent: id,
+                userRating: this.userRatingsCache.get(username)?.[localRatingId(t)] || 0,
+            })) : [],
         }
     }
 
@@ -2090,9 +2102,9 @@ class SubsonicHandler {
 
         const playlists: any[] = []
         if (global.lx.config['subsonic.localPlaylist'] !== false) {
-            playlists.push((await this.getLocalLibraryPlaylist(username)).meta)
+            playlists.push((await this.getLocalLibraryPlaylist(username, false, false)).meta)
             if (global.lx.config['subsonic.customPlaylist'] !== false && getCustomMusicDir(username)) {
-                playlists.push((await this.getLocalLibraryPlaylist(username, true)).meta)
+                playlists.push((await this.getLocalLibraryPlaylist(username, true, false)).meta)
             }
         }
 

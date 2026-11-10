@@ -367,6 +367,7 @@ declare namespace LX {
      */
     'subsonic.localPlaylist'?: boolean
     'subsonic.customPlaylist'?: boolean
+    'subsonic.cachePlaylist'?: boolean
     'subsonic.publicLeaderboards'?: boolean
 
     /**

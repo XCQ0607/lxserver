@@ -1426,6 +1426,17 @@
                                     style="display: none;">
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
+                                            <span class="config-toggle-label">返回缓存目录歌曲 <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="默认关闭，本地歌曲歌单仅返回当前账号所选存储位置 music 目录中的歌曲。开启后将 cache 目录歌曲一并加入本地歌曲歌单。">?</button></span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="subsonic.cachePlaylist" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
                                             <span class="config-toggle-label">返回自定义目录歌曲 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
                                                     data-help="单独返回“自定义目录(用户名)”只读歌单，放在本地歌曲歌单之后。仅收录该账号已启用的自定义音乐目录。关闭后不返回此歌单。">?</button></span>
