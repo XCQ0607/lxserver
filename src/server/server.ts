@@ -1,6 +1,6 @@
 import { readRatingPreferences, saveRatingPreferences } from './rating/ratingPreferences'
 import { ratingVersion, readRatingTasks, retryRatingTasks, ratingIdentityDetails, listRatingItems, readRatings, resolveRatingId, resolveStoredRatingId, writeRating } from './rating/ratingService'
-import { getOpenlistRuntimeStatus } from './openlist/openlistBackup'
+import { getOpenlistRuntimeStatus, getOpenlistConnection, probeOpenlistConnection, verifyPending } from './openlist/openlistBackup'
 import * as webdavRestoreTasks from './backup/webdavRestoreTasks'
 import { lookupLocalLyrics } from './music/localLyrics'
 import { resolveOpenlistCacheEntry } from './openlist/openlistBackup'
@@ -8140,6 +8140,21 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         })()
         return
       }
+      if (pathname === '/api/openlist/connection') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401); res.end(); return
+        }
+        if (!['GET', 'POST'].includes(req.method || '')) { res.writeHead(405); res.end(); return }
+        void (async () => {
+          try {
+            const connection = req.method === 'POST' ? await probeOpenlistConnection() : getOpenlistConnection()
+            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ success: true, connection }))
+            if (req.method === 'POST' && connection.state === 'online') void verifyPending()
+          } catch { res.writeHead(500); res.end(JSON.stringify({ error: '连接探测失败' })) }
+        })()
+        return
+      }
       if (['/api/openlist/metadata', '/api/openlist/metadata/start', '/api/openlist/metadata/cancel'].includes(pathname)) {
         if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
           res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'Unauthorized' })); return
@@ -8148,7 +8163,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           try {
             let result: any
             if (pathname === '/api/openlist/metadata' && req.method === 'GET') result = openlistMetadataStatus()
-            else if (pathname === '/api/openlist/metadata/start' && req.method === 'POST') result = startOpenlistMetadata(JSON.parse(await readBody(req) || '{}'))
+            else if (pathname === '/api/openlist/metadata/start' && req.method === 'POST') result = await startOpenlistMetadata(JSON.parse(await readBody(req) || '{}'))
             else if (pathname === '/api/openlist/metadata/cancel' && req.method === 'POST') { cancelMetadata(); result = { stopped: true } }
             else { res.writeHead(405); res.end(); return }
             res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
@@ -8166,7 +8181,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         try {
           const list = listBackups()
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true, list }))
+          res.end(JSON.stringify({ success: true, list, connection: getOpenlistConnection() }))
         } catch (e: any) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))

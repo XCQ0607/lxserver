@@ -84,6 +84,7 @@ export async function publishRecoveryManifest(cl: OpenListClient): Promise<void>
   for (const row of rows) {
     if (row.folder_type === 'data' && row.remote_path.startsWith(dataPrefix)) {
       const relative = row.remote_path.slice(dataPrefix.length)
+      if (relative.split('/').some(segment => segment.toLowerCase() === 'test-evidence')) continue
       if (!backupType(relative) || !types.includes(backupType(relative)!)) continue
       const object = `_system/recovery/objects/${row.local_hash!.slice(0, 2)}/${row.local_hash}`
       const target = cl.resolveRemotePath(object)

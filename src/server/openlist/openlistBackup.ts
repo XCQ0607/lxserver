@@ -11,6 +11,7 @@
  * 状态机：pending -> uploading -> completed -> verified（失败记 failed，删除记 deleted）。
  * 纯路径（不含域名/URL）存库，供后续定位与下载使用。
  */
+import { openlistError } from './openlistErrors'
 import path from 'node:path'
 import fs from 'node:fs'
 import crypto from 'node:crypto'
@@ -24,15 +25,67 @@ export function integrityStatus() {
 import { metadataObservations, recordRemoteObservation, metadataStatus, startMetadata, cancelMetadata } from './openlistMetadata'
 export { cancelMetadata }
 function metadataSource() { const cfg = getConfig(); return crypto.createHash('sha256').update(JSON.stringify([cfg.endpoint, cfg.root.replace(/\\/g, '/').replace(/\/+$/, '') || '/', cfg.username, cfg.token || cfg.password])).digest('hex') }
+let connectionSource = ''
+let connection = { state: 'unknown', checkedAt: 0, lastSuccessAt: 0, nextProbeAt: 0, failures: 0, message: '尚未探测连接' }
+let connectionProbe: Promise<ReturnType<typeof getOpenlistConnection>> | null = null
+export function getOpenlistConnection() {
+  const source = metadataSource()
+  if (connectionSource !== source) {
+    connectionSource = source
+    connection = { state: 'unknown', checkedAt: 0, lastSuccessAt: 0, nextProbeAt: 0, failures: 0, message: '尚未探测连接' }
+  }
+  return { ...connection, enabled: getConfig().enable, checking: verifyRunning }
+}
+export async function probeOpenlistConnection() {
+  getOpenlistConnection()
+  if (connectionProbe) return connectionProbe
+  const source = connectionSource, cl = getClient()
+  if (!cl) return { ...getOpenlistConnection(), state: 'disabled', message: 'OpenList 未启用或连接未配置' }
+  connectionProbe = (async () => {
+    try {
+      await cl.testConnection(10000)
+      if (source === metadataSource()) connection = { state: 'online', checkedAt: Date.now(), lastSuccessAt: Date.now(), nextProbeAt: 0, failures: 0, message: '连接正常，可访问配置的备份目录' }
+    } catch (error: any) {
+      if (source === metadataSource()) {
+        const detail = String(error?.message || error)
+        const auth = ['auth', 'permission'].includes(openlistError(error).code)
+        const failures = connection.failures + 1
+        connection = { ...connection, state: auth ? 'auth_error' : 'unavailable', checkedAt: Date.now(), failures,
+          nextProbeAt: Date.now() + Math.min(300000, 30000 * 2 ** Math.min(failures - 1, 4)),
+          message: auth ? '认证或访问权限异常，请检查账号、令牌和目录权限' : '暂时无法访问 OpenList，请检查服务、网络或备份目录' }
+      }
+    }
+    return getOpenlistConnection()
+  })()
+  try { return await connectionProbe } finally { connectionProbe = null }
+}
+async function connectionReady(cl: OpenListClient): Promise<boolean> {
+  if (cl !== getClient() || !getConfig().enable) return false
+  const health = getOpenlistConnection()
+  if (health.nextProbeAt > Date.now()) return false
+  if (health.state === 'online' && Date.now() - health.checkedAt < 15000) return true
+  return (await probeOpenlistConnection()).state === 'online'
+}
+async function pauseConnection(error: any, cl: OpenListClient): Promise<boolean> {
+  if (!openlistError(error).connection) return false
+  await probeOpenlistConnection()
+  return cl !== getClient() || getOpenlistConnection().state !== 'online'
+}
 function observeRemote(row: any, info?: { size?: number; modified?: string }, error?: any) { recordRemoteObservation(metadataSource(), row, info, error) }
 export function openlistMetadataStatus() { const root = getConfig().root.replace(/\/+$/, '') + '/'; return { ...metadataStatus(metadataSource()), total: listAllBackups().filter(row => !row.deleted_at && row.remote_path.startsWith(root)).length } }
-export function startOpenlistMetadata(options: { target?: string; ids?: number[] }) {
+export async function startOpenlistMetadata(options: { target?: string; ids?: number[] }) {
   if (!options || !['local', 'remote', 'both'].includes(options.target || '')) throw new Error('检查位置无效')
   if (options.ids !== undefined && (!Array.isArray(options.ids) || !options.ids.length || options.ids.some(id => !Number.isSafeInteger(id) || id <= 0))) throw new Error('记录范围无效')
+  if (options.target !== 'local' && (await probeOpenlistConnection()).state !== 'online') throw new Error(getOpenlistConnection().message)
   const ids = options.ids ? new Set(options.ids) : null
   const cl = getClient(), root = getConfig().root.replace(/\/+$/, '') + '/'
   const rows = listAllBackups().filter(row => !row.deleted_at && (!ids || ids.has(row.id)) && row.remote_path.startsWith(root))
-  return startMetadata(metadataSource(), rows, options.target!, cl)
+  const source = metadataSource()
+  return startMetadata(source, rows, options.target!, cl, async () => {
+    if (source !== metadataSource() || !getConfig().enable) throw new Error('连接配置已变化，请重新开始检查')
+    const status = getOpenlistConnection()
+    return status.nextProbeAt > Date.now() ? false : (await probeOpenlistConnection()).state === 'online'
+  })
 }
 function integrityContext() {
   const cl = getClient()
@@ -42,6 +95,7 @@ function integrityContext() {
   const files = new Map<string, IntegrityFile>()
   for (const row of listAllBackups()) {
     if (row.deleted_at || !['completed', 'verified'].includes(row.status) || !row.remote_path.startsWith(cl.resolveRemotePath(''))) continue
+    if (row.folder_type === 'data' && (row.name || '').split('/').some((segment: string) => segment.toLowerCase() === 'test-evidence')) continue
     const observation = observations(row.remote_path)
     const changedAt = observation?.baseline === JSON.stringify([row.size, row.local_hash, row.remote_mtime]) ? observation.changedAt : undefined
     const type = row.folder_type === 'data' ? backupType(row.name || '') || 'system' : row.folder_type
@@ -550,6 +604,7 @@ async function refetchLocalFile(row: any): Promise<boolean> {
 
 async function uploadOne(row: any, cl: OpenListClient, mode: SyncMode, retries = UPLOAD_RETRY_TIMES): Promise<boolean> {
   row = currentUploadRow(row, cl)
+  if (!await connectionReady(cl)) { setBackupStatus(row.id, 'pending'); return false }
   if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) return false
   // 本地源文件缺失时尝试按源重新拉取（缓存被清理 / 容器重建导致丢失 -> ENOENT 自愈）
   if (!row.local_path || !fs.existsSync(row.local_path)) {
@@ -586,6 +641,7 @@ async function uploadOne(row: any, cl: OpenListClient, mode: SyncMode, retries =
       })
       return true
     } catch (e: any) {
+      if (await pauseConnection(e, cl)) { setBackupStatus(row.id, 'pending', { error: null }); return false }
       if (attempt >= retries) {
         setBackupStatus(row.id, 'failed', { error: String(e?.message || e), retryCount: (row.retry_count || 0) + 1 })
         return false
@@ -601,6 +657,7 @@ async function uploadOne(row: any, cl: OpenListClient, mode: SyncMode, retries =
  * 与 uploadOne 对称，失败记为 failed（带重试计数）。
  */
 async function downloadOne(row: any, cl: OpenListClient, mode: SyncMode, metadata?: RecoveryCache): Promise<boolean> {
+  if (!await connectionReady(cl)) { setBackupStatus(row.id, 'pending'); return false }
   if (!rowEnabled(row) || getBackupById(row.id)?.deleted_at) return false
   try {
     setBackupStatus(row.id, 'uploading')
@@ -629,6 +686,7 @@ async function downloadOne(row: any, cl: OpenListClient, mode: SyncMode, metadat
     setBackupStatus(row.id, 'verified', { size, remoteMtime: parseMod(info.modified), localMtime: fs.statSync(row.local_path).mtimeMs, localHash: hashFile(row.local_path), error: null, retryCount: 0 })
     return true
   } catch (e: any) {
+    if (await pauseConnection(e, cl)) { setBackupStatus(row.id, 'pending', { error: null }); return false }
     setBackupStatus(row.id, 'failed', { error: String(e?.message || e), retryCount: (row.retry_count || 0) + 1 })
     return false
   }
@@ -788,6 +846,7 @@ export async function resolveOpenlistCacheDirectUrl(user: string, folder: 'cache
 }
 
 async function uploadAttachment(att: any, cl: OpenListClient): Promise<void> {
+  if (!await connectionReady(cl)) { setAttachmentStatus(att.id, 'pending'); return }
   if (!folderEnabled(att.user, att.folder_type)) return
   try {
     setAttachmentStatus(att.id, 'uploading')
@@ -800,6 +859,7 @@ async function uploadAttachment(att: any, cl: OpenListClient): Promise<void> {
     const v = await cl.getFileInfo(att.remote_path)
     if (v && v.size != null) setAttachmentStatus(att.id, 'verified', { size: v.size })
   } catch (e: any) {
+    if (await pauseConnection(e, cl)) { setAttachmentStatus(att.id, 'pending'); return }
     setAttachmentStatus(att.id, 'failed', { error: String(e?.message || e) })
   }
 }
@@ -1041,6 +1101,9 @@ export async function verifyPending(): Promise<void> {
     const cl = getClient()
     if (!cl) return
     const cfg = getConfig()
+    const health = getOpenlistConnection()
+    if (health.nextProbeAt > Date.now()) return
+    if ((await probeOpenlistConnection()).state !== 'online') return
     const rows = [...listBackupByStatus('completed'), ...listBackupByStatus('verified')]
     for (const row of rows) {
       if (!rowEnabled(row, cfg) || enqueuedIds.has(`f:${row.id}`)) continue
@@ -1083,6 +1146,7 @@ export async function verifyPending(): Promise<void> {
           }
         }
       } catch (e: any) {
+        if (!(e instanceof OpenListNotFoundError) && (await probeOpenlistConnection()).state !== 'online') return
         observeRemote(row, undefined, e)
         const missingDataBackup = row.folder_type === 'data' && e instanceof OpenListNotFoundError && fs.existsSync(row.local_path)
         setBackupStatus(row.id, missingDataBackup ? 'failed' : row.status, { error: String(e?.message || e) })
@@ -1154,6 +1218,7 @@ function lazyStartScheduler(): void {
   startVerifyScheduler()
 }
 
+let connectionTimer: ReturnType<typeof setInterval> | null = null
 let nextScheduledSync = 0
 let nextScheduledCheck = 0
 let lastSyncResult: { at: number; uploaded: number; downloaded: number; deleted: number; errors: string[] } | null = null
@@ -1188,10 +1253,19 @@ export function startVerifyScheduler(): void {
   syncTimer = setInterval(() => { nextScheduledSync = Date.now() + syncDelay; void runSyncNow().catch(e => console.warn('[OpenList] 定时同步失败:', e)) }, syncDelay)
   verifyTimer.unref()
   syncTimer.unref()
+  connectionTimer = setInterval(() => {
+    const status = getOpenlistConnection()
+    if (status.nextProbeAt && Date.now() >= status.nextProbeAt) void probeOpenlistConnection().then(result => {
+      if (result.state === 'online') void verifyPending()
+    }).catch(error => console.warn('[OpenList] 连接探测失败:', error))
+  }, 10000)
+  connectionTimer.unref()
   void verifyPending()
 }
 
 export function stopVerifyScheduler(): void {
+  if (connectionTimer) clearInterval(connectionTimer)
+  connectionTimer = null
   nextScheduledCheck = 0
   nextScheduledSync = 0
   if (verifyTimer) {
@@ -1327,16 +1401,40 @@ async function uploadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: Ba
   }
 }
 
+async function preserveDeletedBackup(row: any, cl: OpenListClient, remoteExists: boolean) {
+  const root = path.resolve(global.lx.dataPath, 'backups', 'openlist-recycle')
+  const dir = path.resolve(root, crypto.randomUUID())
+  if (!isSubPath(dir, root) || dir === root) throw new Error('回收目录无效，已取消删除')
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(path.join(dir, 'manifest.json'), JSON.stringify({ at: Date.now(), source: metadataSource(), row, attachments: listAttachments(row.id) }), { mode: 0o600 })
+  if (fs.existsSync(row.local_path)) {
+    fs.copyFileSync(row.local_path, path.join(dir, 'file'))
+    if (row.local_hash && hashFile(path.join(dir, 'file')) !== row.local_hash) throw new Error('保存回收副本时发现本地文件变化，已取消删除')
+  }
+  else if (remoteExists) await cl.download(row.remote_path, path.join(dir, 'file'), undefined, undefined, row.local_hash || undefined)
+  for (const att of listAttachments(row.id)) {
+    if (att.local_path && fs.existsSync(att.local_path)) fs.copyFileSync(att.local_path, path.join(dir, 'attachment-' + att.id))
+    else if (att.remote_path) await cl.download(att.remote_path, path.join(dir, 'attachment-' + att.id))
+  }
+}
 async function deletionDetection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
-  for (const row of listBackupsByUserFolder(entry.user, folderType)) {
+  const rows = listBackupsByUserFolder(entry.user, folderType)
+  const observations = new Map<number, Awaited<ReturnType<OpenListClient['getFileInfo']>> | null>()
+  let deletions = 0
+  for (const row of rows) {
+    if (!['verified', 'completed'].includes(row.status) || enqueuedIds.has('f:' + row.id)) continue
+    let info = null
+    try { info = await cl.getFileInfo(row.remote_path) } catch (error) { if (!(error instanceof OpenListNotFoundError)) throw error }
+    observations.set(row.id, info)
+    if ((!info && fs.existsSync(row.local_path) && !localChanged(row)) ||
+        (info && !fs.existsSync(row.local_path) && folderType !== 'cache' && getLocalFile(row.user, row.local_path) && row.local_hash)) deletions++
+  }
+  if (deletions > 20) throw new Error('检测到超过 20 项删除，已暂停本目录同步；请核对本地目录和云端挂载后再处理')
+  for (const row of rows) {
     if (!['verified', 'completed'].includes(row.status) || enqueuedIds.has('f:' + row.id)) continue
     if (listAttachments(row.id).some(a => enqueuedIds.has(`a:${a.id}`))) continue
     const localExists = fs.existsSync(row.local_path)
-    let info: Awaited<ReturnType<OpenListClient['getFileInfo']>> | null = null
-    try { info = await cl.getFileInfo(row.remote_path) }
-    catch (e) {
-      if (!(e instanceof OpenListNotFoundError)) throw e // 网络/权限错误绝不能解释为删除
-    }
+    const info = observations.get(row.id) || null
     if (!localExists && info) {
       // cache 是可淘汰的副本，缺失不代表用户希望删除云端。
       // 显式清理登记也保留远端；只有音乐/快照的已同步文件缺失才传播删除。
@@ -1344,9 +1442,14 @@ async function deletionDetection(entry: UserBackupCfg, cl: OpenListClient, cfg: 
       if (folderType === 'cache' || !registered || !row.local_hash) continue
       const rm = parseMod(info.modified)
       if (info.size !== row.size || (rm != null && row.remote_mtime != null && rm !== row.remote_mtime)) continue
+      await preserveDeletedBackup(row, cl, true)
+      const latest = await cl.getFileInfo(row.remote_path)
+      if (latest.size !== info.size || latest.modified !== info.modified || fs.existsSync(row.local_path)) continue
       await cl.remove(row.remote_path)
     } else if (!info && localExists) {
       // 本地有尚未同步的新修改时保留它，让上传方向重建远端。
+      if (localChanged(row)) continue
+      await preserveDeletedBackup(row, cl, false)
       if (localChanged(row)) continue
       fs.unlinkSync(row.local_path)
     } else if (info || localExists) continue
@@ -1570,7 +1673,8 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
       await cl.mkdir(cl.resolveRemotePath(''))
       await cl.testConnection()
     }
-  } catch (e: any) { summary.errors.push(e?.message || String(e)); return summary }
+    await probeOpenlistConnection()
+  } catch (e: any) { await probeOpenlistConnection(); summary.errors.push(openlistError(e).message); return summary }
   const selectedData = (global.lx.config as any)['backup.openlist.types'] !== undefined
   for (const entry of cfg.userBackups) {
     if (!entry.enabled) continue
@@ -1590,7 +1694,8 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
           await uploadDirection(entry, cl, cfg, ft, summary)
         }
       } catch (e: any) {
-        summary.errors.push(`${entry.user}/${ft}: ${e?.message || e}`)
+        summary.errors.push(`${entry.user}/${ft}: ${openlistError(e).message}`)
+        if (await pauseConnection(e, cl)) return summary
       }
     }
   }
@@ -1665,7 +1770,8 @@ export function listBackups(): any[] {
     const observed = observations(f.remote_path)
     const observation = observed?.baseline === JSON.stringify([f.size, f.local_hash, f.remote_mtime]) ? observed : undefined
     const localObservation = observations(f.remote_path, 'local')
-    const remoteState = observation?.state || 'unchecked'
+    const unavailable = ['unavailable', 'auth_error'].includes(getOpenlistConnection().state)
+    const remoteState = unavailable ? 'unavailable' : observation?.state || 'unchecked'
     const cfg = getConfig(), mode = effectiveModeFromRow(f, cfg)
     const enabled = rowEnabled(f, cfg)
     let taskState = 'completed'
@@ -1678,7 +1784,7 @@ export function listBackups(): any[] {
     } else if (localState === 'changed') taskState = mode === 'download' ? 'attention' : 'pending'
     else if (f.status === 'pending') taskState = mode === 'download' ? 'download' : 'pending'
     const stale = check?.result === 'stale'
-    return { ...f, task_state: taskState, sync_enabled: enabled, sync_mode: mode, local_state: localState, local_checked_at: Date.now(), last_manual_local_check: localObservation?.baseline === JSON.stringify([f.size, f.local_hash, f.remote_mtime]) ? localObservation.checkedAt : null, remote_state: remoteState, remote_checked_at: observation?.checkedAt || null, verification_stale: stale, user, content_verification: check?.result || null, content_verified_at: check?.result === 'matched' ? check.checkedAt : null, backup_type: relative ? backupType(relative) : null, local_exists: localExists, attachments: listAttachments(f.id) }
+    return { ...f, error_raw: f.error || observation?.error || null, error: f.error || observation?.error ? openlistError(f.error || observation?.error).message : null, task_state: taskState, sync_enabled: enabled, sync_mode: mode, local_state: localState, local_checked_at: Date.now(), last_manual_local_check: localObservation?.baseline === JSON.stringify([f.size, f.local_hash, f.remote_mtime]) ? localObservation.checkedAt : null, remote_state: remoteState, remote_error: observation?.error || null, remote_checked_at: observation?.checkedAt || null, verification_stale: stale, user, content_verification: check?.result || null, content_verified_at: check?.result === 'matched' ? check.checkedAt : null, backup_type: relative ? backupType(relative) : null, local_exists: localExists, attachments: listAttachments(f.id) }
   })
 }
 
@@ -1694,6 +1800,7 @@ export async function retryBackup(id: number): Promise<{ ok: boolean; message?: 
   if (syncJob || verifyRunning || manualTransfers || isCloudRestoreRunning() || enqueuedIds.has('f:' + id)) return { ok: false, message: '文件正在同步或校验，请稍后重试' }
   const cl = getClient()
   if (!cl) return { ok: false, message: 'OpenList 客户端不可用' }
+  if (!await connectionReady(cl)) return { ok: false, message: getOpenlistConnection().message }
   const mode = effectiveModeFromRow(row, cfg)
   const download = row.direction === 'download' || mode === 'download'
   // 不以“路径存在”判断成功。上传必须重新传输并确认大小/本地指纹；下载必须完整落盘。
@@ -1725,66 +1832,64 @@ export async function deleteOpenlistBackups(ids: number[], skipMainRemote = fals
   remoteFailed: string[]
 }> {
   if (!skipMainRemote && (syncJob || verifyRunning || manualTransfers)) throw new Error('OpenList 正在同步或校验，请稍后删除')
-  const db = getBackupDb()
-  const cl = getClient()
-  const ts = Date.now()
-  const remoteFailed: string[] = []
-  let deleted = 0
-  let remoteRemoved = 0
-  for (const id of ids) {
-    const row = getBackupById(id)
-    if (!row || row.deleted_at) continue
-    if (enqueuedIds.has(`f:${id}`)) { remoteFailed.push(`${row.remote_path} (文件正在上传，请稍后删除)`); continue }
-    const atts = listAttachments(id)
-    if (atts.some(a => enqueuedIds.has(`a:${a.id}`))) { remoteFailed.push(`${row.remote_path} (附件正在上传，请稍后删除)`); continue }
-    // 先软删除附件记录（避免后续远程引用计数把同属本记录的附件误判为「被其它活跃记录引用」）
-    // 附件：删远端（仅当无其它活跃记录引用同一远端路径）+ 删本地
-    for (const a of atts) {
-      if (unlinkAttachment(id, a.id) > 0) continue
-      db.prepare('UPDATE openlist_backup_attachments SET deleted_at = ?, status = ? WHERE id = ?').run(ts, 'deleted', a.id)
-      if (a.remote_path) {
-        if (cl && countRemotePathRefs(a.remote_path, id, a.id) === 0) {
-          try {
-            await cl.remove(a.remote_path)
-            remoteRemoved++
-          } catch (e: any) {
-            remoteFailed.push(`${a.remote_path} (${e?.message || e})`)
-          }
-        }
-      }
-      if (a.local_path && fs.existsSync(a.local_path) && countLocalPathRefs(a.local_path, id, a.id) === 0) {
-        try { fs.unlinkSync(a.local_path); softDeleteLocalFile(row.user, a.local_path) } catch { /* ignore */ }
-      }
-    }
-    // 软删除主记录
-    db.prepare(
-      'UPDATE openlist_backup_files SET deleted_at = ?, status = ?, error = NULL WHERE id = ?',
-    ).run(ts, 'deleted', id)
-    // 主文件远端：删远端（仅当无其它活跃记录引用同一远端路径）
-    if (row.remote_path && !skipMainRemote) {
-      if (cl && countRemotePathRefs(row.remote_path, id, -1) === 0) {
+  const release = skipMainRemote ? () => {} : beginCloudRestore()
+  try {
+    const db = getBackupDb()
+    const cl = getClient()
+    const ts = Date.now()
+    const remoteFailed: string[] = []
+    let deleted = 0
+    let remoteRemoved = 0
+    for (const id of ids) {
+      const row = getBackupById(id)
+      if (!row || row.deleted_at) continue
+      if (enqueuedIds.has(`f:${id}`)) { remoteFailed.push(`${row.remote_path} (文件正在上传，请稍后删除)`); continue }
+      const atts = listAttachments(id)
+      if (atts.some(a => enqueuedIds.has(`a:${a.id}`))) { remoteFailed.push(`${row.remote_path} (附件正在上传，请稍后删除)`); continue }
+      // 远端删除成功后才更改记录与本地文件；失败保留关联，允许原 ID 重试。
+      const paths = new Set(atts.filter(a => countRemotePathRefs(a.remote_path, id, a.id) === 0).map(a => a.remote_path))
+      if (!skipMainRemote && countRemotePathRefs(row.remote_path, id, -1) === 0) paths.add(row.remote_path)
+      let failed = false
+      for (const remote of paths) {
+        if (!remote) continue
         try {
-          await cl.remove(row.remote_path)
+          if (!cl) throw new Error('OpenList 未连接')
+          await cl.remove(remote)
           remoteRemoved++
         } catch (e: any) {
-          remoteFailed.push(`${row.remote_path} (${e?.message || e})`)
+          if (e instanceof OpenListNotFoundError) continue
+          remoteFailed.push(`${remote} (${e?.message || e})`)
+          failed = true
+          break
         }
-      } else if (!cl) {
-        remoteFailed.push(`${row.remote_path} (OpenList 未连接，跳过远端删除)`)
       }
+      if (failed) continue
+      // 先软删除附件记录（避免后续远程引用计数把同属本记录的附件误判为「被其它活跃记录引用」）
+      // 附件：删远端（仅当无其它活跃记录引用同一远端路径）+ 删本地
+      for (const a of atts) {
+        if (unlinkAttachment(id, a.id) > 0) continue
+        db.prepare('UPDATE openlist_backup_attachments SET deleted_at = ?, status = ? WHERE id = ?').run(ts, 'deleted', a.id)
+        if (a.local_path && fs.existsSync(a.local_path) && countLocalPathRefs(a.local_path, id, a.id) === 0) {
+          try { fs.unlinkSync(a.local_path); softDeleteLocalFile(row.user, a.local_path) } catch { /* ignore */ }
+        }
+      }
+      // 软删除主记录
+      db.prepare(
+        'UPDATE openlist_backup_files SET deleted_at = ?, status = ?, error = NULL WHERE id = ?',
+      ).run(ts, 'deleted', id)
+      // 主文件本地：仅 cache 类型物理删除本地临时副本（music 为用户实际文件，仅软删记录）
+      if (row.folder_type === 'cache' && row.local_path && fs.existsSync(row.local_path) && countLocalPathRefs(row.local_path, id, -1) === 0) {
+        try { fs.unlinkSync(row.local_path); softDeleteLocalFile(row.user, row.local_path) } catch { /* ignore */ }
+      }
+      removeLocalCache(row)
+      deleted++
     }
-    // 主文件本地：仅 cache 类型物理删除本地临时副本（music 为用户实际文件，仅软删记录）
-    if (row.folder_type === 'cache' && row.local_path && fs.existsSync(row.local_path) && countLocalPathRefs(row.local_path, id, -1) === 0) {
-      try { fs.unlinkSync(row.local_path); softDeleteLocalFile(row.user, row.local_path) } catch { /* ignore */ }
+    if (remoteFailed.length) {
+      console.warn(
+        '[openlist] 删除备份记录时以下远端文件未能从网盘删除（失败记录及本地文件已保留，可重试）：\n' +
+          remoteFailed.join('\n'),
+      )
     }
-    removeLocalCache(row)
-    deleted++
-  }
-  if (remoteFailed.length) {
-    console.warn(
-      '[openlist] 删除备份记录时以下远端文件未能从网盘删除（记录已软删，但网盘文件残留）：\n' +
-        remoteFailed.join('\n'),
-    )
-  }
-  return { deleted, remoteRemoved, remoteFailed }
+    return { deleted, remoteRemoved, remoteFailed }
+  } finally { release(); pumpUploads() }
 }

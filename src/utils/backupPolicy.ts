@@ -97,7 +97,7 @@ export function scanBackupFiles(context: BackupContext, types: readonly BackupTy
       const rel = prefix + entry.name
       const local = path.join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (!entry.name.startsWith('.') && !/^(runtime|cache|logs|tmp|backups)$/i.test(entry.name)) walk(local, rel + '/')
+        if (!entry.name.startsWith('.') && !/^(runtime|cache|logs|tmp|backups|test-evidence)$/i.test(entry.name)) walk(local, rel + '/')
       } else if (entry.isFile()) {
         const type = backupType(rel)
         if (type && types.includes(type)) files.set(rel, local)

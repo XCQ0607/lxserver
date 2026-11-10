@@ -1,3 +1,5 @@
+import { setTimeout as delay } from 'node:timers/promises'
+import { openlistError } from './openlistErrors'
 import fs from 'node:fs'
 import path from 'node:path'
 import crypto from 'node:crypto'
@@ -52,10 +54,10 @@ export function recordRemoteObservation(source: string, row: Row, info?: { size?
 }
 export function metadataStatus(source: string) {
   const job = read().job
-  return { job: job?.source === source ? { ...job, state: job.state === 'running' && !controller ? 'interrupted' : job.state } : null }
+  return { job: job?.source === source ? { ...job, state: ['running', 'paused'].includes(job.state) && !controller ? 'interrupted' : job.state } : null }
 }
 export function cancelMetadata() { if (!controller) throw new Error('没有正在执行的文件检查'); controller.abort() }
-export function startMetadata(source: string, rows: Row[], target: string, client: OpenListClient | null) {
+export function startMetadata(source: string, rows: Row[], target: string, client: OpenListClient | null, ready?: () => Promise<boolean>) {
   if (controller) throw new Error('已有文件检查正在执行')
   if (!['local', 'remote', 'both'].includes(target)) throw new Error('检查位置无效')
   if (target !== 'local' && !client) throw new Error('请先启用并保存 OpenList 连接')
@@ -66,6 +68,13 @@ export function startMetadata(source: string, rows: Row[], target: string, clien
   void (async () => {
     try {
       for (const row of rows) {
+        if (target !== 'local' && ready) {
+          while (!abort.signal.aborted && !await ready()) {
+            job.state = 'paused'; const store = read(); store.job = job; write(store)
+            try { await delay(1000, undefined, { signal: abort.signal }) } catch { break }
+          }
+          job.state = 'running'
+        }
         if (abort.signal.aborted) break
         let failed = false
         if (target !== 'remote') {
@@ -78,8 +87,28 @@ export function startMetadata(source: string, rows: Row[], target: string, clien
           const store = read(); store.observations[key(source, row.remote_path, 'local')] = { state, error, checkedAt: Date.now(), baseline: metadataBaseline(row) }; write(store)
         }
         if (target !== 'local' && !abort.signal.aborted) {
-          try { const info = await client!.getFileInfo(row.remote_path, AbortSignal.any([abort.signal, AbortSignal.timeout(10_000)])); recordRemoteObservation(source, row, info) }
-          catch (error) { if (abort.signal.aborted) break; failed = true; recordRemoteObservation(source, row, undefined, error) }
+          while (!abort.signal.aborted) {
+            try {
+              const info = await client!.getFileInfo(row.remote_path, AbortSignal.any([abort.signal, AbortSignal.timeout(10000)]))
+              recordRemoteObservation(source, row, info)
+              break
+            } catch (error) {
+              if (abort.signal.aborted) break
+              if (!ready || !openlistError(error).connection) {
+                failed = true; recordRemoteObservation(source, row, undefined, error); break
+              }
+              // Retry the same row after recovery. Connection outages do not become file errors.
+              job.state = 'paused'
+              const store = read(); store.job = job; write(store)
+              let recovered = false
+              do {
+                recovered = await ready()
+                if (!recovered) try { await delay(1000, undefined, { signal: abort.signal }) } catch { break }
+              } while (!abort.signal.aborted && !recovered)
+              job.state = 'running'
+            }
+          }
+          if (abort.signal.aborted) break
         }
         job.done++; if (failed) job.failed++
         const store = read(); store.job = job; write(store)

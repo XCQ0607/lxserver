@@ -4768,10 +4768,10 @@ class App {
         try {
             const { job } = await this.request('/api/openlist/metadata');
             if (!job) { box.textContent = ''; return; }
-            const labels = { running: '检查中', completed: '检查完成', cancelled: '已停止', interrupted: '进程中断', failed: '检查失败' };
+            const labels = { running: '检查中', paused: '等待连接恢复', completed: '检查完成', cancelled: '已停止', interrupted: '进程中断', failed: '检查失败' };
             const targets = { local: '本地', remote: '云端', both: '本地与云端' };
             box.textContent = `${targets[job.target] || ''} · ${labels[job.state] || '未知'} · ${job.done}/${job.total} 项 · 异常 ${job.failed} 项 · ${new Date(job.finishedAt || job.startedAt).toLocaleString('zh-CN')}`;
-            if (job.state === 'running') {
+            if (['running', 'paused'].includes(job.state)) {
                 const stop = document.createElement('button'); stop.type = 'button'; stop.className = 'btn-secondary olb-act-btn'; stop.textContent = '停止检查'; stop.onclick = () => this.cancelOpenlistMetadataCheck(); box.appendChild(stop);
                 clearTimeout(this._olMetadataTimer);
                 if (this.currentView === 'backups') this._olMetadataTimer = setTimeout(() => this.loadOpenlistMetadataStatus(), 1500);
@@ -4780,6 +4780,50 @@ class App {
                 if (this._olMetadataFinished !== job.id + job.state) { this._olMetadataFinished = job.id + job.state; await this.loadOpenlistBackups(true); }
             }
         } catch { box.textContent = '无法读取文件检查进度，请重新刷新记录。'; }
+    }
+
+    renderOpenlistConnection(connection) {
+        if (connection) this._olbConnection = connection;
+        const c = this._olbConnection, box = document.getElementById('olb-connection');
+        if (!box || !c) return;
+        const esc = value => this.escapeHtml(String(value));
+        const time = value => value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '暂无';
+        const titles = { online: 'OpenList 连接正常', unavailable: 'OpenList 暂时无法访问', auth_error: 'OpenList 认证或权限异常', unknown: 'OpenList 连接待探测', disabled: 'OpenList 未启用' };
+        const busy = !!this._olbProbeBusy;
+        box.dataset.state = c.state;
+        box.innerHTML = '<div class="olb-connection-symbol" aria-hidden="true">☁</div><div class="olb-connection-copy"><strong>' +
+            esc(titles[c.state] || titles.unknown) + '</strong><p>' + esc(c.message) +
+            '。历史备份记录保留，连接状态不代表文件内容校验结果。</p><div class="olb-connection-meta">最近探测：' +
+            esc(time(c.checkedAt)) + (c.checking ? ' · 正在重新检查文件' : '') + ' · 最近成功：' + esc(time(c.lastSuccessAt)) +
+            (c.nextProbeAt ? ' · 下次自动探测：' + esc(time(c.nextProbeAt)) : '') +
+            '</div></div><button type="button" class="btn-secondary olb-probe-button" onclick="app.probeOpenlistConnection()" ' +
+            (busy || !c.enabled ? 'disabled' : '') + '>' + (busy ? '正在探测…' : '探测连接') + '</button>';
+        if (!this._olbConnectionTimer) this._olbConnectionTimer = setInterval(async () => {
+            const el = document.getElementById('olb-connection');
+            if (!el || !el.getClientRects().length) return;
+            try {
+                const r = await this.request('/api/openlist/connection');
+                const changed = this._olbConnection?.state !== r.connection?.state;
+                this.renderOpenlistConnection(r.connection);
+                if (changed) await this.loadOpenlistBackups(true);
+            } catch { /* Keep the last observation; a failed admin request is not OpenList health. */ }
+        }, 15000);
+    }
+
+    async probeOpenlistConnection() {
+        if (this._olbProbeBusy) return;
+        this._olbProbeBusy = true;
+        this.renderOpenlistConnection();
+        try {
+            const r = await this.request('/api/openlist/connection', { method: 'POST' });
+            this.renderOpenlistConnection(r.connection);
+            await this.loadOpenlistBackups(true);
+        } catch (error) {
+            if (window.showError) window.showError('无法完成连接探测：' + error.message);
+        } finally {
+            this._olbProbeBusy = false;
+            this.renderOpenlistConnection();
+        }
     }
 
     renderOpenlistCheckTimes(records) {
@@ -4800,8 +4844,8 @@ class App {
             remote: '<path d="M6 19a4 4 0 0 1-.7-7.94A7 7 0 0 1 19 9a5 5 0 0 1 0 10Z"/>'
         };
         const states = {
-            same: ['未变', 'success'], changed: ['有变化', 'warning'], missing: ['缺失', 'danger'],
-            error: ['检查失败', 'danger'], unknown: ['信息不全', 'neutral'],
+            same: ['上次未变', 'success'], changed: ['有变化', 'warning'], missing: ['缺失', 'danger'],
+            unavailable: ['暂无法检查', 'warning'], error: ['检查失败', 'danger'], unknown: ['信息不全', 'neutral'],
             untracked: ['版本未知', 'neutral'], unchecked: ['未检查', 'neutral']
         };
         const badges = ['local', 'remote'].map(side => {
@@ -4809,7 +4853,7 @@ class App {
             const [label, tone] = states[state] || states.unknown;
             const name = side === 'local' ? '本地' : '云端';
             const time = file[side + '_checked_at'];
-            const tip = `${name}：${label}。只检查存在性、大小与修改时间，不代表内容一致。${time ? '最近检查：' + new Date(time).toLocaleString('zh-CN') : '暂无检查时间。'}`;
+            const tip = `${name}：${label}（历史观察结果）。只检查存在性、大小与修改时间，不代表内容一致。${time ? '最近检查：' + new Date(time).toLocaleString('zh-CN') : '暂无检查时间。'}`;
             return `<span class="olb-state-tag olb-observation-tag is-${tone}" title="${esc(tip)}" aria-label="${esc(tip)}"><svg class="olb-state-icon is-${side}" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${icons[side]}</svg>${label}</span>`;
         });
         // 本地变化或待传输时，旧的内容通过结果只留在详情，避免掩盖当前任务。
@@ -4831,6 +4875,7 @@ class App {
         if (!silent) box.innerHTML = '<div class="config-hint">加载中…</div>'
         try {
             const r = fromCache && this._olbRawRecords ? { list: this._olbRawRecords } : await this.request('/api/openlist/backups')
+            this.renderOpenlistConnection(r.connection);
             this._olbRawRecords = r.list || []
             let list = ((r && r.list) || []).map(f => ({ ...f, status: f.task_state || (['completed', 'verified'].includes(f.status) ? 'completed' : f.status) }))
             // 先按当前 tab 的 folder scope 过滤（媒体文件记录=cache,music；系统配置=system；歌单快照=list），统计卡与下方列表口径一致
@@ -4954,13 +4999,13 @@ class App {
                 }
                 const canRetry = ['failed', 'pending', 'download', 'attention'].includes(f.status)
                 const retryBtn = canRetry
-                    ? '<button type="button" class="olb-act-btn is-retry" title="重新上传或校验此记录" onclick="app.retryOpenlistBackup(' + f.id + ')">重试</button>'
+                    ? '<button type="button" class="olb-act-btn is-retry" title="按配置重新上传或下载此记录" onclick="app.retryOpenlistBackup(' + f.id + ')">' + (f.direction === 'download' || f.sync_mode === 'download' ? '重试下载' : '重试上传') + '</button>'
                     : ''
                 const hasLocal = !!f.local_exists
                 const localMark = f.local_exists == null ? '<span class="olb-local-badge" title="无法检查本地文件，请检查服务端文件权限">未知</span>' : hasLocal
                     ? '<span class="olb-local-badge is-yes" title="本地文件存在">✓ 存在</span>'
                     : '<span class="olb-local-badge is-no" title="本地文件不存在或已被清理">✗ 已删</span>'
-                const errStr = f.error || ''
+                const errStr = f.remote_state === 'unavailable' ? '等待 OpenList 连接恢复，历史备份记录保留' : f.error || f.remote_error || ''
                 const errCell = errStr
                     ? '<span class="olb-err-text" title="' + esc(errStr) + '">' + esc(errStr.length > 46 ? errStr.slice(0, 46) + '…' : errStr) + '</span>'
                     : '<span class="olb-muted-dash">—</span>'
@@ -4977,7 +5022,7 @@ class App {
                     '<td style="text-align:center;white-space:nowrap;">' + localMark + '</td>' +
                     '<td class="olb-col-err">' + errCell + '</td>' +
                     '<td class="olb-col-time">' + d.toLocaleString('zh-CN', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }) + '</td>' +
-                    '<td class="olb-col-actions"><div class="olb-row-actions">' + retryBtn + '<button type="button" class="olb-act-btn" onclick="app.showOpenlistDetail(' + f.id + ')">详情</button><button type="button" class="olb-act-btn is-delete" title="删除此项云端备份（将先显示删除范围）" onclick="app.deleteSelectedOpenlist(' + f.id + ')">删除</button></div></td>' +
+                    '<td class="olb-col-actions"><div class="olb-row-actions"><button type="button" class="olb-act-btn" title="只检查元信息，不上传或下载文件" onclick="app.checkOpenlistBackup(' + f.id + ')">检查</button>' + retryBtn + '<button type="button" class="olb-act-btn" onclick="app.showOpenlistDetail(' + f.id + ')">详情</button><button type="button" class="olb-act-btn is-delete" title="删除此项云端备份（将先显示删除范围）" onclick="app.deleteSelectedOpenlist(' + f.id + ')">删除</button></div></td>' +
                     '</tr>'
             }).join('')
             const pager = '<div class="olb-pager">' +
@@ -5009,18 +5054,27 @@ class App {
                 heading('user', '用户', 88) +
                 heading('type', '类型', 96) +
                 heading('name', '文件名', 260) +
-                heading('status', '任务状态 / 文件检查 / 内容校验', 450) +
+                heading('status', '任务状态 / 文件检查 / 内容校验', 340) +
                 heading('size', '大小', 88) +
                 heading('local', '本地', 76) +
                 heading('error', '异常原因', 160) +
                 heading('time', '更新时间', 152) +
-                '<th style="width:180px;text-align:center;">操作</th>' +
+                '<th style="width:250px;text-align:center;">操作</th>' +
                 '</tr></thead><tbody>' + rows + '</tbody></table></div>' + pager
             this.initCustomSelects()
             this.updateOlbSelCount()
         } catch (e) {
             console.error(e)
             box.innerHTML = '<div class="config-hint" style="color:var(--danger);">加载失败: ' + (e && e.message || e) + '</div>'
+        }
+    }
+
+    async checkOpenlistBackup(id) {
+        try {
+            await this.request('/api/openlist/metadata/start', { method: 'POST', body: JSON.stringify({ target: 'both', ids: [id] }) });
+            await this.loadOpenlistMetadataStatus();
+        } catch (error) {
+            if (window.showError) window.showError('无法开始检查：' + error.message);
         }
     }
 
@@ -5208,11 +5262,12 @@ class App {
             row('大小', f.size == null ? null : fmtSize(f.size)) +
             (isAudio ? optional('来源平台', sourceLabels[f.source] || f.source) + optional('音质', f.quality) + optional('歌曲 ID', f.songmid) : '') +
             row('状态说明', ({ same: '本地大小和修改时间未变', changed: '本地有变化，等待备份', missing: '本地不存在', untracked: '缺少本地版本基线', error: '本地无法检查' })[f.local_state] || '未检查') +
-            row('云端检查', ({ same: '大小和修改时间未变（非内容校验）', changed: '云端有变化，需重新校验', missing: '云端文件缺失', error: '检查失败', unchecked: '尚未检查', unknown: '云端未提供完整元信息' })[f.remote_state] || '尚未检查') +
+            row('云端检查', ({ unavailable: 'OpenList 暂时无法访问，保留历史备份结果', same: '大小和修改时间未变（非内容校验）', changed: '云端有变化，需重新校验', missing: '云端文件缺失', error: '检查失败', unchecked: '尚未检查', unknown: '云端未提供完整元信息' })[f.remote_state] || '尚未检查') +
             optional('本地检查时间', fmtTime(f.local_checked_at)) +
             optional('上次手动本地检查', fmtTime(f.last_manual_local_check)) +
             optional('云端检查时间', fmtTime(f.remote_checked_at)) +
             row('本地存在', f.local_exists == null ? '无法检查（请检查文件权限）' : f.local_exists ? '是' : '否') +
+            row('原始错误', f.error_raw || '—') +
             row('重试次数', f.retry_count) +
             row('本地路径', f.local_path) +
             row('云端路径', f.remote_path) +
@@ -5392,7 +5447,7 @@ class App {
                 const cls = resultBadgeCls[key] || '';
                 return `<span class="ol-integrity-stat-pill ${cls}"><b>${esc(labels[key] || key)}</b> ${n}</span>`;
             }).join('');
-            document.getElementById('ol-integrity-results').innerHTML = rows.length ? '<div class="ol-integrity-summary-line">' + countPills + '<span class="config-hint" style="margin:0 0 0 auto;">以下为当前备份版本的最近校验结果</span></div><table class="backup-policy-table olb-records-table"><thead><tr><th style="min-width:320px;">文件名 / 云端路径</th><th style="width:120px;text-align:center;">校验结果</th><th style="width:170px;">最近校验时间</th><th>说明</th></tr></thead><tbody>' + rows.slice((page - 1) * 50, page * 50).map(row => '<tr><td style="overflow-wrap:anywhere"><div class="ol-integrity-filename">' + esc(row.name) + '</div><div class="config-hint" style="font-size:0.75rem;font-family:monospace;opacity:0.8;">' + esc(row.remote) + '</div></td><td style="text-align:center;"><span class="ol-integrity-badge ' + (resultBadgeCls[row.result] || '') + '">' + esc(labels[row.result] || row.result) + '</span></td><td style="white-space:nowrap;font-size:0.78rem;color:var(--text-secondary);font-family:monospace;">' + esc(new Date(row.checkedAt).toLocaleString()) + '</td><td style="font-size:0.8rem;color:var(--text-secondary);">' + esc(row.error || '匹配该次备份的 SHA-256') + '</td></tr>').join('') + '</tbody></table><div class="backup-policy-actions olb-pager" style="margin-top:0.75rem;"><button type="button" class="btn-secondary olb-pager-btn" ' + (page <= 1 ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page - 1) + ')">上一页</button><span class="olb-pager-info">' + page + ' / ' + pages + ' 页，共 ' + rows.length + ' 条</span><button type="button" class="btn-secondary olb-pager-btn" ' + (page >= pages ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page + 1) + ')">下一页</button></div>' : '<div class="olb-empty-state"><div class="olb-empty-title">暂无符合条件的校验结果</div><div class="olb-empty-desc">历史版本生成与普通后台检查不会自动触发完整校验</div></div>';
+            document.getElementById('ol-integrity-results').innerHTML = rows.length ? '<div class="ol-integrity-summary-line">' + countPills + '<span class="config-hint" style="margin:0 0 0 auto;">当前备份版本的全部最近校验结果（包含历史任务，不受上方校验范围限制）</span></div><table class="backup-policy-table olb-records-table"><thead><tr><th style="min-width:320px;">文件名 / 云端路径</th><th style="width:120px;text-align:center;">校验结果</th><th style="width:170px;">最近校验时间</th><th>说明</th></tr></thead><tbody>' + rows.slice((page - 1) * 50, page * 50).map(row => '<tr><td style="overflow-wrap:anywhere"><div class="ol-integrity-filename">' + esc(row.name) + '</div><div class="config-hint" style="font-size:0.75rem;font-family:monospace;opacity:0.8;">' + esc(row.remote) + '</div></td><td style="text-align:center;"><span class="ol-integrity-badge ' + (resultBadgeCls[row.result] || '') + '">' + esc(labels[row.result] || row.result) + '</span></td><td style="white-space:nowrap;font-size:0.78rem;color:var(--text-secondary);font-family:monospace;">' + esc(new Date(row.checkedAt).toLocaleString()) + '</td><td style="font-size:0.8rem;color:var(--text-secondary);">' + esc(row.result === 'stale' ? '云端状态在上次校验后发生变化，请重新校验' : (row.error || (row.result === 'matched' ? '匹配该次备份的 SHA-256' : '暂无详细说明'))) + '</td></tr>').join('') + '</tbody></table><div class="backup-policy-actions olb-pager" style="margin-top:0.75rem;"><button type="button" class="btn-secondary olb-pager-btn" ' + (page <= 1 ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page - 1) + ')">上一页</button><span class="olb-pager-info">' + page + ' / ' + pages + ' 页，共 ' + rows.length + ' 条</span><button type="button" class="btn-secondary olb-pager-btn" ' + (page >= pages ? 'disabled' : '') + ' onclick="app.changeOpenlistIntegrityPage(' + (page + 1) + ')">下一页</button></div>' : '<div class="olb-empty-state"><div class="olb-empty-title">暂无符合条件的校验结果</div><div class="olb-empty-desc">历史版本生成与普通后台检查不会自动触发完整校验</div></div>';
             if (active && !this._olIntegrityTimer) this._olIntegrityTimer = setInterval(() => {
                 if (this.currentView !== 'backups' || !document.getElementById('openlist-pane-integrity')?.classList.contains('active')) { clearInterval(this._olIntegrityTimer); this._olIntegrityTimer = null; return; }
                 this.loadOpenlistIntegrity();

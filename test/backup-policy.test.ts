@@ -49,10 +49,12 @@ test('shared cloud backup policy and WebDAV restore', async t => {
   write('backups/config-old.js', 'backup')
   write('openlist-backup.db', 'live DB')
   write('openlist-backup.db-wal', 'live WAL')
+  write('users/alice/test-evidence/run/users/settings.json', 'test output')
 
   await t.test('five disjoint types include extensionless snapshots and exclude transient/cache files', () => {
     const all = scanBackupFiles({ dataPath: source }, BACKUP_TYPES)
     assert.equal(all.size, 11)
+    assert.equal(all.has('users/alice/test-evidence/run/users/settings.json'), false)
     assert.ok(all.has('users/alice/list/snapshot/snapshot_123'))
     for (const file of ['cache/alice/song.mp3', 'users/alice/cache/audio.mp3', 'runtime/queue.json', 'backups/config-old.js', 'openlist-backup.db-wal']) assert.equal(all.has(file), false)
     const music = scanBackupFiles({ dataPath: source }, ['music'])

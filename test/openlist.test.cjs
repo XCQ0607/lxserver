@@ -17,8 +17,11 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   let metadataReads = 0
   let uploads = 0
   const contentReads = []
+  let transferOffline = false
   let refuseUpload = false
   let expireUploadOnce = false
+  let refuseDelete = false
+  let duringDelete
   let base
   const storage = http.createServer(async (req, res) => {
     const parts = []
@@ -37,6 +40,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     if (req.url === '/api/fs/mkdir') return answer({})
     if (req.url === '/api/fs/put') {
       if (expireUploadOnce) { expireUploadOnce = false; return answer(null, 401) }
+      if (transferOffline) { metadataError = true; req.socket.destroy(); return }
       if (refuseUpload) return answer(null, 500)
       const name = decodeURIComponent(req.headers['file-path'])
       remote.set(name, { body, modified: new Date().toISOString() })
@@ -55,6 +59,9 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
       return answer({ content: files.slice((args.page - 1) * args.per_page, args.page * args.per_page), total: files.length })
     }
     if (req.url === '/api/fs/remove') {
+      if (duringDelete) await duringDelete()
+      if (refuseDelete === true || refuseDelete === args.dir + '/' + args.names[0]) return answer(null, 500)
+      if (args.names.every(name => !remote.has(args.dir + '/' + name))) return answer(null, 404)
       for (const name of args.names) remote.delete(args.dir + '/' + name)
       return answer({})
     }
@@ -108,7 +115,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     config['subsonic.playCacheFirstUseOpenlist'] = true
     remote.clear(); state.items.clear(); state.registered.length = 0; state.removed.length = 0
     metadataError = false; truncateDownload = false; uploads = 0
-    refuseUpload = false
+    refuseUpload = false; transferOffline = false
     contentReads.length = 0
     expireUploadOnce = false
     delete config['openlist.playback.enable']
@@ -124,6 +131,66 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   }
   const rp = (folder = 'cache', name = 'song.mp3') => '/root/alice/' + folder + '/' + name
   const sync = folder => api.runSyncNow({ user: 'alice', folder })
+
+  await t.test('destination outage preserves backup history and recovery only probes metadata', async () => {
+    reset()
+    putLocal()
+    await sync('cache')
+    await api.verifyPending()
+    const before = api.listBackups()[0]
+    const sent = uploads
+    metadataError = true
+    const [one, two] = await Promise.all([api.probeOpenlistConnection(), api.probeOpenlistConnection()])
+    assert.equal(one.state, 'auth_error')
+    assert.equal(two.checkedAt, one.checkedAt)
+    assert.ok(one.nextProbeAt >= one.checkedAt + 29000)
+    await api.verifyPending()
+    const offline = api.listBackups().find(row => row.id === before.id)
+    assert.equal(offline.status, before.status)
+    assert.equal(offline.task_state, 'completed')
+    assert.equal(offline.remote_state, 'unavailable')
+    assert.equal(offline.retry_count, before.retry_count)
+    assert.equal(uploads, sent)
+    metadataError = false
+    assert.equal((await api.probeOpenlistConnection()).state, 'online')
+    await api.verifyPending()
+    assert.equal(api.listBackups().find(row => row.id === before.id).remote_state, 'same')
+    assert.equal(uploads, sent)
+    assert.equal(contentReads.length, 0)
+    const oldRoot = config['openlist.root']
+    config['openlist.root'] = '/different-root'
+    assert.equal(api.getOpenlistConnection().state, 'unknown')
+    assert.equal(api.getOpenlistConnection().lastSuccessAt, 0)
+    config['openlist.root'] = oldRoot
+  })
+
+  await t.test('transfer outage pauses pending work without consuming file retries', async () => {
+    reset(); putLocal(); await sync('cache'); await api.verifyPending()
+    fs.writeFileSync(path.join(state.dirs.cache, 'song.mp3'), 'updated audio')
+    transferOffline = true
+    await sync('cache')
+    const row = api.listBackups()[0]
+    assert.equal(row.status, 'pending')
+    assert.equal(row.retry_count, 0)
+    assert.equal(api.getOpenlistConnection().state, 'auth_error')
+    transferOffline = false; metadataError = false
+    await api.probeOpenlistConnection()
+    await api.verifyPending()
+    // Pending upload runs in the queue.
+    for (let n = 0; n < 100 && api.listBackups()[0].status === 'pending'; n++) await new Promise(resolve => setTimeout(resolve, 10))
+    await api.runSyncNow({ user: 'alice', folder: 'cache' })
+    assert.equal(remote.get(rp()).body.toString(), 'updated audio')
+  })
+
+  await t.test('bulk deletion stops before changing any of the 21 originals', async () => {
+    reset()
+    for (let n = 0; n < 21; n++) putLocal('music', 'bulk-' + n + '.mp3')
+    await sync('music'); await api.verifyPending()
+    remote.clear()
+    const result = await sync('music')
+    assert.ok(result.errors.some(error => error.includes('20')))
+    assert.equal(fs.readdirSync(state.dirs.music).length, 21)
+  })
 
   await t.test('data backup ownership maps music, source and snapshot namespaces without changing stored identities', () => {
     reset()
@@ -256,6 +323,8 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     await sync('music')
     assert.equal(fs.existsSync(local), false)
     assert.equal(remote.has(rp('music')), false)
+    const recycled = fs.readdirSync(path.join(temp, 'backups/openlist-recycle')).map(name => path.join(temp, 'backups/openlist-recycle', name))
+    assert.ok(recycled.some(dir => fs.existsSync(path.join(dir, 'file')) && fs.readFileSync(path.join(dir, 'file'), 'utf8') === 'original'))
   })
 
   await t.test('download mode updates existing files and preserves nested directory identity', async () => {
@@ -293,6 +362,48 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     await api.resolveOpenlistCacheEntry('alice', 'cache', 'playback-route')
     assert.equal(metadataReads - before, 1)
     assert.equal(await api.resolveOpenlistCacheEntry('bob', 'cache', 'playback-route'), null)
+  })
+
+  await t.test('failed deletion preserves records and local bytes, blocks competing work and permits retry', async () => {
+    reset()
+    const local = putLocal()
+    await sync('cache')
+    const row = api.listAllBackups().find(r => r.local_path === local)
+    refuseDelete = true
+    duringDelete = async () => {
+      await assert.rejects(api.runSyncNow(), /云端|恢复/)
+      await assert.rejects(api.deleteOpenlistBackups([row.id]), /云端|恢复/)
+    }
+    try {
+      const result = await api.deleteOpenlistBackups([row.id])
+      assert.equal(result.deleted, 0)
+      assert.equal(result.remoteFailed.length, 1)
+      assert.equal(api.getBackupById(row.id).deleted_at, null)
+      assert.equal(fs.existsSync(local), true)
+    } finally { refuseDelete = false; duringDelete = undefined }
+    assert.equal((await api.deleteOpenlistBackups([row.id])).deleted, 1)
+    assert.equal(remote.has(rp()), false)
+    assert.equal(fs.existsSync(local), false)
+  })
+
+  await t.test('partial remote deletion preserves attachment links and retries missing remote files', async () => {
+    reset(); config['openlist.includeNonAudio'] = true
+    const local = putLocal('cache', 'partial.mp3')
+    const lyric = path.join(state.dirs.cache, 'partial.lrc')
+    fs.writeFileSync(lyric, 'lyrics')
+    await sync('cache')
+    const row = api.listAllBackups().find(r => r.local_path === local)
+    assert.equal(api.listAttachments(row.id).length, 1)
+    refuseDelete = row.remote_path
+    try {
+      assert.equal((await api.deleteOpenlistBackups([row.id])).deleted, 0)
+      assert.equal(api.listAttachments(row.id).length, 1)
+      assert.equal(fs.existsSync(lyric), true)
+      assert.equal(remote.has(rp('cache', 'partial.lrc')), false)
+    } finally { refuseDelete = false }
+    assert.equal((await api.deleteOpenlistBackups([row.id])).deleted, 1)
+    assert.equal(api.listAttachments(row.id).length, 0)
+    assert.equal(fs.existsSync(lyric), false)
   })
 
   await t.test('attachments belong to matching songs; shared covers survive deletion of one song', async () => {

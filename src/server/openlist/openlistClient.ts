@@ -77,7 +77,7 @@ export class OpenListClient {
     })
     const data: any = await resp.json().catch(() => ({}))
     if (data?.code !== 200 || !data?.data?.token) {
-      throw new Error('OpenList 登录失败：' + (data?.message || resp.status))
+      throw new Error('OpenList 登录失败（' + (data?.code || resp.status) + '）：' + (data?.message || resp.status))
     }
     this.token = data.data.token
     return this.token!
@@ -124,7 +124,7 @@ export class OpenListClient {
       })
       const data: any = await resp.json().catch(() => ({}))
       if (resp.status === 404 || data?.code === 404 || (data?.code !== 200 && /object not found|no such file/i.test(data?.message || ''))) throw new OpenListNotFoundError('OpenList 目录不存在：' + p)
-      if (data?.code !== 200) throw new Error('OpenList 列目录失败：' + (data?.message || resp.status))
+      if (data?.code !== 200) throw new Error('OpenList 列目录失败（' + (data?.code || resp.status) + '）：' + (data?.message || resp.status))
       const d = data.data || {}
       const items: any[] = d.content || []
       all.push(...items)
@@ -237,7 +237,8 @@ export class OpenListClient {
       signal: AbortSignal.timeout(META_TIMEOUT_MS),
     })
     const data: any = await resp.json().catch(() => ({}))
-    if (data?.code !== 200) throw new Error('OpenList 删除失败：' + (data?.message || resp.status))
+    if (resp.status === 404 || data?.code === 404 || (data?.code !== 200 && /object not found|no such file/i.test(data?.message || ''))) throw new OpenListNotFoundError('OpenList 文件不存在：' + remotePath)
+    if (!resp.ok || data?.code !== 200) throw new Error('OpenList 删除失败：' + (data?.message || data?.code || resp.status))
   }
 
   /** 删除唯一的本地副本前，校验远端实际字节，不能只相信同名文件的大小。 */

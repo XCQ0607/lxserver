@@ -52,4 +52,17 @@ test('metadata checks are read-only, scoped, durable and cancellable', async t =
   assert.equal((await wait())?.state, 'cancelled')
   assert.equal(metadataStatus('source').job?.done, 0)
   assert.equal(metadataObservations('source')('/root/two'), undefined)
+  let online = false, attempts = 0
+  const flaky = { async getFileInfo() { attempts++; if (!online) throw new Error('fetch failed'); return { size: 5 } } } as unknown as OpenListClient
+  startMetadata('source', [row, { ...row, id: 2, remote_path: '/root/resume' }], 'remote', flaky, async () => online)
+  for (let n = 0; n < 100 && metadataStatus('source').job?.state !== 'paused'; n++) await new Promise(resolve => setTimeout(resolve, 5))
+  assert.equal(metadataStatus('source').job?.state, 'paused')
+  assert.equal(attempts, 0, 'offline preflight never fans out file requests')
+  online = true
+  for (let n = 0; n < 300 && ['running', 'paused'].includes(metadataStatus('source').job?.state || ''); n++) await new Promise(resolve => setTimeout(resolve, 5))
+  assert.equal(metadataStatus('source').job?.state, 'completed')
+  assert.equal(metadataStatus('source').job?.done, 2)
+  assert.equal(metadataStatus('source').job?.failed, 0)
+  assert.equal(attempts, 2)
+
 })

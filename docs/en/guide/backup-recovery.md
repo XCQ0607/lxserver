@@ -28,6 +28,8 @@ Open **Backup management → Cloud backup → Backup scope**, select types indep
 
 **Ordinary data backup excludes cache, logs, temporary files, local backup archives and external custom music directories. Directory links are not followed.** A separate `music` directory in the program working directory is also excluded. Paths refer to your actual data directory, which may differ from the default `data`.
 
+New backup scans, new OpenList history manifests and full content verification exclude `test-evidence` directories. Existing cloud files are not automatically deleted, and older history remains restorable. Failed manual OpenList deletion preserves the affected records and local files for retry using the same records. Some remote files may already have been removed; retries skip missing files. Backup and full verification are blocked during deletion. The verification table shows all latest results for current versions, independently of the task scope selected above.
+
 Advanced OpenList playback caching can upload cache separately for selected users. It is not the same as ordinary data backup. System/account backups may contain credentials; store them somewhere you control.
 
 
@@ -176,3 +178,13 @@ Configuration changes do not reconcile historical data. Raising the threshold al
 The admin Data view includes a Dislikes tab for the selected user, combining dislike rules and disliked artist/album libraries. Filter by type, creation channel, platform, or keyword; inspect saved covers, rules, ratings, and complete fields. Missing provenance is explicitly shown as unrecorded rather than inferred. The view is read-only and does not change linking or ratings.
 
 Rating identity migration and restore use a transaction journal: write failures roll back, and the next rating access completes an interrupted commit. Restore normalizes local/online scores against current file links and updates rating IDs in dislike reasons while preserving manual reasons and older snapshots. The temporary journal is stored in each user’s `rating/transaction.json` and removed after completion. Multiple server processes must not write to the same data directory concurrently.
+
+### OpenList connection status
+
+The backup records page shows destination health separately, including the latest probe and successful connection times. “探测连接” (Probe connection) checks authentication and the configured backup directory without uploading or downloading files. An unavailable destination preserves historical backup results and marks remote observations as temporarily unavailable. Automatic probes back off from 30 seconds to 5 minutes; recovery triggers a check of previously backed-up files. A successful connection or unchanged metadata does not prove content integrity.
+
+Connection failures use Chinese explanations, while record details retain raw diagnostics. Uploads, downloads, and attachment transfers return to pending on destination outages without consuming per-file retry attempts, then continue after recovery. File checks preserve their current position while disconnected, display a waiting state, and retry the current file after recovery. They remain cancellable. A process restart marks unfinished checks as interrupted; start a new check to proceed.
+
+“上次未变” means the last metadata observation was unchanged. The per-record “检查” action only checks local and remote metadata; “重试上传／重试下载” performs a transfer.
+
+Before propagating a bidirectional deletion, files and readable linked attachments are copied to `backups/openlist-recycle/<random-id>/` under the data directory. A `manifest.json` records original paths for manual recovery. A failed safety copy prevents deletion. Recycle copies are not automatically removed. More than 20 candidate deletions in one user folder pause that folder's synchronization before any deletion, upload, or download. Check the mount and local directory, then handle confirmed deletions manually in smaller batches. Explicit administrator deletion actions are unchanged.
