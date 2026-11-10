@@ -5705,6 +5705,7 @@ async function probeUrl(url) {
 }
 
 const prefetchManager = {
+    generation: 0,
     cache: new Map(), // Map<songId, {url, quality, sourceType, timestamp}>
     bufferer: new Audio(), // 隐藏的缓冲器，用于预加载数据流
 
@@ -5713,12 +5714,17 @@ const prefetchManager = {
         this.bufferer.preload = 'auto'; // 强制浏览器尽可能多地预缓冲
     },
 
-    set(songId, data) {
-        this.cache.set(songId, { ...data, timestamp: Date.now() });
+    key(song, quality) {
+        const cleaned = cleanSongData(song);
+        return JSON.stringify([cleaned.source || '', String(cleaned.id), quality]);
+    },
+
+    set(song, quality, data) {
+        this.cache.set(this.key(song, quality), { ...data, timestamp: Date.now() });
 
         // 核心升级：触发数据流预加载
         if (data.url) {
-            console.log(`[Prefetch] Pre-loading data stream for ID: ${songId}`);
+            console.log(`[Prefetch] Pre-loading data stream for ID: ${song.id}`);
             this.bufferer.src = data.url;
             this.bufferer.load(); // 诱导浏览器开始填充缓冲区
         }
@@ -5728,19 +5734,65 @@ const prefetchManager = {
             this.cache.delete(oldestKey);
         }
     },
-    get(songId) {
-        const data = this.cache.get(songId);
+    get(song, quality) {
+        const key = this.key(song, quality);
+        const data = this.cache.get(key);
         if (data && (Date.now() - data.timestamp < 30 * 60 * 1000)) {
+            const explicitLocal = song.isLocal || song.url?.startsWith('/api/music/cache/file/');
+            if (settings.preferServerCache === false && !explicitLocal &&
+                (data.sourceType === 'server_cache' || data.sourceType === 'openlist')) {
+                this.cache.delete(key);
+                return null;
+            }
             return data;
         }
+        this.cache.delete(key);
         return null;
     },
+    invalidate(song, quality, expected) {
+        const key = this.key(song, quality);
+        // 只清除本次播放使用的记录，保留并发预读写入的新结果。
+        if (expected && this.cache.get(key) === expected) this.cache.delete(key);
+    },
+    stop() {
+        this.generation++;
+        this.bufferer.removeAttribute('src');
+        this.bufferer.load();
+    },
     clear() {
+        this.stop();
         this.cache.clear();
-        this.bufferer.src = '';
     }
 };
 prefetchManager.init(); // 立即初始化缓冲器
+
+async function refreshPrefetchedCache(song, result) {
+    if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
+
+    // 预读解析后，后台下载可能已经完成；播放接管前重新检查文件缓存。
+    const playbackSong = result.switchedSource && result.songInfo ? result.songInfo : song;
+    try {
+        // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
+        const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
+        if (!cached.exists || cached.isCollision) return result;
+        const url = await applyAutoProxy(cached.url, playbackSong);
+        const quality = cached.quality || result.quality;
+        checkAndTriggerBackgroundCacheUpgrade(cleanSongData(playbackSong), result.quality, quality);
+        return {
+            ...result,
+            url,
+            quality,
+            sourceType: cached.origin === 'openlist' ? 'openlist' : 'server_cache',
+            folder: cached.folder,
+            sourceName: undefined,
+            sourceId: undefined,
+            hasMoreSources: false
+        };
+    } catch (e) {
+        console.warn('[Prefetch] Cache refresh failed, keeping preloaded URL:', e);
+        return result;
+    }
+}
 
 // --- URL Fetching Logic (Unified Resolution) ---
 
@@ -6395,8 +6447,19 @@ function getNextIndex() {
 }
 
 // Prefetch next song helper (Recursive Discovery)
-async function prefetchNextSong(startFromIndex = null, depth = 0) {
+async function prefetchNextSong(startFromIndex = null, depth = 0, generation = null) {
     if (settings.enablePreloader === false || depth > 5) return;
+    if (generation === null) {
+        prefetchManager.stop();
+        generation = prefetchManager.generation;
+    }
+    if (generation !== prefetchManager.generation) return;
+    const playlist = currentPlaylist.slice();
+    const originIndex = currentIndex;
+    const originMode = playMode;
+    const isCurrent = () => settings.enablePreloader !== false &&
+        generation === prefetchManager.generation && originIndex === currentIndex && originMode === playMode &&
+        playlist.length === currentPlaylist.length && playlist.every((song, index) => song === currentPlaylist[index]);
 
     let targetIndex = startFromIndex;
     if (targetIndex === null) {
@@ -6413,28 +6476,39 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
 
     try {
         const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
+        const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
 
         // 1. 检查内存缓存
-        let result = prefetchManager.get(nextSong.id);
+        let result = prefetchManager.get(nextSong, targetQual);
         if (result) {
-            if (await probeUrl(result.url)) return;
-            prefetchManager.cache.delete(nextSong.id);
+            const alive = await probeUrl(result.url);
+            if (!canCommit()) return;
+            if (alive) {
+                prefetchManager.set(nextSong, targetQual, result);
+                return;
+            }
+            prefetchManager.invalidate(nextSong, targetQual, result);
         }
 
         // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
         result = await resolveSongUrl(nextSong, targetQual, true);
+        if (!canCommit()) return;
 
         // 3. 探活获取到的链接
-        if (!(await probeUrl(result.url))) {
+        const alive = await probeUrl(result.url);
+        if (!canCommit()) return;
+        if (!alive) {
             localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
             result = await resolveSongUrl(nextSong, targetQual, true, true);
+            if (!canCommit()) return;
         }
 
-        prefetchManager.set(nextSong.id, result);
+        prefetchManager.set(nextSong, targetQual, result);
         const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
         console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
 
     } catch (e) {
+        if (!isCurrent()) return;
         // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
         console.warn(`[Prefetch] Could not preload [${nextSong.name}]:`, e.message);
         if (e.errorCode === 'NO_AVAILABLE_SOURCE') return;
@@ -6442,13 +6516,13 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
         // 递归探测
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
         if (followingIndex !== currentIndex) {
-            return prefetchNextSong(followingIndex, depth + 1);
+            return prefetchNextSong(followingIndex, depth + 1, generation);
         }
     }
 }
 
 // --- Server Cache Helpers ---
-async function checkServerCache(song, quality, exactQuality = false, includeOpenlist = false) {
+async function checkServerCache(song, quality, exactQuality = false, includeOpenlist = false, signal = undefined) {
     try {
         const username = currentListData?.username || '';
         const params = new URLSearchParams({
@@ -6464,7 +6538,7 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
 
-        const res = await fetch(`/api/music/cache/check?${params}`, { headers });
+        const res = await fetch(`/api/music/cache/check?${params}`, { headers, signal });
         if (res.ok) {
             const data = await res.json();
             return data; // 返回完整数据对象，包含 exists, isCollision, url 等
@@ -7340,6 +7414,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     }
 
     const thisRequestId = ++loadingRequestCounter;
+    prefetchManager.stop();
     currentLoadingSongId = thisRequestSongId;
     currentLoadingRequestId = thisRequestId;
     shouldAutoRecoverPlayback = false;
@@ -7459,16 +7534,20 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     let targetQuality = forceQuality;
     let isPrefetchFound = false;
     let urlResult = null;
+    let prefetchedResult = null;
+    let prefetchQuality = null;
 
     // 提前检查预读缓存，以便淡出逻辑使用
     if (!targetQuality && !isRetry) {
-        urlResult = prefetchManager.get(song.id);
+        prefetchQuality = window.QualityManager.getBestQuality(song, settings.preferredQuality || 'flac');
+        urlResult = prefetchManager.get(song, prefetchQuality);
+        prefetchedResult = urlResult;
         if (urlResult) {
             urlResult.isPrefetch = true;
             isPrefetchFound = true;
 
             // [Optimize] 既然主播放器即将接管该 URL，立即清空缓冲器 src 以停止其后台加载
-            prefetchManager.bufferer.src = '';
+            // stop() 已在本次播放请求开始时停止预缓冲并作废旧任务。
         }
     }
 
@@ -7493,6 +7572,11 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
     let sourceAssigned = false;
     try {
+        if (urlResult) {
+            urlResult = await refreshPrefetchedCache(song, urlResult);
+            if (currentLoadingRequestId !== thisRequestId) return;
+        }
+
         // 1. 智能音质选择与 URL 解析
         if (!urlResult) {
             if (!targetQuality) {
@@ -7584,6 +7668,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         // needs an explicit recovery entry point.
         currentPlaybackErrorHandler = async () => {
             if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
+            prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
             currentPlaybackErrorHandler = null;
 
             const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
@@ -7727,6 +7812,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 console.warn('[Player] Playback blocked by browser autoplay policy:', playError);
                 setPlayerStatus('请点击播放按钮');
             } else if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId) {
+                prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
                 shouldAutoRecoverPlayback = false;
                 playbackRecoveryTriggeredForRequestId = thisRequestId;
                 console.error('[Player] Playback failed:', playError);
@@ -7736,7 +7822,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
 
         // [Trigger Prefetch] 确保即便 play() 被拦截也尝试发起下一首预读
-        prefetchNextSong();
+        if (currentLoadingRequestId === thisRequestId) prefetchNextSong();
 
     } catch (error) {
         if (currentLoadingRequestId !== thisRequestId) return;
@@ -9395,7 +9481,10 @@ const SETTINGS_UI_MAP = {
     enableAutoSkipOnError: { id: 'setting-auto-skip-on-error', type: 'checkbox' },
     enableAutoDegradeQuality: { id: 'setting-auto-degrade-quality', type: 'checkbox' },
     playbackErrorPriority: { id: 'setting-playback-error-priority', type: 'value' },
-    enablePreloader: { id: 'setting-enable-preloader', type: 'checkbox' },
+    enablePreloader: {
+        id: 'setting-enable-preloader', type: 'checkbox',
+        action: (enabled) => { if (!enabled) prefetchManager.clear(); }
+    },
     disablePreloadSkip: { id: 'setting-disable-preload-skip', type: 'checkbox', normalize: () => true, readOnly: true },
     deduplicatePlaylistByQuality: { id: 'setting-deduplicate-playlist', type: 'checkbox' },
     enableSmtcLyric: {

@@ -58,9 +58,9 @@ test('unsupported platform skips same-platform retry and quality degradation, st
 test('no-source stops recursive background prefetch', async () => {
     let calls = 0;
     const context = load('prefetchNextSong', '// --- Server Cache Helpers ---', {
-        settings: {}, currentIndex: 0, currentPlaylist: [{ id: 0 }, { id: 1 }, { id: 2 }],
+        settings: {}, playMode: 'list', currentIndex: 0, currentPlaylist: [{ id: 0 }, { id: 1 }, { id: 2 }],
         window: { QualityManager: { getBestQuality: () => 'flac' } },
-        prefetchManager: { get: () => null },
+        prefetchManager: { generation: 0, stop() { this.generation++; }, get: () => null },
         resolveSongUrl: async () => { calls++; throw noSource; },
     });
     await context.prefetchNextSong(1);

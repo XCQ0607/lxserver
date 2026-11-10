@@ -32,7 +32,7 @@ function setup({ retry = false, seekFails = false } = {}) {
         serverReconnectTimer: null, settings: {},
         currentRecoveryState: retry ? { savedResumeTime: 37 } : null,
         scrollLockTimeout: null, hintTimeout: null,
-        RecoveryToast: { dismiss() {}, isActive: () => false }, prefetchManager: { get() { return null; } },
+        RecoveryToast: { dismiss() {}, isActive: () => false }, prefetchManager: { stop() {}, get() { return null; } },
         updatePlayerInfo() {}, updateMediaSessionMetadata() {}, fetchLyric() {},
         showInfo() {}, setPlayerStatus() {}, updatePlayButton() {},
         formatTime: seconds => seconds === 0 ? '00:00' : String(seconds),
