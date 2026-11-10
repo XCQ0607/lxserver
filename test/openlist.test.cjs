@@ -403,7 +403,11 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     remote.get(history).modified = '2020-01-01T00:00:00Z'
     await api.runSyncNow()
     assert.equal([...remote.keys()].filter(p => p.startsWith('/new-mount/_system/config-history/')).length, 1)
-    assert.ok(Date.parse(remote.get(history).modified) > Date.parse('2020-01-01'))
+    // 同步会删掉过期副本并按「当前秒」重建；跨秒时文件名里的秒级时间戳会变，
+    // 不能复用同步前的 key（该条目已从远端移除），否则读取 undefined.modified 抛错。
+    const refreshed = [...remote.keys()].find(p => p.startsWith('/new-mount/_system/config-history/'))
+    assert.ok(refreshed, '同步后应保留一份配置历史副本')
+    assert.ok(Date.parse(remote.get(refreshed).modified) > Date.parse('2020-01-01'), '过期副本应被重新上传并刷新 mtime')
     config['openlist.root'] = '/third-mount'
     await api.runSyncNow()
     assert.ok(remote.has('/third-mount/_data/config.js'))

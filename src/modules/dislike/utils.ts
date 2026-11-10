@@ -70,3 +70,10 @@ export const filterRules = (rules: string) => {
   }
   return new Set(list)
 }
+
+/** 固定格式去重键；保留 Live 等版本语义，只消除大小写和括号邻接空格。 */
+export const canonicalDislikeRule = (rule: string): string =>
+  rule.normalize('NFKC').trim().toLowerCase().replace(/\s*([()@])\s*/g, '$1')
+
+export const scopedDislikeRule = (rule: string, source?: string): string =>
+  `${source || '*'}::${canonicalDislikeRule(rule)}`

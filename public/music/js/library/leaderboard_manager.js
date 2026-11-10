@@ -235,7 +235,7 @@ window.LeaderboardManager = (function () {
                         <div class="font-bold text-sm t-text-main group-hover:text-emerald-500 transition-colors">
                             ${window.createMarqueeHtml ? window.createMarqueeHtml(song.name) : `<span class="truncate">${song.name}</span>`}
                         </div>
-                        <div class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
+                        <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
                             ${window.getSourceTag ? window.getSourceTag(song.source || state.source) : ''}
                             ${window.getQualityTags ? window.getQualityTags(song) : ''}
                             <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(song) : ''}"></span>
@@ -277,6 +277,7 @@ window.LeaderboardManager = (function () {
                             onclick="event.stopPropagation(); window.LeaderboardManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
+                    <button type="button" class="p-1 text-amber-500" data-rating-index="${index}" title="评分" onclick="event.stopPropagation(); window.LeaderboardManager.rateSong(${index})">☆</button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.LeaderboardManager.dislikeSong(${index})">
@@ -289,6 +290,7 @@ window.LeaderboardManager = (function () {
 
         if (typeof window.lazyLoadImages === 'function') window.lazyLoadImages();
         if (typeof window.applyMarqueeChecks === 'function') window.applyMarqueeChecks();
+        container.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, state.songs[Number(button.dataset.ratingIndex)]));
         window.ServerFileState?.paintBadges(container);
     }
 
@@ -503,6 +505,7 @@ window.LeaderboardManager = (function () {
          * 切换某首歌的「不喜欢」状态。
          * 走 /api/music/dislike，与 Subsonic 评分联动共用同一份规则。
          */
+        rateSong: function (index) { const song = state.songs[index]; if (song) window.RatingManager?.open(song); },
         dislikeSong: async function (index) {
             const song = state.songs[index];
             if (!song) return;

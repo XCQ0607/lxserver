@@ -10,6 +10,8 @@ interface SnapshotInfo {
   latest: string | null
   time: number
   list: string[]
+  /** 由用户上传导入的快照 id；系统自动生成的快照不在此列 */
+  imported: string[]
   clients: Record<string, LX.Sync.Dislike.ListInfo>
 }
 export class SnapshotDataManage {
@@ -20,6 +22,48 @@ export class SnapshotDataManage {
   snapshotInfo: SnapshotInfo
   clientSnapshotKeys: string[]
   private readonly saveSnapshotInfoThrottle: () => void
+
+  /** 兼容旧版 snapshotInfo.json（无 imported 字段） */
+  private getImported = (): string[] => {
+    if (!Array.isArray(this.snapshotInfo.imported)) this.snapshotInfo.imported = []
+    return this.snapshotInfo.imported
+  }
+
+  /**
+   * 来源登记直接同步落盘，不走 saveSnapshotInfoThrottle：
+   * 该节流回调会触发 clearOldSnapshot，避免在清理路径里互相触发写入。
+   */
+  private persistSnapshotInfo = () => {
+    try {
+      fs.writeFileSync(this.snapshotInfoFilePath, JSON.stringify(this.snapshotInfo))
+    } catch (err) {
+      syncLog.warn(err)
+    }
+  }
+
+  /** 登记用户导入的备份，来源由服务端显式持久化，不靠文件名/latest 推断 */
+  markImported = (name: string) => {
+    const imported = this.getImported()
+    if (imported.includes(name)) return
+    imported.push(name)
+    this.persistSnapshotInfo()
+  }
+
+  /** 删除快照时移除来源登记 */
+  unmarkImported = (name: string) => {
+    const imported = this.getImported()
+    const idx = imported.indexOf(name)
+    if (idx < 0) return
+    imported.splice(idx, 1)
+    this.persistSnapshotInfo()
+  }
+
+  /**
+   * 判定是否为导入来源：优先读显式登记；兼容本次改动前已导入的备份——
+   * 系统自动快照 id 恒为 32 位 md5，其余 id 只可能是外部导入的文件名。
+   */
+  isImported = (name: string): boolean =>
+    this.getImported().includes(name) || !/^[0-9a-f]{32}$/.test(name)
 
   isIncluedsDevice = (key: string) => {
     return this.clientSnapshotKeys.includes(key)
@@ -124,6 +168,26 @@ export class SnapshotDataManage {
     }
   }
 
+  /** 导入外部下载的 dislike 备份：直接写入原始 JSON 内容并保留文件时间（与歌单快照 saveSnapshotWithTime 同构） */
+  saveSnapshotWithTime = async(name: string, data: string, time: number) => {
+    syncLog.info('saveSnapshotWithTime', this.userDataManage.userName, name, time)
+    const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
+    try {
+      fs.writeFileSync(filePath, data)
+      if (time) {
+        const date = new Date(time)
+        fs.utimesSync(filePath, date, date)
+      }
+      // 导入来源是显式登记的，避免下次自动快照把它误当成系统快照
+      this.markImported(name)
+      void (globalThis as any).lx?.scheduleOpenlistSync?.()
+      void (globalThis as any).lx?.backupSnapshotToLocal?.(filePath, this.userDataManage.userName, name)
+    } catch (err) {
+      syncLog.error(err)
+      throw err
+    }
+  }
+
   removeSnapshot = async(name: string) => {
     syncLog.info('removeSnapshot', this.userDataManage.userName, name)
     const filePath = path.join(this.snapshotDir, `snapshot_${name}`)
@@ -133,13 +197,14 @@ export class SnapshotDataManage {
       syncLog.error(err)
       throw err
     }
+    this.unmarkImported(name)
     // 一并清理本地备份目录中该快照的所有带时间戳历史副本（含旧版无时间戳副本），避免孤儿文件
     void (globalThis as any).lx?.removeSnapshotLocalBackups?.(this.userDataManage.userName, name)
   }
 
   /** 列出不喜欢快照（与歌单快照 getSnapshotListWithMeta 同构，供 /api/data/snapshots 合并展示） */
-  getSnapshotListWithMeta = async () => {
-    const list: Array<{ id: string, time: number, size: number }> = []
+  getSnapshotListWithMeta = async (): Promise<Array<{ id: string, time: number, size: number, origin: 'imported' | 'auto' }>> => {
+    const list: Array<{ id: string, time: number, size: number, origin: 'imported' | 'auto' }> = []
     try {
       const files = await fs.promises.readdir(this.snapshotDir)
       for (const file of files) {
@@ -148,7 +213,7 @@ export class SnapshotDataManage {
         const filePath = path.join(this.snapshotDir, file)
         try {
           const stat = await fs.promises.stat(filePath)
-          list.push({ id: name, time: stat.mtimeMs, size: stat.size })
+          list.push({ id: name, time: stat.mtimeMs, size: stat.size, origin: this.isImported(name) ? 'imported' : 'auto' })
         } catch { /* ignore missing files */ }
       }
     } catch (err) {
@@ -225,7 +290,7 @@ export class SnapshotDataManage {
     this.snapshotInfoFilePath = path.join(this.dislikeDir, File.dislikeSnapshotInfoJSON)
     this.snapshotInfo = fs.existsSync(this.snapshotInfoFilePath)
       ? JSON.parse(fs.readFileSync(this.snapshotInfoFilePath).toString())
-      : { latest: null, time: 0, list: [], clients: {} }
+      : { latest: null, time: 0, list: [], imported: [], clients: {} }
 
     this.updateSnapshotDir()
 

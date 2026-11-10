@@ -159,3 +159,41 @@ Favorite artists/albums and dislike rules are stored separately. Subsonic can hi
 Server downloads, sync-download and matching run in the backend; browser downloads run on the visiting device. Closing the page does not cancel submitted server work. Inspect task status and use its stop/cancel action rather than refreshing to stop it.
 
 See [operations](./operations.md) for diagnosis and [API reference](../api/reference.md) for fields.
+
+### Song ratings
+
+After signing in to a local account, rate songs from 1 to 5 stars or clear ratings using the player, song menus, artist detail, charts, local music, and custom directories. Favorites → My ratings provides a searchable rating collection.
+
+Web and Subsonic share per-user `ratings` and `ratingOrigins` in `subsonic-meta.json`. Rating snapshots live in `rating/snapshot/`; `rating/songs.json` stores essential Web-submitted song descriptions without playback URLs or authentication parameters. Ratings do not modify playlists or audio tags. Current ratings and song descriptions belong to the user-data backup scope; snapshots belong to the snapshots scope.
+
+Online songs use source-specific IDs, preferring QQ song mids. Unlinked local files use stable registry IDs shared by Web and Subsonic. Once linked, the online ID becomes authoritative: reads and writes share the online version and other linked copies. If the online version already has a rating, it wins and the local score record is deleted. Otherwise the local score, origin and history move to the online ID, and the local entry is deleted. Relinking selects the new online ID; titles are never used to merge ratings. Files recognized as new after importing, rebuilding, or moving are not automatically matched to old ratings by name.
+
+Low ratings only add dislike rules when linking and the threshold allow it. Raising or clearing ratings does not delete dislike rules. Direct Web ratings record `web`; Web rating-to-dislike linking records `web-rating-link`; direct Subsonic ratings record `subsonic`. Partial snapshot/link failures are reported after the rating is saved. Lists load ratings in batches and refresh periodically or when returning to the page.
+
+
+### Rating identity, reconciliation and backups
+
+Unlinked local songs use local IDs. Linking keeps an existing online score or migrates the local score when the online version is unrated, then removes the local score record. The dialog shows the target ID and linked copy count; Admin Data View no longer has rating status labels or filters.
+
+The two supplement actions remain additive. Saving settings does not delete historical rules. To apply a changed threshold, select the user and choose Recalculate by threshold, preview the changes, then execute. Only invalid reasons traceable to a specific rating ID are removed. Rules with manual or other valid reasons remain; historical rules without precise provenance are preserved. Disabling linking does not trigger cleanup.
+
+My ratings → Export rating backup includes scores, origins, song descriptions and local link references, without audio files. New rating snapshots also contain descriptions. Importing/restoring a rating backup in the admin interface restores scores and available descriptions while preserving current favorites and file links. Link references are for comparison: backup paths never locate or move files or revert associations. A score-only backup cannot recreate missing covers or titles.
+
+Recommendation exclusion uses the same policy for daily, random and similar tracks: matching dislike rules and scores at or below the threshold are excluded. This is independent of ordinary list hiding and automatic linking.
+
+Admin rating and dislike dashboards support platform, action origin, cover availability, record age, combined keywords and score filters. Platform options show user totals, including zero-count platforms. Click the score distribution to filter, change page size, inspect records or export the current selection. Rating statistics follow platform, origin, age and keyword filters; type and score further narrow the list.
+
+### Per-user dislike auto-rating
+
+Settings → Logic → Dislike auto-rating is saved to the current account on the server and defaults to off. Adding a Web song dislike supplements 1 star only when unrated; existing ratings remain. Other users and the low-score threshold do not control this preference. The global reverse-link switch has been removed. Admin backfill is an independent, previewable operation and works with auto-rating off or threshold zero. Sources are labeled Web manual rating, Subsonic manual rating, Dislike automatic rating, and Admin backfill. The preference is stored in each user’s `rating/preferences.json`; score backup restore does not change this preference.
+
+Playlist detail supports direct rating. Open rating collections refresh periodically, on returning to the page and after local rating/dislike actions, preserving filters and list scroll. Each entity retains up to 30 recent score changes, including clearing, backfill and restore; identical submissions keep origin timestamps. Old history is not fabricated. Failed auto-rating reports partial completion while retaining the dislike. Recoverable restore write errors roll back files; this does not guarantee cross-file atomicity during process termination or power loss.
+
+
+### Metadata repair and synchronization status
+
+Identical scores keep their origin and timestamp while allowing available metadata to be repaired. Direct ratings and automatic/admin backfill share one write service; backfill only supplements missing scores. Resolved Subsonic metadata is stored in the user's `rating/songs.json`, reducing dependence on runtime caches. Favorite operations retain rating origins and history.
+
+My ratings and admin Ratings show pending work with Retry failed items. The user's `rating/sync-status.json` tracks backfill writes, catalog writes, unresolved metadata and snapshot failures. Retries preserve newer scores; metadata resolution still depends on provider availability. Corrupt primary rating files block writes and exports without replacing the original. Corrupt status files request manual inspection instead of being cleared.
+
+Admin previews separate additions, already-rated skips, duplicate linked identities and resolution failures. Saved scores with failed snapshots report partial completion. Version checks avoid unnecessary full refreshes. The Web collection average follows the current selection; the distribution follows the other filters, so users can switch score levels.

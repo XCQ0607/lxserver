@@ -1,3 +1,4 @@
+import { withRatingIdentityLock } from '../rating/ratingIdentityLock'
 import { beginCloudBackup } from '@/utils/backupPolicy'
 import { resolveContainedPath } from '../auth/security'
 import { serveFile } from '../http/serveFile'
@@ -1367,7 +1368,8 @@ export const batchUpdateMetadata = async (filenames: string[], username: string 
 /**
  * Link an unindexed local file to a specific online song identity
  */
-export const linkLocalFile = async (oldFilename: string, songInfo: any, username: string | undefined, targetFolder?: string) => {
+export const linkLocalFile = (oldFilename: string, songInfo: any, username: string | undefined, targetFolder?: string) => withRatingIdentityLock(username || '_open', () => linkLocalFileUnlocked(oldFilename, songInfo, username, targetFolder))
+const linkLocalFileUnlocked = async (oldFilename: string, songInfo: any, username: string | undefined, targetFolder?: string) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
     // Find the item in all possible folders
@@ -1435,8 +1437,11 @@ export const linkLocalFile = async (oldFilename: string, songInfo: any, username
     indexManager.update(normalizedUsername, item, folder)
 
     // 3. Post-link processing: Update ID3 tags and cover
+    require('./subsonicLocal').updateLocalTrackLink(normalizedUsername, dir, oldFilename, newFilename, newId)
     await batchUpdateMetadata([newFilename], normalizedUsername)
+    require('./subsonicLocal').invalidateLocalCatalog(normalizedUsername)
 
+    await require('./subsonicLocal').getLocalTracks(normalizedUsername)
     return {
         success: true,
         filename: newFilename,

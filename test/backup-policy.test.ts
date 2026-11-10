@@ -14,6 +14,12 @@ import WebDAVSync from '../src/utils/webdavSync'
 import { BACKUP_TYPES, BACKUP_TYPE_INFO, backupLocalPath, backupType, getBackupTypes, normalizeBackupTypes, scanBackupFiles } from '../src/utils/backupPolicy'
 import defaultConfig from '../src/defaultConfig'
 
+test('评分快照与索引属于快照范围，当前评分属于用户数据', () => {
+  assert.equal(backupType('users/alice/rating/snapshot/snapshot_abc'), 'snapshots')
+  assert.equal(backupType('users/alice/rating/snapshotInfo.json'), 'snapshots')
+  assert.equal(backupType('users/alice/subsonic-meta.json'), 'userData')
+})
+
 test('shared cloud backup policy and WebDAV restore', async t => {
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-backup-policy-'))
   const source = path.join(temp, 'data')

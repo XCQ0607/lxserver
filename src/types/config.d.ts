@@ -394,12 +394,16 @@ declare namespace LX {
      */
     'subsonic.linkRatingToDislike'?: boolean
 
+
+
     /**
-     * 解耦开关(反向): 不喜欢 -> 评星 是否自动联动 (默认 false)
-     * true 时, 网页端 / Subsonic 给某歌点「不喜欢」会回写该用户 subsonic-meta.json 的 ratings 映射(低星),
-     * 使 Subsonic 客户端能看到这颗星; false 时, 「不喜欢」仅写入原生 dislike 规则, 不回写评星, 与评星解耦。
+     * 是否向 Subsonic 客户端暴露 1~5 星评星歌单 (默认 true)
+     * 虚拟只读歌单(不落盘、不影响 LX 客户端「我的歌单」)：id 为 rating_1 ~ rating_5。
+     * rating_1 承载「我不喜欢」：除 1 星歌曲外并入 dislike 规则命中的歌曲，无真实评分时显示 1 星；
+     * 仅控制显示；自动联动分别受对应开关控制，仅补充缺失数据，
+     * 便于只能用评星操作的 Subsonic 客户端通过 1 星查找并处理不喜欢。
      */
-    'subsonic.linkDislikeToRating'?: boolean
+    'subsonic.ratingPlaylists'?: boolean
 
     /**
      * Subsonic 列表中是否隐藏 dislike 命中的歌曲 (默认 true)

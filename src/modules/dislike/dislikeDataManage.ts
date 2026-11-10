@@ -1,8 +1,9 @@
+import { registerDislikeMigration } from '../../server/rating/ratingMigration'
 import fs from 'node:fs'
 import path from 'node:path'
 import { SPLIT_CHAR } from '@/constants'
 import { type SnapshotDataManage } from './snapshotDataManage'
-import { filterRules, encodeAlbumRule } from './utils'
+import { encodeAlbumRule, canonicalDislikeRule, scopedDislikeRule } from './utils'
 
 export class DislikeDataManage {
   snapshotDataManage: SnapshotDataManage
@@ -10,6 +11,7 @@ export class DislikeDataManage {
 
   constructor(snapshotDataManage: SnapshotDataManage) {
     this.snapshotDataManage = snapshotDataManage
+    if (snapshotDataManage.dislikeDir) registerDislikeMigration(path.dirname(snapshotDataManage.dislikeDir), this)
 
     try {
       const latest = this.snapshotDataManage.snapshotInfo?.latest
@@ -72,7 +74,7 @@ export class DislikeDataManage {
   // Returns all active rule strings separated by newline (used by dislikeCache for parsing)
   getDislikeRulesString = (): string => {
     return this.dislikeRules.dislikeList
-      .map(s => this.buildDislikeRule(s))
+      .map(s => scopedDislikeRule(this.buildDislikeRule(s), (s as any).source))
       .filter(Boolean)
       .join('\n')
   }
@@ -84,44 +86,76 @@ export class DislikeDataManage {
   }
 
   addDislikeInfo = async(infos: LX.Dislike.DislikeSongInfo[]) => {
-    // Check for duplicates
-    const currentRules = new Set(this.dislikeRules.dislikeList.map(s => this.buildDislikeRule(s)))
-    for (const info of infos) {
-      const rule = this.buildDislikeRule(info)
-      if (!rule) continue
-      if (!currentRules.has(rule)) {
-        info.dislikeRule = rule
+    const key = (item: any) => scopedDislikeRule(this.buildDislikeRule(item), item.source)
+    const current = new Map(this.dislikeRules.dislikeList.map(item => [key(item), item]))
+    for (const raw of infos) {
+      const info: any = { ...raw, dislikeRule: canonicalDislikeRule(this.buildDislikeRule(raw)) }
+      if (!info.dislikeRule) continue
+      info.provenance = info.provenance || { channel: 'unknown', at: Date.now() }
+      info.reasons = info.reasons || [info.provenance]
+      const existing: any = current.get(key(info))
+      if (existing) {
+        // 只有身份不冲突时补字段；同名不同ID不能互相污染。
+        const identity = (x: any) => String(x.songmid || x.id || '').replace(new RegExp('^' + (x.source || '') + '_'), '')
+        const reasons = existing.reasons || [existing.provenance || { channel: 'unknown', at: Date.now() }]
+        for (const reason of info.reasons) if (!reasons.some((x: any) => x.channel === reason.channel && x.ratingId === reason.ratingId)) reasons.push(reason)
+        existing.reasons = reasons
+        if (identity(existing) && identity(info) && identity(existing) !== identity(info)) continue
+        const fill = (target: any, incoming: any) => {
+          for (const [field, value] of Object.entries(incoming)) {
+            if (['dislikeRule', 'provenance', 'reasons', '__proto__', 'constructor', 'prototype'].includes(field) || value == null || value === '') continue
+            const old = target[field]
+            if (old == null || old === '' || (Array.isArray(old) && !old.length)) target[field] = value
+            else if (typeof old === 'object' && !Array.isArray(old) && typeof value === 'object' && !Array.isArray(value)) fill(old, value)
+          }
+        }
+        const before = JSON.stringify(existing)
+        fill(existing, info)
+        if (JSON.stringify(existing) !== before) existing.enrichedBy = info.provenance
+      } else {
         this.dislikeRules.dislikeList.push(info)
-        currentRules.add(rule)
+        current.set(key(info), info)
       }
     }
     return this.dislikeRules
+  }
+
+  /** 同步读取当前规则并裁剪原因，避免预览期间新增的手动原因被旧副本覆盖。 */
+  reconcileRatingReasons = (validIds: Set<string>, preview = true) => {
+    const removed: any[] = []
+    const next: LX.Dislike.DislikeSongInfo[] = []
+    for (const item of this.dislikeRules.dislikeList) {
+      const reasons = item.reasons || [item.provenance || { channel: 'unknown', at: 0 }]
+      const remaining = reasons.filter(reason => {
+        const keep = !reason.ratingId || validIds.has(reason.ratingId)
+        if (!keep) removed.push({ rule: item.dislikeRule, source: item.source, ratingId: reason.ratingId })
+        return keep
+      })
+      if (remaining.length) next.push({ ...item, reasons: remaining, provenance: remaining[0] })
+    }
+    const result = { removedReasons: removed.length, removedRules: this.dislikeRules.dislikeList.length - next.length, removals: removed }
+    if (!preview) this.dislikeRules = { dislikeList: next }
+    return result
+  }
+
+  removeDislikeInfo = async(rule: string, source?: string) => {
+    const wanted = scopedDislikeRule(rule, source)
+    this.dislikeRules.dislikeList = this.dislikeRules.dislikeList.filter(item => scopedDislikeRule(this.buildDislikeRule(item), (item as any).source) !== wanted)
   }
 
   addDislikeAlbums = async(infos: LX.Dislike.DislikeAlbumInfo[]) => {
     if (!infos || infos.length === 0) return this.dislikeRules
-    const currentRules = new Set(this.dislikeRules.dislikeList.map(s => this.buildDislikeRule(s)))
-    const lines = infos.map(info => encodeAlbumRule(info.albumName, info.singer))
-    
-    for (let i = 0; i < lines.length; i++) {
-      const rule = lines[i]
-      if (!currentRules.has(rule)) {
-        this.dislikeRules.dislikeList.push({
-          name: '',
-          singer: '',
-          dislikeRule: rule
-        })
-        currentRules.add(rule)
-      }
-    }
+    await this.addDislikeInfo(infos.map(info => ({ name: '', singer: '',
+      dislikeRule: encodeAlbumRule(info.albumName, info.singer), source: info.source,
+      provenance: info.provenance, reasons: info.reasons })))
     return this.dislikeRules
   }
 
   overwirteDislikeInfo = async(rulesString: string) => {
-    const validRules = new Set(filterRules(rulesString))
+    const validRules = new Set(rulesString.split('\n').map(r => r.trim()).filter(Boolean))
     const existingMap = new Map<string, LX.Dislike.DislikeSongInfo>()
     for (const item of this.dislikeRules.dislikeList) {
-      const r = this.buildDislikeRule(item)
+      const r = scopedDislikeRule(this.buildDislikeRule(item), (item as any).source)
       if (r && validRules.has(r)) {
         existingMap.set(r, item)
       }
@@ -134,7 +168,8 @@ export class DislikeDataManage {
         newDislikeList.push({
           name: '',
           singer: '',
-          dislikeRule: r,
+          dislikeRule: r.includes('::') ? r.split('::').slice(1).join('::') : r,
+          source: r.split('::')[0] === '*' ? undefined : r.split('::')[0],
         })
       }
     }

@@ -10,6 +10,8 @@ interface SnapshotInfo {
   latest: string | null
   time: number
   list: string[]
+  /** 由用户上传导入的快照 id；系统自动生成的快照不在此列 */
+  imported: string[]
   clients: Record<string, LX.Sync.List.ListInfo>
 }
 export class SnapshotDataManage {
@@ -20,6 +22,48 @@ export class SnapshotDataManage {
   snapshotInfo: SnapshotInfo
   clientSnapshotKeys: string[]
   private readonly saveSnapshotInfoThrottle: () => void
+
+  /** 兼容旧版 snapshotInfo.json（无 imported 字段） */
+  private getImported = (): string[] => {
+    if (!Array.isArray(this.snapshotInfo.imported)) this.snapshotInfo.imported = []
+    return this.snapshotInfo.imported
+  }
+
+  /**
+   * 来源登记直接同步落盘，不走 saveSnapshotInfoThrottle：
+   * 该节流回调会触发 clearOldSnapshot，避免在清理路径里互相触发写入。
+   */
+  private persistSnapshotInfo = () => {
+    try {
+      fs.writeFileSync(this.snapshotInfoFilePath, JSON.stringify(this.snapshotInfo))
+    } catch (err) {
+      syncLog.warn(err)
+    }
+  }
+
+  /** 登记用户导入的备份，来源由服务端显式持久化，不靠文件名/latest 推断 */
+  markImported = (name: string) => {
+    const imported = this.getImported()
+    if (imported.includes(name)) return
+    imported.push(name)
+    this.persistSnapshotInfo()
+  }
+
+  /** 删除快照时移除来源登记 */
+  unmarkImported = (name: string) => {
+    const imported = this.getImported()
+    const idx = imported.indexOf(name)
+    if (idx < 0) return
+    imported.splice(idx, 1)
+    this.persistSnapshotInfo()
+  }
+
+  /**
+   * 判定是否为导入来源：优先读显式登记；兼容本次改动前已导入的备份——
+   * 系统自动快照 id 恒为 32 位 md5，其余 id 只可能是外部导入的文件名。
+   */
+  isImported = (name: string): boolean =>
+    this.getImported().includes(name) || !/^[0-9a-f]{32}$/.test(name)
 
   isIncluedsDevice = (key: string) => {
     return this.clientSnapshotKeys.includes(key)
@@ -113,6 +157,8 @@ export class SnapshotDataManage {
         const date = new Date(time)
         fs.utimesSync(filePath, date, date)
       }
+      // 导入来源是显式登记的，避免下次自动快照把它误当成系统快照
+      this.markImported(name)
       // 歌单快照落盘后，防抖触发一次云端备份（与缓存落盘上传同一入口；按配置备份 snapshots 类型）
       void (globalThis as any).lx?.scheduleOpenlistSync?.()
       // 本地备份开关打开时，复制一份快照到备份目录（"跟配置走"，复用 configBackup.enable 与备份目录约定）
@@ -132,12 +178,13 @@ export class SnapshotDataManage {
       syncLog.error(err)
       throw err
     }
+    this.unmarkImported(name)
     // 一并清理本地备份目录中该快照的所有带时间戳历史副本（含旧版无时间戳副本），避免孤儿文件
     void (globalThis as any).lx?.removeSnapshotLocalBackups?.(this.userDataManage.userName, name)
   }
 
-  getSnapshotListWithMeta = async () => {
-    const list = []
+  getSnapshotListWithMeta = async (): Promise<Array<{ id: string, time: number, size: number, origin: 'imported' | 'auto' }>> => {
+    const list: Array<{ id: string, time: number, size: number, origin: 'imported' | 'auto' }> = []
     try {
       const files = await fs.promises.readdir(this.snapshotDir)
       for (const file of files) {
@@ -150,6 +197,7 @@ export class SnapshotDataManage {
             id: name,
             time: stat.mtimeMs,
             size: stat.size,
+            origin: this.isImported(name) ? 'imported' : 'auto',
           })
         } catch (e) {
           // ignore missing files
@@ -259,7 +307,7 @@ export class SnapshotDataManage {
     this.listDir = path.join(userDataManage.userDir, File.listDir)
     checkAndCreateDirSync(this.listDir)
 
-    this.snapshotInfo = { latest: null, time: 0, list: [], clients: {} }
+    this.snapshotInfo = { latest: null, time: 0, list: [], imported: [], clients: {} }
     this.updateSnapshotDir()
 
     this.saveSnapshotInfoThrottle = throttle(() => {

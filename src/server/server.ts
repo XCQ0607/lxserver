@@ -1,3 +1,5 @@
+import { readRatingPreferences, saveRatingPreferences } from './rating/ratingPreferences'
+import { ratingVersion, readRatingTasks, retryRatingTasks, ratingIdentityDetails, listRatingItems, readRatings, resolveRatingId, resolveStoredRatingId, writeRating } from './rating/ratingService'
 import { getOpenlistRuntimeStatus } from './openlist/openlistBackup'
 import * as webdavRestoreTasks from './backup/webdavRestoreTasks'
 import { lookupLocalLyrics } from './music/localLyrics'
@@ -19,11 +21,12 @@ import {
   SYNC_CLOSE_CODE,
 } from '@/constants'
 import { getUserSpace, releaseUserSpace, getUserName, getServerId, getUserDirname, getUserConfig, migrateUserData, renameUserSpace, finishRenameUserSpace, updateAllUserSnapshotDirs } from '@/user'
-import { parseDislikeRules, splitSingers } from '@/modules/dislike/match'
+import { scopeDislikeRules, parseDislikeRules, splitSingers } from '@/modules/dislike/match'
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
-import { invalidateSubsonicPlaylistCache } from '@/server/integrations/subsonic'
+import { invalidateSubsonicPlaylistCache, syncRatingsToDislike, syncDislikesToRating, readSubsonicMeta } from '@/server/integrations/subsonic'
+import { exportRatingBackup, createRatingSnapshot, saveRatingImport, listRatingSnapshots, readRatingSnapshot, restoreRatingSnapshot, deleteRatingSnapshot, normalizeRatingMeta, isValidSnapshotId } from './rating/ratingSnapshot'
 import { createMsg2call } from 'message2call'
 import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
@@ -36,6 +39,29 @@ import { getOpenlistRecoveryHistory, startOpenlistRestore, listRestoreTasks, can
 import { prepareOpenlistIntegrity, startOpenlistIntegrity, integrityStatus, cancelIntegrity } from '@/server/openlist/openlistBackup'
 import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes, isCloudBackupRunning } from '@/utils/backupPolicy'
 import { OpenListClient } from '@/server/openlist/openlistClient'
+
+/** 快照备份的三类目录；检测口径与 public/app.js 的导入识别保持一致 */
+type SnapshotKind = 'list' | 'dislike' | 'rating'
+const isSnapshotObject = (value: unknown): value is Record<string, any> =>
+  !!value && typeof value === 'object' && !Array.isArray(value)
+
+const detectSnapshotKind = (parsed: unknown): SnapshotKind => {
+  if (!isSnapshotObject(parsed)) return 'list'
+  if (parsed.type === 'lxRating_v1') return 'rating'
+  if (Array.isArray(parsed.defaultList) || Array.isArray(parsed.userList)) return 'list'
+  if (Array.isArray(parsed.dislikeList)) return 'dislike'
+  if (isSnapshotObject(parsed.ratings)) return 'rating'
+  return 'list'
+}
+
+/** 落雪音乐离线备份 playList_v2 转回服务端内部歌单快照结构 */
+const toInternalListSnapshot = (parsed: unknown): string | null => {
+  if (!isSnapshotObject(parsed) || parsed.type !== 'playList_v2' || !Array.isArray(parsed.data)) return null
+  const defaultList = parsed.data.find((l: any) => l?.id === 'default')?.list || []
+  const loveList = parsed.data.find((l: any) => l?.id === 'love')?.list || []
+  const userList = parsed.data.filter((l: any) => l?.id !== 'default' && l?.id !== 'love')
+  return JSON.stringify({ defaultList, loveList, userList })
+}
 
 async function validateOpenListConfig(newConfig: any): Promise<void> {
   const c: any = global.lx.config
@@ -152,12 +178,13 @@ const serializeDislikeRules = (rules: string, username?: string) => {
         const albumsArr = JSON.parse(fs.readFileSync(albumsFile, 'utf8'))
         if (Array.isArray(albumsArr)) {
           for (const x of albumsArr) {
+            const scoped = scopeDislikeRules(parsed, x.source)
             const albumName = normalizeText(String(x.name || ''))
             if (!albumName) continue
-            let sSet = parsed.albums.get(albumName)
+            let sSet = scoped.albums.get(albumName)
             if (!sSet) {
               sSet = new Set<string>()
-              parsed.albums.set(albumName, sSet)
+              scoped.albums.set(albumName, sSet)
             }
             const singers = splitSingers(x.artistName)
             for (const s of singers) sSet.add(s)
@@ -170,8 +197,9 @@ const serializeDislikeRules = (rules: string, username?: string) => {
         const artistsArr = JSON.parse(fs.readFileSync(artistsFile, 'utf8'))
         if (Array.isArray(artistsArr)) {
           for (const x of artistsArr) {
+            const scoped = scopeDislikeRules(parsed, x.source)
             const singerName = normalizeText(String(x.name || ''))
-            if (singerName) parsed.singerNames.add(singerName)
+            if (singerName) scoped.singerNames.add(singerName)
           }
         }
       }
@@ -180,6 +208,7 @@ const serializeDislikeRules = (rules: string, username?: string) => {
     }
   }
   return {
+    scoped: parsed.scoped ? Object.fromEntries([...parsed.scoped].map(([source, rules]) => [source, { exact: [...rules.exact], musicNames: [...rules.musicNames], singerNames: [...rules.singerNames], albums: [...rules.albums].map(([albumName, singers]) => ({ albumName, singers: [...singers] })) }])) : {},
     exact: Array.from(parsed.exact),
     musicNames: Array.from(parsed.musicNames),
     singerNames: Array.from(parsed.singerNames),
@@ -1949,11 +1978,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             console.error(err)
           }
 
+          const dislikeList = (await userSpace.dislikeManage.getDislikeRules()).dislikeList
+          await require('./music/subsonicLocal').getLocalTracks(verifiedUser)
+          const ratingMeta = readSubsonicMeta(verifiedUser)
+          const ratingItems = listRatingItems(verifiedUser)
+          const activeRatings = Object.fromEntries(ratingItems.filter(x => !x.dormant).map(x => [x.id, x.rating]))
           res.writeHead(200, {
             'Content-Type': 'application/json',
             'Cache-Control': 'no-cache, no-store, must-revalidate'
           })
-          res.end(JSON.stringify({ ...data, albums, artists, dislikeAlbums, dislikeArtists }))
+          res.end(JSON.stringify({ ...data, albums, artists, dislikeAlbums, dislikeArtists, dislikeList, userRatings: activeRatings, storedRatings: ratingMeta.ratings, ratingOrigins: ratingMeta.ratingOrigins || {}, ratingItems, ratingSyncPending: readRatingTasks(verifiedUser) }))
         }).catch(err => {
           res.writeHead(500)
           res.end(err.message)
@@ -1991,9 +2025,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         try {
           const listSnaps = await userSpace.listManage.getSnapshotList()
           const dislikeSnaps = userSpace.dislikeManage ? await userSpace.dislikeManage.snapshotDataManage.getSnapshotListWithMeta() : []
+          const ratingSnaps = await listRatingSnapshots(verifiedUser)
           const list = [
             ...listSnaps.map(s => ({ ...s, kind: 'list' })),
             ...dislikeSnaps.map(s => ({ ...s, kind: 'dislike' })),
+            ...ratingSnaps.map(s => ({ ...s, kind: 'rating' })),
           ].sort((a, b) => (b.time || 0) - (a.time || 0))
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -2042,10 +2078,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
         try {
           const kind = urlObj.searchParams.get('kind')
-          if (kind && kind !== 'list' && kind !== 'dislike') throw new Error('Invalid snapshot kind')
-          let data: any = kind === 'dislike' ? null : await userSpace.listManage.getSnapshot(id)
-          if (!data && kind !== 'list' && userSpace.dislikeManage) {
-            data = await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)
+          if (kind && kind !== 'list' && kind !== 'dislike' && kind !== 'rating') throw new Error('Invalid snapshot kind')
+          let data: any
+          if (kind === 'rating') {
+            // 评分快照严格隔离读取，避免与歌单 / 不喜欢目录中的同名 id 串数据
+            data = await readRatingSnapshot(verifiedUser, id)
+          } else {
+            data = kind === 'dislike' ? null : await userSpace.listManage.getSnapshot(id)
+            if (!data && kind !== 'list' && userSpace.dislikeManage) {
+              data = await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)
+            }
           }
           if (!data) {
             res.writeHead(404)
@@ -2096,7 +2138,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
 
-          if (kind === 'dislike' && userSpace.dislikeManage) {
+          if (kind && kind !== 'list' && kind !== 'dislike' && kind !== 'rating') throw new Error('Invalid snapshot kind')
+          if (kind === 'rating') {
+            await restoreRatingSnapshot(verifiedUser, id)
+            // Subsonic 每次非轻量请求都会重新预读 subsonic-meta.json，评星缓存随之刷新
+            invalidateSubsonicPlaylistCache()
+          } else if (kind === 'dislike' && userSpace.dislikeManage) {
             await userSpace.dislikeManage.restoreSnapshot(id)
             invalidateDislikeCache(verifiedUser)
           } else {
@@ -2299,13 +2346,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           const { id, kind } = JSON.parse(body)
           if (!id) throw new Error('Missing id')
 
-          if (kind && kind !== 'list' && kind !== 'dislike') throw new Error('Invalid snapshot kind')
-          if (kind === 'dislike') {
-            if (!await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)) throw new Error('快照不存在')
+          if (kind && kind !== 'list' && kind !== 'dislike' && kind !== 'rating') throw new Error('Invalid snapshot kind')
+          if (kind === 'rating') {
+            if (!await deleteRatingSnapshot(verifiedUser, id)) throw new Error('快照不存在')
+          } else if (kind === 'dislike') {
+            if (!userSpace.dislikeManage || !await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)) throw new Error('快照不存在')
             await userSpace.dislikeManage.snapshotDataManage.removeSnapshot(id)
           } else if (await userSpace.listManage.getSnapshot(id)) {
             await userSpace.listManage.removeSnapshot(id)
-          } else if (!kind && await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)) {
+          } else if (!kind && userSpace.dislikeManage && await userSpace.dislikeManage.snapshotDataManage.getSnapshot(id)) {
             await userSpace.dislikeManage.snapshotDataManage.removeSnapshot(id)
           } else {
             throw new Error('快照不存在')
@@ -2326,6 +2375,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const userParam = urlObj.searchParams.get('user')
         const time = parseInt(urlObj.searchParams.get('time') || '0')
         const filename = urlObj.searchParams.get('filename')
+        const restore = urlObj.searchParams.get('restore') === '1'
 
         if (!userParam) {
           res.writeHead(400)
@@ -2357,50 +2407,87 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         try {
           const body = await readBody(req)
-          let finalData = body
+          let parsed: unknown = null
+          try { parsed = JSON.parse(body) } catch { /* 非 JSON 按原生歌单快照导入 */ }
 
-          // [核心兼容性修复] 检测是否为落雪音乐离线备份格式 (playList_v2)
-          try {
-            const jsonData = JSON.parse(body)
-            if (jsonData && jsonData.type === 'playList_v2' && Array.isArray(jsonData.data)) {
-              startupLog.info(`[Snapshot] Detected LX Music backup format for user ${verifiedUser}, converting back to internal format...`)
+          // 三类备份分流到各自目录：歌单 / 不喜欢 / 我的评分，与前端导入识别口径一致
+          const kind: SnapshotKind = detectSnapshotKind(parsed)
+          const ratingMeta = kind === 'rating' ? normalizeRatingMeta(parsed) : null
+          const convertedList = kind === 'list' ? toInternalListSnapshot(parsed) : null
+          const finalData = ratingMeta ? JSON.stringify(ratingMeta) : (convertedList || body)
 
-              // 寻找默认列表
-              const defaultList = jsonData.data.find((l: any) => l.id === 'default')?.list || []
-              // 寻找收藏列表
-              const loveList = jsonData.data.find((l: any) => l.id === 'love')?.list || []
-              // 其他所有列表均作为用户列表
-              const userList = jsonData.data.filter((l: any) => l.id !== 'default' && l.id !== 'love')
-
-              // 拼装为服务器内部快照格式
-              const internalFormat = {
-                defaultList,
-                loveList,
-                userList
-              }
-
-              // 压缩为单行 JSON 以节省磁盘空间并保持与原生快照一致的大小
-              finalData = JSON.stringify(internalFormat)
-              startupLog.info(`[Snapshot] Conversion complete for user ${verifiedUser}.`)
-            }
-          } catch (parseErr) {
-            // 解析失败说明不是标准的 JSON 格式或已经是原始快照，保持原样即可
-          }
-
-          // 处理文件名：如果以 snapshot_ 开头，则去掉（因为 saveSnapshotWithTime 会自动加）
-          // 如果不以 snapshot_ 开头，则保持原样（saveSnapshotWithTime 会自动加 snapshot_ 前缀）
+          // 文件名会直接拼进快照目录，统一拒绝路径分隔符与上跳片段
           let name = filename
-          if (name.startsWith('snapshot_')) {
-            name = name.substring(9)
+          if (name.startsWith('snapshot_')) name = name.substring(9)
+          if (!isValidSnapshotId(name)) throw new Error('Invalid snapshot id')
+
+          // 「导入并恢复」：先把导入前状态存成系统快照，再落盘并立即恢复
+          let safetySnapshot = false
+          if (restore) {
+            if (kind === 'rating') await createRatingSnapshot(verifiedUser)
+            else if (kind === 'dislike') {
+              if (!userSpace.dislikeManage) throw new Error('不喜欢管理未启用')
+              await userSpace.dislikeManage.createSnapshot()
+            } else await userSpace.listManage.createSnapshot()
+            safetySnapshot = true
           }
 
-          // 调用 ListManage 中的 saveSnapshotWithTime 方法
-          await userSpace.listManage.saveSnapshotWithTime(name, finalData, time)
+          if (kind === 'rating') {
+            await saveRatingImport(verifiedUser, name, ratingMeta!, time)
+          } else if (kind === 'dislike') {
+            if (!userSpace.dislikeManage) throw new Error('不喜欢管理未启用')
+            await userSpace.dislikeManage.saveSnapshotWithTime(name, finalData, time)
+          } else {
+            await userSpace.listManage.saveSnapshotWithTime(name, finalData, time)
+          }
+
+          if (restore) {
+            if (kind === 'rating') {
+              await restoreRatingSnapshot(verifiedUser, name)
+              invalidateSubsonicPlaylistCache()
+            } else if (kind === 'dislike') {
+              if (!userSpace.dislikeManage) throw new Error('不喜欢管理未启用')
+              await userSpace.dislikeManage.restoreSnapshot(name)
+              invalidateDislikeCache(verifiedUser)
+            } else {
+              await userSpace.listManage.restoreSnapshot(name)
+              invalidateSubsonicPlaylistCache()
+            }
+          }
 
           res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify({ success: true }))
+          res.end(JSON.stringify({ success: true, kind, restored: restore, safetySnapshot }))
         } catch (err: any) {
           res.writeHead(500)
+          res.end(err.message)
+        }
+        return
+      }
+
+      // [新增] Subsonic 评分 / 不喜欢 联动补数据（仅管理员从配置页手动触发）
+      if (pathname === '/api/subsonic/sync-link' && req.method === 'POST') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
+          return
+        }
+        try {
+          const { user, direction, preview, reconcile } = JSON.parse(await readBody(req))
+          if (!user || typeof user !== 'string') throw new Error('Missing user')
+          if (direction !== 'ratingToDislike' && direction !== 'dislikeToRating') throw new Error('Invalid direction')
+          const enabled = direction === 'ratingToDislike'
+            ? global.lx.config['subsonic.linkRatingToDislike']
+            : true
+          if (!enabled) throw new Error('联动开关未开启，请先在配置中开启并保存')
+          const known = user === '_open' || global.lx.config.users.some((u: any) => u.name === user)
+          if (!known) throw new Error('用户不存在')
+          const result = direction === 'ratingToDislike'
+            ? (reconcile === true ? await require('./integrations/subsonic').subsonicHandler.reconcileRatingDislikes(user, preview !== false) : await syncRatingsToDislike(user, preview === true))
+            : await syncDislikesToRating(user, preview === true)
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(result))
+        } catch (err: any) {
+          res.writeHead(400, { 'Content-Type': 'application/json' })
           res.end(err.message)
         }
         return
@@ -5461,14 +5548,14 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
         void readBody(req).then(async body => {
           try {
-            const { filename, songInfo } = JSON.parse(body)
+            const { filename, songInfo, folder } = JSON.parse(body)
             if (!filename || !songInfo) {
               res.writeHead(400)
               res.end('Missing params')
               return
             }
 
-            const result = await fileCache.linkLocalFile(filename, songInfo, verified)
+            const result = await fileCache.linkLocalFile(filename, songInfo, verified, folder === 'music' || folder === 'cache' ? folder : undefined)
             res.writeHead(200, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify(result))
           } catch (e: any) {
@@ -7075,6 +7162,68 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       //   GET  /api/music/dislike        返回已解析的规则集（歌曲 / 歌手 / 专辑）
       //   POST /api/music/dislike/add     body: { type, name?, singer?, source?, albumId? }
       //   POST /api/music/dislike/remove  body: 同上
+      if (pathname === '/api/data/rating-sync' && (req.method === 'GET' || req.method === 'POST')) {
+        res.setHeader('Content-Type','application/json'); res.setHeader('Cache-Control','no-store')
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {res.writeHead(401);res.end(JSON.stringify({error:'Unauthorized'}));return}
+        try {
+          const user = new URL(req.url || '/', 'http://localhost').searchParams.get('user') || ''
+          if (user !== '_open' && !global.lx.config.users.some(u=>u.name===user)) throw Error('用户不存在')
+          const result = req.method === 'POST' ? await retryRatingTasks(user) : {pending:readRatingTasks(user),version:ratingVersion(user)}
+          res.end(JSON.stringify(result))
+        } catch(e:any){res.writeHead(400);res.end(JSON.stringify({error:e.message}))}
+        return
+      }
+
+      if (pathname === '/api/music/rating-preferences' && (req.method === 'GET' || req.method === 'POST')) {
+        const user = verifyUserAuth(req)
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store')
+        if (!user) { res.writeHead(401); res.end(JSON.stringify({ error: '请先登录本地账号' })); return }
+        try {
+          const preference = req.method === 'GET' ? readRatingPreferences(user) : saveRatingPreferences(user, JSON.parse(await readBody(req)).dislikeAutoRating)
+          res.end(JSON.stringify(preference))
+        } catch (e: any) { res.writeHead(400); res.end(JSON.stringify({ error: e.message })) }
+        return
+      }
+
+      if (pathname === '/api/music/ratings' && (req.method === 'GET' || req.method === 'POST')) {
+        const user = verifyUserAuth(req)
+        if (!user) { res.writeHead(401); res.end(JSON.stringify({ error: '请先登录本地账号' })); return }
+        try {
+          res.setHeader('Content-Type', 'application/json')
+          res.setHeader('Cache-Control', 'no-store')
+          if (req.method === 'GET') {
+            const meta = readRatings(user)
+            for (const id of Object.keys(meta.ratings)) { if (id.startsWith('local_') && await resolveStoredRatingId(user, id) !== id) { delete meta.ratings[id]; if (meta.ratingOrigins) delete meta.ratingOrigins[id] } }
+            const songs = listRatingItems(user).filter(item => Object.hasOwn(meta.ratings, item.id))
+            res.end(JSON.stringify({ version: ratingVersion(user), pending: readRatingTasks(user), ratings: meta.ratings, origins: meta.ratingOrigins || {}, songs })); return
+          }
+          const body = JSON.parse(await readBody(req))
+          if (body.operation === 'version') { res.end(JSON.stringify({ version: ratingVersion(user) })); return }
+          if (body.operation === 'retryFailed') { res.end(JSON.stringify(await retryRatingTasks(user))); return }
+          if (body.operation === 'exportBackup') { res.end(JSON.stringify(exportRatingBackup(user))); return }
+          if (body.operation === 'resolve') {
+            if (!Array.isArray(body.songs) || body.songs.length > 100) throw new Error('Too many songs')
+            const meta = readRatings(user)
+            const entries = await Promise.all(body.songs.map(async (song: any) => {
+              try { const identity = await ratingIdentityDetails(user, song, body.includeDetails === true); return { ...identity, rating: meta.ratings[identity.id] || 0 } }
+              catch (e: any) { return { id: null, rating: 0, error: e.message } }
+            }))
+            res.end(JSON.stringify({ entries, version: ratingVersion(user) })); return
+          }
+          const rating = body.rating
+          if (!Number.isInteger(rating) || rating < 0 || rating > 5) throw new Error('评分必须为0至5的整数')
+          const requestedId = await resolveRatingId(user, body.song)
+          const saved = await writeRating(user, requestedId, rating, 'web', body.song)
+          const id = saved.id
+          let linkWarning
+          try { await require('./integrations/subsonic').subsonicHandler.applyRatingLink(user, id, rating, body.song) }
+          catch { linkWarning = '评分已保存，但不喜欢联动失败，可重试或手动补齐' }
+          invalidateSubsonicPlaylistCache()
+          res.end(JSON.stringify({ id, rating, warning: linkWarning || saved.snapshotWarning }))
+        } catch (err: any) { res.writeHead(400); res.end(JSON.stringify({ error: err.message })) }
+        return
+      }
+
       if (pathname === '/api/music/dislike' && req.method === 'GET') {
         const verified = verifyUserAuth(req)
         if (!verified) {
@@ -7106,8 +7255,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           }
           try {
             const isAdd = pathname === '/api/music/dislike/add'
-            const payload = JSON.parse(body || '{}')
+            let payload = JSON.parse(body || '{}')
             const type = String(payload.type || 'song')
+            if (type === 'song' && (payload.isLocal || payload._localFilename)) {
+              const effectiveId = await resolveRatingId(verified, payload)
+              const local = require('./music/subsonicLocal')
+              const tracks = await local.getLocalTracks(verified, false, payload._localLocation)
+              const track = tracks.find((item: any) => local.localRatingId(item) === effectiveId)
+              payload = { ...payload, id: effectiveId, source: effectiveId.startsWith('local_') ? 'local' : effectiveId.split('_')[0], name: track?.title || payload.name, singer: track?.artist || payload.singer }
+            }
             const name = String(payload.name || '')
             const singer = String(payload.singer || '')
             const source = String(payload.source || '')
@@ -7128,7 +7284,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 return
               }
               const singers = splitSingers(singer)
-              if (isAdd) await dm.dislikeDataManage.addDislikeAlbums(singers.map(s => ({ albumName, singer: s })))
+              if (isAdd) await dm.dislikeDataManage.addDislikeAlbums(singers.map(s => ({ albumName, singer: s, source, provenance: { channel: 'web', at: Date.now() } })))
               else for (const s of singers) {
                 removeKeys.add(encodeAlbumRule(normalizeText(albumName), s))
                 removeKeys.add(normalizeText(encodeAlbumRule(albumName, s)))
@@ -7139,7 +7295,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 res.end(JSON.stringify({ success: false, message: 'Missing singer' }))
                 return
               }
-              if (isAdd) await dm.dislikeDataManage.addDislikeInfo([{ name: '', singer, dislikeRule: '' }])
+              if (isAdd) await dm.dislikeDataManage.addDislikeInfo([{ name: '', singer, source, dislikeRule: '', provenance: { channel: 'web', at: Date.now() } }])
               else removeKeys.add(`@${normalizeText(singer)}`)
             } else {
               if (!name) {
@@ -7150,6 +7306,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (isAdd) {
                 const { type, ...songData } = payload
                 songData.dislikeRule = ''
+                songData.provenance = { channel: 'web', at: Date.now() }
+                songData.reasons = [songData.provenance]
                 await dm.dislikeDataManage.addDislikeInfo([songData])
               } else {
                 if (singer) {
@@ -7161,29 +7319,25 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               }
             }
 
-            const dislikeRatingThreshold = global.lx.config['subsonic.dislikeRating'] ?? 1
-            if (global.lx.config['subsonic.linkDislikeToRating'] && dislikeRatingThreshold > 0 && id && source) {
-              const subId = id.startsWith(`${source}_`) ? id : `${source}_${id}`
+            let ratingWarning: string | undefined
+            let ratingResult: string | undefined
+            const dislikeAutoRating = readRatingPreferences(verified).dislikeAutoRating
+            if (type === 'song' && dislikeAutoRating && id && source) {
               try {
+                const subId = await resolveRatingId(verified, payload)
+                const hadRating = readRatings(verified).ratings[subId] > 0
                 const { syncDislikeToRating } = require('./integrations/subsonic')
-                await syncDislikeToRating(verified, subId, isAdd ? 1 : 0)
+                await syncDislikeToRating(verified, subId, isAdd ? 1 : 0, payload)
+                ratingResult = !isAdd ? 'unchanged' : hadRating ? 'existing' : 'supplemented'
               } catch (e) {
                 console.error('[黑名单 API] 评分回写失败:', e)
+                ratingWarning = '不喜欢操作已保存，但补分或评分快照未完成，可重试或在后台补分'
+                ratingResult = 'failed'
               }
             }
 
             if (!isAdd && removeKeys.size > 0) {
-              const rulesString = dm.dislikeDataManage.getDislikeRulesString()
-              const lines = rulesString.split('\n').filter((l: string) => l.trim())
-              const remain = lines.filter((l: string) => {
-                const trimmed = l.trim().toLowerCase()
-                if (removeKeys.has(trimmed)) return false
-                // Also check without spaces or with alias
-                return true
-              })
-              if (remain.length !== lines.length) {
-                await dm.dislikeDataManage.overwirteDislikeInfo(remain.join('\n'))
-              }
+              for (const rule of removeKeys) await dm.dislikeDataManage.removeDislikeInfo(rule, source || undefined)
             }
 
             await dm.createSnapshot()
@@ -7193,7 +7347,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const data: any = serializeDislikeRules(finalRulesString, verified)
             data.dislikeList = dm.dislikeDataManage.dislikeRules.dislikeList || []
             res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
-            res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions() }))
+            res.end(JSON.stringify({ success: true, data, options: dislikeMatchOptions(), warning: ratingWarning, ratingResult }))
           } catch (err: any) {
             console.error('[黑名单 API] 处理异常:', err?.message)
             res.writeHead(500, { 'Content-Type': 'application/json' })
@@ -7366,8 +7520,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.sharedListMode': global.lx.config['subsonic.sharedListMode'] ?? 'leaderboard',
             'subsonic.sharedListSort': global.lx.config['subsonic.sharedListSort'] ?? 'hot',
             'subsonic.dislikeRating': global.lx.config['subsonic.dislikeRating'] ?? 1,
+            'subsonic.ratingPlaylists': global.lx.config['subsonic.ratingPlaylists'] ?? true,
             'subsonic.linkRatingToDislike': global.lx.config['subsonic.linkRatingToDislike'] ?? false,
-            'subsonic.linkDislikeToRating': global.lx.config['subsonic.linkDislikeToRating'] ?? false,
             'subsonic.hideDisliked': global.lx.config['subsonic.hideDisliked'] ?? true,
             'subsonic.dislikeCrossSource': global.lx.config['subsonic.dislikeCrossSource'] ?? false,
             'subsonic.dislikeNoRecommend': global.lx.config['subsonic.dislikeNoRecommend'] ?? true,
@@ -7665,6 +7819,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                 if (['hot', 'new'].includes(st)) global.lx.config['subsonic.sharedListSort'] = st as any
               }
               if (newConfig['subsonic.dislikeRating'] !== undefined) global.lx.config['subsonic.dislikeRating'] = Number(newConfig['subsonic.dislikeRating'])
+              if (typeof newConfig['subsonic.ratingPlaylists'] === 'boolean') global.lx.config['subsonic.ratingPlaylists'] = newConfig['subsonic.ratingPlaylists']
               if (newConfig['subsonic.hideDisliked'] !== undefined) global.lx.config['subsonic.hideDisliked'] = !!newConfig['subsonic.hideDisliked']
               if (newConfig['subsonic.dislikeCrossSource'] !== undefined) global.lx.config['subsonic.dislikeCrossSource'] = !!newConfig['subsonic.dislikeCrossSource']
               if (newConfig['subsonic.dislikeNoRecommend'] !== undefined) global.lx.config['subsonic.dislikeNoRecommend'] = !!newConfig['subsonic.dislikeNoRecommend']
@@ -7675,7 +7830,6 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.dislikeNormalizeName'] !== undefined) global.lx.config['subsonic.dislikeNormalizeName'] = !!newConfig['subsonic.dislikeNormalizeName']
               if (newConfig['subsonic.dislikeRequireSinger'] !== undefined) global.lx.config['subsonic.dislikeRequireSinger'] = !!newConfig['subsonic.dislikeRequireSinger']
               if (newConfig['subsonic.linkRatingToDislike'] !== undefined) global.lx.config['subsonic.linkRatingToDislike'] = !!newConfig['subsonic.linkRatingToDislike']
-              if (newConfig['subsonic.linkDislikeToRating'] !== undefined) global.lx.config['subsonic.linkDislikeToRating'] = !!newConfig['subsonic.linkDislikeToRating']
               if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']

@@ -28,11 +28,17 @@ declare namespace LX {
      * 规则串中以 !<专辑名>@<歌手> 形式存储，按歌手拆成多条。
      */
     interface DislikeAlbumInfo {
+      source?: string
+      provenance?: { channel: string, at: number, ratingId?: string }
+      reasons?: { channel: string, at: number, ratingId?: string }[]
       albumName: string
       singer: string
     }
 
     interface DislikeSongInfo {
+      provenance?: { channel: string, at: number, ratingId?: string }
+      reasons?: { channel: string, at: number, ratingId?: string }[]
+      enrichedBy?: { channel: string, at: number }
       id?: string
       name: string
       singer: string

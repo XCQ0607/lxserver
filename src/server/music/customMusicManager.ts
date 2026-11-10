@@ -1,3 +1,4 @@
+import { withRatingIdentityLock } from '../rating/ratingIdentityLock'
 import fs from 'fs'
 import path from 'path'
 import http from 'http'
@@ -572,7 +573,8 @@ export const removeCustomFile = (filename: string, username: string): boolean =>
 }
 
 // 手动关联自定义目录歌曲（更新 ID3 标签及 custom_index.json）
-export const linkCustomSong = async (filename: string, songInfo: any, username: string) => {
+export const linkCustomSong = (filename: string, songInfo: any, username: string) => withRatingIdentityLock(username, () => linkCustomSongUnlocked(filename, songInfo, username))
+const linkCustomSongUnlocked = async (filename: string, songInfo: any, username: string) => {
     const customDir = getCustomMusicDir(username)
     if (!customDir) throw new Error('用户未启用或未配置自定义目录')
 
@@ -623,6 +625,8 @@ export const linkCustomSong = async (filename: string, songInfo: any, username: 
     customIndexManager.set(username, filename, updatedItem)
     customIndexManager.save(username)
 
+    require('./subsonicLocal').invalidateLocalCatalog(username)
+    await require('./subsonicLocal').getLocalTracks(username)
     return { success: true, message: '关联成功', data: updatedItem }
 }
 

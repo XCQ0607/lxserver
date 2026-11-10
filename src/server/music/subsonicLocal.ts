@@ -41,6 +41,7 @@ interface Registry { tracks: Record<string, LocalTrack> }
 export interface LocalPlaylist { name: string; ids: string[]; created: string; changed: string; standalone: boolean }
 interface UserState { playlists: Record<string, LocalPlaylist>; starred: Record<string, string> }
 const locks = new Map<string, Promise<unknown>>()
+const catalogRevisions = new Map<string, number>()
 const catalogs = new Map<string, { key: string; at: number; tracks: LocalTrack[] }>()
 const scans = new Map<string, { scanning: boolean; count: number; error?: string }>()
 const pending = new Map<string, Promise<LocalTrack[]>>()
@@ -91,11 +92,11 @@ const duration = (value: unknown) => {
 }
 
 /** Main roots follow persistent user settings; browsing overrides never affect this catalog. */
-export function getLocalTracks(user: string, force = false): Promise<LocalTrack[]> {
+export function getLocalTracks(user: string, force = false, browseLocation?: string): Promise<LocalTrack[]> {
   return withCacheBrowseLocation('/rest/', () => {
-    const location = getUserCacheLocation(user)
+    const location = browseLocation || getUserCacheLocation(user)
     const custom = getCustomMusicDir(user)
-    const key = JSON.stringify([location, custom, getCacheDir(user, false, location), getCacheDir(user, true, location)])
+    const key = JSON.stringify([catalogRevisions.get(user) || 0, location, custom, getCacheDir(user, false, location), getCacheDir(user, true, location)])
     const cached = catalogs.get(user)
     if (!force && cached?.key === key && Date.now() - cached.at < 30_000) return Promise.resolve(cached.tracks)
     const pendingKey = `${user}:${key}`
@@ -122,7 +123,8 @@ export function getLocalTracks(user: string, force = false): Promise<LocalTrack[
           seen.add(resolved)
           const old = registry.tracks[resolved]
           let track: LocalTrack
-          const platformId = ['wy', 'tx', 'kw', 'kg', 'mg', 'bd'].includes(item.source) ? item.id : undefined
+          const rawPlatformId = item.source === 'tx' ? item.songmid || item.id : item.id || item.songmid
+          const platformId = ['wy', 'tx', 'kw', 'kg', 'mg', 'bd'].includes(item.source) && rawPlatformId ? (String(rawPlatformId).startsWith(item.source + '_') ? String(rawPlatformId) : `${item.source}_${rawPlatformId}`) : undefined
           if (old && old.mtime === item.mtime && old.size === item.size) {
             track = { ...old, root, filename: item.filename, platformId }
           } else {
@@ -160,6 +162,7 @@ export function getLocalTracks(user: string, force = false): Promise<LocalTrack[
           registry.tracks[resolved] = track
           tracks.push(track)
         }
+        require('../rating/ratingService').migrateLinkedRatings(user, undefined, tracks)
         write(file, registry)
         catalogs.set(user, { key, tracks, at: Date.now() })
         scans.set(user, { scanning: false, count: tracks.length })
@@ -278,4 +281,26 @@ export function mergeLocalPlaylist(online: string[], overlay?: LocalPlaylist): s
   const ids = overlay.ids.filter(id => isLocalSong(id) || present.has(id))
   const seen = new Set(ids)
   return [...ids, ...online.filter(id => !seen.has(id))]
+}
+
+/** 关联后评分以在线身份为准；未关联时保留本地身份。 */
+export const localRatingId = (track: Pick<LocalTrack, 'id' | 'platformId'>): string => track.platformId || track.id
+export function invalidateLocalCatalog(user: string): void { catalogs.delete(user); catalogRevisions.set(user, (catalogRevisions.get(user) || 0) + 1) }
+
+/** 缓存关联可能改名；保留原本地ID和旧定位别名，读取评分时仍以最新在线ID为准。 */
+export function updateLocalTrackLink(user: string, root: string, oldFilename: string, filename: string, platformId: string): void {
+  const file = userFile(user, 'subsonic-local-registry.json')
+  const registry = read<Registry>(file, { tracks: {} })
+  const actualRoot = fs.realpathSync(root)
+  const oldPath = path.resolve(actualRoot, oldFilename)
+  const newPath = localFile({ root, filename })
+  if (!newPath || !oldPath.startsWith(actualRoot + path.sep)) throw new Error('Invalid local rating relocation')
+  const previous = registry.tracks[oldPath]
+  if (previous) {
+    const track = { ...previous, root: actualRoot, filename, platformId }
+    for (const [key, item] of Object.entries(registry.tracks)) if (item.id === track.id) registry.tracks[key] = track
+    registry.tracks[newPath] = track
+    write(file, registry)
+  }
+  invalidateLocalCatalog(user)
 }
