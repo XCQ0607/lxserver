@@ -5,7 +5,7 @@ const vm = require('node:vm');
 
 function manager(fetch) {
     const source = fs.readFileSync('public/music/js/download/download_manager.js', 'utf8');
-    const context = vm.createContext({ window: { getUserAuthHeaders: () => ({ 'x-user-token': 'test-token' }) }, fetch, console, AbortController, URL });
+    const context = vm.createContext({ window: { ensureDownloadSession: async () => {}, getUserAuthHeaders: () => ({ 'x-user-token': 'test-token' }) }, fetch, console, AbortController, URL });
     vm.runInContext(source.slice(0, source.indexOf('// Global UI Toggles')) + '\nthis.Manager = DownloadManager;', context);
     const value = Object.create(context.Manager.prototype);
     Object.assign(value, { tasks: [{ id: 'dl_test', isServer: false, status: 'downloading', nativeDownloadDispatched: true, progress: 0 }], renderTask() {}, saveTasks() {}, processQueue() {} });

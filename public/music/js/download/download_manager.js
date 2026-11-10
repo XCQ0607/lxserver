@@ -996,8 +996,18 @@ class DownloadManager {
             }
 
             if (window.authorizeMediaUrl) finalUrl = window.authorizeMediaUrl(finalUrl);
+            const ownMediaUrl = finalUrl.startsWith('/api/music/') || (() => {
+                try {
+                    const parsed = new URL(finalUrl, window.location.href);
+                    return parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/music/');
+                } catch { return false; }
+            })();
 
             if (task.useNativeDownload) {
+                if (ownMediaUrl) {
+                    if (typeof window.ensureDownloadSession !== 'function') throw new Error('下载认证组件未就绪，请刷新页面');
+                    await window.ensureDownloadSession();
+                }
                 if (task.controller.signal.aborted) throw new DOMException('Download paused', 'AbortError');
                 this.triggerNativeDownload(finalUrl, filename);
                 task.nativeDownloadDispatched = true;
@@ -1013,8 +1023,13 @@ class DownloadManager {
             }
 
             // 2. Fetch the actual file using Streams to track progress
-            const response = await fetch(finalUrl, { signal: task.controller.signal });
-            if (!response.ok) throw new Error(`下载请求失败（HTTP ${response.status}）`);
+            const response = await fetch(finalUrl, {
+                signal: task.controller.signal,
+                ...(ownMediaUrl ? { headers: window.getUserAuthHeaders?.() || {} } : {})
+            });
+            if (!response.ok) throw Object.assign(new Error(response.status === 401
+                ? '登录已失效，请重新登录后重试下载'
+                : `下载请求失败（HTTP ${response.status}）`), { status: response.status });
 
             const contentLength = response.headers.get('content-length');
             if (contentLength) {
@@ -1099,9 +1114,10 @@ class DownloadManager {
             } else {
                 console.error(`Download error for ${task.song.name}:`, error);
                 task.errorMsg = error.message === 'Failed to fetch' ? '下载请求失败，请检查网络或服务端日志' : (error.message || '下载失败');
+                task.speed = 0;
 
                 // Retry logic
-                if (task.retryCount < task.maxRetries) {
+                if (![401, 403, 409].includes(error.status) && task.retryCount < task.maxRetries) {
                     task.retryCount++;
                     task.status = 'error'; // Show error momentarily
                     this.renderTask(task);

@@ -1181,6 +1181,7 @@ async function ensureUserAuthToken(options = {}) {
                 headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
             });
             const result = response.ok ? await response.json() : null;
+            if ((localStorage.getItem('lx_sync_user') || '') !== username) return false;
             if (result?.valid && result.user === username) {
                 userToken = token;
                 return true;
@@ -1208,6 +1209,7 @@ async function ensureUserAuthToken(options = {}) {
 
             const result = await response.json();
             if (!result.success || !result.token) return false;
+            if ((localStorage.getItem('lx_sync_user') || '') !== username) return false;
 
             userToken = result.token;
             localStorage.setItem('lx_user_token', userToken);
@@ -1225,20 +1227,34 @@ async function ensureUserAuthToken(options = {}) {
 }
 window.ensureUserAuthToken = ensureUserAuthToken;
 
-async function restorePlaybackSession(allowRefresh = true) {
-    if (!isUserLoggedIn()) return false;
+async function restorePlaybackSession(allowRefresh = true, strict = false) {
+    const expectedUser = localStorage.getItem('lx_sync_user') || '';
+    const loggedIn = isUserLoggedIn();
+    if (!loggedIn && !strict) return false;
+    const checkAccount = () => {
+        if ((localStorage.getItem('lx_sync_user') || '') !== expectedUser) {
+            throw Object.assign(new Error('账号已切换，请重新发起下载'), { status: 409 });
+        }
+    };
     let valid;
     try {
         // Check the cookie alone: native audio cannot attach the API token header.
         const response = await fetch('/api/music/auth/verify', {
             cache: 'no-store', signal: AbortSignal.timeout(5000)
         });
-        if (!response.ok) return false;
+        if (!response.ok) {
+            if (strict) throw new Error('无法确认登录状态，请稍后重试');
+            return false;
+        }
         const session = await response.json();
-        valid = session.valid === true && session.user === localStorage.getItem('lx_sync_user');
-    } catch (_) { return false; }
+        valid = session.valid === true && (!loggedIn || session.user === expectedUser);
+    } catch (error) {
+        if (strict) throw error;
+        return false;
+    }
+    if (strict) checkAccount();
     if (valid !== false) return false;
-    if (allowRefresh) {
+    if (allowRefresh && loggedIn) {
         const token = (typeof userToken !== 'undefined' && userToken) || localStorage.getItem('lx_user_token');
         if (token) {
             try {
@@ -1247,13 +1263,27 @@ async function restorePlaybackSession(allowRefresh = true) {
                     headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
                 });
                 const session = response.ok ? await response.json() : null;
-                if (session?.valid && session.user === localStorage.getItem('lx_sync_user')) return true;
-            } catch (_) { }
+                if (strict) checkAccount();
+                if (session?.valid && session.user === expectedUser) return true;
+            } catch (error) { if (error.status === 409) throw error; }
         }
-        if (localStorage.getItem('lx_sync_pass') && await ensureUserAuthToken({ force: true })) return true;
+        if (strict) checkAccount();
+        if (localStorage.getItem('lx_sync_pass') && await ensureUserAuthToken({ force: true })) {
+            if (strict) checkAccount();
+            return true;
+        }
     }
     throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
 }
+window.ensureDownloadSession = async () => {
+    const account = localStorage.getItem('lx_sync_user') || '';
+    const refreshed = await restorePlaybackSession(true, true);
+    // Verify that the browser actually accepted the replacement cookie.
+    if (refreshed) await restorePlaybackSession(false, true);
+    if ((localStorage.getItem('lx_sync_user') || '') !== account) {
+        throw Object.assign(new Error('账号已切换，请重新发起下载'), { status: 409 });
+    }
+};
 
 /**
  * 更新顶部栏的用户状态显示 (登录按钮/用户名)
