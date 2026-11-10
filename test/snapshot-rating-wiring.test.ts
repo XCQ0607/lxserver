@@ -95,7 +95,7 @@ test('S19 playList_v2 转换：非该格式返回 null，残缺 data 不抛异�
 })
 
 const syncLinkBody = slice(
-  '          const { user, direction } = JSON.parse(await readBody(req))',
+  '          const { user, direction, preview, reconcile } = JSON.parse(await readBody(req))',
   '        } catch (err: any) {',
 )
 

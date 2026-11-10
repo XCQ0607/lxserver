@@ -34,6 +34,10 @@ const build = (ratingPlaylists: boolean | undefined = undefined) => {
     global: { lx: { config } },
     getLocalTracks: async () => [],
     localMusic: (x: any) => x,
+    localRatingId: (track: any) => track.platformId || track.id,
+    withTimeout: (p: any) => p,
+    LINK_SYNC_ITEM_TIMEOUT_MS: 8000,
+    subsonicLog: { warn() {} },
     console,
   })
   vm.runInContext(transformSync(harness, { loader: 'ts', format: 'cjs', target: 'node20' }).code, context)
@@ -53,6 +57,26 @@ test('S5 ratings 值域：非整数 / 越界 / 字符串评分不得让 getPlayl
   const groups = await instance.getRatingPlaylistSongs('alice')
   assert.equal(groups.get(3).length, 1, '只有整数 3 应进入 3 星歌单')
   for (const star of [1, 2, 4, 5]) assert.equal(groups.get(star).length, 0)
+})
+
+test('高评分屏蔽歌曲同时进入原星级与不喜欢合集', async () => {
+  const { instance } = build(true)
+  instance.meta = { ratings: { a: 5 } }
+  instance.listData = { loveList: [], defaultList: [song('a')], userList: [] }
+  instance.disliked = new Set(['a'])
+  const groups = await instance.getRatingPlaylistSongs('alice')
+  assert.equal(groups.get(1)[0].id, 'a')
+  assert.equal(groups.get(5)[0].id, 'a')
+})
+
+test('缓存淘汰后解析已评分歌曲，排除专辑和歌手', async () => {
+  const { instance } = build(true)
+  instance.meta = { ratings: { lost: 5, alb_wy_1: 5, art_tx_2: 4 } }
+  const calls: string[] = []
+  instance.resolveSongMeta = async (_user: string, id: string) => { calls.push(id); return { music: song(id) } }
+  const groups = await instance.getRatingPlaylistSongs('alice')
+  assert.equal(groups.get(5)[0].id, 'lost')
+  assert.deepEqual(calls, ['lost'])
 })
 
 test('S8 开关：默认开启，显式 false 关闭', () => {
@@ -83,7 +107,7 @@ test('S8 只读语义与配置契约：虚拟歌单不得被写入或删除', ()
   assert.match(source, /评星歌单为只读播放列表，请通过给歌曲评星来修改/)
   assert.match(source, /评星歌单为只读播放列表，不支持删除/)
   assert.match(source, /Rating playlists are disabled/)
-  assert.match(source, /linkToDislike = .*\|\| this\.isRatingPlaylistEnabled\(\)/)
+  assert.match(source, /if \(!global\.lx\.config\['subsonic\.linkRatingToDislike'\]/)
   const defaults = fs.readFileSync(path.resolve('src/defaultConfig.ts'), 'utf8')
   assert.match(defaults, /'subsonic\.ratingPlaylists': true/)
 })

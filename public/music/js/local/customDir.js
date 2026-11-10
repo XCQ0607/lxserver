@@ -926,7 +926,7 @@ window.CustomDirManager = {
                         </div>
                         
                         <!-- Row 2: Singer (mobile only) + Quality badge + Audio specs (desktop only) + Lyric/Cover badges (desktop only) -->
-                        <div class="text-[11px] md:text-xs t-text-muted mt-0.5 flex items-center gap-1.5 min-w-0 flex-nowrap">
+                        <div data-rating-badges class="text-[11px] md:text-xs t-text-muted mt-0.5 flex items-center gap-1.5 min-w-0 flex-nowrap">
                             <span class="sm:hidden font-medium text-emerald-600/80 truncate max-w-[105px] xs:max-w-[140px] shrink min-w-0" title="${safeSinger}">${safeSinger}</span>
                             <span class="px-1.5 py-0.5 rounded text-[9px] border t-border-main ${qualityClass} shrink-0 leading-none font-medium">${this.escapeHtml(qualityName || '标准')}</span>
                             ${item.bitrate ? `<span class="text-[10px] opacity-60 font-mono hidden sm:inline-block shrink-0">${Math.round(item.bitrate)}kbps</span>` : ''}
@@ -1037,6 +1037,14 @@ window.CustomDirManager = {
         container.innerHTML = html;
 
         // 绑定封面加载失败兜底
+        container.querySelectorAll('[data-lm-action="playlist"]').forEach(anchor => {
+            const item = this.displayData[Number(anchor.dataset.lmIndex)];
+            if (!item) return;
+            const button = document.createElement('button'); button.type = 'button';
+            button.className = 'text-xs text-amber-500 px-1 shrink-0';
+            anchor.parentElement.insertBefore(button, anchor);
+            window.RatingManager?.attach(button, { ...item.songInfo, name: item.name || item.songInfo?.name, singer: item.singer || item.songInfo?.singer, isLocal: true, _localFilename: item.filename, _localFolder: true ? 'custom' : item.folder || 'cache', _localLocation: true ? undefined : document.getElementById('lm-location-select')?.value || 'root', _isCustomDir: true });
+        });
         container.querySelectorAll('.lm-cover-image').forEach(img => {
             img.addEventListener('error', () => {
                 const index = parseInt(img.dataset.lmCoverIndex || '', 10);

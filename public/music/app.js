@@ -1434,6 +1434,7 @@ async function handleHeaderLogout(e) {
             } catch (err) { }
             const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
             localStorage.clear();
+    window.dispatchEvent(new Event('ratingaccountchange'));
             sessionStorage.clear();
             if (agreementAccepted) localStorage.setItem('lx_agreement_accepted', agreementAccepted);
             window.location.reload();
@@ -1528,6 +1529,7 @@ async function handleLogout() {
 
     const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
     localStorage.clear();
+    window.dispatchEvent(new Event('ratingaccountchange'));
     sessionStorage.clear();
     if (agreementAccepted) localStorage.setItem('lx_agreement_accepted', agreementAccepted);
 
@@ -2237,7 +2239,7 @@ function renderQueue() {
                 
                 <div class="flex-1 min-w-0">
                     ${createMarqueeHtml(song.name, 'text-sm font-bold ' + (isActive ? 'text-emerald-500' : 't-text-main'))}
-                    <div class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
+                    <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
                         ${getSourceTag(song.source)}
                         ${getQualityTags(song)}
                         ${createMarqueeHtml(song.singer, 'text-[10px] t-text-muted flex-1')}
@@ -2900,7 +2902,7 @@ function renderHotSearch(data) {
     if (!container || !data || !data.list || data.list.length === 0 || settings.hotSearchLimit === 0) {
         // 显示默认空白状态
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-music text-6xl opacity-20"></i>
                 <p>输入关键词开始搜索音乐</p>
             </div>
@@ -2992,7 +2994,7 @@ function switchHotSearchTab(source) {
     const container = document.getElementById('search-results');
     if (container) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
                 <p>正在加载热门搜索...</p>
             </div>
@@ -3034,7 +3036,7 @@ function showInitialSearchState() {
 
     // 显示加载状态
     container.innerHTML = `
-        <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+        <div class="dislike-empty-state">
             <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
             <p>正在加载热门搜索...</p>
         </div>
@@ -3052,7 +3054,7 @@ function showInitialSearchState() {
         console.error('[HotSearch] 显示热搜失败:', err);
         // 失败时显示默认状态
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-music text-6xl opacity-20"></i>
                 <p>输入关键词开始搜索音乐</p>
             </div>
@@ -3911,7 +3913,7 @@ function renderArtistSongsUI(list, page) {
                         </div>
                         <div class="min-w-0 flex-1">
                             <div class="font-bold t-text-main text-sm md:text-base leading-tight truncate group-hover:text-emerald-600 transition-colors">${item.name}</div>
-                            <div class="flex items-center gap-1 mt-1 overflow-hidden whitespace-nowrap">
+                            <div data-rating-badges class="flex items-center gap-1 mt-1 overflow-hidden whitespace-nowrap">
                                 ${getSourceTag ? getSourceTag(item.source) : ''}
                                 ${getQualityTags ? getQualityTags(item) : ''}
                                 <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
@@ -3936,6 +3938,7 @@ function renderArtistSongsUI(list, page) {
 
                     <!-- Actions -->
                     <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button type="button" data-rating-index="${index}" class="p-1 text-amber-500">☆ 评分</button>
                         <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
                             <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
@@ -3982,6 +3985,7 @@ function renderArtistSongsUI(list, page) {
     // Init Marquee if needed (though we use truncate here)
     if (window.applyMarqueeChecks) applyMarqueeChecks();
     if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
+    content.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, list[Number(button.dataset.ratingIndex)]));
     window.ServerFileState?.paintBadges(content);
 }
 window.renderArtistSongsUI = renderArtistSongsUI;
@@ -5206,7 +5210,11 @@ function renderResults(list) {
     window.viewingPlaylist = list;
 
     if (!list || list.length === 0) {
-        container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
+        const emptyDislike = window.currentViewingListId === 'dislike_songs' && !document.getElementById('gl-local-search-input')?.value?.trim() && !document.getElementById('search-input')?.value?.trim();
+        if (emptyDislike) {
+            if (header) header.classList.add('hidden');
+            container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-music" aria-hidden="true"></i><p>还没有不喜欢任何歌曲</p><small>在歌曲操作菜单中点击“不喜欢”即可添加</small></div>';
+        } else container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
         updatePaginationInfo(0, 0, 0, 1, 1);
         return;
     }
@@ -5310,7 +5318,7 @@ function renderResults(list) {
                     <div class="font-bold t-text-main text-sm md:text-base leading-tight hover:text-emerald-600 transition-colors">
                          ${createMarqueeHtml(item.name)}
                     </div>
-                    <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
+                    <div data-rating-badges class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
                          ${getSourceTag(item.source)}
                          ${getQualityTags(item)}
                          <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
@@ -5376,6 +5384,12 @@ function renderResults(list) {
             menu.addEventListener('click', event => event.stopPropagation());
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
+            const rateButton = document.createElement('button');
+            rateButton.type = 'button';
+            rateButton.className = 'rating-menu-item';
+            menu.querySelector('.queue-actions-menu').appendChild(rateButton);
+            window.RatingManager?.attach(rateButton, item);
+            window.RatingManager?.attachTag(row.querySelector('[data-rating-badges]'), item);
             const popup = menu.querySelector('.queue-actions-menu');
             if (typeof popup.showPopover === 'function') {
                 popup.setAttribute('popover', 'auto');
@@ -7964,6 +7978,7 @@ window.setImg = (id, src) => {
 };
 
 function updatePlayerInfo(song, actualQuality) {
+    window.RatingManager?.current(song);
     // Bottom Player - 更新标题
     const titleEl = document.getElementById('player-title');
     if (titleEl) {
@@ -12009,7 +12024,7 @@ function renderLibraryArtists(list, isDislike = false) {
 
     if (!list || list.length === 0) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-user-slash text-6xl opacity-20"></i>
                 <p>${isDislike ? '还没有不喜欢任何歌手' : '还没有收藏任何歌手'}</p>
                 <p class="text-xs">在搜索结果中点击 ${isDislike ? '🚫 不喜欢歌手' : '♥ 收藏歌手'}</p>
@@ -12090,7 +12105,7 @@ function renderLibraryAlbums(list, isDislike = false) {
 
     if (!list || list.length === 0) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-compact-disc text-6xl opacity-20"></i>
                 <p>${isDislike ? '还没有不喜欢任何专辑' : '还没有收藏任何专辑'}</p>
                 <p class="text-xs">在搜索结果中点击 ${isDislike ? '🚫 不喜欢专辑' : '♥ 收藏专辑'}</p>
@@ -12704,6 +12719,7 @@ async function handleSyncLogout(skipConfirm = false) {
         // 7. 彻底清空 localStorage & sessionStorage
         const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
         localStorage.clear();
+    window.dispatchEvent(new Event('ratingaccountchange'));
         sessionStorage.clear();
         if (agreementAccepted) {
             localStorage.setItem('lx_agreement_accepted', agreementAccepted);
@@ -12790,6 +12806,7 @@ async function handleLocalLogin() {
             }
             if (!tokenReady) throw new Error('登录已失效，请重新登录');
             localStorage.setItem('lx_sync_user', user);
+            window.dispatchEvent(new Event('ratingaccountchange'));
 
             // [新增] 显示并加载 Token 管理面板
             const tokenSection = document.getElementById('token-management-section');
@@ -12815,6 +12832,7 @@ async function handleLocalLogin() {
             // Save credentials to localStorage (Simple version)
             localStorage.setItem('lx_sync_mode', 'local'); // [Fix] Save mode
             localStorage.setItem('lx_sync_user', user);
+            window.dispatchEvent(new Event('ratingaccountchange'));
             if (pass) {
                 localStorage.setItem('lx_sync_pass', pass);
             }
@@ -13913,6 +13931,7 @@ function handleDislikeArtistsClick() {
     clearSearchDetailView();
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_artists';
+    const pageTitle = document.getElementById('page-title'); if (pageTitle) pageTitle.textContent = '不喜欢歌手';
     currentSearchScope = 'local_list';
     window.refreshSearchStatusVisibility?.();
     
@@ -13954,6 +13973,7 @@ function handleDislikeAlbumsClick() {
     clearSearchDetailView();
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_albums';
+    const pageTitle = document.getElementById('page-title'); if (pageTitle) pageTitle.textContent = '不喜欢专辑';
     currentSearchScope = 'local_list';
     window.refreshSearchStatusVisibility?.();
     
@@ -16087,6 +16107,7 @@ function cleanSongData(song) {
     if (song.url) cleanSong.url = song.url;
     if (song.folder) cleanSong.folder = song.folder;
     if (song.filename) cleanSong.filename = song.filename;
+    for (const key of ['_localFilename', '_localFolder', '_localLocation', '_localUsername', '_isCustomDir']) if (song[key] !== undefined) cleanSong[key] = song[key];
 
     // Remove undefined keys
     const removeUndefined = (obj) => {
@@ -18742,7 +18763,8 @@ window.CustomSelectManager = {
             if (opt.disabled) return;
             const li = document.createElement('li');
             li.className = 'cs-option' + (opt.selected ? ' selected' : '');
-            li.innerHTML = `<span>${opt.text}</span><i class="fas fa-check"></i>`;
+            const optionLabel = document.createElement('span'); optionLabel.textContent = opt.text;
+            const check = document.createElement('i'); check.className = 'fas fa-check'; li.append(optionLabel, check);
 
             li.onclick = (e) => {
                 e.stopPropagation();
@@ -18755,7 +18777,9 @@ window.CustomSelectManager = {
         });
 
         dropdown.appendChild(optionsList);
-        document.body.appendChild(dropdown);
+        const dialogHost = select.closest('dialog[open]');
+        (dialogHost || document.body).appendChild(dropdown);
+        dropdown._dialogHost = dialogHost;
 
         // 计算位置
         this.reposition(trigger, dropdown);
@@ -18771,17 +18795,23 @@ window.CustomSelectManager = {
     reposition(trigger, dropdown) {
         const rect = trigger.getBoundingClientRect();
         dropdown.style.width = rect.width + 'px';
-        dropdown.style.left = rect.left + 'px';
+        const host = dropdown._dialogHost;
+        const hostRect = host?.getBoundingClientRect();
+        dropdown.style.left = (host ? rect.left - hostRect.left + host.scrollLeft - host.clientLeft : rect.left + window.scrollX) + 'px';
 
         // 检查空间，自动决定向上还是向下展开
-        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceBelow = (hostRect ? Math.min(window.innerHeight, hostRect.bottom) : window.innerHeight) - rect.bottom;
         const dropdownHeight = dropdown.offsetHeight || 260;
 
-        if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
-            dropdown.style.top = (rect.top + window.scrollY - dropdownHeight - 6) + 'px';
+        const offsetTop = host ? -hostRect.top + host.scrollTop - host.clientTop : window.scrollY;
+        const spaceAbove = rect.top - (hostRect?.top || 0);
+        if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+            dropdown.style.maxHeight = Math.max(80, Math.min(280, spaceAbove - 10)) + 'px';
+            dropdown.style.top = (rect.top + offsetTop - Math.min(dropdownHeight, Math.max(80, spaceAbove - 10)) - 6) + 'px';
             dropdown.classList.add('open-up');
         } else {
-            dropdown.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+            dropdown.style.maxHeight = Math.max(80, Math.min(280, spaceBelow - 10)) + 'px';
+            dropdown.style.top = (rect.bottom + offsetTop + 4) + 'px';
             dropdown.classList.remove('open-up');
         }
     },

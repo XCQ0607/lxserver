@@ -690,6 +690,14 @@
                                 <span>收藏歌手</span>
                                 <span class="data-tab-count" id="tab-count-artists">0</span>
                             </button>
+                            <button class="data-tab-btn" data-tab="ratings" onclick="app.setDataTab('ratings')">
+                                <span aria-hidden="true">★</span><span>评分</span>
+                                <span class="data-tab-count" id="tab-count-ratings">0</span>
+                            </button>
+                            <button class="data-tab-btn" data-tab="dislikes" onclick="app.setDataTab('dislikes')">
+                                <span aria-hidden="true">⊘</span><span>不喜欢</span>
+                                <span class="data-tab-count" id="tab-count-dislikes">0</span>
+                            </button>
                         </div>
                     </div>
                     <div id="data-content" class="data-content"></div>
@@ -1493,11 +1501,11 @@
                                         <div class="tag-select-group" id="tag-group-shared-mode">
                                             <span class="tag-select-item active" data-value="leaderboard">排行榜</span>
                                             <span class="tag-select-item" data-value="playlist">歌单</span>
-                                            <span class="tag-select-item" data-value="both">都要</span>
+                                            <span class="tag-select-item" data-value="both">两者</span>
                                         </div>
                                         <small class="config-hint"
                                             style="margin-top: 8px; display: block; line-height: 1.5; color: var(--text-secondary);">
-                                            选择「排行榜」仅暴露榜单；「歌单」仅暴露平台热门/最新歌单；「都要」同时暴露两者。
+                                            选择「排行榜」仅暴露榜单；「歌单」仅暴露平台热门/最新歌单；「两者」同时暴露两者。
                                         </small>
                                     </div>
                                     <div class="config-field">
@@ -1581,7 +1589,7 @@
                                     </div>
                                 </div>
                                 <div class="config-section-title">播放与缓存</div>
-                                <div class="config-toggle-grid">
+                                <div class="config-toggle-grid subsonic-cache-settings">
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
                                             <span class="config-toggle-label">播放时触发服务器缓存 <button type="button"
@@ -1615,19 +1623,24 @@
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
-                                    <div class="config-hint" style="grid-column:1/-1;">播放顺序按用户隔离：music/cache → 可选
-                                        OpenList → 在线音源，匹配客户端音质与码率要求。local_ 本地曲库直接读本地（含自定义目录）。歌词：本地 LRC →
-                                        在线平台；本地曲库还支持内嵌歌词。播放时缓存仅决定后台写 cache，不决定是否优先读取已有文件；在线 download 分支仍会后台缓存。全局播放来源开关请在
-                                        <a href="#"
-                                            onclick="app.openBackupCenter('cloud', 'playcache');return false;">备份管理 →
-                                            OpenList 播放缓存</a> 中配置。
-                                    </div>
                                     <div class="config-field">
-                                        <label class="config-label">OpenList 命中后交付方式</label>
-                                        <select name="subsonic.openlistDelivery" class="form-input config-input">
-                                            <option value="direct">给直链（302 跳转，客户端直连网盘/OpenList，省服务器流量）</option>
-                                            <option value="proxy">服务端代理转发（兼容不支持跳转的客户端）</option>
+                                        <label class="config-label" for="subsonic-openlist-delivery">OpenList 交付方式
+                                            <button type="button" class="help-icon" aria-label="OpenList 交付方式说明"
+                                                onclick="app.toggleHelp(this)"
+                                                data-help="直链：302 跳转，客户端直接访问网盘或 OpenList，节省服务器流量。代理：由服务器转发，适合不支持跳转的客户端。">?</button></label>
+                                        <select id="subsonic-openlist-delivery" name="subsonic.openlistDelivery"
+                                            class="form-input config-input">
+                                            <option value="direct">直链跳转（302）</option>
+                                            <option value="proxy">服务器代理</option>
                                         </select>
+                                    </div>
+                                    <div class="subsonic-cache-help-row">
+                                        <span>播放顺序与歌词 <button type="button" class="help-icon" aria-label="播放顺序与歌词说明"
+                                                onclick="app.toggleHelp(this)"
+                                                data-help="按用户隔离：本地 music/cache → 可选 OpenList → 在线音源，并匹配客户端音质与码率要求。local_ 本地曲库直接读取本地文件（含自定义目录）。歌词优先本地 LRC，再查询在线平台；本地曲库也支持内嵌歌词。播放时缓存只控制后台写入 cache，不决定是否优先读取已有文件；在线 download 分支仍会后台缓存。OpenList 作为播放来源的总开关在备份管理中设置。">?</button></span>
+                                        <a href="#"
+                                            onclick="app.openBackupCenter('cloud', 'playcache');return false;">OpenList
+                                            播放缓存设置 ↗</a>
                                     </div>
                                 </div>
                                 <div class="config-hint"
@@ -1640,14 +1653,14 @@
                                     客户端支持音乐目录时，也可选择“全部在线平台”或单个平台目录后再搜索。同时间戳歌词顺序为<strong>原文在上，翻译在下</strong>。
                                 </div>
                                 <!-- 不喜欢 / 评分联动 -->
-                                <div class="config-section-title">不喜欢 / 评分联动 (Subsonic)</div>
+                                <div class="config-section-title">评分与不喜欢（Subsonic）</div>
                                 <div class="config-grid-2">
                                     <div class="config-field">
-                                        <label class="config-label">评分联动 dislike 阈值 <button type="button"
-                                                class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="Subsonic 客户端打低星时写回原生 dislike 规则的阈值；0 关闭整条联动">?</button></label>
+                                        <label class="config-label">低分阈值 <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                data-help="评分大于0且不超过此值时，正向联动才补不喜欢。0暂停两个方向的联动，不删除评分或已有规则。更改阈值不会重算历史；调高后可手动补数据，调低后原规则仍保留。">?</button></label>
                                         <select name="subsonic.dislikeRating" class="form-input config-input">
-                                            <option value="0">0（关闭：评分不影响 dislike）</option>
+                                            <option value="0">0（暂停评分与不喜欢联动）</option>
                                             <option value="1">1（≤1 星视为不喜欢）</option>
                                             <option value="2">2（≤2 星视为不喜欢）</option>
                                             <option value="3">3（≤3 星视为不喜欢）</option>
@@ -1656,20 +1669,20 @@
                                         </select>
                                     </div>
                                     <div class="config-field">
-                                        <label class="config-label">多歌手匹配模式（合唱 / 专辑共用） <button type="button"
-                                                class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                        <label class="config-label">合唱匹配 <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
                                                 data-help="歌曲与专辑维度多歌手时，dislike 规则命中的判定方式（合唱歌曲与专辑歌手集合统一按此处理）">?</button></label>
                                         <select name="subsonic.dislikeDuetMode" class="form-input config-input">
-                                            <option value="any">any（任一歌手命中即屏蔽，合辑友好）</option>
-                                            <option value="all">all（全部歌手命中才屏蔽）</option>
-                                            <option value="primary">primary（仅看第一位歌手）</option>
+                                            <option value="any">任一歌手命中</option>
+                                            <option value="all">全部歌手命中</option>
+                                            <option value="primary">仅匹配主唱</option>
                                         </select>
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">在列表中隐藏 dislike 歌曲 <button type="button"
+                                            <span class="config-toggle-label">隐藏不喜欢歌曲 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="命中不喜欢规则的歌曲从专辑/歌单/搜索等列表中剔除；关闭则仅以评分体现">?</button></span>
+                                                    data-help="在 Subsonic 搜索、普通歌单和专辑列表中隐藏命中项。关闭后重新显示，不删除规则，也不修改评分；评分歌单不受此过滤影响。">?</button></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.hideDisliked" />
@@ -1678,9 +1691,9 @@
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">dislike 跨平台同名命中 <button type="button"
+                                            <span class="config-toggle-label">跨来源匹配 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="开启后同名不同歌手/专辑也会被一并屏蔽（有误伤风险）">?</button></span>
+                                                    data-help="新规则关闭时仅匹配相同来源，开启时跨来源匹配同名规则；未指定来源的规则作用于全部来源。">?</button></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.dislikeCrossSource" />
@@ -1689,9 +1702,9 @@
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">推荐类接口排除 dislike <button type="button"
+                                            <span class="config-toggle-label">推荐排除不喜欢 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="每日推荐/随机/相似歌曲中排除 dislike 命中歌曲（与隐藏列表独立）">?</button></span>
+                                                    data-help="每日推荐、随机和相似歌曲统一排除不喜欢命中项及阈值内低分。与普通列表隐藏、自动联动开关独立；关闭后不做此过滤。">?</button></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.dislikeNoRecommend" />
@@ -1700,9 +1713,9 @@
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">歌名去版本后缀归一化 <button type="button"
+                                            <span class="config-toggle-label">匹配其他版本 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="「晴天 (Live)」也能命中「晴天」规则（代价：少数仅差后缀的不同歌曲会误并）">?</button></span>
+                                                    data-help="匹配时忽略 Live、Remix 等版本后缀，让基础歌名规则命中其他版本。仅改变过滤结果，不合并原始歌曲、不重写评分。">?</button></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.dislikeNormalizeName" />
@@ -1711,9 +1724,9 @@
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">要求歌手同时匹配 <button type="button"
+                                            <span class="config-toggle-label">同时匹配歌手 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="歌曲/专辑级别都要求歌手匹配，避免不同歌手同名歌曲被一起屏蔽">?</button></span>
+                                                    data-help="控制只有歌名、未记录歌手的通用规则：开启时不单独命中，关闭时按歌名命中。已有歌手的歌曲规则、专辑规则仍校验歌手。">?</button></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.dislikeRequireSinger" />
@@ -1722,9 +1735,9 @@
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">评星 → 不喜欢 自动联动 <button type="button"
+                                            <span class="config-toggle-label">低分补不喜欢 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="Subsonic 客户端打低星时写回原生 dislike 规则；关闭则评分仅记录、不触碰不喜欢">?</button></span>
+                                                    data-help="Web 对歌曲、Subsonic 对歌曲、歌手或专辑提交低分时，解析后补对应不喜欢规则。仅影响之后的评分请求；已有低分需手动补数据。提高、清除评分或关闭开关均不删除规则。客户端是否能给歌手或专辑评分取决于客户端支持。">?</button></span>
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.linkRatingToDislike" />
@@ -1733,31 +1746,45 @@
                                     </div>
                                     <div class="config-toggle-row">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">不喜欢 → 评星 自动联动 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="网页端/Subsonic 点「不喜欢」回写客户端评分（低星）；关闭则不喜欢仅写入规则、不回写评星">?</button></span>
+                                            <span class="config-toggle-label">显示评分歌单 <button type="button"
+                                                    class="help-icon" aria-label="评分歌单说明" onclick="app.toggleHelp(this)"
+                                                    data-help="向 Subsonic 展示有内容的1至5星虚拟歌单，不创建实体歌单。1星合集额外包含不喜欢命中项，保留其真实评分；关闭只隐藏入口，不关闭联动、不删除数据。">?</button></span>
                                         </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.linkDislikeToRating" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
+                                        <label class="toggle-switch"><input type="checkbox"
+                                                name="subsonic.ratingPlaylists" /><span class="toggle-track"><span
+                                                    class="toggle-thumb"></span></span></label>
                                     </div>
                                 </div>
-                                <div class="config-section-title" id="link-sync-field">评分 / 不喜欢 联动补数据</div>
+                                <div class="config-hint subsonic-rating-note">
+                                    <strong>💡 Web / Subsonic 评分说明</strong>
+                                    <p>星级评分与爱心收藏独立，两端共用评分。Web 支持歌曲评分；Subsonic
+                                        还可为歌手、专辑评分（取决于客户端）。低分转不喜欢与不喜欢补评分分别由开关控制，不喜欢自动补分由各用户在 Web 设置 →
+                                        逻辑中单独开启，默认关闭；后台补分独立执行，不受用户开关和低分阈值影响。</p>
+                                    <p>本地歌曲未关联时使用本地评分；关联后以在线歌曲评分为准，与在线版及其他关联副本共用。在线版已有评分时保留在线评分并删除本地评分；仅本地有评分时迁移到在线 ID，同时保留评分来源与记录。
+                                    </p>
+                                    <p>联动只补数据，不撤销历史：调低阈值、提高或清除评分、关闭开关均不会删除已有规则。需要处理历史数据时，可预览补齐或按阈值重算。重算仅撤销可追溯的评分联动原因，手动与来源不明规则保留。
+                                    </p>
+                                    <span id="subsonic-link-saved-status" role="status"></span>
+                                </div>
+                                <div class="config-section-title" id="link-sync-field">历史数据补齐</div>
                                 <div class="config-grid-2">
                                     <div class="config-field">
                                         <label class="config-label" for="subsonic-sync-user">目标用户 <button type="button"
                                                 class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="导入 / 回滚不会自动联动另一侧数据；在此选用户后手动补数据，只补缺失项、不覆盖已有数据">?</button></label>
+                                                data-help="导入 / 回滚不会自动联动另一侧数据；手动同步先预览候选歌曲与来源，扫描歌单、本地及在线缓存，只补缺失项。">?</button></label>
                                         <select id="subsonic-sync-user" class="form-input config-input"></select>
                                     </div>
                                     <div class="config-field">
-                                        <label class="config-label">手动同步（需先开启并保存对应联动开关）</label>
+                                        <label class="config-label">操作（低分补规则需先保存开关；后台补分可独立执行）</label>
                                         <div style="display: flex; gap: .5rem; flex-wrap: wrap;">
-                                            <button type="button" id="sync-rating-to-dislike-btn" class="btn-secondary hidden"
-                                                onclick="app.syncLink('ratingToDislike')">评星 → 不喜欢</button>
-                                            <button type="button" id="sync-dislike-to-rating-btn" class="btn-secondary hidden"
-                                                onclick="app.syncLink('dislikeToRating')">不喜欢 → 评星</button>
+                                            <button type="button" id="sync-rating-to-dislike-btn"
+                                                class="btn-secondary hidden"
+                                                onclick="app.syncLink('ratingToDislike')">低分补不喜欢</button>
+                                            <button type="button" id="sync-dislike-to-rating-btn"
+                                                class="btn-secondary hidden"
+                                                onclick="app.syncLink('dislikeToRating')">后台补分</button>
+                                            <button type="button" id="reconcile-rating-btn" class="btn-secondary"
+                                                onclick="app.syncLink('ratingToDislike', true)">按阈值重算</button>
                                         </div>
                                     </div>
                                 </div>
@@ -3341,7 +3368,8 @@
                                                             <polyline points="17 8 12 3 7 8"></polyline>
                                                             <line x1="12" y1="3" x2="12" y2="15"></line>
                                                         </svg>
-                                                        <span class="olb-desktop-label">立即备份并同步缓存</span><span class="olb-mobile-label">备份与同步</span>
+                                                        <span class="olb-desktop-label">立即备份并同步缓存</span><span
+                                                            class="olb-mobile-label">备份与同步</span>
                                                     </button>
                                                     <button type="button" class="btn-secondary olb-btn"
                                                         onclick="app.restoreOpenlistBackup()">
@@ -3356,7 +3384,11 @@
                                                 </div>
                                                 <div class="olb-actions-divider"></div>
                                                 <div class="olb-actions-batch">
-                                                    <button type="button" id="olb-bulkcheck" class="btn-secondary olb-btn" onclick="app.openOpenlistMetadataCheck('selected')" disabled><span class="olb-desktop-label">检查已选文件…</span><span class="olb-mobile-label">检查已选</span></button>
+                                                    <button type="button" id="olb-bulkcheck"
+                                                        class="btn-secondary olb-btn"
+                                                        onclick="app.openOpenlistMetadataCheck('selected')"
+                                                        disabled><span class="olb-desktop-label">检查已选文件…</span><span
+                                                            class="olb-mobile-label">检查已选</span></button>
                                                     <button type="button" id="olb-bulkretry"
                                                         class="btn-secondary olb-btn"
                                                         onclick="app.retrySelectedOpenlist()" disabled>
@@ -3377,7 +3409,8 @@
                                                                 d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2">
                                                             </path>
                                                         </svg>
-                                                        <span class="olb-desktop-label">删除云端备份…</span><span class="olb-mobile-label">删除云端</span>
+                                                        <span class="olb-desktop-label">删除云端备份…</span><span
+                                                            class="olb-mobile-label">删除云端</span>
                                                     </button>
                                                     <span id="olb-selcount" class="olb-selcount-badge"></span>
                                                 </div>
@@ -3385,8 +3418,8 @@
                                             <div class="olb-filter-panel" id="olb-filter-panel">
                                                 <div class="olb-filter-top">
                                                     <label class="olb-filter-search"><span>搜索</span><input type="search"
-                                                            aria-label="搜索文件名、用户、歌曲或路径" id="olb-filter-name" class="form-input"
-                                                            placeholder="文件名、用户、歌曲信息或路径；多个关键词以空格分隔"
+                                                            aria-label="搜索文件名、用户、歌曲或路径" id="olb-filter-name"
+                                                            class="form-input" placeholder="文件名、用户、歌曲信息或路径；多个关键词以空格分隔"
                                                             oninput="app.scheduleOpenlistReload()" /></label>
                                                     <button type="button" class="btn-secondary"
                                                         onclick="app.loadOpenlistBackups(true)">刷新记录</button>
@@ -4173,23 +4206,27 @@
                         <h4 class="usage-card-title">常规数据备份：本地 → OpenList</h4>
                         <p class="usage-scenario-desc">使用“备份范围”中 OpenList 列已保存的五类选择：歌曲与歌词、用户音源、歌单与不喜欢快照、用户数据、系统与账户。保存到
                             <code>备份根路径/_data/相对路径</code>，例如
-                            <code>/local/_data/music/用户/歌曲.mp3</code>。不会上传后删除本地；关闭范围不会清理已有云端副本，本地删除也不会自动传播到该数据目录。</p>
+                            <code>/local/_data/music/用户/歌曲.mp3</code>。不会上传后删除本地；关闭范围不会清理已有云端副本，本地删除也不会自动传播到该数据目录。
+                        </p>
                     </section>
                     <section class="usage-card">
                         <h4 class="usage-card-title">播放缓存：按用户独立处理</h4>
                         <p class="usage-scenario-desc">下方“OpenList 播放缓存”卡片单独选择用户和模式，云端位置为
                             <code>备份根路径/用户名/cache/</code>，例如 <code>/local/admin/cache/</code>。常规数据备份排除
-                            cache，不代表高级用户缓存规则不能上传缓存。两套范围与保存按钮互相独立。</p>
+                            cache，不代表高级用户缓存规则不能上传缓存。两套范围与保存按钮互相独立。
+                        </p>
                     </section>
                 </div>
                 <section class="usage-card">
                     <h4 class="usage-card-title">具体读取本地哪个目录？</h4>
                     <p class="usage-scenario-desc">常规“歌曲与歌词”读取实际数据目录的 <code>music/</code>，默认
                         <code>data/music/</code>，包含已有 LRC、封面与索引。排除数据目录外独立的根目录 <code>music/</code>、各级
-                        cache、外部自定义曲库、日志、runtime、临时文件和本地备份包。自定义 <code>DATA_PATH</code> 后以实际数据目录为准。</p>
+                        cache、外部自定义曲库、日志、runtime、临时文件和本地备份包。自定义 <code>DATA_PATH</code> 后以实际数据目录为准。
+                    </p>
                     <p class="usage-scenario-desc">高级播放缓存跟随<strong>该用户当前缓存位置</strong>：data 对应
                         <code>数据目录/cache/用户名/</code>，root 对应
-                        <code>程序运行目录/cache/用户名/</code>，不是同时扫描两边。用户未设置时使用全局位置；旧配置中有效的自定义 cacheDir 优先沿用。</p>
+                        <code>程序运行目录/cache/用户名/</code>，不是同时扫描两边。用户未设置时使用全局位置；旧配置中有效的自定义 cacheDir 优先沿用。
+                    </p>
                 </section>
                 <section>
                     <h4 class="bm-sub-title">四种缓存模式不是一次性操作</h4>

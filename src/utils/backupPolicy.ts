@@ -29,7 +29,7 @@ export interface BackupContext {
 export const BACKUP_TYPE_INFO = [
   { id: 'music', label: '歌曲与歌词', description: '当前数据目录的 music/（默认 data/music）内的歌曲、已有歌词、封面和音乐索引；不含各级 cache、数据目录外独立 music 或外部曲库。' },
   { id: 'userFiles', label: '用户音源文件', description: 'users/source 内的音源脚本、顺序和状态文件，以及上传的用户文件。' },
-  { id: 'snapshots', label: '歌单与不喜欢快照', description: '快照正文、snapshotInfo.json；包含没有扩展名的快照及已配置的外部歌单快照目录。' },
+  { id: 'snapshots', label: '歌单、不喜欢与评分快照', description: '快照正文、snapshotInfo.json；包含没有扩展名的快照及已配置的外部歌单快照目录。' },
   { id: 'userData', label: '用户数据', description: '用户设置、播放记录、收藏与其他 JSON 数据；不包含音源文件和快照。' },
   { id: 'system', label: '系统与账户', description: 'config.js、users.json、serverInfo.json 等系统 JSON；包含账号和连接凭据。' },
 ] as const
@@ -55,7 +55,7 @@ export function backupType(relative: string): BackupType | null {
   if (/^users\/[^/]+\/music\//i.test(rel)) return null
   if (/\.(tmp|oltmp|part|log|lock|db|sqlite)(-(wal|shm))?$/i.test(rel) || /(^|\/)temp-|(^|\/)lx-sync-backup-/.test(lower)) return null
   if (lower.startsWith('music/')) return 'music'
-  if (lower.startsWith('_snapshots/') || /^users\/[^/]+\/(list|dislike)\/snapshot(\/|info\.json$)/i.test(rel)) return 'snapshots'
+  if (lower.startsWith('_snapshots/') || /^users\/[^/]+\/(list|dislike|rating)\/snapshot(\/|info\.json$)/i.test(rel)) return 'snapshots'
   if (/^(users\/source|source|uploads)\//i.test(rel)) return 'userFiles'
   if (/^users\/[^/]+\//i.test(rel)) return 'userData'
   if (lower === 'config.js' || (!rel.includes('/') && lower.endsWith('.json'))) return 'system'

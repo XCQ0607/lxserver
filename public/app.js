@@ -1635,6 +1635,7 @@ class App {
     }
 
     async loadUserData() {
+        const requestId = this._dataRequestId = (this._dataRequestId || 0) + 1;
         const username = document.getElementById('data-user-select')?.value;
         const statsContainer = document.getElementById('data-stats');
         const contentContainer = document.getElementById('data-content');
@@ -1650,6 +1651,8 @@ class App {
 
         try {
             const data = await this.request(`/api/data?user=${encodeURIComponent(username)}`);
+            if (this._dataRequestId !== requestId || document.getElementById('data-user-select')?.value !== username) return;
+            if (this.currentUserData?.username !== username) this._dislikeFilters = {}, this._ratingFilters = {};
             this.currentUserData = { username, data };
 
             // 统计数据
@@ -1710,6 +1713,12 @@ class App {
                 </div>
             `;
 
+            const dislikeCount = this.getDislikeEntries(data).length;
+            statsContainer.insertAdjacentHTML('beforeend', `<div class="data-stat-card clickable" onclick="app.setDataTab('dislikes')"><div class="stat-card-header"><h4>不喜欢</h4><span class="stat-card-icon">⊘</span></div><div class="value">${dislikeCount}</div></div>`);
+            const ratingBadge = document.getElementById('tab-count-ratings');
+            if (ratingBadge) ratingBadge.textContent = (data.ratingItems || []).length;
+            const dislikeBadge = document.getElementById('tab-count-dislikes');
+            if (dislikeBadge) dislikeBadge.textContent = dislikeCount;
             // 更新 Tabs 徽章与显示状态
             const tabsContainer = document.getElementById('data-tabs-container');
             if (tabsContainer) {
@@ -1737,6 +1746,9 @@ class App {
             }, 400);
 
         } catch (err) {
+            if (this._dataRequestId !== requestId) return;
+            statsContainer.classList.remove('content-loading');
+            contentContainer.classList.remove('content-loading');
             contentContainer.innerHTML = '<p style="color: var(--accent-error); padding: 2rem; text-align: center;">加载数据失败</p>';
         } finally {
             applyMarqueeChecks();
@@ -1792,8 +1804,335 @@ class App {
             html += this.getArtistsSectionHtml(data.artists || [], tab === 'all');
         }
 
+        if (tab === 'all' || tab === 'ratings') html += this.getRatingSectionHtml(data);
+        if (tab === 'all' || tab === 'dislikes') html += this.getDislikeSectionHtml(data);
         contentContainer.innerHTML = html;
+        this.initCustomSelects();
         applyMarqueeChecks();
+    }
+
+    dislikeOriginLabel(channel) {
+        return ({ web: 'Web 添加', 'subsonic-rating': 'Subsonic 低分联动', 'web-rating-link': 'Web 低分联动', 'manual-rating-to-dislike': '手动评分联动', 'snapshot-restore': '评分恢复', unknown: '来源未记录' })[channel] || (channel ? `其他：${channel}` : '来源未记录');
+    }
+
+    adminPlatformOptions(items, selected, allLabel) {
+        const e = value => this.escapeHtml(String(value));
+        const platforms = [...new Set(['wy', 'tx', 'kw', 'kg', 'mg', 'local', ...items.map(x => x.source || '*')])].filter(source => source !== 'bd');
+        const label = code => code === 'local' ? '本地音乐' : code === '*' ? '未指定平台' : this.getSourceLabel(code);
+        return `<option value="">${allLabel}</option>` + platforms.map(code => `<option value="${e(code)}" ${selected === code ? 'selected' : ''}>${e(label(code))}（${items.filter(x => (x.source || '*') === code).length}）</option>`).join('');
+    }
+
+    adminExtraFilters(section, filters) {
+        const handler = section === 'rating' ? 'filterRatingData' : 'filterDislikeData';
+        const select = (key, label, options) => `<label class="admin-filter-field"><span>${label}</span><select class="form-input" aria-label="${label}" onchange="app.${handler}('${key}',this.value)">${options.map(([value,text]) => `<option value="${value}" ${(filters[key] || '') === value ? 'selected' : ''}>${text}</option>`).join('')}</select></label>`;
+        return `<div class="admin-extra-filters">
+            ${select('cover','封面资料',[['','全部封面状态'],['yes','有封面'],['no','缺少封面']])}
+            ${select('period','记录时间',[['','不限时间'],['7','最近7天'],['30','最近30天'],['90','最近90天'],['unknown','未记录时间']])}
+            ${select('pageSize','每页条数',[['','默认条数'],['24','24条'],['48','48条'],['96','96条']])}
+            <button type="button" class="btn-secondary" onclick="app.exportAdminRecords('${section}')">导出筛选结果</button>
+            <button type="button" class="btn-secondary admin-filter-reset" onclick="app.resetAdminFilters('${section}')">重置筛选</button>
+        </div>`;
+    }
+
+    adminMatchesExtra(filters, cover, time, text) {
+        if (filters.cover && (filters.cover === 'yes') !== !!cover) return false;
+        if (filters.period === 'unknown' ? !!time : filters.period && (!time || time < Date.now() - Number(filters.period) * 86400000)) return false;
+        const terms = String(filters.query || '').normalize('NFKC').trim().toLowerCase().split(/\s+/).filter(Boolean);
+        const haystack = String(text).normalize('NFKC').toLowerCase();
+        return terms.every(term => haystack.includes(term));
+    }
+
+    adminPageSize(filters, fallback) {
+        const value = Number(filters.pageSize);
+        return [24,48,96].includes(value) ? value : fallback;
+    }
+
+    exportAdminRecords(section) {
+        const data = this.currentUserData?.data || {};
+        const rows = section === 'rating' ? this.getFilteredRatingRows(data.ratingItems || []) : this.getFilteredDislikeRows(this.getDislikeEntries(data)).map(({ x, r }) => ({ kind: x.kind, name: x.title, singer: x.singer, source: x.source, rule: x.rule, rating: r.rating, provenance: x.raw.provenance, reasons: x.raw.reasons }));
+        const url = URL.createObjectURL(new Blob([JSON.stringify({ user: this.currentUserData?.username, exportedAt: new Date().toISOString(), count: rows.length, records: rows }, null, 2)], { type: 'application/json' }));
+        const link = document.createElement('a'); link.href = url; link.download = section === 'rating' ? 'filtered-ratings.json' : 'filtered-dislikes.json'; link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    resetAdminFilters(section) {
+        const rating = section === 'rating';
+        if (rating) this._ratingFilters = {};
+        else this._dislikeFilters = { view: this._dislikeFilters?.view };
+        const node = document.querySelector(rating ? '.admin-ratings' : '.admin-dislikes:not(.admin-ratings)');
+        if (node) node.outerHTML = rating ? this.getRatingSectionHtml(this.currentUserData?.data || {}) : this.getDislikeSectionHtml(this.currentUserData?.data || {});
+        this.initCustomSelects();
+    }
+
+    getDislikeEntries(data) {
+        const entries = new Map();
+        const add = (raw, kind, library = false) => {
+            const rule = String(raw.dislikeRule || '');
+            const split = rule.lastIndexOf('@');
+            const title = raw.name || raw.albumName || (kind === 'album' ? rule.slice(1, split < 0 ? undefined : split) : kind === 'artist' ? raw.singer || rule.slice(1) : rule.slice(0, split < 0 ? undefined : split)) || '未命名规则';
+            const singer = raw.singer || raw.artistName || (split >= 0 ? rule.slice(split + 1) : '');
+            const source = raw.source || '';
+            const key = `${kind}|${source}|${rule || (kind === 'album' ? `!${title}@${singer}` : kind === 'artist' ? `@${title}` : `${title}@${singer}`)}`.normalize('NFKC').toLowerCase().replace(/\s*([()@])\s*/g, '$1');
+            const image = raw.img || raw.pic || raw.picUrl || raw.cover || raw.meta?.picUrl || '';
+            const cover = typeof image === 'string' && (/^https?:\/\//i.test(image) || /^\/(?!\/)/.test(image)) ? image : '';
+            const item = { kind, title, singer, source, cover, rule, raw, library, channel: raw.provenance?.channel || 'unknown' };
+            if (!entries.has(key)) entries.set(key, item);
+            else { const prior = entries.get(key); if (!prior.cover) prior.cover = cover; prior.libraryData = raw; }
+        };
+        for (const row of data.dislikeList || []) {
+            const rule = String(row.dislikeRule || '');
+            add(row, rule.startsWith('!') ? 'album' : rule.startsWith('@') || (!row.name && row.singer) ? 'artist' : 'song');
+        }
+        for (const row of data.dislikeAlbums || []) add(row, 'album', true);
+        for (const row of data.dislikeArtists || []) add(row, 'artist', true);
+        return [...entries.values()];
+    }
+
+    getDislikeRating(x, data) {
+        const raw = x.raw;
+        const id = raw.id || raw.songmid || raw.meta?.songId || '';
+        const keys = [id, `${x.source}_${id}`, x.kind === 'album' ? `alb_${x.source}_${raw.albumId || id}` : x.kind === 'artist' ? `art_${x.source}_${id}` : ''];
+        const key = keys.find(k => k && Object.hasOwn(data.userRatings || {}, k));
+        return { id, key, rating: key ? Number(data.userRatings[key]) : null };
+    }
+
+    starsHtml(value, size = '') {
+        const v = Math.max(0, Math.min(5, Number(value) || 0));
+        return `<span class="admin-stars ${size}" role="img" aria-label="${v} 星" style="--v:${v}">★★★★★</span>`;
+    }
+
+    getDislikeSectionHtml(data) {
+        const items = this.getDislikeEntries(data);
+        const e = value => this.escapeHtml(String(value ?? ''));
+        const f = this._dislikeFilters || {};
+        const option = (value, text, key) => `<option value="${e(value)}" ${(f[key] || '') === value ? 'selected' : ''}>${e(text)}</option>`;
+        const channels = [...new Set(['web','web-rating-link','subsonic-rating','manual-rating-to-dislike','unknown', ...items.flatMap(x => [x.channel, ...(x.raw.reasons || []).map(r => r.channel)])])].sort();
+        return `<section class="admin-dislikes" aria-label="用户不喜欢数据">
+            <div class="data-section-header"><div class="section-header-title"><div class="section-icon-box admin-dislike-icon">⊘</div><div><h3>不喜欢</h3><p>歌曲、歌手与专辑规则 · Web 与 Subsonic 联动数据</p></div></div><span class="admin-section-count">${items.length} 条</span></div>
+            <div id="admin-dislike-stats">${this.getDislikeStatsHtml(items)}</div>
+            <div class="admin-dislike-toolbar">
+                <div class="admin-dislike-search"><span aria-hidden="true">⌕</span><input class="form-input" aria-label="搜索不喜欢条目" placeholder="搜索名称、歌手、规则或 ID" value="${e(f.query || '')}" oninput="app.filterDislikeData('query',this.value)"></div>
+                <select class="form-input" aria-label="添加来源" onchange="app.filterDislikeData('channel',this.value)">${option('', '全部添加来源', 'channel')}${channels.map(x => option(x, this.dislikeOriginLabel(x), 'channel')).join('')}</select>
+                <select class="form-input" aria-label="音乐来源" onchange="app.filterDislikeData('source',this.value)">${this.adminPlatformOptions(items, f.source, '全部音乐平台')}</select>
+                <select class="form-input" aria-label="评分筛选" onchange="app.filterDislikeData('rating',this.value)">${option('', '全部评分', 'rating')}${option('rated', '已评分', 'rating')}${option('none', '未评分', 'rating')}${option('low', '低分（1–2星）', 'rating')}${option('high', '高分（4–5星）', 'rating')}${[5, 4, 3, 2, 1].map(n => option(String(n), '★'.repeat(n), 'rating')).join('')}</select>
+                <select class="form-input" aria-label="排序" onchange="app.filterDislikeData('sort',this.value)">${option('', '默认顺序', 'sort')}${option('time', '最近添加', 'sort')}${option('name', '名称 A-Z', 'sort')}${option('rating', '评分高→低', 'sort')}</select>
+                <div class="admin-view-toggle" role="group" aria-label="视图"><button type="button" class="${f.view !== 'grid' ? '' : 'on'}" onclick="app.filterDislikeData('view','grid');app.refreshDislikeToggle()" aria-label="卡片视图">▦</button><button type="button" class="${f.view !== 'grid' ? 'on' : ''}" onclick="app.filterDislikeData('view','list');app.refreshDislikeToggle()" aria-label="列表视图">☰</button></div>
+            </div>
+            ${this.adminExtraFilters('dislike', f)}
+            <p class="config-hint">平台标注总条数；来源筛选包含同一条规则的全部添加原因。多个关键词需同时匹配。添加来源与音乐平台分别记录。缺少来源记录的条目显示“来源未记录”；展开详情可查看所有已保存字段。评分只表示关联记录，不代表整张专辑或歌手的歌曲都被评分。</p>
+            <div id="admin-dislike-results">${this.getDislikeResultsHtml(items)}</div>
+        </section>`;
+    }
+
+    getDislikeStatsHtml(items) {
+        const data = this.currentUserData?.data || {};
+        const f = this._dislikeFilters || {};
+        items = this.getFilteredDislikeRows(items, { ...f, kind: '' }).map(row => row.x);
+        const count = k => items.filter(x => x.kind === k).length;
+        const rated = items.filter(x => this.getDislikeRating(x, data).rating != null).length;
+        const linked = items.filter(x => [x.raw.provenance, ...(x.raw.reasons || [])].some(reason => reason && /rating/.test(reason.channel))).length;
+        const chip = (kind, label, n, icon) => `<button type="button" class="admin-dislike-stat ${(f.kind || '') === kind ? 'on' : ''}" onclick="app.filterDislikeData('kind','${kind}')"><span class="s-icon">${icon}</span><span class="s-num">${n}</span><span class="s-label">${label}</span></button>`;
+        return `<div class="admin-dislike-stats">${chip('', '全部', items.length, '⊘')}${chip('song', '歌曲', count('song'), '♪')}${chip('artist', '歌手', count('artist'), '♙')}${chip('album', '专辑', count('album'), '◎')}<div class="admin-dislike-stat static"><span class="s-icon">★</span><span class="s-num">${rated}</span><span class="s-label">已评分</span></div><div class="admin-dislike-stat static"><span class="s-icon">⇄</span><span class="s-num">${linked}</span><span class="s-label">评分联动</span></div></div>`;
+    }
+
+    refreshDislikeStats() {
+        const node = document.getElementById('admin-dislike-stats');
+        if (node) node.innerHTML = this.getDislikeStatsHtml(this.getDislikeEntries(this.currentUserData?.data || {}));
+    }
+
+    refreshDislikeToggle() {
+        const f = this._dislikeFilters || {};
+        document.querySelectorAll('.admin-view-toggle button').forEach((b, i) => b.classList.toggle('on', (i === 1) === (f.view !== 'grid')));
+    }
+
+    filterDislikeData(key, value) {
+        this._dislikeFilters = { ...(this._dislikeFilters || {}), [key]: value, page: 0 };
+        const node = document.getElementById('admin-dislike-results');
+        if (node) node.innerHTML = this.getDislikeResultsHtml(this.getDislikeEntries(this.currentUserData?.data || {}));
+        this.refreshDislikeStats();
+    }
+
+    dislikePage(delta) {
+        this._dislikeFilters = { ...(this._dislikeFilters || {}), page: Math.max(0, (this._dislikeFilters?.page || 0) + delta) };
+        const node = document.getElementById('admin-dislike-results');
+        if (node) { node.innerHTML = this.getDislikeResultsHtml(this.getDislikeEntries(this.currentUserData?.data || {})); node.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+    }
+
+    getFilteredDislikeRows(items, f = this._dislikeFilters || {}) {
+        const data = this.currentUserData?.data || {};
+        const withRating = items.map(x => ({ x, r: this.getDislikeRating(x, data) }));
+        const matchRating = r => !f.rating || (f.rating === 'rated' ? r.rating != null : f.rating === 'none' ? r.rating == null : f.rating === 'low' ? r.rating != null && r.rating <= 2 : f.rating === 'high' ? r.rating >= 4 : r.rating === Number(f.rating));
+        return withRating.filter(({ x, r }) => (!f.kind || f.kind === x.kind) && (!f.channel || f.channel === x.channel || (x.raw.reasons || []).some(reason => reason.channel === f.channel)) && (!f.source || f.source === (x.source || '*')) && matchRating(r) && this.adminMatchesExtra(f, x.cover, x.raw.provenance?.at, JSON.stringify([x.title, x.singer, x.rule, x.source, x.raw.id, x.raw.songmid, x.raw.meta])));
+    }
+
+    getDislikeResultsHtml(items) {
+        const e = value => this.escapeHtml(String(value ?? ''));
+        const f = this._dislikeFilters || {};
+        const data = this.currentUserData?.data || {};
+        let selected = this.getFilteredDislikeRows(items, f);
+        if (f.sort === 'name') selected = [...selected].sort((a, b) => a.x.title.localeCompare(b.x.title, 'zh'));
+        else if (f.sort === 'rating') selected = [...selected].sort((a, b) => (b.r.rating ?? -1) - (a.r.rating ?? -1));
+        else if (f.sort === 'time') selected = [...selected].sort((a, b) => (b.x.raw.provenance?.at || 0) - (a.x.raw.provenance?.at || 0));
+        if (!selected.length) return '<div class="admin-dislike-empty"><div class="big">⊘</div>暂无符合条件的不喜欢记录</div>';
+        const PAGE = this.adminPageSize(f, 24), pages = Math.ceil(selected.length / PAGE);
+        const page = Math.min(f.page || 0, pages - 1);
+        this.resetAdminDetails();
+        const cards = selected.slice(page * PAGE, page * PAGE + PAGE).map(({ x, r }) => {
+            const raw = x.raw, { id, key: ratingKey, rating } = r;
+            const fields = { '歌手': x.singer, '规则': x.rule, '音乐来源': x.source ? this.getSourceLabel(x.source) : '未指定（通用）', '对象 ID': id, '歌曲标识': raw.songmid, '专辑': raw.albumName || raw.meta?.albumName, '专辑 ID': raw.albumId || raw.meta?.albumId, '时长': raw.interval, '评分': rating == null ? '' : `${rating} 星`, '添加来源': this.dislikeOriginLabel(x.channel), '全部添加原因': (raw.reasons || [raw.provenance]).filter(Boolean).map(reason => this.dislikeOriginLabel(reason.channel) + (reason.ratingId ? `（${reason.ratingId}）` : '')).join('、'), '添加时间': raw.provenance?.at ? new Date(raw.provenance.at).toLocaleString() : '', '补全来源': raw.enrichedBy ? this.dislikeOriginLabel(raw.enrichedBy.channel) : '', '补全时间': raw.enrichedBy?.at ? new Date(raw.enrichedBy.at).toLocaleString() : '', '音质': Array.isArray(raw.types) ? raw.types.map(q => `${q.type}${q.size ? ` (${q.size})` : ''}`).join('、') : '' };
+            const image = x.cover ? `<a href="${e(x.cover)}" target="_blank" rel="noopener noreferrer" aria-label="预览封面"><img src="${e(x.cover)}" loading="lazy" referrerpolicy="no-referrer" alt="${e(x.title)}封面" onerror="this.style.display='none'"></a>` : `<span aria-hidden="true">${x.kind === 'song' ? '♪' : x.kind === 'album' ? '◎' : '♙'}</span>`;
+            const full = JSON.stringify({ ...raw, ...(x.libraryData ? { libraryData: x.libraryData } : {}), ...(ratingKey ? { linkedRating: { id: ratingKey, value: rating, origin: data.ratingOrigins?.[ratingKey] || null } } : {}) }, null, 2);
+            const when = raw.provenance?.at ? new Date(raw.provenance.at).toLocaleDateString() : '';
+            const g = keys => keys.map(k => [k, fields[k]]);
+            const token = this.registerAdminDetail({ title: x.title, subtitle: [x.singer, raw.albumName || raw.meta?.albumName].filter(Boolean).join(' · '), cover: x.cover, icon: x.kind === 'song' ? '♪' : x.kind === 'album' ? '◎' : '♙', rating, raw: { ...raw, ...(x.libraryData ? { libraryData: x.libraryData } : {}), ...(ratingKey ? { linkedRating: { id: ratingKey, value: rating, origin: data.ratingOrigins?.[ratingKey] || null } } : {}) }, badges: [({ song: '歌曲', artist: '歌手', album: '专辑' })[x.kind], x.source ? this.getSourceLabel(x.source) : '通用规则', this.dislikeOriginLabel(x.channel)], sections: [{ title: '基本信息', fields: g(['歌手', '专辑', '时长', '音乐来源']) }, { title: '评分关联', fields: [['评分', fields['评分']], ['评分 ID', ratingKey || '']] }, { title: '添加记录', fields: g(['规则', '添加来源', '全部添加原因', '添加时间', '补全来源', '补全时间']) }, { title: '标识', fields: g(['对象 ID', '歌曲标识', '专辑 ID']) }, { title: '可用音质', fields: [['音质', Array.isArray(raw.types) ? raw.types.map(q => q.type + (q.size ? ' · ' + q.size : '')) : []]] }] });
+            return `<article class="admin-dislike-card kind-${x.kind}"><div class="admin-dislike-cover">${image}</div><div class="admin-dislike-main"><h4 title="${e(x.title)}">${e(x.title)}</h4><p>${e([x.singer || '未记录歌手', raw.albumName || raw.meta?.albumName].filter(Boolean).join(' · '))}</p><button type="button" class="adm-open" onclick="app.openAdminDetail('${token}')">查看详情</button></div><div class="admin-dislike-badges"><span class="k">${e(({ song: '歌曲', artist: '歌手', album: '专辑' })[x.kind])}</span><span>${e(this.dislikeOriginLabel(x.channel))}</span><span>${e(x.source ? this.getSourceLabel(x.source) : '通用规则')}</span></div><div class="admin-dislike-score"><div class="admin-dislike-rating">${rating == null ? '<span class="muted">未评分</span>' : `${this.starsHtml(rating)}<b>${e(rating)}</b>`}</div><small>${e(when || '时间未记录')}</small></div></article>`;
+        }).join('');
+        return `<div class="admin-dislike-summary" role="status" aria-live="polite">共 ${selected.length} 条（总计 ${items.length} 条） · 第 ${page + 1} / ${pages} 页</div><div class="admin-dislike-grid ${f.view !== 'grid' ? 'is-list' : ''}">${cards}</div><div class="admin-dislike-pages"><button class="btn-secondary" ${page ? '' : 'disabled'} onclick="app.dislikePage(-1)">上一页</button><button class="btn-secondary" ${page + 1 < pages ? '' : 'disabled'} onclick="app.dislikePage(1)">下一页</button></div>`;
+    }
+
+    ratingOriginLabel(origin) {
+        if (!origin?.channel) return '来源未记录';
+        return ({ web: 'Web 手动评分', subsonic: 'Subsonic 手动评分', 'web-dislike-link': '不喜欢自动补分', 'manual-dislike-to-rating': '后台补分', 'web-rating-link': 'Web 低分联动', 'subsonic-rating': 'Subsonic 低分联动', 'manual-rating-to-dislike': '后台低分补不喜欢', 'snapshot-restore': '评分恢复', unknown: '来源未记录' })[origin.channel] || '其他来源（未识别）';
+    }
+
+    async retryAdminRatingSync() {
+        if (this._ratingRetryBusy) return;
+        const user=this.currentUserData?.username;if(!user)return;
+        this._ratingRetryBusy=true;
+        try {const result=await this.request(`/api/data/rating-sync?user=${encodeURIComponent(user)}`,{method:'POST'});if(result.pending?.length)showInfo(`重试完成，仍有 ${result.pending.length} 项待处理`);else showSuccess('失败项已处理');if(this.currentUserData?.username===user)await this.loadUserData()}
+        catch(error){showError('重试失败：'+error.message)}finally{this._ratingRetryBusy=false}
+    }
+
+    getRatingSectionHtml(data) {
+        const items = data.ratingItems || [];
+        const e = v => this.escapeHtml(String(v ?? ''));
+        const f = this._ratingFilters || {};
+        const opt = (v, t, k) => `<option value="${e(v)}" ${(f[k] || (k === 'status' ? 'active' : '')) === v ? 'selected' : ''}>${e(t)}</option>`;
+        const origins = ['web', 'subsonic', 'web-dislike-link', 'manual-dislike-to-rating'];
+        return `<section class="admin-dislikes admin-ratings" aria-label="用户评分数据">
+            <div class="data-section-header"><div class="section-header-title"><div class="section-icon-box admin-flat-icon">★</div><div><h3>评分</h3><p>歌曲、专辑、歌手评分 · 含封面、平台与评分来源</p></div></div><span class="admin-section-count">${items.length} 条</span></div>
+            ${(data.ratingSyncPending || []).length ? `<details class="config-hint"><summary>同步待处理 ${(data.ratingSyncPending || []).length} 项</summary>${data.ratingSyncPending.map(task => `<p>${e(task.id || '评分快照')}：${e(task.message)}</p>`).join('')}<button type="button" class="btn-secondary" onclick="app.retryAdminRatingSync()">仅重试失败项</button></details>` : ''}
+            <div id="admin-rating-stats">${this.getRatingStatsHtml(items)}</div>
+            <div class="admin-dislike-toolbar">
+                <div class="admin-dislike-search"><input class="form-input" aria-label="搜索评分" placeholder="搜索名称、歌手、专辑或 ID" value="${e(f.query || '')}" oninput="app.filterRatingData('query',this.value)"></div>
+                <select class="form-input" aria-label="平台" onchange="app.filterRatingData('source',this.value)">${this.adminPlatformOptions(items, f.source, '全部音乐平台')}</select>
+                <select class="form-input" aria-label="评分来源" onchange="app.filterRatingData('origin',this.value)">${opt('', '全部评分来源', 'origin')}${origins.map(o => opt(o || '*', this.ratingOriginLabel(o ? { channel: o } : null), 'origin')).join('')}</select>
+                <select class="form-input" aria-label="星级" onchange="app.filterRatingData('stars',this.value)">${opt('', '全部星级', 'stars')}${opt('low', '低分（1–2星）', 'stars')}${opt('high', '高分（4–5星）', 'stars')}${[5, 4, 3, 2, 1].map(n => opt(String(n), n + ' 星', 'stars')).join('')}</select>
+                <select class="form-input" aria-label="排序" onchange="app.filterRatingData('sort',this.value)">${opt('', '评分高→低', 'sort')}${opt('low', '评分低→高', 'sort')}${opt('time', '最近评分', 'sort')}${opt('oldest', '最早评分', 'sort')}${opt('singer', '歌手名称', 'sort')}${opt('source', '音乐平台', 'sort')}${opt('name', '名称', 'sort')}</select>
+            </div>
+            ${this.adminExtraFilters('rating', f)}
+            <p class="config-hint">平台标注该用户的总条数，0条也可筛选。多个关键词以空格分隔，需同时匹配；音乐平台与评分操作来源分别筛选。</p>
+            <div id="admin-rating-results">${this.getRatingResultsHtml(items)}</div>
+        </section>`;
+    }
+
+    getRatingStatsHtml(items) {
+        const f = this._ratingFilters || {};
+        const total = items.length, dormant = items.filter(x => x.dormant).length;
+        const selected = this.getFilteredRatingRows(items).length;
+        items = this.getFilteredRatingRows(items, { ...f, kind: '', stars: '' });
+        const n = k => items.filter(x => x.kind === k).length;
+        const avg = items.length ? (items.reduce((a, x) => a + x.rating, 0) / items.length).toFixed(2) : '–';
+        const cell = (k, label, v) => `<button type="button" class="${(f.kind || '') === k ? 'on' : ''}" onclick="app.filterRatingData('kind','${k}')"><b>${v}</b><span>${label}</span></button>`;
+        const dist = [5, 4, 3, 2, 1].map(s => { const c = items.filter(x => x.rating === s).length; return `<button type="button" class="admin-dist-row ${f.stars === String(s) ? 'on' : ''}" aria-label="筛选 ${s} 星，共 ${c} 条" aria-pressed="${f.stars === String(s)}" onclick="app.filterRatingData('stars','${f.stars === String(s) ? '' : s}')"><span>${s}★</span><i><u style="width:${items.length ? c / items.length * 100 : 0}%"></u></i><em>${c}</em></button>`; }).join('');
+        return `<div class="admin-flat-stats">${cell('', '全部', items.length)}${cell('song', '歌曲', n('song'))}${cell('album', '专辑', n('album'))}${cell('artist', '歌手', n('artist'))}<div class="static"><b>${avg}</b><span>平均分</span></div></div><div class="admin-rating-insights"><div class="admin-insight-main"><span class="admin-eyebrow">评分分布 · 点击筛选 / 再次点击取消</span><div class="admin-dist">${dist}</div></div><div class="admin-insight-score" style="--score:${Number(avg) || 0}"><div class="admin-score-ring"><b>${avg}</b><span>平均评分</span></div><p>当前匹配 <strong>${selected}</strong> / ${total} 条</p></div></div>`;
+    }
+
+    refreshRatingStats() {
+        const node = document.getElementById('admin-rating-stats');
+        if (node) node.innerHTML = this.getRatingStatsHtml(this.currentUserData?.data?.ratingItems || []);
+    }
+
+    filterRatingData(key, value) {
+        this._ratingFilters = { ...(this._ratingFilters || {}), [key]: value, page: 0 };
+        const node = document.getElementById('admin-rating-results');
+        if (node) node.innerHTML = this.getRatingResultsHtml(this.currentUserData?.data?.ratingItems || []);
+        this.refreshRatingStats();
+        const stars = document.querySelector('.admin-ratings select[aria-label="星级"]');
+        if (stars && key === 'stars') { stars.value = value; this.syncCustomSelects(); }
+    }
+
+    ratingPage(delta) {
+        this._ratingFilters = { ...(this._ratingFilters || {}), page: Math.max(0, (this._ratingFilters?.page || 0) + delta) };
+        const node = document.getElementById('admin-rating-results');
+        if (node) { node.innerHTML = this.getRatingResultsHtml(this.currentUserData?.data?.ratingItems || []); node.scrollIntoView({ block: 'start' }); }
+    }
+
+    getFilteredRatingRows(items, f = this._ratingFilters || {}) {
+        return items.filter(x => (!f.kind || x.kind === f.kind) && (!f.source || (x.source || '*') === f.source) && (!f.origin || (x.origin?.channel || '*') === f.origin) && (!f.stars || (f.stars === 'low' ? x.rating <= 2 : f.stars === 'high' ? x.rating >= 4 : x.rating === Number(f.stars))) && this.adminMatchesExtra(f, x.img, x.origin?.at, `${x.name} ${x.singer} ${x.albumName} ${x.id} ${x.effectiveId || ''} ${x.source || ''}`));
+    }
+
+    getRatingResultsHtml(items) {
+        const e = v => this.escapeHtml(String(v ?? ''));
+        const f = this._ratingFilters || {};
+        let rows = this.getFilteredRatingRows(items, f);
+        rows = [...rows].sort((a, b) => f.sort === 'low' ? a.rating - b.rating : f.sort === 'time' ? (b.origin?.at || 0) - (a.origin?.at || 0) : f.sort === 'oldest' ? (a.origin?.at || 0) - (b.origin?.at || 0) : f.sort === 'singer' ? String(a.singer).localeCompare(String(b.singer), 'zh') : f.sort === 'source' ? String(a.source).localeCompare(String(b.source)) : f.sort === 'name' ? String(a.name).localeCompare(String(b.name), 'zh') : b.rating - a.rating);
+        if (!rows.length) return '<div class="admin-dislike-empty">暂无符合条件的评分</div>';
+        const PAGE = this.adminPageSize(f, 30), pages = Math.ceil(rows.length / PAGE), page = Math.min(f.page || 0, pages - 1);
+        const kindName = { song: '歌曲', album: '专辑', artist: '歌手' };
+        this.resetAdminDetails();
+        const body = rows.slice(page * PAGE, page * PAGE + PAGE).map(x => {
+            const cover = x.img ? `<a href="${e(x.img)}" target="_blank" rel="noopener noreferrer" aria-label="预览封面"><img src="${e(x.img)}" loading="lazy" referrerpolicy="no-referrer" alt="" onerror="this.remove()"></a>` : '';
+            const sub = [x.singer, x.albumName].filter(Boolean).join(' · ');
+            const at = x.origin?.at ? new Date(x.origin.at).toLocaleString() : '';
+            const token = this.registerAdminDetail({ title: x.name, subtitle: sub, cover: x.img, icon: x.kind === 'song' ? '♪' : x.kind === 'album' ? '◎' : '♙', rating: x.rating, raw: x, badges: [kindName[x.kind], x.source === 'local' ? '本地' : x.source ? this.getSourceLabel(x.source) : '未知平台'], sections: [{ title: '基本信息', fields: [['歌手', x.singer], ['专辑', x.albumName], ['时长', x.interval], ['音乐平台', x.source === 'local' ? '本地' : x.source ? this.getSourceLabel(x.source) : '']] }, { title: '评分记录', fields: [['评分来源', this.ratingOriginLabel(x.origin)], ['评分时间', at]] }, { title: '标识', fields: [['评分 ID', x.id], ['当前使用 ID', x.dormant ? x.effectiveId : '']] }] });
+            return `<div class="admin-row kind-${e(x.kind)}"><div class="admin-row-cover">${cover}<span>${x.kind === 'song' ? '♪' : x.kind === 'album' ? '◎' : '♙'}</span></div><div class="admin-row-main"><div class="admin-row-title" title="${e(x.name)}">${e(x.name)}</div><div class="admin-row-sub">${e(sub || '—')}</div><button type="button" class="adm-open" onclick="app.openAdminDetail('${token}')">查看详情</button></div><div class="admin-row-meta"><span>${e(kindName[x.kind])}</span><span>${e(x.source === 'local' ? '本地' : x.source ? this.getSourceLabel(x.source) : '未知平台')}</span><span>${e(this.ratingOriginLabel(x.origin))}</span></div><div class="admin-row-score">${this.starsHtml(x.rating)}<small>${e(at)}</small></div></div>`;
+        }).join('');
+        return `<div class="admin-dislike-summary" role="status" aria-live="polite">共 ${rows.length} 条（总计 ${items.length} 条） · 第 ${page + 1} / ${pages} 页</div><div class="admin-rows">${body}</div><div class="admin-dislike-pages"><button class="btn-secondary" ${page ? '' : 'disabled'} onclick="app.ratingPage(-1)">上一页</button><button class="btn-secondary" ${page + 1 < pages ? '' : 'disabled'} onclick="app.ratingPage(1)">下一页</button></div>`;
+    }
+
+    registerAdminDetail(model) {
+        this._adminDetails = this._adminDetails || new Map();
+        const token = `d${this._adminSeq = (this._adminSeq || 0) + 1}`;
+        this._adminDetails.set(token, model);
+        return token;
+    }
+
+    /** 解析/渲染后清空旧登记，避免翻页后令牌无限增长 */
+    resetAdminDetails() { if ((this._adminDetails?.size || 0) > 5000) this._adminDetails = new Map(); }
+
+    closeAdminDetail() {
+        const el = document.getElementById('admin-detail-modal');
+        if (!el) return;
+        el.classList.add('closing');
+        document.removeEventListener('keydown', this._adminDetailKey);
+        setTimeout(() => el.remove(), 160);
+    }
+
+    openAdminDetail(token) {
+        const m = this._adminDetails?.get(token);
+        if (!m) return;
+        this.closeAdminDetail();
+        document.getElementById('admin-detail-modal')?.remove();
+        const e = v => this.escapeHtml(String(v ?? ''));
+        const cell = ([k, v]) => {
+            const copy = /ID|标识/.test(k) ? `<button type="button" class="adm-copy" data-copy="${e(v)}" aria-label="复制${e(k)}">复制</button>` : '';
+            const val = Array.isArray(v) ? `<div class="adm-chips">${v.map(x => `<span>${e(x)}</span>`).join('')}</div>` : `<span class="adm-val ${/ID|标识|规则/.test(k) ? 'mono' : ''}">${e(v)}</span>`;
+            return `<div class="adm-field"><dt>${e(k)}</dt><dd>${val}${copy}</dd></div>`;
+        };
+        const sections = m.sections.map(s => ({ ...s, fields: s.fields.filter(([, v]) => v !== '' && v != null && !(Array.isArray(v) && !v.length)) })).filter(s => s.fields.length)
+            .map(s => `<section class="adm-section"><h5>${e(s.title)}</h5><dl>${s.fields.map(cell).join('')}</dl></section>`).join('');
+        const cover = m.cover ? `<a class="adm-cover" href="${e(m.cover)}" target="_blank" rel="noopener noreferrer" title="查看原图"><img src="${e(m.cover)}" referrerpolicy="no-referrer" alt="" onerror="this.parentNode.classList.add('empty');this.remove()"></a>` : `<div class="adm-cover empty"><span>${m.icon || '♪'}</span></div>`;
+        const wrap = document.createElement('div');
+        wrap.id = 'admin-detail-modal';
+        wrap.className = 'adm-overlay';
+        wrap.innerHTML = `<div class="adm-panel" role="dialog" aria-modal="true" aria-label="${e(m.title)} 详情" tabindex="-1">
+            <div class="adm-grip"></div>
+            <header class="adm-head">${cover}<div class="adm-title"><div class="adm-tags">${(m.badges || []).map((b, i) => `<span class="${i ? '' : 'k'}">${e(b)}</span>`).join('')}</div><h3>${e(m.title)}</h3><p>${e(m.subtitle || '')}</p>${m.rating != null ? `<div class="adm-score">${this.starsHtml(m.rating, 'lg')}<b>${e(m.rating)}</b></div>` : '<div class="adm-score muted">未评分</div>'}</div><button type="button" class="adm-x" aria-label="关闭">✕</button></header>
+            <div class="adm-body">${sections}
+                <details class="adm-raw"><summary>原始数据</summary><div class="adm-raw-tools"><button type="button" class="btn-secondary adm-copy-json">复制 JSON</button></div><pre>${e(JSON.stringify(m.raw, null, 2))}</pre></details>
+            </div></div>`;
+        document.body.appendChild(wrap);
+        const close = () => this.closeAdminDetail();
+        wrap.addEventListener('click', ev => {
+            if (ev.target === wrap || ev.target.closest('.adm-x')) return close();
+            const c = ev.target.closest('.adm-copy');
+            if (c) { navigator.clipboard?.writeText(c.dataset.copy); c.textContent = '已复制'; setTimeout(() => c.textContent = '复制', 1200); }
+            if (ev.target.closest('.adm-copy-json')) { navigator.clipboard?.writeText(JSON.stringify(m.raw, null, 2)); const b = ev.target.closest('.adm-copy-json'); b.textContent = '已复制'; setTimeout(() => b.textContent = '复制 JSON', 1200); }
+        });
+        this._adminDetailKey = ev => { if (ev.key === 'Escape') close(); };
+        document.addEventListener('keydown', this._adminDetailKey);
+        wrap.querySelector('.adm-panel').focus();
     }
 
     getPlaylistsSectionHtml(userList, isAllTab) {
@@ -3367,9 +3706,6 @@ class App {
             if (form.elements['subsonic.linkRatingToDislike']) {
                 form.elements['subsonic.linkRatingToDislike'].checked = config['subsonic.linkRatingToDislike'] === true;
             }
-            if (form.elements['subsonic.linkDislikeToRating']) {
-                form.elements['subsonic.linkDislikeToRating'].checked = config['subsonic.linkDislikeToRating'] === true;
-            }
 
             // 音质 / 源优选
             if (form.elements['subsonic.quality.enabled']) {
@@ -3438,7 +3774,6 @@ class App {
             'subsonic.dislikeRequireSinger': formData.get('subsonic.dislikeRequireSinger') === 'on',
             'subsonic.ratingPlaylists': formData.get('subsonic.ratingPlaylists') === 'on',
             'subsonic.linkRatingToDislike': formData.get('subsonic.linkRatingToDislike') === 'on',
-            'subsonic.linkDislikeToRating': formData.get('subsonic.linkDislikeToRating') === 'on',
             'subsonic.quality.enabled': formData.get('subsonic.quality.enabled') === 'on',
             'subsonic.quality.priority': (formData.get('subsonic.quality.priority') || '').trim() || 'flac,320k,128k',
 
@@ -3469,10 +3804,12 @@ class App {
                 body: JSON.stringify(config)
             });
             this.loadedSubsonicConfig = Object.assign({}, this.loadedSubsonicConfig || {}, config);
+            this.updateLinkSyncUI();
             if (res.warning) {
                 showInfo('Subsonic 配置保存成功！\n\n⚠️ 警告：' + res.warning);
             } else {
-                showSuccess('Subsonic 配置保存成功！');
+                const linkChanged = ['subsonic.dislikeRating', 'subsonic.linkRatingToDislike'].some(k => config[k] !== prevConfig[k]);
+                showSuccess('Subsonic 配置保存成功！' + (linkChanged ? '\n联动配置对后续操作生效，历史评分和不喜欢不会自动重算或删除。' : ''));
             }
             if (needRestart) {
                 const ok = await showSelect(
@@ -3507,7 +3844,7 @@ class App {
         if (this._linkSyncBound) return;
         const form = document.getElementById('subsonic-form');
         if (!form) return;
-        ['subsonic.linkRatingToDislike', 'subsonic.linkDislikeToRating'].forEach(key => {
+        ['subsonic.linkRatingToDislike', 'subsonic.dislikeRating'].forEach(key => {
             const el = form.elements[key];
             if (el) el.addEventListener('change', () => this.updateLinkSyncUI());
         });
@@ -3518,11 +3855,22 @@ class App {
         const form = document.getElementById('subsonic-form');
         [
             ['subsonic.linkRatingToDislike', 'sync-rating-to-dislike-btn'],
-            ['subsonic.linkDislikeToRating', 'sync-dislike-to-rating-btn'],
+            ['subsonic.linkRatingToDislike', 'reconcile-rating-btn'],
         ].forEach(([key, btnId]) => {
             const btn = document.getElementById(btnId);
-            if (btn) btn.classList.toggle('hidden', !form?.elements[key]?.checked);
+            if (btn) {
+                btn.classList.remove('hidden');
+                const saved = this.loadedSubsonicConfig || {};
+                btn.disabled = !form?.elements[key]?.checked || saved[key] !== true || Number(saved['subsonic.dislikeRating'] ?? 1) <= 0;
+                btn.title = btn.disabled ? '请先开启并保存低分联动开关，且阈值大于 0' : btnId === 'reconcile-rating-btn' ? '先预览，再撤销失效评分原因；保留手动及其他有效原因' : '先预览，再补齐缺失的不喜欢规则';
+            }
         });
+        const manualButton = document.getElementById('sync-dislike-to-rating-btn');
+        if (manualButton) { manualButton.classList.remove('hidden'); manualButton.disabled = this._linkSyncBusy === true; manualButton.title = '管理员预览并批量补1星，只补未评分歌曲；不依赖自动开关或阈值'; }
+        const saved = this.loadedSubsonicConfig || {};
+        const threshold = Number(saved['subsonic.dislikeRating'] ?? 1);
+        const status = document.getElementById('subsonic-link-saved-status');
+        if (status) status.textContent = '已保存：' + (threshold <= 0 ? '低分联动已暂停（阈值为 0）；用户自动补分及后台补分不受影响' : `低分阈值 ${threshold} 星；低分补不喜欢${saved['subsonic.linkRatingToDislike'] ? '开启' : '关闭'}；不喜欢自动补分由各用户独立设置`) + '。更改配置不会重算历史数据。';
     }
 
     async loadLinkSyncUsers() {
@@ -3550,17 +3898,17 @@ class App {
         }
     }
 
-    async syncLink(direction) {
+    async syncLink(direction, reconcile = false) {
         if (this._linkSyncBusy) return;
         const isRatingToDislike = direction === 'ratingToDislike';
-        const key = isRatingToDislike ? 'subsonic.linkRatingToDislike' : 'subsonic.linkDislikeToRating';
-        const label = isRatingToDislike ? '评星 → 不喜欢' : '不喜欢 → 评星';
-        const btn = document.getElementById(isRatingToDislike ? 'sync-rating-to-dislike-btn' : 'sync-dislike-to-rating-btn');
+        const key = 'subsonic.linkRatingToDislike';
+        const label = reconcile ? '按当前阈值重算' : isRatingToDislike ? '低分补不喜欢' : '后台补分';
+        const btn = document.getElementById(reconcile ? 'reconcile-rating-btn' : isRatingToDislike ? 'sync-rating-to-dislike-btn' : 'sync-dislike-to-rating-btn');
         const form = document.getElementById('subsonic-form');
         // 开关以服务端已保存的配置为准，避免「表单勾了但没保存」时后端拒绝
         const checked = !!form?.elements[key]?.checked;
         const saved = (this.loadedSubsonicConfig || {})[key] === true;
-        if (!checked || !saved) {
+        if (isRatingToDislike && (!checked || !saved)) {
             showError(`请先开启「${label} 自动联动」并保存配置，再执行同步。`);
             return;
         }
@@ -3569,8 +3917,13 @@ class App {
             showError('请先选择联动同步目标用户');
             return;
         }
+        let preview;
+        try {
+            preview = await this.request('/api/subsonic/sync-link', { method: 'POST', body: JSON.stringify({ user, direction, preview: true, reconcile }) });
+        } catch (err) { showError('同步预览失败: ' + err.message); return; }
+        const sample = (preview.candidates || []).slice(0, 20).map(x => `${x.name || x.id} [${x.source || '?'}]`).join('\n');
         const confirmed = await showSelect('手动联动同步',
-            `将对用户 ${this.escapeHtml(user)} 执行「${label}」补数据：只补目标侧缺失的数据，不覆盖已有数据，也不会改动导入 / 回滚逻辑。\n\n确定继续吗？`,
+            `扫描范围包含用户歌单、本地曲目及在线缓存。待新增 ${preview.candidates?.length || 0} 项；已有评分 ${preview.existing?.length || 0} 项；重复关联 ${preview.duplicates?.length || 0} 项；解析失败 ${preview.failures?.length || 0} 项（最多显示20项）：\n${this.escapeHtml(sample)}\n\n将对用户 ${this.escapeHtml(user)} 执行「${label}」补数据：${reconcile ? `将撤销 ${preview.removedReasons || 0} 个失效评分原因，移除 ${preview.removedRules || 0} 条无其他原因的规则；保留手动及来源不明规则，并补齐当前低分。` : '只补目标侧缺失的数据，不覆盖已有数据，也不会改动导入 / 回滚逻辑。'}\n\n确定继续吗？`,
             { confirmText: '开始同步', cancelText: '取消' });
         if (!confirmed) return;
 
@@ -3580,22 +3933,23 @@ class App {
         try {
             const res = await this.request('/api/subsonic/sync-link', {
                 method: 'POST',
-                body: JSON.stringify({ user, direction })
+                body: JSON.stringify({ user, direction, reconcile, preview: false })
             });
-            const text = `同步完成（${label} · 用户 ${user}）：扫描 ${res.scanned} 条，新增 ${res.added} 条，已存在 ${res.skipped} 条` +
+            const text = `同步完成（${label} · 用户 ${user}）：扫描 ${res.scanned} 条，新增 ${res.added} 条，补全 ${res.updated || 0} 条，已存在 ${res.skipped} 条` +
                 (res.failed ? `，失败 ${res.failed} 条` : '') +
-                (res.batches > 1 ? `，分 ${res.batches} 批处理（全量）` : '') + '。';
+                (res.batches > 1 ? `，分 ${res.batches} 批处理（全量）` : '') + (reconcile ? `，撤销原因 ${res.removedReasons || 0} 个、删除规则 ${res.removedRules || 0} 条` : '') + '。';
             const box = document.getElementById('link-sync-result');
             if (box) {
                 box.textContent = text;
                 box.classList.remove('hidden');
             }
-            showSuccess(text);
+            if (res.warning) showInfo(text + '\n' + res.warning); else showSuccess(text);
         } catch (err) {
             showError('同步失败: ' + err.message);
         } finally {
             this._linkSyncBusy = false;
-            if (btn) { btn.disabled = false; btn.textContent = oldText || '同步'; }
+            if (btn) btn.textContent = oldText || '同步';
+            this.updateLinkSyncUI();
         }
     }
 
@@ -3604,7 +3958,7 @@ class App {
             // 用服务端已保存的配置校验开关，只提供手动操作入口，绝不自动执行联动
             const config = await this.request('/api/config');
             const ratingToDislike = config['subsonic.linkRatingToDislike'] === true;
-            const dislikeToRating = config['subsonic.linkDislikeToRating'] === true;
+            const dislikeToRating = true;
             const threshold = Number(config['subsonic.dislikeRating'] ?? 1);
             if ((!ratingToDislike && !dislikeToRating) || !(threshold > 0)) return;
             const dirs = [ratingToDislike ? '评星 → 不喜欢' : '', dislikeToRating ? '不喜欢 → 评星' : '']
@@ -6735,7 +7089,7 @@ class App {
             return;
         }
 
-        if (!(await showSelect('回滚快照', '警告：此操作将把服务器数据回滚到选定的快照状态！\n\n1. 当前所有未保存的更改将丢失。\n2. 所有客户端的同步状态将被重置。\n3. 客户端连接后，请务必选择【远程覆盖本地】以获取回滚后的数据。\n\n确定要继续吗？', { danger: true }))) {
+        if (!(await showSelect('回滚快照', (kind === 'rating' ? '评分恢复范围：分数、来源与备份中的歌曲描述。保留当前收藏及本地文件关联；关联参照不会恢复旧关联。\n\n' : '') + '警告：此操作将把服务器数据回滚到选定的快照状态！\n\n1. 当前所有未保存的更改将丢失。\n2. 所有客户端的同步状态将被重置。\n3. 客户端连接后，请务必选择【远程覆盖本地】以获取回滚后的数据。\n\n确定要继续吗？', { danger: true }))) {
             return;
         }
 

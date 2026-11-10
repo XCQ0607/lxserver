@@ -1,3 +1,5 @@
+import { withRatingIdentityLock } from '../rating/ratingIdentityLock'
+import { writeRating, writeRatingUnlocked, recordRatingBackfillFailure, flushRatingSnapshot, readRatings, resolveStoredRatingId } from '../rating/ratingService'
 import { lookupLocalLyrics } from '@/server/music/localLyrics'
 import http from 'http'
 import { Readable } from 'stream'
@@ -5,7 +7,7 @@ import { pipeline } from 'stream/promises'
 import crypto from 'crypto'
 import { URL } from 'url'
 import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
-import { createRatingSnapshot } from '../ratingSnapshot'
+import { createRatingSnapshot, withMetaLock } from '../rating/ratingSnapshot'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
 import { downloadAndCache, checkCache, serveCacheFile, getFileName } from '@/server/music/fileCache'
 import { resolveOpenlistCacheEntry } from '@/server/openlist/openlistBackup'
@@ -24,7 +26,7 @@ import { proxyCoverImage } from '@/server/media/coverProxy'
 import { subsonicLog } from '@/utils/log4js'
 import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetchPlaylistSongs, fetchSongsByGenre } from '@/server/utils/discovery'
 import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/music/radioStations'
-import { getLocalTracks, findLocalTrack, localMusic, localSong, localAlbums, localArtists, localFile, localCover, localLyrics, serveLocalTrack, isLocalSong, isLocalEntity, getLocalScanStatus, readLocalState, editLocalState, mergeLocalPlaylist } from '@/server/music/subsonicLocal'
+import { getLocalTracks, localRatingId, findLocalTrack, localMusic, localSong, localAlbums, localArtists, localFile, localCover, localLyrics, serveLocalTrack, isLocalSong, isLocalEntity, getLocalScanStatus, readLocalState, editLocalState, mergeLocalPlaylist } from '@/server/music/subsonicLocal'
 import { getCustomMusicDir } from '@/server/music/customMusicManager'
 import { checkLyricCache } from '@/server/music/fileCache'
 import { parseLyrics } from '@/utils/lrcTool'
@@ -144,6 +146,12 @@ export interface LinkSyncSummary {
     threshold: number
     /** 实际处理的批次数（0 表示无待处理条目） */
     batches: number
+    candidates?: Array<{ id: string, name?: string, source?: string }>
+    updated?: number
+    warning?: string
+    existing?: any[]
+    duplicates?: any[]
+    failures?: any[]
 }
 
 const countDislikeRules = (rules: string): number =>
@@ -459,6 +467,7 @@ export interface SubsonicMeta {
     starredAlbums: string[]
     starredArtists: string[]
     starredArtistNames: string[]
+    ratingOrigins?: Record<string, { channel: string, at: number }>
     ratings: Record<string, number>
 }
 
@@ -471,22 +480,9 @@ export function getSubsonicMetaFilePath(username: string): string {
 }
 
 export function readSubsonicMeta(username: string): SubsonicMeta {
-    try {
-        const filePath = getSubsonicMetaFilePath(username)
-        if (fs.existsSync(filePath)) {
-            const data = JSON.parse(fs.readFileSync(filePath, 'utf8'))
-            return {
-                starredAlbums: Array.isArray(data.starredAlbums) ? data.starredAlbums : [],
-                starredArtists: Array.isArray(data.starredArtists) ? data.starredArtists : [],
-                // 兼容旧版元数据：starredArtistNames 可能为 undefined
-                starredArtistNames: Array.isArray(data.starredArtistNames) ? data.starredArtistNames : [],
-                ratings: data.ratings && typeof data.ratings === 'object' ? data.ratings : {},
-            }
-        }
-    } catch (e) {
-        subsonicLog.error('[Subsonic] Failed to read subsonic-meta.json:', e)
-    }
-    return { starredAlbums: [], starredArtists: [], starredArtistNames: [], ratings: {} }
+    const data = readRatings(username)
+    return { ...data, starredAlbums: Array.isArray(data.starredAlbums) ? data.starredAlbums : [], starredArtists: Array.isArray(data.starredArtists) ? data.starredArtists : [], starredArtistNames: Array.isArray(data.starredArtistNames) ? data.starredArtistNames : [] }
+
 }
 
 export function writeSubsonicMeta(username: string, meta: SubsonicMeta) {
@@ -494,9 +490,11 @@ export function writeSubsonicMeta(username: string, meta: SubsonicMeta) {
         const filePath = getSubsonicMetaFilePath(username)
         const dirPath = path.dirname(filePath)
         if (!fs.existsSync(dirPath)) fs.mkdirSync(dirPath, { recursive: true })
-        fs.writeFileSync(filePath, JSON.stringify(meta), 'utf8')
+        fs.writeFileSync(filePath + '.meta.tmp', JSON.stringify(meta), 'utf8')
+        fs.renameSync(filePath + '.meta.tmp', filePath)
     } catch (e) {
         subsonicLog.error('[Subsonic] Failed to write subsonic-meta.json:', e)
+        throw e
     }
 }
 
@@ -734,53 +732,18 @@ export function syncNativeLibraryToSubsonic(
  * 后写入者会整体覆盖前者的修改，导致用户刚设置的星标或评分丢失。
  * 这里按 username 串成 Promise 链，保证同一用户的读-改-写严格顺序执行。
  */
-const metaLocks = new Map<string, Promise<unknown>>()
-
-/**
- * 同一用户 subsonic-meta.json 的「读-改-写」串行化锁。
- * 避免 handleSetRating / handleStar / syncDislikeToRating 并发写同一文件互相覆盖。
- */
-function withMetaLock<T>(username: string, task: () => Promise<T>): Promise<T> {
-    const prev = metaLocks.get(username) ?? Promise.resolve()
-    const run = (): Promise<T> => task()
-    // 前一个任务无论成功还是失败都要继续，避免一次异常卡死整条队列
-    const next = prev.then(run, run)
-    const tail = next.then(() => undefined, () => undefined)
-    metaLocks.set(username, tail)
-    tail.then(() => {
-        if (metaLocks.get(username) === tail) metaLocks.delete(username)
-    })
-    return next
-}
-
 /**
  * 双向联动：网页端「不喜欢」(dislike) <-> Subsonic 评分(rating)。
  * 网页给某首歌点「不喜欢」时，回写该用户 subsonic-meta.json 的 ratings 映射，
  * 使 Subsonic 客户端能看到这颗低星（与正向联动 handleSetRating 共用同一份存储）：
- *   rating > 0  -> ratings[id] = rating（低星，落入 dislike 区间）
- *   rating <= 0 -> 删除 ratings[id]（恢复未评）
+ *   rating > 0  -> 仅在没有评分时补充低星
+ *   rating <= 0 -> 不更改评分，保留用户手工数据
  * id 即 Subsonic 歌曲 id（source_songId）。模块级函数，供 server.ts 的 /api/music/dislike 直接调用。
  */
-export async function syncDislikeToRating(username: string, id: string, rating: number): Promise<void> {
-    if (!id) return
-    try {
-        await withMetaLock(username, async () => {
-            const meta = readSubsonicMeta(username)
-            const r = Math.max(0, Math.min(5, Math.floor(rating)))
-            if (r <= 0) {
-                if (meta.ratings[id] === undefined) return
-                delete meta.ratings[id]
-            } else {
-                meta.ratings[id] = r
-            }
-            writeSubsonicMeta(username, meta)
-            subsonicLog.debug(`[Subsonic] dislike<->rating 同步: ${id} -> ${r} (user=${username})`)
-        })
-    } catch (e) {
-        subsonicLog.error('[Subsonic] dislike<->rating 同步失败:', e)
-    }
-    // 评分写入后生成/复用一份「我的评分」快照，使当前评分可被下载备份
-    void createRatingSnapshot(username).catch(e => subsonicLog.warn('[Subsonic] 评分快照生成失败:', e))
+export async function syncDislikeToRating(username: string, id: string, rating: number, song?: any): Promise<void> {
+    if (!id || rating <= 0) return
+    const saved = await writeRating(username, id, rating, 'web-dislike-link', song, { onlyMissing: true })
+    if (saved.snapshotWarning) throw new Error(saved.snapshotWarning)
 }
 
 /**
@@ -1542,7 +1505,7 @@ class SubsonicHandler {
         if (isLocalSong(id) && ['stream', 'download', 'getCoverArt', 'getLyrics', 'getLyricsBySongId', 'getSong'].includes(method)) {
             const track = await findLocalTrack(user, id)
             if (!track || !localFile(track)) return error('Local song not found in selected storage')
-            if (method === 'getSong') return send({ song: { ...localSong(track, user), userRating: readSubsonicMeta(user).ratings[id] || 0 } })
+            if (method === 'getSong') return send({ song: { ...localSong(track, user), userRating: readSubsonicMeta(user).ratings[localRatingId(track)] || 0 } })
             if (method === 'getCoverArt') {
                 const cover = localCover(track)
                 if (cover) { res.setHeader('Content-Type', cover.mime); res.end(cover.data) }
@@ -1747,7 +1710,7 @@ class SubsonicHandler {
      */
     private musicToSongFlat(music: LX.Music.MusicInfo, parentId: string, artistIdOverride?: string, username?: string) {
         const meta = (music as any).meta || {}
-        if (meta.localTrack && username) return { ...localSong(meta.localTrack, username), parent: parentId, userRating: this.userRatingsCache.get(username)?.[music.id] || 0 }
+        if (meta.localTrack && username) return { ...localSong(meta.localTrack, username), parent: parentId, userRating: this.userRatingsCache.get(username)?.[localRatingId(meta.localTrack)] || 0 }
 
         const id = music.id
         const singer = music.singer || 'Unknown Artist'
@@ -2054,23 +2017,44 @@ class SubsonicHandler {
         this.loadOnlineSongCache()
         for (const [id, m] of this.onlineSongCache) if (!all.has(id)) all.set(id, m)
         // 补充未收藏的本地歌曲：cacheOnlineSong 会跳过本地歌曲，仅靠歌单会漏掉已评分的 NAS 曲目；
-        // 在线缓存超出上限被淘汰的已评分歌曲暂无法覆盖（可接受）。
+        // 缓存淘汰的已评分歌曲会在下方尝试按 ID 重新解析。
         for (const t of await getLocalTracks(username)) if (!all.has(t.id)) all.set(t.id, localMusic(t))
 
-        const assigned = new Set<string>()
+        // Web独立评分资料可用于展示未加入歌单、也未进入在线缓存的歌曲。
+        try {
+            const file = path.join(global.lx.userPath, getUserDirname(username), 'rating', 'songs.json')
+            const catalog = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {}
+            for (const [id, stored] of Object.entries(catalog)) {
+                if (all.has(id) || id.startsWith('local_')) continue
+                const item = stored as any
+                all.set(id, { ...item, meta: { songId: id.slice(String(item.source).length + 1), albumName: item.albumName } })
+            }
+        } catch { /* 资料缺失时继续现有解析路径 */ }
+
         for (const [id, music] of all) {
-            const star = ratings[id]
+            const star = ratings[(music.meta as any)?.localTrack ? localRatingId((music.meta as any).localTrack) : id]
             // ratings 来自可手工编辑的 subsonic-meta.json；只接受 1~5 的整数，
             // 否则 groups.get(1.5) 为 undefined，push 会让整个 getPlaylists 请求 500。
             if (typeof star === 'number' && Number.isInteger(star) && star >= 1 && star <= 5) {
                 groups.get(star)!.push(music)
-                assigned.add(id)
             }
+        }
+
+        // 缓存淘汰后重新解析已评分歌曲；解析失败保留原评分，后续可重试。
+        for (const [id, star] of Object.entries(ratings)) {
+            if (all.has(id) || /^(alb_|art_|artist_)/.test(id) || !Number.isInteger(star) || star < 1 || star > 5) continue
+            try {
+                const hit = await withTimeout(this.resolveSongMeta(username, id), LINK_SYNC_ITEM_TIMEOUT_MS)
+                if (hit?.music) {
+                    all.set(id, hit.music)
+                    groups.get(star)!.push(hit.music)
+                }
+            } catch (e) { subsonicLog.warn(`[Subsonic] 无法解析已评分歌曲 ${id}`, e) }
         }
 
         // 1 星歌单 = 1 星歌曲 ∪ dislike 规则命中的歌曲
         if (global.lx.config['subsonic.ratingPlaylists'] !== false) {
-            const candidates = [...all.values()].filter(m => !assigned.has(m.id) || ratings[m.id] === 1)
+            const candidates = [...all.values()]
             const kept = await this.filterDislikedSongs(username, candidates)
             const keptIds = new Set(kept.map(m => m.id))
             const oneStar = groups.get(1)!
@@ -2215,10 +2199,11 @@ class SubsonicHandler {
             if (!(star >= 1 && star <= 5)) return this.sendError(res, 70, 'Rating playlist not found', format)
             const groups = await this.getRatingPlaylistSongs(username)
             const musics = groups.get(star) || []
-            // 强制标注该星级，让客户端把这批歌识别为对应评分（1 星歌单里的 dislike 歌曲可能没有 rating 记录）
+            const actualRatings = (await this.getUserSubsonicMeta(username)).ratings
+            // 优先展示真实评分，没有评分的屏蔽项以 1 星展示。
             const entry = musics.map((m: LX.Music.MusicInfo) => ({
                 ...this.musicToSongFlat(m, id, undefined, username),
-                userRating: star,
+                userRating: actualRatings[(m.meta as any)?.localTrack ? localRatingId((m.meta as any).localTrack) : m.id] || star,
             }))
             const name = star === 1
                 ? '★☆☆☆☆ 1星 · 我不喜欢'
@@ -2227,7 +2212,7 @@ class SubsonicHandler {
                 playlist: {
                     id,
                     name,
-                    comment: star === 1 ? '该歌单关联「我不喜欢」：打 1 星即加入，提高或清除评分即移除' : '',
+                    comment: star === 1 ? '包含 1 星及不喜欢命中歌曲；保留真实评分，联动仅补充数据' : '',
                     owner: username,
                     public: false,
                     songCount: musics.length,
@@ -3206,10 +3191,11 @@ class SubsonicHandler {
         if (global.lx.config['subsonic.hideDisliked'] && !ratingStar) {
             musics = await this.filterDislikedSongs(username, musics)
         }
-        // 评星歌单强制标注星级，让客户端把 dislike 命中的歌曲也识别为对应评分
+        const actualRatings = ratingStar ? (await this.getUserSubsonicMeta(username)).ratings : {}
+        // 保留真实评分，没有评分的屏蔽项以 1 星展示。
         const toSong = (m: LX.Music.MusicInfo) => {
             const flat = this.musicToSongFlat(m, id, undefined, username)
-            return ratingStar ? { ...flat, userRating: ratingStar } : flat
+            return ratingStar ? { ...flat, userRating: actualRatings[(m.meta as any)?.localTrack ? localRatingId((m.meta as any).localTrack) : m.id] || ratingStar } : flat
         }
 
         if (format === 'json') {
@@ -5187,6 +5173,7 @@ class SubsonicHandler {
                 const merge = (base: string[], add: Set<string>, del: Set<string>): string[] =>
                     Array.from(new Set([...(base || []).filter((x: string) => !del.has(x)), ...add]))
                 await this.saveUserSubsonicMeta(username, {
+                    ...fresh,
                     starredAlbums: merge(fresh.starredAlbums, addedAlbums, removedAlbums),
                     starredArtists: merge(fresh.starredArtists, addedArtists, removedArtists),
                     starredArtistNames: merge(fresh.starredArtistNames, addedArtistNames, removedArtistNames),
@@ -5252,15 +5239,15 @@ class SubsonicHandler {
             return valid.length
         } catch (e) {
             subsonicLog.error('[Subsonic] 写入 dislike 规则失败:', e)
-            return 0
+            throw e
         }
     }
 
     /** 写入专辑维度的 dislike 规则（!<专辑名>@<歌手>，按歌手拆多条） */
-    private async addDislikeAlbum(username: string, album: { albumName: string, singers: string[] }): Promise<number> {
+    private async addDislikeAlbum(username: string, album: { albumName: string, singers: string[], source?: string }, ratingId?: string, channel = 'subsonic-rating'): Promise<number> {
         try {
             const userSpace = getUserSpace(username) as any
-            const infos = (album.singers || []).map(singer => ({ albumName: album.albumName, singer }))
+            const infos = (album.singers || []).map(singer => ({ albumName: album.albumName, singer, source: album.source, provenance: { channel, at: Date.now(), ratingId } }))
             if (infos.length === 0) return 0
             await userSpace.dislikeManage.dislikeDataManage.addDislikeAlbums(infos)
             await userSpace.dislikeManage.createSnapshot()
@@ -5268,7 +5255,7 @@ class SubsonicHandler {
             return infos.length
         } catch (e) {
             subsonicLog.error('[Subsonic] 写入专辑 dislike 失败:', e)
-            return 0
+            throw e
         }
     }
 
@@ -5339,7 +5326,7 @@ class SubsonicHandler {
      */
     private async resolveDislikeTarget(username: string, id: string): Promise<{
         infos: Array<{ name: string, singer: string }>
-        album?: { albumName: string, singers: string[] }
+        album?: { albumName: string, singers: string[], source?: string }
         singer?: { name: string, source: string, singerId: string }
         keys: Set<string>
     }> {
@@ -5359,7 +5346,7 @@ class SubsonicHandler {
             }
 
             const identity = await this.resolveSingerIdentity(username, name, preset)
-            const infos = identity.name ? [{ name: '', singer: identity.name }] : []
+            const infos = identity.name ? [{ name: '', singer: identity.name, source: identity.source, provenance: { channel: 'subsonic-rating', at: Date.now() } }] : []
             return {
                 infos,
                 singer: identity,
@@ -5390,7 +5377,7 @@ class SubsonicHandler {
             if (!albumName) return { infos: [], keys: new Set() }
             const singers = [...singerSet]
             const keys = new Set(singers.map(s => encodeAlbumRule(albumName, s)))
-            const album = { albumName, singers }
+            const album = { albumName, singers, source }
             return { infos: [], album, keys }
         }
 
@@ -5404,16 +5391,14 @@ class SubsonicHandler {
             singer: hit.music.singer || '',
             source: hit.music.source,
             interval: hit.music.interval,
+            provenance: { channel: 'subsonic-rating', at: Date.now() },
             pic: (hit.music as any).img || (hit.music as any).meta?.picUrl || undefined,
         }] : []
         let singerIdentity: { name: string, source: string, singerId: string } | undefined
         if (hit?.music) {
             const rawSingerId = (hit.music as any).singerId
-            singerIdentity = await this.resolveSingerIdentity(
-                username,
-                (hit.music.singer || '').split('、')[0] || '',
-                rawSingerId ? { source: hit.music.source, id: String(rawSingerId) } : undefined,
-            )
+            // 歌曲规则已有歌曲身份，不为附带歌手资料在线回源，避免补同步被无关超时丢弃。
+            singerIdentity = { name: (hit.music.singer || '').split('、')[0] || '', source: hit.music.source, singerId: String(rawSingerId || '') }
         }
         return {
             infos,
@@ -5434,7 +5419,7 @@ class SubsonicHandler {
         return filterDisliked(musics, ruleSet, (m) => ({
             name: m.name,
             singer: m.singer,
-            source: m.source,
+            source: (m.meta as any)?.localTrack?.platformId?.split('_')[0] || m.source,
             albumId: (m as any).meta?.albumId ?? (m as any).albumId ?? (m as any).album?.id,
             albumName: (m as any).meta?.albumName,
         }), { crossSource, duetMode, normalizeName, requireSinger })
@@ -5454,7 +5439,7 @@ class SubsonicHandler {
      * 语义等价于重放一次 setRating 的正向联动，但只补不删；与快照导入/回滚完全解耦，
      * 仅由管理员在 Subsonic 配置页点击「同步」时触发。
      */
-    async syncRatingsToDislike(username: string): Promise<LinkSyncSummary> {
+    async syncRatingsToDislike(username: string, preview = false): Promise<LinkSyncSummary> {
         const threshold = Number(global.lx.config['subsonic.dislikeRating'] ?? 1)
         const summary: LinkSyncSummary = {
             direction: 'ratingToDislike', user: username,
@@ -5466,7 +5451,10 @@ class SubsonicHandler {
         const ratings = meta.ratings || {}
         const lowRatedIds = Object.keys(ratings).filter(id =>
             typeof ratings[id] === 'number' && ratings[id] > 0 && ratings[id] <= threshold)
+        for (let i = lowRatedIds.length - 1; i >= 0; i--) { if (await resolveStoredRatingId(username, lowRatedIds[i]) !== lowRatedIds[i]) lowRatedIds.splice(i, 1) }
         summary.scanned = lowRatedIds.length
+        summary.candidates = lowRatedIds.map(id => ({ id, source: id.replace(/^(alb_|art_)/, '').split('_')[0] }))
+        if (preview) return summary
         if (lowRatedIds.length === 0) return summary
 
         const userSpace = getUserSpace(username) as any
@@ -5476,32 +5464,33 @@ class SubsonicHandler {
                 const batch = lowRatedIds.slice(start, start + LINK_SYNC_BATCH_SIZE)
                 summary.batches++
                 const infos: any[] = []
-                const albumSingers = new Map<string, Set<string>>()
+                const albumInfos: any[] = []
                 // 单条解析可能在线回源，逐条设超时；失败只记数，不中断后续批次
                 for (const id of batch) {
                     try {
                         const target = await withTimeout(this.resolveDislikeTarget(username, id), LINK_SYNC_ITEM_TIMEOUT_MS)
-                        for (const info of target.infos) infos.push(info)
+                        if (!target.infos.length && (!target.album || !target.album.singers.length)) { summary.failed++; continue }
+                        for (const info of target.infos) infos.push({ ...info, provenance: { channel: 'manual-rating-to-dislike', at: Date.now(), ratingId: id } })
                         if (target.album) {
-                            const singers = albumSingers.get(target.album.albumName) ?? new Set<string>()
-                            for (const s of target.album.singers) singers.add(s)
-                            albumSingers.set(target.album.albumName, singers)
+                            for (const singer of target.album.singers) albumInfos.push({ albumName: target.album.albumName, source: target.album.source, singer, provenance: { channel: 'manual-rating-to-dislike', at: Date.now(), ratingId: id } })
                         }
                     } catch (e) {
                         summary.failed++
                         subsonicLog.warn(`[Subsonic] 联动同步：解析评分歌曲 ${id} 失败`, e)
                     }
                 }
-                if (infos.length === 0 && albumSingers.size === 0) continue
+                if (infos.length === 0 && albumInfos.length === 0) continue
 
-                const albumInfos = Array.from(albumSingers).flatMap(([albumName, singers]) =>
-                    Array.from(singers).map(singer => ({ albumName, singer })))
                 try {
                     // addDislikeInfo / addDislikeAlbums 自带按规则行去重，只补不删
                     const before = userSpace.dislikeManage.dislikeDataManage.getDislikeRulesString() as string
+                    const beforeData = JSON.stringify(userSpace.dislikeManage.dislikeDataManage.dislikeRules)
                     await userSpace.dislikeManage.dislikeDataManage.addDislikeInfo(infos)
                     if (albumInfos.length > 0) await userSpace.dislikeManage.dislikeDataManage.addDislikeAlbums(albumInfos)
                     const after = userSpace.dislikeManage.dislikeDataManage.getDislikeRulesString() as string
+                    const beforeItems = new Map((JSON.parse(beforeData || '{}').dislikeList || []).map((x: any) => [`${x.source || '*'}::${x.dislikeRule}`, JSON.stringify(x)]))
+                    const changedExisting = (userSpace.dislikeManage.dislikeDataManage.dislikeRules?.dislikeList || []).filter((x: any) => { const previous = beforeItems.get(`${x.source || '*'}::${x.dislikeRule}`); return previous && previous !== JSON.stringify(x) }).length
+                    summary.updated = (summary.updated || 0) + changedExisting
                     const added = Math.max(0, countDislikeRules(after) - countDislikeRules(before))
                     summary.added += added
                     summary.skipped += Math.max(0, infos.length + albumInfos.length - added)
@@ -5513,7 +5502,7 @@ class SubsonicHandler {
             }
         } finally {
             // 全部分批结束后统一落盘 + 失效缓存，只生成一份快照，避免按批堆积
-            if (summary.added > 0) {
+            if (summary.added > 0 || summary.updated) {
                 await userSpace.dislikeManage.createSnapshot()
                 invalidateDislikeCache(username)
             }
@@ -5525,13 +5514,15 @@ class SubsonicHandler {
      * 手动补数据（不喜欢 → 评星）：对当前 dislike 规则命中的歌曲补写低星评分。
      * 语义等价于重放一次网页端「不喜欢」的反向联动（1 星），只补不覆盖已有评分。
      */
-    async syncDislikesToRating(username: string): Promise<LinkSyncSummary> {
+    async syncDislikesToRating(username: string, preview = false): Promise<LinkSyncSummary> {
+        return withRatingIdentityLock(username, () => this.syncDislikesToRatingUnlocked(username, preview))
+    }
+    private async syncDislikesToRatingUnlocked(username: string, preview = false): Promise<LinkSyncSummary> {
         const threshold = Number(global.lx.config['subsonic.dislikeRating'] ?? 1)
         const summary: LinkSyncSummary = {
             direction: 'dislikeToRating', user: username,
             scanned: 0, added: 0, skipped: 0, failed: 0, threshold, batches: 0,
         }
-        if (threshold <= 0) return summary
 
         // 与评星歌单同源：用户歌单 + 已缓存的在线歌曲，纯内存规则匹配，不在线回源
         const listData = await this.getSubsonicListData(username)
@@ -5552,84 +5543,98 @@ class SubsonicHandler {
 
         const kept = await this.filterDislikedSongs(username, candidates)
         const keptIds = new Set(kept.map(m => m.id))
-        const hitIds = candidates.filter(m => !keptIds.has(m.id)).map(m => m.id)
+        const hits = candidates.filter(m => !keptIds.has(m.id))
+        const meta = readSubsonicMeta(username)
+        const unique = new Map<string, LX.Music.MusicInfo>()
+        summary.existing = []; summary.duplicates = []; summary.failures = []
+        for (const music of hits) {
+            try {
+                const id = await resolveStoredRatingId(username, music.id)
+                const row = { id, name: music.name, source: id.startsWith('local_') ? 'local' : id.split('_')[0] }
+                if (unique.has(id)) { summary.duplicates.push(row); continue }
+                unique.set(id, music)
+                if (meta.ratings[id] > 0) summary.existing.push(row)
+            } catch { summary.failures.push({ id: music.id, name: music.name, stage: 'identity' }); summary.failed++ }
+        }
+        summary.candidates = [...unique].filter(([id]) => !meta.ratings[id]).map(([id, music]) => ({ id, name: music.name, source: id.startsWith('local_') ? 'local' : id.split('_')[0] }))
+        summary.skipped = summary.existing.length + summary.duplicates.length
+        if (preview) return summary
+        for (const candidate of summary.candidates) {
+            try {
+                const saved = await writeRatingUnlocked(username, candidate.id, 1, 'manual-dislike-to-rating', unique.get(candidate.id), { onlyMissing: true, deferSnapshot: true })
+                if (saved.unchanged) summary.skipped++; else summary.added++
+                if (saved.snapshotWarning) summary.warning = saved.snapshotWarning
+                this.userRatingsCache.set(username, saved.meta.ratings)
+            } catch { recordRatingBackfillFailure(username,candidate.id,'manual-dislike-to-rating'); summary.failed++; summary.failures.push({ ...candidate, stage: 'write' }) }
+        }
+        if (summary.added) summary.warning = await flushRatingSnapshot(username) || summary.warning
 
-        // 与 /api/music/dislike/add 的自动联动保持一致：不喜欢回写 1 星
-        await withMetaLock(username, async () => {
-            const meta = readSubsonicMeta(username)
-            for (const id of hitIds) {
-                if (meta.ratings[id] > 0) { summary.skipped++; continue }
-                meta.ratings[id] = 1
-                summary.added++
-            }
-            if (summary.added > 0) {
-                writeSubsonicMeta(username, meta)
-                this.userRatingsCache.set(username, meta.ratings || {})
-                void createRatingSnapshot(username).catch(e => subsonicLog.warn('[Subsonic] 联动同步评分快照生成失败:', e))
-            }
-        })
         return summary
     }
 
     /**
      * 处理 Subsonic setRating：写回评分，并按配置把低分（<=阈值）联动为「不喜欢」。
      */
+    async reconcileRatingDislikes(username: string, preview = true) {
+        return withRatingIdentityLock(username, () => this.reconcileRatingDislikesUnlocked(username, preview))
+    }
+    private async reconcileRatingDislikesUnlocked(username: string, preview = true) {
+        const dm = (getUserSpace(username) as any).dislikeManage
+        const ratings = readSubsonicMeta(username).ratings
+        const threshold = Number(global.lx.config['subsonic.dislikeRating'] ?? 1)
+        const valid = new Set<string>()
+        for (const [id, value] of Object.entries(ratings) as [string, number][]) {
+            if (value > 0 && value <= threshold && await resolveStoredRatingId(username, id).catch(() => id) === id) valid.add(id)
+        }
+        const candidates = await this.syncRatingsToDislike(username, true)
+        if (preview) return { ...candidates, ...dm.dislikeDataManage.reconcileRatingReasons(valid, true) }
+        await dm.createSnapshot() // 先保留可回滚的当前规则
+        const removed = dm.dislikeDataManage.reconcileRatingReasons(valid, false)
+        await dm.createSnapshot()
+        invalidateDislikeCache(username)
+        const added = await this.syncRatingsToDislike(username, false)
+        return { ...added, ...removed }
+    }
+
+    async applyRatingLink(username: string, id: string, rating: number, song?: any, channel = 'web-rating-link') {
+        const threshold = global.lx.config['subsonic.dislikeRating'] ?? 1
+        if (!global.lx.config['subsonic.linkRatingToDislike'] || threshold <= 0 || rating <= 0 || rating > threshold) return
+        const target = await this.resolveDislikeTarget(username, id)
+        if (!target.infos.length && !target.album && song && !song.isLocal && !song._localFilename && !id.startsWith('local_')) {
+            if (!song.name || !song.singer) throw new Error('缺少歌曲资料')
+            const info = { id, name: song.name, singer: song.singer, source: song.source, interval: song.interval, provenance: { channel, at: Date.now(), ratingId: id } }
+            await this.addDislikeRules(username, [info])
+            return
+        }
+        if (!target.infos.length && !target.album) throw new Error('无法解析不喜欢目标')
+        await this.addDislikeRules(username, target.infos.map(x => ({ ...x, provenance: { channel, at: Date.now(), ratingId: id } })))
+        if (target.album) await this.addDislikeAlbum(username, target.album, id, channel)
+    }
+
+    async getRatingMetadata(username: string, id: string): Promise<any> {
+        if (/^(alb_|art_|artist_|lalb_|lart_)/.test(id)) {
+            const target = await withTimeout(this.resolveDislikeTarget(username,id),LINK_SYNC_ITEM_TIMEOUT_MS)
+            return target.album ? {name:target.album.albumName,singer:target.album.singers.join('、'),source:target.album.source} : target.infos[0] ? {name:target.infos[0].singer,source:(target.infos[0] as any).source} : undefined
+        }
+        return (await withTimeout(this.resolveSongMeta(username,id),LINK_SYNC_ITEM_TIMEOUT_MS))?.music
+    }
+
     private async handleSetRating(res: http.ServerResponse, username: string, params: URLSearchParams, format: string) {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
-        const rating = parseInt(params.get('rating') || '0', 10)
-        if (isNaN(rating) || rating < 0 || rating > 5) {
+        const rating = Number(params.get('rating') || '0')
+        if (!Number.isInteger(rating) || rating < 0 || rating > 5) {
             return this.sendError(res, 0, 'Rating must be between 0 and 5', format)
         }
-        // 读-改-写整体串行化，避免与并发的 star / dislike 联动互相覆盖
-        await withMetaLock(username, async () => {
-            const meta = await this.getUserSubsonicMeta(username)
-            if (rating === 0) {
-                delete meta.ratings[id]
-            } else {
-                meta.ratings[id] = rating
-            }
-            await this.saveUserSubsonicMeta(username, meta)
-            // [修复] 立即刷新内存评星缓存，保证本次请求之后的歌曲序列化能带上最新 userRating
-            this.userRatingsCache.set(username, meta.ratings || {})
-        })
-        subsonicLog.debug(`[Subsonic] setRating ${id} -> ${rating} (user=${username})`)
-        // 评分写入后生成/复用一份「我的评分」快照，使当前评分可被下载备份
-        void createRatingSnapshot(username).catch(e => subsonicLog.warn('[Subsonic] 评分快照生成失败:', e))
-
-        // [dislike 联动] 0 < rating <= dislikeRating 视为「不喜欢」，写回 lx-music 原生 dislike 规则；
-        // 提高评分或清除评分则移除此前写入的规则。需 linkRatingToDislike 开启才联动，否则仅记录评分。
-        const threshold = global.lx.config['subsonic.dislikeRating'] ?? 1
-        // 评星歌单开启时，1 星歌单承载「我不喜欢」，正向联动必须生效：
-        // 客户端给歌曲打 1 星 -> 写入 dislike 规则；提高评分或清除 -> 移除规则。
-        const linkToDislike = global.lx.config['subsonic.linkRatingToDislike'] || this.isRatingPlaylistEnabled()
-        if (linkToDislike && threshold > 0) {
-            try {
-                const target = await this.resolveDislikeTarget(username, id)
-                // [调试] 打印解析到的维度与身份信息，便于确认各入口能拿到什么
-                if (global.lx.config['subsonic.enableDebug']) {
-                    subsonicLog.debug(`[Subsonic] dislike 解析 id=${id}`, JSON.stringify({
-                        dimension: target.album ? 'album' : (id.startsWith('art_') || id.startsWith('artist_') ? 'singer' : 'song'),
-                        song: target.infos,
-                        singer: target.singer || null,
-                        album: target.album || null,
-                        keys: Array.from(target.keys),
-                    }))
-                }
-                if (rating > 0 && rating <= threshold) {
-                    let added = await this.addDislikeRules(username, target.infos)
-                    if (target.album) added += await this.addDislikeAlbum(username, target.album)
-                    subsonicLog.debug(`[Subsonic] setRating 联动 dislike：写入 ${added} 条规则 (id=${id}, user=${username})`)
-                } else {
-                    const removed = await this.removeDislikeRules(username, target.keys)
-                    if (removed > 0) {
-                        subsonicLog.debug(`[Subsonic] setRating 联动 dislike：移除 ${removed} 条规则 (id=${id}, user=${username})`)
-                    }
-                }
-            } catch (e) {
-                subsonicLog.error('[Subsonic] setRating 联动 dislike 失败:', e)
-            }
+        const resolved = rating > 0 ? await this.getRatingMetadata(username,id).catch(() => undefined) : undefined
+        const saved = await writeRating(username, id, rating, 'subsonic', resolved)
+        this.userRatingsCache.set(username, saved.meta.ratings)
+        try { await this.applyRatingLink(username, saved.id, rating, undefined, 'subsonic-rating') }
+        catch (e) {
+            subsonicLog.error('[Subsonic] setRating 联动 dislike 失败:', e)
+            return this.sendError(res, 0, '评分已保存，但不喜欢同步失败；请重试或手动补同步', format)
         }
+        if (saved.snapshotWarning) return this.sendError(res, 0, saved.snapshotWarning, format)
 
         return this.sendResponse(res, {}, format)
     }
@@ -5794,13 +5799,25 @@ class SubsonicHandler {
         return this.renderRandomSongs(res, picked, format, rootKey, username)
     }
 
+    private async filterRecommendationEntries(username: string, entries: { music: LX.Music.MusicInfo, listId: string }[]) {
+        if (!global.lx.config['subsonic.dislikeNoRecommend']) return entries
+        const visible = await this.filterDislikedEntries(username, entries)
+        const meta = await this.getUserSubsonicMeta(username)
+        const threshold = Number(global.lx.config['subsonic.dislikeRating'] ?? 1)
+        return visible.filter(({ music }) => {
+            const track = (music.meta as any)?.localTrack
+            const rating = meta.ratings[track ? localRatingId(track) : music.id] || 0
+            return !(threshold > 0 && rating > 0 && rating <= threshold)
+        })
+    }
+
     private async renderRandomSongs(res: http.ServerResponse, picked: { music: LX.Music.MusicInfo, listId: string }[], format: string, rootKey: string = 'randomSongs', username?: string) {
         // [dislike] 随机歌曲 / 流派歌曲 / 每日推荐等入口共用此渲染。
         // 这里受 dislikeNoRecommend 控制（与列表剔除 hideDisliked 相互独立）：
         // 即使不隐藏歌曲，也可以让它们不再出现在推荐里。
         let list = picked
         if (username && global.lx.config['subsonic.dislikeNoRecommend']) {
-            list = await this.filterDislikedEntries(username, picked)
+            list = await this.filterRecommendationEntries(username, picked)
         }
 
         if (format === 'json') {
@@ -5833,16 +5850,9 @@ class SubsonicHandler {
     ) {
         const size = Math.min(parseInt(params.get('size') || '20'), 100)
         try {
-            // 取当天全部候选（最多 100），再按「不喜欢」阈值排除：评分落在 (0, threshold] 视为不喜欢。
-            // 阈值取自 subsonic.dislikeRating（可配置），避免此处硬编码导致管理员改阈值后语义不一致。
             const all = await fetchRecommendedSongs(100)
-            const meta = await this.getUserSubsonicMeta(username)
-            const threshold = global.lx.config['subsonic.dislikeRating'] ?? 1
-            const songs = all.filter((s: any) => {
-                const r = meta.ratings[s.id] || 0
-                return !(threshold > 0 && r > 0 && r <= threshold)
-            }).slice(0, size)
-            const picked = songs.map((s: any) => ({ music: s, listId: 'recommended' }))
+            const candidates = all.map((music: any) => ({ music, listId: 'recommended' }))
+            const picked = (await this.filterRecommendationEntries(username, candidates)).slice(0, size)
             return this.renderRandomSongs(res, picked, format, 'recommendedSongs', username)
         } catch (e) {
             subsonicLog.error('[Subsonic] getRecommendedSongs 出错:', e)
@@ -5915,7 +5925,7 @@ class SubsonicHandler {
 
         // [dislike] 相似歌曲属于推荐性质，受 dislikeNoRecommend 控制
         if (global.lx.config['subsonic.dislikeNoRecommend']) {
-            picked = await this.filterDislikedEntries(username, picked)
+            picked = await this.filterRecommendationEntries(username, picked)
         }
         return picked
     }
@@ -7717,7 +7727,7 @@ class SubsonicHandler {
 
         // [dislike] 热门歌曲同样过滤
         if (global.lx.config['subsonic.hideDisliked']) {
-            picked = await this.filterDislikedEntries(username, picked)
+            picked = await this.filterRecommendationEntries(username, picked)
         }
         // [修复] 尊重客户端的 count：SDK 分支此前会把抓到的全部返回（最多 500 首）
         picked = picked.slice(0, count)
@@ -8056,10 +8066,10 @@ export function invalidateSubsonicPlaylistCache(): void {
 export const subsonicHandler = new SubsonicHandler()
 
 /** 管理端「联动数据同步」按钮入口：仅手动触发，不参与快照导入/回滚链路 */
-export function syncRatingsToDislike(username: string): Promise<LinkSyncSummary> {
-    return subsonicHandler.syncRatingsToDislike(username)
+export function syncRatingsToDislike(username: string, preview = false): Promise<LinkSyncSummary> {
+    return subsonicHandler.syncRatingsToDislike(username, preview)
 }
 
-export function syncDislikesToRating(username: string): Promise<LinkSyncSummary> {
-    return subsonicHandler.syncDislikesToRating(username)
+export function syncDislikesToRating(username: string, preview = false): Promise<LinkSyncSummary> {
+    return subsonicHandler.syncDislikesToRating(username, preview)
 }

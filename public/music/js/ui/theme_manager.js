@@ -102,6 +102,7 @@ function updateAppearanceUI(activeMode) {
 }
 
 function switchSettingsTab(tabName) {
+    if (tabName === 'logic') window.RatingManager?.loadPreference();
     const panels = ['system', 'display', 'logic', 'logs'];
 
     // Deactivate all first

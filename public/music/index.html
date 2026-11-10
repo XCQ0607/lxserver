@@ -43,7 +43,10 @@
     <script src="/js/notification-engine.js"></script>
     <link rel="stylesheet" href="css/app.css">
     <link rel="stylesheet" href="css/dynamic-backgrounds.css">
+    <link rel="stylesheet" href="css/rating.css">
 
+<style>
+</style>
 </head>
 
 <body class="t-bg-main flex flex-col overflow-hidden t-text-main font-sans" style="height: 100dvh;">
@@ -119,6 +122,7 @@
                                 class="fas fa-chevron-down text-xs transition-transform duration-200"></i>
                         </div>
                         <ul id="favorites-children" class="t-bg-main/50 overflow-hidden transition-all duration-300">
+                            <li class="px-3 py-1"><button type="button" onclick="window.RatingManager?.browse()" class="w-full text-left px-3 py-2 t-text-muted hover:t-bg-main rounded-lg"><span class="text-amber-500">★</span> 我的评分</button></li>
                             <li class="px-1.5 py-1">
                                 <div id="my-lists-container" class="space-y-1 pb-1">
                                     <!-- Lists will be injected here -->
@@ -3447,6 +3451,21 @@
                                             <i class="fas fa-list-ul mr-2 text-emerald-500"></i> 播放队列与列表
                                         </h4>
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="rating-preference-card">
+                                        <div class="rating-preference-heading">
+                                            <span>不喜欢自动补分</span>
+                                            <button type="button" class="setting-tooltip-trigger" aria-label="不喜欢自动补分说明">
+                                                <i class="fas fa-question-circle" aria-hidden="true"></i>
+                                                <span class="setting-tooltip-content" role="tooltip">仅对当前账号生效，默认关闭，设置保存在服务器。开启后，Web 将单首歌曲加入不喜欢时为未评分歌曲补 1 星；已有评分不覆盖，取消不喜欢或关闭设置不删除评分。同账号跨设备生效，后台补分独立执行。</span>
+                                            </button>
+                                        </div>
+                                        <label class="rating-preference-switch">
+                                            <input type="checkbox" id="setting-dislike-auto-rating" disabled aria-label="不喜欢自动补分" onchange="window.RatingManager.setDislikeAutoRating(this.checked)">
+                                            <span aria-hidden="true"></span>
+                                        </label>
+                                        <p id="rating-preference-status" class="rating-preference-status" role="status" hidden></p>
+                                    </div>
+
                                             <!-- Change Playlist on Search Play -->
                                             <div
                                                 class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
@@ -4164,6 +4183,7 @@
                     <div id="player-artist"
                         class="text-xs text-gray-500 truncate dynamic-marquee min-w-0 w-fit self-start"
                         data-text="选择一首歌曲播放">选择一首歌曲播放</div>
+                    <button type="button" id="player-rating" class="player-rating-button" aria-label="歌曲评分" title="选择歌曲后评分">☆ 评分</button>
                     <div id="player-status" class="text-xs text-emerald-600 font-medium whitespace-nowrap"></div>
                 </div>
             </div>
@@ -6279,6 +6299,7 @@
     <script src="js/library/songlist_manager.js"></script>
     <script src="js/library/leaderboard_manager.js"></script>
     <script src="js/library/dislike_manager.js"></script>
+    <script src="js/library/rating_manager.js"></script>
     <script src="js/vendor/wave.js"></script>
     <script src="js/player/playback.js"></script>
     <script src="js/player/visualizer.js"></script>
