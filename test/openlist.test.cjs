@@ -14,7 +14,14 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   const remote = new Map()
   let metadataError = false
   let truncateDownload = false
+  let metadataReads = 0
   let uploads = 0
+  const contentReads = []
+  let transferOffline = false
+  let refuseUpload = false
+  let expireUploadOnce = false
+  let refuseDelete = false
+  let duringDelete
   let base
   const storage = http.createServer(async (req, res) => {
     const parts = []
@@ -22,6 +29,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     const body = Buffer.concat(parts)
     const answer = (data, code = 200) => { res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ code, data })) }
     if (req.url.startsWith('/audio?')) {
+      contentReads.push(new URL(req.url, base).searchParams.get('path'));
       const file = remote.get(new URL(req.url, base).searchParams.get('path'))
       if (!file) { res.writeHead(404); res.end(); return }
       res.end(truncateDownload ? file.body.subarray(0, 1) : file.body)
@@ -31,22 +39,29 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     if (req.url === '/api/auth/login') return answer({ token: 'test-token' })
     if (req.url === '/api/fs/mkdir') return answer({})
     if (req.url === '/api/fs/put') {
-      const name = Buffer.from(req.headers['file-path'], 'latin1').toString('utf8')
+      if (expireUploadOnce) { expireUploadOnce = false; return answer(null, 401) }
+      if (transferOffline) { metadataError = true; req.socket.destroy(); return }
+      if (refuseUpload) return answer(null, 500)
+      const name = decodeURIComponent(req.headers['file-path'])
       remote.set(name, { body, modified: new Date().toISOString() })
       uploads++
       return answer({})
     }
     if (metadataError) return answer(null, 403)
     if (req.url === '/api/fs/get') {
+      metadataReads++
       const file = remote.get(args.path)
       if (!file) return answer(null, 404)
-      return answer({ size: file.body.length, name: path.posix.basename(args.path), modified: file.modified, raw_url: base + '/audio?path=' + encodeURIComponent(args.path) })
+      return answer({ hash_info: file.sha256 ? { sha256: file.sha256 } : undefined, size: file.body.length, name: path.posix.basename(args.path), modified: file.modified, raw_url: base + '/audio?path=' + encodeURIComponent(args.path) })
     }
     if (req.url === '/api/fs/list') {
       const files = [...remote].filter(([p]) => p.startsWith(args.path + '/')).map(([p, f]) => ({ path: p, name: path.posix.basename(p), size: f.body.length, modified: f.modified, is_dir: false }))
       return answer({ content: files.slice((args.page - 1) * args.per_page, args.page * args.per_page), total: files.length })
     }
     if (req.url === '/api/fs/remove') {
+      if (duringDelete) await duringDelete()
+      if (refuseDelete === true || refuseDelete === args.dir + '/' + args.names[0]) return answer(null, 500)
+      if (args.names.every(name => !remote.has(args.dir + '/' + name))) return answer(null, 404)
       for (const name of args.names) remote.delete(args.dir + '/' + name)
       return answer({})
     }
@@ -65,7 +80,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   })
   // Isolate the music SDK and user spaces; exercise the real manager, SQLite DB and HTTP client.
   await build({
-    stdin: { contents: "export * from './src/server/openlistBackup'; export * from './src/server/openlistBackupDb'; export * from './src/server/openlistClient'", resolveDir: root, loader: 'ts' },
+    stdin: { contents: "export * from './src/server/openlist/openlistBackup'; export * from './src/server/openlist/openlistBackupDb'; export * from './src/server/openlist/openlistClient'", resolveDir: root, loader: 'ts' },
     bundle: true, platform: 'node', format: 'cjs', outfile: path.join(temp, 'manager.cjs'),
     plugins: [{ name: 'application-boundaries', setup(b) {
       b.onResolve({ filter: /^@\/(server\/music\/fileCache|server\/sources\/userApi|user(\/data)?|constants)$/ }, a => ({ path: a.path, namespace: 'boundary' }))
@@ -75,9 +90,9 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
         export function registerOpenListCacheFile(user, item) { global.__openlistTest.registered.push(item) }
         export function unregisterOpenListCacheFile(user, id) { global.__openlistTest.removed.push(id) }
         export function callUserApiGetMusicUrl() { return null }
-        export function getUserDirname(user) { return user }
+        export function getUserDirname(user) { return global.__openlistTest.aliases?.[user] || user }
         export function getUserSpace() { return { listManage: { snapshotDataManage: { updateSnapshotDir() {} } } } }
-        export const File = { listDir: 'list', listSnapshotDir: 'snapshot' }
+        export const File = { listDir: 'list', listSnapshotDir: 'snapshot', dislikeDir: 'dislike', dislikeSnapshotDir: 'snapshot' }
       ` }))
     } }],
   })
@@ -100,7 +115,12 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     config['subsonic.playCacheFirstUseOpenlist'] = true
     remote.clear(); state.items.clear(); state.registered.length = 0; state.removed.length = 0
     metadataError = false; truncateDownload = false; uploads = 0
+    refuseUpload = false; transferOffline = false
+    contentReads.length = 0
+    expireUploadOnce = false
+    delete config['openlist.playback.enable']
     delete config['backup.openlist.types']
+    config['openlist.root'] = '/root'
   }
   const putLocal = (folder = 'cache', name = 'song.mp3', text = 'original') => {
     const target = path.join(state.dirs[folder], name)
@@ -111,6 +131,118 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   }
   const rp = (folder = 'cache', name = 'song.mp3') => '/root/alice/' + folder + '/' + name
   const sync = folder => api.runSyncNow({ user: 'alice', folder })
+
+  await t.test('destination outage preserves backup history and recovery only probes metadata', async () => {
+    reset()
+    putLocal()
+    await sync('cache')
+    await api.verifyPending()
+    const before = api.listBackups()[0]
+    const sent = uploads
+    metadataError = true
+    const [one, two] = await Promise.all([api.probeOpenlistConnection(), api.probeOpenlistConnection()])
+    assert.equal(one.state, 'auth_error')
+    assert.equal(two.checkedAt, one.checkedAt)
+    assert.ok(one.nextProbeAt >= one.checkedAt + 29000)
+    await api.verifyPending()
+    const offline = api.listBackups().find(row => row.id === before.id)
+    assert.equal(offline.status, before.status)
+    assert.equal(offline.task_state, 'completed')
+    assert.equal(offline.remote_state, 'unavailable')
+    assert.equal(offline.retry_count, before.retry_count)
+    assert.equal(uploads, sent)
+    metadataError = false
+    assert.equal((await api.probeOpenlistConnection()).state, 'online')
+    await api.verifyPending()
+    assert.equal(api.listBackups().find(row => row.id === before.id).remote_state, 'same')
+    assert.equal(uploads, sent)
+    assert.equal(contentReads.length, 0)
+    const oldRoot = config['openlist.root']
+    config['openlist.root'] = '/different-root'
+    assert.equal(api.getOpenlistConnection().state, 'unknown')
+    assert.equal(api.getOpenlistConnection().lastSuccessAt, 0)
+    config['openlist.root'] = oldRoot
+  })
+
+  await t.test('transfer outage pauses pending work without consuming file retries', async () => {
+    reset(); putLocal(); await sync('cache'); await api.verifyPending()
+    fs.writeFileSync(path.join(state.dirs.cache, 'song.mp3'), 'updated audio')
+    transferOffline = true
+    await sync('cache')
+    const row = api.listBackups()[0]
+    assert.equal(row.status, 'pending')
+    assert.equal(row.retry_count, 0)
+    assert.equal(api.getOpenlistConnection().state, 'auth_error')
+    transferOffline = false; metadataError = false
+    await api.probeOpenlistConnection()
+    await api.verifyPending()
+    // Pending upload runs in the queue.
+    for (let n = 0; n < 100 && api.listBackups()[0].status === 'pending'; n++) await new Promise(resolve => setTimeout(resolve, 10))
+    await api.runSyncNow({ user: 'alice', folder: 'cache' })
+    assert.equal(remote.get(rp()).body.toString(), 'updated audio')
+  })
+
+  await t.test('bulk deletion stops before changing any of the 21 originals', async () => {
+    reset()
+    for (let n = 0; n < 21; n++) putLocal('music', 'bulk-' + n + '.mp3')
+    await sync('music'); await api.verifyPending()
+    remote.clear()
+    const result = await sync('music')
+    assert.ok(result.errors.some(error => error.includes('20')))
+    assert.equal(fs.readdirSync(state.dirs.music).length, 21)
+  })
+
+  await t.test('data backup ownership maps music, source and snapshot namespaces without changing stored identities', () => {
+    reset()
+    const previousUsers = config.users
+    config.users = [{ name: 'admin' }, { name: 'test' }]
+    state.aliases = { admin: 'admin_21232f' }
+    try {
+      const cases = [
+        ['music/admin/song.mp3', 'admin'],
+        ['music/_open/public.mp3', '_open'],
+        ['users/source/admin/source.js', 'admin'],
+        ['users/source/_open/source.js', '_open'],
+        ['users/admin_21232f/list/snapshot/snapshot_1', 'admin'],
+        ['_snapshots/admin/snapshot/snapshot_2', 'admin'],
+        ['config.js', '_system'],
+        ['music/unknown/song.mp3', '_system'],
+      ]
+      for (const [relative] of cases) api.upsertBackupFile({ user: '_system', folderType: 'data', name: relative,
+        localPath: path.join(temp, relative), remotePath: '/root/_data/' + relative, size: 5, direction: 'upload', mode: 'upload', status: 'completed' })
+      const listed = api.listBackups()
+      for (const [relative, expected] of cases) assert.equal(listed.find(row => row.name === relative).user, expected, relative)
+      assert.ok(api.listAllBackups().every(row => row.user === '_system'))
+      assert.equal(api.prepareOpenlistIntegrity({ user: 'admin', scope: 'all' }).total, 4)
+      assert.equal(api.prepareOpenlistIntegrity({ user: '_open', scope: 'all' }).total, 2)
+      config.users = [{ name: 'test' }]
+      assert.equal(api.listBackups().find(row => row.name === 'music/admin/song.mp3').user, '_system')
+      assert.equal(api.listBackups().find(row => row.name === 'users/admin_21232f/list/snapshot/snapshot_1').user, '_system')
+    } finally { config.users = previousUsers; delete state.aliases; reset() }
+  })
+
+  await t.test('local existence follows disk deletion and recreation without changing cloud status', async () => {
+    reset(); rule.mode = 'upload'
+    const local = putLocal()
+    await sync('cache')
+    const record = api.listBackups().find(row => row.local_path === local)
+    assert.equal(record.local_exists, true)
+    assert.ok(['same', 'untracked'].includes(record.local_state))
+    fs.unlinkSync(local)
+    assert.equal(api.listBackups().find(row => row.id === record.id).local_exists, false)
+    fs.mkdirSync(local)
+    assert.equal(api.listBackups().find(row => row.id === record.id).local_exists, false)
+    fs.rmdirSync(local)
+    fs.writeFileSync(local, 'recreated')
+    const recreated = api.listBackups().find(row => row.id === record.id)
+    assert.equal(recreated.local_exists, true)
+    assert.equal(recreated.status, record.status)
+    assert.equal(recreated.local_state, 'changed')
+    assert.equal(recreated.task_state, 'pending')
+    const enabled = rule.enabled; rule.enabled = false
+    assert.equal(api.listBackups().find(row => row.id === record.id).task_state, 'paused')
+    rule.enabled = enabled
+  })
 
   await t.test('upload-delete verifies bytes, restores soft-deleted registration and original metadata', async () => {
     reset(); rule.mode = 'upload-delete'
@@ -137,6 +269,15 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     assert.equal(fs.existsSync(local), false)
     const missing = api.upsertBackupFile({ user: 'alice', folderType: 'cache', localPath: local + '.missing', remotePath: rp() + '.missing', status: 'failed' })
     assert.equal((await api.retryBackup(missing.id)).ok, false)
+  })
+
+  await t.test('upload paths preserve literal URL escapes, percent signs and Chinese characters', async () => {
+    reset(); rule.mode = 'upload'
+    const name = '%E6%BA%90 100% 中文.mp3'
+    putLocal('cache', name)
+    assert.deepEqual((await sync('cache')).errors, [])
+    assert.equal(remote.get(rp('cache', name)).body.toString(), 'original')
+    assert.equal(remote.has(rp('cache', decodeURIComponent('%E6%BA%90') + ' 100% 中文.mp3')), false)
   })
 
   await t.test('same-sized corrupted cloud bytes never authorize deleting the local original', async () => {
@@ -182,6 +323,8 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     await sync('music')
     assert.equal(fs.existsSync(local), false)
     assert.equal(remote.has(rp('music')), false)
+    const recycled = fs.readdirSync(path.join(temp, 'backups/openlist-recycle')).map(name => path.join(temp, 'backups/openlist-recycle', name))
+    assert.ok(recycled.some(dir => fs.existsSync(path.join(dir, 'file')) && fs.readFileSync(path.join(dir, 'file'), 'utf8') === 'original'))
   })
 
   await t.test('download mode updates existing files and preserves nested directory identity', async () => {
@@ -205,6 +348,62 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     assert.equal(await api.tryRestoreFromOpenlist('alice', 'cache', state.dirs.cache, 'song', '320k'), null)
     rule.backupCache = true
     assert.ok(await api.resolveOpenlistCacheEntry('alice', 'cache', 'different-name', { id: 'tx_song123', source: 'tx', quality: '320k' }))
+  })
+
+  await t.test('OpenList playback master is independent of Subsonic settings and reuses metadata requests', async () => {
+    reset(); putLocal('cache', 'playback-route.mp3')
+    await sync('cache'); await api.verifyPending()
+    config['openlist.playback.enable'] = false
+    assert.equal(await api.resolveOpenlistCacheEntry('alice', 'cache', 'playback-route'), null)
+    config['openlist.playback.enable'] = true; config['subsonic.playCacheFirst'] = false; config['subsonic.playCacheFirstUseOpenlist'] = false
+    const before = metadataReads
+    const hits = await Promise.all([api.resolveOpenlistCacheEntry('alice', 'cache', 'playback-route'), api.resolveOpenlistCacheEntry('alice', 'cache', 'playback-route')])
+    assert.ok(hits.every(Boolean)); assert.equal(metadataReads - before, 1)
+    await api.resolveOpenlistCacheEntry('alice', 'cache', 'playback-route')
+    assert.equal(metadataReads - before, 1)
+    assert.equal(await api.resolveOpenlistCacheEntry('bob', 'cache', 'playback-route'), null)
+  })
+
+  await t.test('failed deletion preserves records and local bytes, blocks competing work and permits retry', async () => {
+    reset()
+    const local = putLocal()
+    await sync('cache')
+    const row = api.listAllBackups().find(r => r.local_path === local)
+    refuseDelete = true
+    duringDelete = async () => {
+      await assert.rejects(api.runSyncNow(), /云端|恢复/)
+      await assert.rejects(api.deleteOpenlistBackups([row.id]), /云端|恢复/)
+    }
+    try {
+      const result = await api.deleteOpenlistBackups([row.id])
+      assert.equal(result.deleted, 0)
+      assert.equal(result.remoteFailed.length, 1)
+      assert.equal(api.getBackupById(row.id).deleted_at, null)
+      assert.equal(fs.existsSync(local), true)
+    } finally { refuseDelete = false; duringDelete = undefined }
+    assert.equal((await api.deleteOpenlistBackups([row.id])).deleted, 1)
+    assert.equal(remote.has(rp()), false)
+    assert.equal(fs.existsSync(local), false)
+  })
+
+  await t.test('partial remote deletion preserves attachment links and retries missing remote files', async () => {
+    reset(); config['openlist.includeNonAudio'] = true
+    const local = putLocal('cache', 'partial.mp3')
+    const lyric = path.join(state.dirs.cache, 'partial.lrc')
+    fs.writeFileSync(lyric, 'lyrics')
+    await sync('cache')
+    const row = api.listAllBackups().find(r => r.local_path === local)
+    assert.equal(api.listAttachments(row.id).length, 1)
+    refuseDelete = row.remote_path
+    try {
+      assert.equal((await api.deleteOpenlistBackups([row.id])).deleted, 0)
+      assert.equal(api.listAttachments(row.id).length, 1)
+      assert.equal(fs.existsSync(lyric), true)
+      assert.equal(remote.has(rp('cache', 'partial.lrc')), false)
+    } finally { refuseDelete = false }
+    assert.equal((await api.deleteOpenlistBackups([row.id])).deleted, 1)
+    assert.equal(api.listAttachments(row.id).length, 0)
+    assert.equal(fs.existsSync(lyric), false)
   })
 
   await t.test('attachments belong to matching songs; shared covers survive deletion of one song', async () => {
@@ -271,9 +470,11 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     fs.writeFileSync(path.join(state.dirs.cache, 'not-a-backup.mp3'), 'cache')
     const result = await api.runSyncNow()
     assert.deepEqual(result.errors, [])
-    assert.equal(result.uploaded, Object.keys(data).length)
+    assert.equal(result.uploaded, Object.keys(data).length + 1) // 配置历史副本独立于恢复镜像
     await api.verifyPending()
-    assert.deepEqual([...remote.keys()].sort(), Object.keys(data).map(p => '/root/_data/' + p).sort())
+    assert.deepEqual([...remote.keys()].filter(p => p.startsWith('/root/_data/')).sort(), Object.keys(data).map(p => '/root/_data/' + p).sort())
+    assert.equal([...remote.keys()].filter(p => p.startsWith('/root/_system/config-history/')).length, 1)
+    assert.equal(api.listBackups().find(r => r.name === 'config.js').backup_type, 'system')
     // A missing cloud copy must be recreated even if the local bytes are unchanged.
     remote.delete('/root/_data/music/alice/song.lrc')
     assert.equal((await api.runSyncNow()).errors.length, 0)
@@ -293,6 +494,310 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     fs.writeFileSync(path.join(fresh, 'users/alice/settings.json'), 'keep local')
     assert.equal((await api.restoreOpenlistData()).restored, 2)
     assert.equal(fs.readFileSync(path.join(fresh, 'users/alice/settings.json'), 'utf8'), 'keep local')
+  })
+
+  await t.test('changing root retargets exhausted uploads and completed data; history follows the new root', async () => {
+    reset(); rule.backupCache = false
+    config['backup.openlist.types'] = ['system']
+    fs.writeFileSync(global.lx.configPath, 'module.exports = { changed: true }')
+    await api.runSyncNow()
+    const row = api.listAllBackups().find(r => r.name === 'config.js')
+    api.setBackupStatus(row.id, 'failed', { retryCount: 5, error: 'storage not found' })
+    config['openlist.root'] = '/new-mount'
+    assert.equal((await api.retryBackup(row.id)).ok, true)
+    assert.equal(api.getBackupById(row.id).remote_path, '/new-mount/_data/config.js')
+    await api.runSyncNow()
+    assert.ok(remote.has('/new-mount/_data/config.js'))
+    assert.equal([...remote.keys()].filter(p => p.startsWith('/new-mount/_system/config-history/')).length, 1)
+    assert.equal((await api.runSyncNow()).uploaded, 0)
+    const history = [...remote.keys()].find(p => p.startsWith('/new-mount/_system/config-history/'))
+    remote.get(history).modified = '2020-01-01T00:00:00Z'
+    await api.runSyncNow()
+    assert.equal([...remote.keys()].filter(p => p.startsWith('/new-mount/_system/config-history/')).length, 1)
+    // 同步会删掉过期副本并按「当前秒」重建；跨秒时文件名里的秒级时间戳会变，
+    // 不能复用同步前的 key（该条目已从远端移除），否则读取 undefined.modified 抛错。
+    const refreshed = [...remote.keys()].find(p => p.startsWith('/new-mount/_system/config-history/'))
+    assert.ok(refreshed, '同步后应保留一份配置历史副本')
+    assert.ok(Date.parse(remote.get(refreshed).modified) > Date.parse('2020-01-01'), '过期副本应被重新上传并刷新 mtime')
+    config['openlist.root'] = '/third-mount'
+    await api.runSyncNow()
+    assert.ok(remote.has('/third-mount/_data/config.js'))
+  })
+
+  await t.test('orphan uploading records recover without a ten-minute polling loop', async () => {
+    reset(); rule.mode = 'upload'
+    const local = putLocal()
+    const row = api.upsertBackupFile({ user: 'alice', folderType: 'cache', localPath: local, remotePath: rp(), status: 'uploading' })
+    await api.verifyPending()
+    await sync('cache') // drains the real upload queue
+    await api.verifyPending()
+    assert.equal(api.getBackupById(row.id).status, 'verified')
+    assert.equal(remote.get(rp()).body.toString(), 'original')
+  })
+
+  await t.test('switching to upload-delete never trusts stale completed bytes', async () => {
+    reset(); rule.mode = 'upload'
+    const local = putLocal()
+    await sync('cache'); await api.verifyPending()
+    remote.get(rp()).body = Buffer.from('tampered')
+    rule.mode = 'upload-delete'
+    await api.triggerBackfillUploadDelete('alice')
+    assert.equal(fs.existsSync(local), true)
+    await sync('cache'); await api.verifyPending()
+    assert.equal(remote.get(rp()).body.toString(), 'original')
+    assert.equal(fs.existsSync(local), false)
+  })
+
+  await t.test('playlist and dislike snapshot backups do not require media-cache user rules', async () => {
+    reset(); rule.enabled = false
+    config.users = [{ name: 'alice' }]
+    config['backup.openlist.types'] = ['snapshots']
+    const beforeUserPath = global.lx.userPath
+    global.lx.userPath = path.join(global.lx.dataPath, 'users')
+    try {
+      await api.runSyncNow({ user: 'alice', folder: 'list' })
+      await api.verifyPending()
+      const rows = api.listAllBackups().filter(r => r.folder_type === 'list')
+      assert.ok(rows.length >= 2)
+      assert.ok(rows.some(r => r.local_path.includes(path.join('dislike', 'snapshot'))))
+      assert.ok(rows.every(r => r.status === 'verified' && r.mode === 'upload' && fs.existsSync(r.local_path)))
+    } finally { global.lx.userPath = beforeUserPath; delete config.users }
+  })
+
+  await t.test('restore preview is read-only; missing-only and overwrite use independent type choices', async () => {
+    reset()
+    config['backup.openlist.types'] = ['system']
+    const existing = path.join(global.lx.dataPath, 'users/alice/restore.json')
+    const missing = path.join(global.lx.dataPath, 'users/alice/new.json')
+    fs.mkdirSync(path.dirname(existing), { recursive: true }); fs.writeFileSync(existing, 'local version')
+    fs.rmSync(missing, { force: true })
+    const put = (name, value) => remote.set('/root/_data/users/alice/' + name, { body: Buffer.from(value), modified: new Date().toISOString() })
+    put('restore.json', 'cloud version'); put('new.json', 'new cloud data')
+    const options = { types: ['userData'], mode: 'missing', backupBeforeRestore: true }
+    const preview = await api.restoreOpenlistData({ ...options, preview: true })
+    assert.equal(preview.added, 1); assert.equal(preview.skipped, 1); assert.equal(preview.restored, 0)
+    assert.equal(api.listAllBackups().length, 0); assert.equal(fs.existsSync(missing), false)
+    assert.equal(preview.backupDir, '')
+    const added = await api.restoreOpenlistData({ ...options, planToken: preview.planToken })
+    assert.equal(added.restored, 1); assert.equal(added.skipped, 1)
+    assert.equal(fs.readFileSync(existing, 'utf8'), 'local version')
+    assert.equal(fs.readFileSync(missing, 'utf8'), 'new cloud data')
+    assert.deepEqual(config['backup.openlist.types'], ['system'])
+    const overwriteOptions = { ...options, mode: 'overwrite' }
+    const next = await api.restoreOpenlistData({ ...overwriteOptions, preview: true })
+    const restored = await api.restoreOpenlistData({ ...overwriteOptions, planToken: next.planToken })
+    assert.equal(restored.restored, 2)
+    assert.equal(fs.readFileSync(existing, 'utf8'), 'cloud version')
+    assert.equal(fs.readFileSync(path.join(restored.backupDir, 'files/users/alice/restore.json'), 'utf8'), 'local version')
+    const manifest = JSON.parse(fs.readFileSync(path.join(restored.backupDir, 'manifest.json'), 'utf8'))
+    assert.equal(manifest.files.length, 2)
+    assert.equal(uploads, 0)
+    assert.equal((await api.restoreOpenlistData({ ...options, preview: true })).skipped, 2)
+  })
+
+  await t.test('changed preview, invalid options and a failed safety copy never replace local data', async () => {
+    reset()
+    const local = path.join(global.lx.dataPath, 'users/alice/restore.json')
+    fs.writeFileSync(local, 'valuable local')
+    const rp = '/root/_data/users/alice/restore.json'
+    remote.set(rp, { body: Buffer.from('cloud replacement'), modified: new Date().toISOString() })
+    const options = { types: ['userData'], mode: 'overwrite' }
+    const preview = await api.restoreOpenlistData({ ...options, preview: true })
+    fs.writeFileSync(local, 'new local change')
+    await assert.rejects(api.restoreOpenlistData({ ...options, planToken: preview.planToken }), /重新预览/)
+    assert.equal(fs.readFileSync(local, 'utf8'), 'new local change')
+    const again = await api.restoreOpenlistData({ ...options, preview: true })
+    remote.get(rp).body = Buffer.from('changed cloud payload')
+    await assert.rejects(api.restoreOpenlistData({ ...options, planToken: again.planToken }), /重新预览/)
+    for (const invalid of [{ mode: 'merge' }, { types: [] }, { types: ['cache'] }, { preview: 'true' }, { backupBeforeRestore: 'false' }]) {
+      await assert.rejects(api.restoreOpenlistData(invalid))
+    }
+    const block = path.join(global.lx.dataPath, 'blocked-backup-root'); fs.writeFileSync(block, 'not a directory')
+    global.lx.getConfigBackupDir = () => block
+    try { await assert.rejects(api.restoreOpenlistData(options)) }
+    finally { delete global.lx.getConfigBackupDir }
+    assert.equal(fs.readFileSync(local, 'utf8'), 'new local change')
+    const restored = await api.restoreOpenlistData({ ...options, backupBeforeRestore: false })
+    assert.equal(restored.restored, 1); assert.equal(restored.backupDir, '')
+  })
+
+  await t.test('download guard preserves concurrent local edits and removes temporary files', async () => {
+    reset()
+    const local = putLocal()
+    remote.set(rp(), { body: Buffer.from('cloud version'), modified: new Date().toISOString() })
+    const client = new api.OpenListClient({ endpoint: base, token: 'test-token' })
+    await assert.rejects(client.download(rp(), local, undefined, () => { throw new Error('local changed') }), /local changed/)
+    assert.equal(fs.readFileSync(local, 'utf8'), 'original')
+    assert.equal(fs.readdirSync(state.dirs.cache).some(p => p.endsWith('.oltmp')), false)
+  })
+
+  await t.test('same-sized old cloud bytes cannot turn an HTTP 500 upload into success', async () => {
+    reset(); const local = putLocal()
+    remote.set(rp(), { body: Buffer.from('tampered'), modified: new Date().toISOString() })
+    refuseUpload = true
+    const client = new api.OpenListClient({ endpoint: base, token: 'test-token' })
+    await assert.rejects(client.upload(local, rp()), /上传被拒绝/)
+    assert.equal(fs.readFileSync(local, 'utf8'), 'original')
+  })
+
+  await t.test('streamed upload reopens its file after refreshing an expired login', async () => {
+    reset(); const local = putLocal('cache', 'stream.mp3', 'streamed content')
+    expireUploadOnce = true
+    const client = new api.OpenListClient({ endpoint: base, username: 'test', password: 'fixture' })
+    const original = fs.promises.readFile
+    fs.promises.readFile = async () => { throw new Error('upload must not buffer the complete file') }
+    try { await client.upload(local, rp('cache', 'stream.mp3')) }
+    finally { fs.promises.readFile = original }
+    assert.equal(remote.get(rp('cache', 'stream.mp3')).body.toString(), 'streamed content')
+  })
+
+  const waitIntegrity = async () => {
+    for (let i = 0; i < 200; i++) {
+      const status = api.integrityStatus()
+      if (status.job && status.job.state !== 'running') return status
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    throw new Error('integrity job timeout')
+  }
+  await t.test('ordinary uploads, periodic checks and unchanged scans never download cloud audio', async () => {
+    reset(); rule.mode = 'upload'; putLocal()
+    await sync('cache'); await api.verifyPending(); await sync('cache')
+    assert.deepEqual(contentReads, [])
+    const before = uploads
+    remote.get(rp()).body = Buffer.from('tampered')
+    await api.verifyPending(); await sync('cache')
+    assert.equal(uploads, before)
+    assert.deepEqual(contentReads, [])
+    const preview = api.prepareOpenlistIntegrity({ scope: 'all', type: 'cache' })
+    assert.equal(preview.total, 1); assert.equal(preview.bytes, 8)
+    api.startOpenlistIntegrity(preview.token)
+    const status = await waitIntegrity()
+    assert.equal(status.job.state, 'completed')
+    assert.equal(status.results[0].result, 'mismatch')
+    assert.equal(contentReads.filter(p => p === rp()).length, 1)
+    assert.equal(remote.get(rp()).body.toString(), 'tampered', 'manual verification never repairs automatically')
+    const row = api.listAllBackups()[0]
+    assert.equal((await api.retryBackup(row.id)).ok, true)
+    assert.equal(remote.get(rp()).body.toString(), 'original')
+  })
+
+  await t.test('manual SHA results skip unchanged backups; driver SHA avoids body reads', async () => {
+    reset(); rule.mode = 'upload'; putLocal('cache', 'manual-sha.mp3', 'sha body')
+    await sync('cache'); await api.verifyPending()
+    assert.equal(api.listBackups().find(row => row.name === 'manual-sha.mp3').content_verification, null)
+    const remotePath = rp('cache', 'manual-sha.mp3')
+    remote.get(remotePath).sha256 = require('node:crypto').createHash('sha256').update('sha body').digest('hex')
+    const preview = api.prepareOpenlistIntegrity({ scope: 'all', type: 'cache' })
+    api.startOpenlistIntegrity(preview.token)
+    const status = await waitIntegrity()
+    assert.equal(status.results[0].result, 'matched'); assert.equal(status.job.bytes, 0)
+    const checked = api.listBackups().find(row => row.name === 'manual-sha.mp3')
+    assert.equal(checked.content_verification, 'matched')
+    assert.ok(checked.content_verified_at > 0)
+    assert.deepEqual(contentReads, [])
+    assert.equal(api.prepareOpenlistIntegrity({ scope: 'changed', type: 'cache' }).total, 0)
+    const stale = api.prepareOpenlistIntegrity({ scope: 'all' })
+    putLocal('cache', 'manual-sha.mp3', 'new version'); await sync('cache')
+    const changed = api.listBackups().find(row => row.name === 'manual-sha.mp3')
+    assert.equal(changed.content_verification, null)
+    assert.equal(changed.content_verified_at, null)
+    assert.throws(() => api.startOpenlistIntegrity(stale.token), /已变化/)
+    assert.equal(api.prepareOpenlistIntegrity({ scope: 'changed', type: 'cache' }).total, 1)
+  })
+
+  await t.test('history generation uses metadata and local hashes instead of reading backup bodies', async () => {
+    reset(); rule.backupCache = false; config['backup.openlist.types'] = ['userData']
+    fs.writeFileSync(path.join(temp, 'users/alice/no-read.json'), 'history without download')
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    await api.verifyPending(); await api.runSyncNow()
+    assert.equal(contentReads.some(p => p.includes('/_data/') || p.includes('/recovery/objects/')), false)
+  })
+
+  await t.test('immutable history restores older bytes and refuses same-sized object corruption', async () => {
+    reset(); rule.backupCache = false; config['backup.openlist.types'] = ['userData']
+    const file = path.join(global.lx.dataPath, 'users/alice/settings.json')
+    fs.writeFileSync(file, 'v1')
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    const history = await api.getOpenlistRecoveryHistory()
+    const first = history.versions[0].id
+    fs.writeFileSync(file, 'v2')
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    const puts = uploads
+    fs.writeFileSync(file, 'local')
+    const options = { types: ['userData'], mode: 'overwrite', snapshotId: first }
+    const preview = await api.restoreOpenlistData({ ...options, preview: true })
+    const restored = await api.restoreOpenlistData({ ...options, planToken: preview.planToken })
+    assert.deepEqual(restored.errors, []); assert.equal(fs.readFileSync(file, 'utf8'), 'v1')
+    assert.equal(remote.get('/root/_data/users/alice/settings.json').body.toString(), 'v2')
+    assert.equal(uploads, puts)
+    const manifest = JSON.parse(remote.get('/root/_system/recovery/history/' + first).body.toString())
+    const item = manifest.files.find(f => f.relative === 'users/alice/settings.json')
+    remote.get('/root/' + item.object).body = Buffer.from('xx')
+    fs.writeFileSync(file, 'protected')
+    const bad = await api.restoreOpenlistData(options)
+    assert.ok(bad.errors.length)
+    assert.equal(bad.restored, 0)
+    assert.equal(fs.readFileSync(file, 'utf8'), 'protected')
+  })
+
+  await t.test('cloud cache metadata restores platform, quality and lyrics after losing SQLite', async () => {
+    reset(); config['backup.openlist.types'] = []; config['openlist.includeNonAudio'] = true; rule.mode = 'upload'
+    const file = putLocal(), lyric = path.join(state.dirs.cache, 'song.lrc')
+    fs.writeFileSync(lyric, 'lyrics')
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    const manifest = JSON.parse(remote.get('/root/_system/recovery/latest.json').body.toString())
+    assert.equal(manifest.cache[0].songmid, 'tx_song123')
+    assert.equal(manifest.cache[0].attachments.length, 1)
+    for (const table of ['openlist_attachment_links', 'openlist_backup_attachments', 'openlist_backup_files', 'openlist_local_files']) api.getBackupDb().exec('DELETE FROM ' + table)
+    fs.unlinkSync(file); fs.unlinkSync(lyric); state.registered.length = 0; rule.mode = 'download'
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    assert.equal(fs.readFileSync(file, 'utf8'), 'original')
+    assert.equal(fs.readFileSync(lyric, 'utf8'), 'lyrics')
+    assert.equal(state.registered[0].id, 'tx_song123')
+    assert.equal(state.registered[0].source, 'tx'); assert.equal(state.registered[0].quality, '320k')
+  })
+
+  await t.test('background restoration persists status and offers a guarded rollback', async () => {
+    reset()
+    const file = path.join(global.lx.dataPath, 'users/alice/job.json')
+    fs.writeFileSync(file, 'local job data')
+    remote.set('/root/_data/users/alice/job.json', { body: Buffer.from('cloud job data'), modified: new Date().toISOString() })
+    const options = { types: ['userData'], mode: 'overwrite' }
+    const preview = await api.restoreOpenlistData({ ...options, preview: true })
+    const id = api.startOpenlistRestore({ ...options, planToken: preview.planToken })
+    let task
+    for (let i = 0; i < 100; i++) {
+      task = api.listRestoreTasks().find(t => t.id === id)
+      if (task && ['completed', 'failed'].includes(task.state)) break
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    assert.equal(task.state, 'completed'); assert.equal(task.applied, 1)
+    assert.equal(fs.readFileSync(file, 'utf8'), 'cloud job data')
+    api.rollbackRestoreTask(id)
+    assert.equal(fs.readFileSync(file, 'utf8'), 'local job data')
+    api.deleteRestoreTask(id)
+    assert.equal(api.listRestoreTasks().some(t => t.id === id), false)
+  })
+
+  await t.test('retention collects only unreferenced history; local removal retains the current cloud copy', async () => {
+    reset(); rule.backupCache = false; config['backup.openlist.types'] = ['userData']; config['openlist.historyRetentionDays'] = 7
+    const file = path.join(global.lx.dataPath, 'users/alice/retention.json'); fs.writeFileSync(file, 'version-one')
+    await api.runSyncNow()
+    const previous = JSON.parse(remote.get('/root/_system/recovery/latest.json').body.toString())
+    const object = previous.files.find(f => f.relative.endsWith('/retention.json')).object
+    const version = (await api.getOpenlistRecoveryHistory()).versions[0].id
+    remote.get('/root/_system/recovery/history/' + version).modified = '2000-01-01T00:00:00Z'
+    remote.get('/root/' + object).modified = '2000-01-01T00:00:00Z'
+    fs.writeFileSync(file, 'version-two')
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    assert.equal(remote.has('/root/_system/recovery/history/' + version), false)
+    assert.equal(remote.has('/root/' + object), false)
+    fs.unlinkSync(file)
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    const current = JSON.parse(remote.get('/root/_system/recovery/latest.json').body.toString())
+    assert.ok(current.files.some(f => f.relative.endsWith('/retention.json')))
+    assert.deepEqual((await api.restoreOpenlistData({ types: ['userData'], mode: 'missing' })).errors, [])
+    assert.equal(fs.readFileSync(file, 'utf8'), 'version-two')
   })
 })
 
@@ -345,7 +850,7 @@ test('Subsonic OpenList delivery uses the production stream handler', async t =>
   const app = http.createServer((req, res) => void h.handleStream(req, res, 'alice', new URL(req.url, 'http://local').searchParams, 'json'))
   app.listen(0, '127.0.0.1'); await once(app, 'listening')
   const endpoint = 'http://127.0.0.1:' + app.address().port + '/?id=tx_song'
-  global.lx = { config: { 'subsonic.playCacheFirst': true, 'subsonic.openlistDelivery': 'direct', 'subsonic.transcode.enabled': true } }
+  global.lx = { config: { 'subsonic.playCacheFirstUseOpenlist': true, 'subsonic.playCacheFirst': true, 'subsonic.openlistDelivery': 'direct', 'subsonic.transcode.enabled': true } }
   const config = global.lx.config
   t.after(async () => {
     for (const server of [app, upstream]) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }

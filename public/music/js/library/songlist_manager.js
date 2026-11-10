@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Song List Manager for LX Music Web
  * Handles fetching, rendering and interactions for the "Song List" (Playlist) feature.
  */
@@ -738,7 +738,7 @@ window.SongListManager = (function () {
                         <div class="font-bold text-sm t-text-main group-hover:text-emerald-500 transition-colors">
                             ${window.createMarqueeHtml ? window.createMarqueeHtml(song.name) : `<span class="truncate">${song.name}</span>`}
                         </div>
-                        <div class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
+                        <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
                              ${window.getSourceTag ? window.getSourceTag(song.source || detailState.source) : ''}
                              ${window.getQualityTags ? window.getQualityTags(song) : ''}
                              <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(song) : ''}"></span>
@@ -780,6 +780,7 @@ window.SongListManager = (function () {
                             onclick="event.stopPropagation(); window.SongListManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
+                    <button type="button" data-songlist-rating="${index}" class="p-1 text-amber-500" title="评分" aria-label="歌曲评分">☆</button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.SongListManager.dislikeSong(${index})">
@@ -800,6 +801,12 @@ window.SongListManager = (function () {
         }
         if (typeof window.applyMarqueeChecks === 'function') {
             window.applyMarqueeChecks();
+        }
+        for (const entry of displayList) {
+            const host = listContainer.querySelector(`#sl-row-${entry.originalIndex} [data-rating-badges]`);
+            window.RatingManager?.attachTag(host, entry.item);
+            const button = listContainer.querySelector(`[data-songlist-rating="${entry.originalIndex}"]`);
+            window.RatingManager?.attach(button, entry.item);
         }
         window.ServerFileState?.paintBadges(listContainer);
     }
@@ -1383,11 +1390,11 @@ function toggleSongListDesc() {
 
     const isExpanded = descEl.dataset.expanded === 'true';
     if (isExpanded) {
-        descEl.classList.add('line-clamp-3', 'md:line-clamp-4');
+        descEl.classList.add('line-clamp-2', 'md:line-clamp-3');
         descEl.dataset.expanded = 'false';
         descBtn.innerHTML = '展开全部 <i class="fas fa-chevron-down text-[10px] ml-0.5"></i>';
     } else {
-        descEl.classList.remove('line-clamp-3', 'md:line-clamp-4');
+        descEl.classList.remove('line-clamp-2', 'md:line-clamp-3');
         descEl.dataset.expanded = 'true';
         descBtn.innerHTML = '收起 <i class="fas fa-chevron-up text-[10px] ml-0.5"></i>';
     }

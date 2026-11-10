@@ -18,6 +18,7 @@ const config: LX.Config = {
   'user.enableLoginCacheRestriction': false, // 是否启用登录用户缓存限制
   'user.enableCacheSizeLimit': false, // 是否启用缓存空间限制
   'user.cacheSizeLimit': 2000, // 缓存空间限制大小 (MB)
+  'cache.maxAgeDays': 14, // 0 disables age-based cache cleanup
 
   maxSnapshotNum: 10, // 公共最大备份快照数
   'list.addMusicLocationType': 'top', // 公共添加歌曲到我的列表时的位置 top | bottom，参考客户端的「设置 → 列表设置 → 添加歌曲到列表时的位置」
@@ -48,6 +49,8 @@ const config: LX.Config = {
   'webdav.username': '',
   'webdav.password': '',
   'webdav.syncPath': '/lx-sync', // 增量同步远程路径
+  'webdav.retentionCount': 5, // ZIP 最多保留份数，始终保留最新一份
+  'webdav.retentionDays': 0, // 0 不按天数清理
   'webdav.backupPath': '/lx-sync-backups', // 全量备份远程路径
   'sync.interval': 60, // 同步间隔（分钟）默认1小时
   'sync.backupInterval': 24, // 全量备份间隔（小时）默认24小时
@@ -63,6 +66,8 @@ const config: LX.Config = {
   // 本地配置备份（config.js 每日一份本地副本）
   'configBackup.enable': true, // 是否启用本地配置备份
   'configBackup.retentionDays': 7, // 本地备份保留天数
+  'configBackup.intervalHours': 24, // 自动备份周期（小时）
+  'configBackup.scheduleTime': '00:00', // 锚点时间；空字符串表示从启动/保存时起计时
   'configBackup.dir': '', // 备份目录，留空则用 <data>/backups，相对路径基于 data 目录，绝对路径直接使用
 
   // 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot，相对路径基于 data 目录，绝对路径直接使用）
@@ -99,13 +104,14 @@ const config: LX.Config = {
   'subsonic.onlineSearchSources': 'wy,tx,kw,kg,mg', // 在线搜索默认平台
   'subsonic.localPlaylist': true, // 返回当前用户的本地歌曲只读歌单，排在歌单列表首位
   'subsonic.customPlaylist': true, // 本地歌单开启时，单独返回自定义目录歌单
+  'subsonic.cachePlaylist': false, // 本地歌曲歌单是否包含 cache 目录歌曲
   'subsonic.publicLeaderboards': false, // 是否在 Subsonic 中公开在线排行榜(只读虚拟播放列表)
   'subsonic.leaderboardSource': 'tx', // 在线排行榜平台: tx | wy | kg | kw | mg
   'subsonic.sharedListMode': 'leaderboard', // 共享歌单内容模式: leaderboard | playlist | both
   'subsonic.sharedListSort': 'hot', // 共享歌单排序: hot | new
   'subsonic.dislikeRating': 1, // 评分联动 dislike 阈值: 0 < rating <= 该值 视为不喜欢(写回原生 dislike 规则); 设为 0 关闭联动
+  'subsonic.ratingPlaylists': true, // 是否向 Subsonic 客户端暴露 1~5 星评星歌单(虚拟只读, 不落盘); 仅控制歌单显示，不改变联动开关
   'subsonic.linkRatingToDislike': false, // 解耦开关(正向): 评星 -> 不喜欢 是否自动联动; false=不联动(仅记录评分)
-  'subsonic.linkDislikeToRating': false, // 解耦开关(反向): 不喜欢 -> 评星 是否自动联动; false=不联动(仅记录不喜欢)
   'subsonic.hideDisliked': true, // 是否在 Subsonic 列表中隐藏 dislike 命中的歌曲(关闭则只评分不剔除)
   'subsonic.dislikeCrossSource': false, // dislike 是否跨平台同名命中(各平台 ID 不互通, 开启会误伤同名歌手/专辑)
   'subsonic.dislikeNoRecommend': true, // 推荐类接口(每日推荐/随机/相似)是否排除 dislike 歌曲(与 hideDisliked 独立)
@@ -132,15 +138,16 @@ const config: LX.Config = {
   'system.allowUnsafeVM': false, // 是否允许运行 VM 模式自定义源脚本
 
   // ===== OpenList 备份/同步 =====
+  'openlist.playback.enable': false, // 本地未命中时允许 Web/Subsonic 使用已登记的 OpenList 文件
   'openlist.enable': false, // 是否启用 OpenList 备份/同步
   'openlist.endpoint': '', // OpenList 地址(如 http://127.0.0.1:5244)
   'openlist.username': '', // OpenList 管理员账号(用于 testConnection)
   'openlist.password': '', // OpenList 密码
   'openlist.token': '', // OpenList 用户令牌(与账号密码二选一)
   'openlist.root': '/lx_music', // OpenList 中 lx-music 备份根目录
-  'openlist.keepLocalAfterUpload': true, // 上传 OpenList 后是否保留本地文件
   'openlist.verifyInterval': 5, // 远端可用性校验周期(分钟)
   'openlist.syncInterval': 60, // 双向同步周期(分钟)
+  'openlist.historyRetentionDays': 7, // 云端历史版本保留天数
   'openlist.userBackups': '[]', // 各用户备份目录配置(JSON 数组)
   'openlist.includeNonAudio': false, // 是否同步非音频文件(图片/封面等)
   'openlist.externalUrl': '', // OpenList 外网地址(留空则同 openlist.endpoint)

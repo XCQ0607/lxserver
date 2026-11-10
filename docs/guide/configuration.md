@@ -80,6 +80,9 @@
 | `SYSTEM_ALLOW_UNSAFE_VM`                   | `system.allowUnsafeVM`                     | 是否允许运行 VM 模式自定义源脚本 (需注意安全风险)                                                  | `false`            |
 | `LX_USER_<用户名>`                         | `users` 数组                               | 快速添加用户，值为该用户的密码 (如 `LX_USER_test=123`)                                           | -                    |
 
+缓存清理仅处理 `cache/`（含子目录），不处理 `music/`。运行根目录和数据目录中，每个用户、每个位置分别计算空间额度；下载完成后检查空间，启动、修改清理设置后及每 12 小时检查两处缓存。按最近访问或修改时间清理，同名音频与歌词成组处理，跳过活跃备份、索引与临时文件。`cache.maxAgeDays` 可在 config.js 或后台设置，默认 14 天；0 仅关闭过期清理，不关闭空间限制。
+
+
 布尔值不区分大小写，开启可用 `true/1/yes/y/on`，关闭可用 `false/0/no/n/off`。
 
 `LX_USER_<用户名>` 的值作为该用户密码使用，例如 `LX_USER_user1=your-password`。自定义目录、写入权限和账号禁用等高级设置请通过后台用户管理维护，不要把 JSON 当作该环境变量的高级配置格式。
@@ -122,7 +125,7 @@ Subsonic 用户目录中的 `subsonic-local-registry.json` 和 `subsonic-local-s
 
 配置备份默认开启，保留 7 天；默认位置为数据目录的 `backups/`。可以用 `CONFIG_BACKUP_DIR` 和 `SNAPSHOT_BACKUP_PATH` 自定义配置备份、歌单快照的存储位置。
 
-WebDAV 和 OpenList 按「系统设置 → 云端备份范围」选择的数据类型备份。启动时恢复默认关闭，可用 `backup.webdav.restoreOnStartup` 显式开启。恢复步骤和两种后端的职责见 [云端备份与恢复](./backup-recovery.md)。
+WebDAV 和 OpenList 按「备份管理 → 云端备份 → 备份范围」选择的数据类型备份。启动时恢复默认关闭，可用 `backup.webdav.restoreOnStartup` 显式开启。恢复步骤和两种后端的职责见 [云端备份与恢复](./backup-recovery.md)。
 
 新的 `backup.webdav.types` 和 `backup.openlist.types` 类型数组分别控制两个目的地。歌曲只包含 `data/music`；`cache` 和外部音乐目录不属于数据备份。旧排除选项不再作为第二套界面开关。
 
@@ -196,3 +199,50 @@ npm run dev
 - WebDAV：核对远端命名空间、排除项、恢复日志和运行时值。
 
 启动方式见 [部署指南](./getting-started.md)，备份恢复见 [运行维护](./operations.md)。
+
+## 备份配置项（后台或 config.js）
+
+备份设置统一位于 **备份管理**。本地配置与快照在“本地备份”，连接、周期、范围和 ZIP 保留策略在“云端备份”，用户播放缓存规则也在“云端备份”内，位于 OpenList 连接配置下方的“OpenList 播放缓存”卡片。实际操作见 [备份与恢复](./backup-recovery.md)。
+
+以下是配置文件键，**不代表存在同名大写环境变量**。目前没有 `OPENLIST_*`、`WEBDAV_RETENTION_*`、`CONFIG_BACKUP_INTERVAL_HOURS`、`CONFIG_BACKUP_SCHEDULE_TIME` 的环境变量映射；请在后台保存，或修改生效的 `config.js`。上方表格列出的 `WEBDAV_*`、`CONFIG_BACKUP_ENABLE`、`CONFIG_BACKUP_RETENTION_DAYS`、`CONFIG_BACKUP_DIR` 等环境变量仍然有效。
+
+| 配置键 | 默认值 | 用途 |
+| --- | --- | --- |
+| `maxSnapshotNum` | `10` | 公共最大历史快照数；用户可有独立设置 |
+| `configBackup.enable` | `true` | 自动保存本地配置历史副本 |
+| `configBackup.intervalHours` | `24` | 配置备份周期，小时 |
+| `configBackup.scheduleTime` | `'00:00'` | 服务器本地锚点时间；空字符串从启动/重新设置后计时 |
+| `configBackup.retentionDays` | `7` | 配置历史保留天数 |
+| `configBackup.dir` | `''` | 空值使用数据目录的 `backups` |
+| `snapshot.backupPath` | `''` | 额外快照路径，按用户隔离 |
+| `backup.webdav.types`、`backup.openlist.types` | 五类全部选中 | 两端独立的数据范围，见下方示例 |
+| `backup.webdav.mirrorDeletes` | `false` | 本地删除时删除已跟踪的 WebDAV 增量副本 |
+| `backup.webdav.restoreOnStartup` | `false` | 每次启动服务前用 WebDAV 覆盖所选本地数据 |
+| `webdav.retentionCount` | `5` | ZIP 最多保留 1–1000 份，始终保留最新一份 |
+| `webdav.retentionDays` | `0` | ZIP 保留 0–3650 天，0 不按天数清理 |
+| `openlist.enable` | `false` | 启用 OpenList 备份与用户缓存规则 |
+| `openlist.endpoint` | `''` | OpenList API 地址 |
+| `openlist.token` | `''` | OpenList API 令牌 |
+| `openlist.username`、`openlist.password` | `''` | 未使用令牌时的登录凭据 |
+| `openlist.root` | `'/lx_music'` | 已存在的 OpenList 挂载内路径，不是主机磁盘路径 |
+| `openlist.externalUrl` | `''` | 外网地址，留空使用 endpoint |
+| `openlist.syncInterval` | `60` | 备份与缓存规则的检查间隔，分钟 |
+| `openlist.verifyInterval` | `5` | 后台状态检查间隔，分钟；不是定时下载正文做 SHA-256 校验 |
+| `openlist.historyRetentionDays` | `7` | 云端历史版本保留天数 |
+| `openlist.userBackups` | `'[]'` | 高级按用户缓存规则，JSON 数组字符串；建议通过界面编辑 |
+| `openlist.includeNonAudio` | `false` | 高级缓存规则附带已有歌词与封面，不控制常规 music 备份 |
+| `openlist.playback.enable` | `false` | 允许已登记 OpenList 文件参与播放回退，另需播放器/Subsonic 相应设置 |
+
+```js
+module.exports = {
+  // 合并到现有配置，不要用此片段覆盖其他配置。
+  'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
+  'backup.webdav.mirrorDeletes': false,
+  'backup.webdav.restoreOnStartup': false,
+  'webdav.retentionCount': 5,
+  'webdav.retentionDays': 0,
+}
+```
+
+类型数组留空 `[]` 表示该端不备份数据。显式类型数组优先于旧 `webdav.excludeMusic`；`webdav.excludeCache` 是兼容项，常规备份始终排除 cache。旧 `openlist.backupSystemConfig` 仅用于没有显式类型设置的兼容流程，新配置使用 `backup.openlist.types`。

@@ -21,7 +21,10 @@ export class DislikeManage {
     if (snapshotInfo.list.includes(md5)) {
       snapshotInfo.list.splice(snapshotInfo.list.indexOf(md5), 1)
     } else await this.snapshotDataManage.saveSnapshot(md5, listData)
-    if (snapshotInfo.latest) snapshotInfo.list.unshift(snapshotInfo.latest)
+    // 用户导入的备份不纳入系统快照 list/配额清理，避免被自动删除或误判为系统生成
+    if (snapshotInfo.latest && !this.snapshotDataManage.isImported(snapshotInfo.latest)) {
+      snapshotInfo.list.unshift(snapshotInfo.latest)
+    }
     snapshotInfo.latest = md5
     snapshotInfo.time = Date.now()
     this.snapshotDataManage.saveSnapshotInfo(snapshotInfo)
@@ -50,6 +53,20 @@ export class DislikeManage {
 
   getDislikeRules = async() => {
     return await this.dislikeDataManage.getDislikeRules()
+  }
+
+  // 管理接口：将指定 dislike 快照恢复为当前数据（回滚）
+  restoreSnapshot = async(name: string) => {
+    const data = await this.snapshotDataManage.getSnapshot(name)
+    if (!data) throw new Error('Snapshot not found')
+    await this.dislikeDataManage.restore(data)
+    this.snapshotDataManage.clearClients()
+    this.snapshotDataManage.setLatest(name)
+  }
+
+  /** 导入外部下载的 dislike 备份文件（保留原文件时间） */
+  saveSnapshotWithTime = async(name: string, data: string, time: number) => {
+    await this.snapshotDataManage.saveSnapshotWithTime(name, data, time)
   }
 }
 

@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
@@ -43,7 +43,10 @@
     <script src="/js/notification-engine.js"></script>
     <link rel="stylesheet" href="css/app.css">
     <link rel="stylesheet" href="css/dynamic-backgrounds.css">
+    <link rel="stylesheet" href="css/rating.css">
 
+<style>
+</style>
 </head>
 
 <body class="t-bg-main flex flex-col overflow-hidden t-text-main font-sans" style="height: 100dvh;">
@@ -119,6 +122,7 @@
                                 class="fas fa-chevron-down text-xs transition-transform duration-200"></i>
                         </div>
                         <ul id="favorites-children" class="t-bg-main/50 overflow-hidden transition-all duration-300">
+                            <li class="px-3 py-1"><button type="button" onclick="window.RatingManager?.browse()" class="w-full text-left px-3 py-2 t-text-muted hover:t-bg-main rounded-lg"><span class="text-amber-500">★</span> 我的评分</button></li>
                             <li class="px-1.5 py-1">
                                 <div id="my-lists-container" class="space-y-1 pb-1">
                                     <!-- Lists will be injected here -->
@@ -360,18 +364,19 @@
                     <!-- Search Input Area -->
                     <div id="music-search-toolbar" class="flex flex-col md:flex-row gap-2 md:gap-4 mb-2">
                         <!-- Search Input -->
-                        <form role="search" onsubmit="event.preventDefault(); doSearch();" class="flex-1 relative rounded-xl" id="search-input-wrapper" autocomplete="off">
+                        <form role="search" onsubmit="handleSearchSubmit(event)" class="flex-1 relative rounded-xl" id="search-input-wrapper" autocomplete="off">
                             <i class="fas fa-search absolute left-4 top-3.5 t-text-muted pointer-events-none"></i>
                             <input type="search" id="search-input" name="lx_music_search_query"
                                 class="w-full pl-10 pr-4 py-3 t-bg-panel border t-border-main rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent transition-all shadow-sm text-sm md:text-base"
                                 placeholder="搜索歌曲、歌手..."
-                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+                                autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false"
+                                role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="search-suggestions-list">
                             <!-- 搜索波浪流光动效条（搜索中从头到尾波动） -->
                             <div id="search-progress-wave" class="search-wave-bar"></div>
                             <!-- Search Suggestions Dropdown -->
                             <div id="search-suggestions"
                                 class="absolute top-full left-0 w-full mt-2 t-bg-panel border t-border-main rounded-xl shadow-xl z-50 hidden overflow-hidden animate-fade-in">
-                                <div id="search-suggestions-list" class="py-2">
+                                <div id="search-suggestions-list" class="py-2" role="listbox" aria-label="搜索联想">
                                     <!-- Suggestions appear here -->
                                 </div>
                             </div>
@@ -595,6 +600,10 @@
                             </div>
                         </div>
                         <!-- Pagination -->
+                        <div id="network-search-more" class="hidden network-search-more" aria-busy="false">
+                            <span id="network-search-count" class="t-text-muted" aria-live="polite"></span>
+                            <button id="network-search-load-more" type="button" onclick="loadMoreNetworkSongs()">加载更多</button>
+                        </div>
                         <div id="search-pagination-bar"
                             class="border-t t-border-main flex items-center justify-between px-3 md:px-6 t-bg-main flex-shrink-0" style="min-height: 3.5rem; padding-bottom: calc(0.5rem + env(safe-area-inset-bottom, 0px));">
                             <div class="flex items-center gap-2">
@@ -906,7 +915,7 @@
                                                 <!-- Description (collapsible) -->
                                                 <div class="relative mb-3 max-w-4xl">
                                                     <p id="sl-detail-desc"
-                                                        class="text-xs md:text-sm t-text-muted leading-relaxed line-clamp-2 md:line-clamp-3 hover:line-clamp-none cursor-pointer bg-black/5 dark:bg-white/5 p-2.5 rounded-xl transition-all select-none"
+                                                        class="text-xs md:text-sm t-text-muted leading-relaxed line-clamp-2 md:line-clamp-3 cursor-pointer bg-black/5 dark:bg-white/5 p-2.5 rounded-xl transition-all select-none"
                                                         onclick="toggleSongListDesc()" title="点击展开/收起完整简介">
                                                         暂无介绍
                                                     </p>
@@ -2563,6 +2572,11 @@
                                         </label>
                                     </div>
 
+                                    <div class="flex items-center justify-between pb-3 border-b t-border-main">
+                                        <div><div class="text-sm font-bold t-text-main flex items-center">优先使用服务器本地歌词<span class="setting-tooltip-trigger ml-1" tabindex="0" role="button" aria-label="优先使用服务器本地歌词说明"><i class="fas fa-question-circle" aria-hidden="true"></i><span class="setting-tooltip-content">开启：当前用户 music / cache 的 LRC → 浏览器歌词缓存 → 在线歌词；关闭：浏览器缓存 → 在线歌词。自定义曲库支持同名 LRC，本地未关联歌曲可用内嵌歌词兜底。只控制读取，不控制保存。</span></span></div></div>
+                                        <label class="relative inline-flex items-center cursor-pointer"><input type="checkbox" id="setting-prefer-local-lyrics" class="sr-only peer" onchange="updateSetting('preferLocalLyrics', this.checked)"><div class="w-11 h-6 bg-gray-200 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500"></div></label>
+                                    </div>
+
                                     <!-- Server Lyric Cache Setting -->
                                     <div class="flex items-center justify-between pb-3 border-b t-border-main">
                                         <div>
@@ -2571,7 +2585,7 @@
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
                                                     <span
-                                                        class="setting-tooltip-content">将歌词文件缓存到同服务器配置的缓存目录下，优先供多端同步极速加载。</span>
+                                                        class="setting-tooltip-content">只控制写入：在线获取歌词及后台保存音频时，是否保存独立 LRC；已有音频时歌词与其同目录同名。读取已有歌词由“优先使用服务器本地歌词”控制。</span>
                                                 </span>
                                             </div>
                                         </div>
@@ -2593,8 +2607,7 @@
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
                                                     <span
-                                                        class="setting-tooltip-content">开启后，下载或缓存歌曲时将自动获取歌词并写入音频文件标签（USLT），同时保存
-                                                        .lrc 文件。支持浏览器下载与服务器缓存两种模式。</span>
+                                                        class="setting-tooltip-content">开启后，下载或缓存歌曲时将自动获取歌词并写入音频文件标签（USLT）。独立 .lrc 文件由“缓存歌词文件”开关单独控制。支持浏览器下载与服务器缓存两种模式。</span>
                                                 </span>
                                             </div>
                                         </div>
@@ -2611,11 +2624,11 @@
                                     <div class="flex items-center justify-between pb-3 border-b t-border-main">
                                         <div>
                                             <div class="text-sm font-bold t-text-main flex items-center">
-                                                优先播放缓存歌曲
+                                                优先播放服务器已有歌曲
                                                 <span class="setting-tooltip-trigger ml-1">
                                                     <i class="fas fa-question-circle"></i>
                                                     <span
-                                                        class="setting-tooltip-content">如果歌曲已缓存，则优先从本地加载。即使“缓存歌曲文件”关闭，已存在的缓存仍可使用。</span>
+                                                        class="setting-tooltip-content">按当前用户查询 music 下载目录和 cache 缓存目录（使用设置的运行目录或 DATA_PATH）。同音质先 music 后 cache；未命中且后台允许时查 OpenList，再用浏览器链接缓存、在线音源。关闭缓存歌曲文件只停止新写入，不禁止读取已有文件。自定义曲库通过本地音乐入口播放。</span>
                                                 </span>
                                             </div>
                                         </div>
@@ -2668,7 +2681,7 @@
                                                 <input type="checkbox" id="setting-enable-remaster" class="sr-only peer"
                                                     onchange="toggleRemasterFeature(this.checked)">
                                                 <div
-                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500 transition-all">
+                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
                                                 </div>
                                             </label>
                                         </div>
@@ -3180,11 +3193,11 @@
                                         <select id="setting-vu-meter-theme"
                                             onchange="updateSetting('vuMeterTheme', this.value)"
                                             class="lm-select !w-full !py-2">
-                                            <option value="vintage-amber">经典暖金</option>
-                                            <option value="ocean-blue">湖水湛蓝</option>
-                                            <option value="cyber-cyan">赛博青翠</option>
-                                            <option value="champagne-gold">香槟金典</option>
-                                            <option value="studio-monochrome">黑白监听</option>
+                                            <option value="study-nocturne">夜曲钛灰 · Nocturne</option>
+                                            <option value="study-heritage">传承象牙 · Heritage</option>
+                                            <option value="study-atelier">工坊香槟铜 · Atelier</option>
+                                            <option value="study-riviera">里维埃拉缎银 · Riviera</option>
+                                            <option value="study-cobalt">钴蓝母带 · Cobalt</option>
                                         </select>
                                     </div>
 
@@ -3438,6 +3451,21 @@
                                             <i class="fas fa-list-ul mr-2 text-emerald-500"></i> 播放队列与列表
                                         </h4>
                                         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="rating-preference-card">
+                                        <div class="rating-preference-heading">
+                                            <span>不喜欢自动补分</span>
+                                            <button type="button" class="setting-tooltip-trigger" aria-label="不喜欢自动补分说明">
+                                                <i class="fas fa-question-circle" aria-hidden="true"></i>
+                                                <span class="setting-tooltip-content" role="tooltip">仅对当前账号生效，默认关闭，设置保存在服务器。开启后，Web 将单首歌曲加入不喜欢时为未评分歌曲补 1 星；已有评分不覆盖，取消不喜欢或关闭设置不删除评分。同账号跨设备生效，后台补分独立执行。</span>
+                                            </button>
+                                        </div>
+                                        <label class="rating-preference-switch">
+                                            <input type="checkbox" id="setting-dislike-auto-rating" disabled aria-label="不喜欢自动补分" onchange="window.RatingManager.setDislikeAutoRating(this.checked)">
+                                            <span aria-hidden="true"></span>
+                                        </label>
+                                        <p id="rating-preference-status" class="rating-preference-status" role="status" hidden></p>
+                                    </div>
+
                                             <!-- Change Playlist on Search Play -->
                                             <div
                                                 class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
@@ -4155,6 +4183,7 @@
                     <div id="player-artist"
                         class="text-xs text-gray-500 truncate dynamic-marquee min-w-0 w-fit self-start"
                         data-text="选择一首歌曲播放">选择一首歌曲播放</div>
+                    <button type="button" id="player-rating" class="player-rating-button" aria-label="歌曲评分" title="选择歌曲后评分">☆ 评分</button>
                     <div id="player-status" class="text-xs text-emerald-600 font-medium whitespace-nowrap"></div>
                 </div>
             </div>
@@ -5537,6 +5566,7 @@
                         <div class="min-w-0 flex-1">
                             <div class="flex items-center gap-2 flex-wrap">
                                 <strong id="sound-effects-state" class="text-sm font-bold t-text-main">音效已开启</strong>
+                                <span id="sound-effects-mode" class="effects-mode-tag" role="status" hidden></span>
                                 <span id="sound-effects-status" role="status" class="text-xs t-text-dim"></span>
                             </div>
                             <p id="sound-effects-summary" class="hidden"></p>
@@ -5555,9 +5585,9 @@
                     </div>
                     <button id="sound-effects-native" hidden type="button"
                         class="mt-2 px-3 py-1.5 text-xs rounded-lg t-bg-track t-text-main hover:t-bg-item-hover transition-colors"
-                        onclick="window.soundEffects.restoreNativePlayback()">刷新并恢复原生播放 / AirPlay</button>
+                        onclick="window.soundEffects.restoreNativePlayback()">恢复原生播放 / AirPlay</button>
                 </div>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 md:divide-x t-border-main">
+                <fieldset id="sound-effects-controls" class="effects-controls grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4 md:divide-x t-border-main" aria-label="音效配置">
 
                     <!-- Left Column -->
                     <div class="space-y-3.5 pr-0 md:pr-4">
@@ -5672,7 +5702,7 @@
                         </section>
                     </div>
 
-                </div>
+                </fieldset>
             </div>
         </div>
     </div>
@@ -6269,7 +6299,9 @@
     <script src="js/library/songlist_manager.js"></script>
     <script src="js/library/leaderboard_manager.js"></script>
     <script src="js/library/dislike_manager.js"></script>
+    <script src="js/library/rating_manager.js"></script>
     <script src="js/vendor/wave.js"></script>
+    <script src="js/player/playback.js"></script>
     <script src="js/player/visualizer.js"></script>
     <script src="js/core/pwa.js"></script>
     <script src="js/player/ios-background-audio.js"></script>
@@ -6280,8 +6312,9 @@
     <script src="js/local/auto_link.js"></script>
     <script src="js/local/customDir.js"></script>
     <script src="js/ui/common_ui.js"></script>
+    <script src="js/library/paged_music_search.js"></script>
+    <script src="js/library/search_suggestions.js"></script>
     <script src="js/download/sync_download.js"></script>
-    <script src="js/player/playback.js"></script>
     <script src="js/library/search_requests.js"></script>
     <script src="js/ui/ui_accessibility.js"></script>
     <script src="js/ui/dynamic_backgrounds.js"></script>

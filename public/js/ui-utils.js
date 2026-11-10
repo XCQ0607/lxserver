@@ -1,92 +1,21 @@
-/* 
+/*
    UI Utilities for LX Sync Server Management Console
    Standardizes notifications (Toasts) and Dialogs
    Requires: Tailwind CSS, FontAwesome
 */
 
 (function () {
-    // 1. Inject enhanced premium CSS
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes toast-in { from { transform: translateX(100%) scale(0.9); opacity: 0; } to { transform: translateX(0) scale(1); opacity: 1; } }
-        @keyframes modal-in { from { transform: scale(0.95) translateY(10px); opacity: 0; } to { transform: scale(1) translateY(0); opacity: 1; } }
-        @keyframes marquee { 0% { transform: translateX(0); } 100% { transform: translateX(-50%); } }
-        
-        .lx-toast-in { animation: toast-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-        .lx-modal-in { animation: modal-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) forwards; }
-        .animate-marquee { display: inline-block; animation: marquee 10s linear infinite; }
-        .pause-animation { animation-play-state: paused; }
-        
-        /* Premium Solid Style for Toasts (Better Legibility) */
-        .lx-toast-card {
-            font-family: 'Outfit', sans-serif !important;
-            background: #1a1a1a !important; 
-            border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            box-shadow: 0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.05) !important;
-            color: #ffffff !important;
-        }
+    // Presentation lives in style.css; helpers below only manage dialog state.
 
-        /* Premium Glassmorphism Overrides */
-        .lx-glass {
-            font-family: 'Outfit', sans-serif !important;
-            background: rgba(255, 255, 255, 0.08) !important;
-            backdrop-filter: blur(20px) saturate(180%) !important;
-            -webkit-backdrop-filter: blur(20px) saturate(180%) !important;
-            border: 1px solid rgba(255, 255, 255, 0.12) !important;
-            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37), inset 0 0 0 1px rgba(255, 255, 255, 0.05) !important;
-        }
-
-        .lx-btn {
-            font-family: 'Outfit', sans-serif !important;
-            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-            position: relative;
-            overflow: hidden;
-        }
-        .lx-btn::after {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(rgba(255,255,255,0.1), transparent);
-            opacity: 0; transition: opacity 0.2s;
-        }
-        .lx-btn:hover::after { opacity: 1; }
-        .lx-btn:active { transform: scale(0.96); }
-
-        .lx-input {
-            background: rgba(0, 0, 0, 0.2) !important;
-            border: 1px solid rgba(255, 255, 255, 0.1) !important;
-            color: #fff !important;
-            transition: border-color 0.3s, box-shadow 0.3s;
-        }
-        .lx-input:focus {
-            border-color: rgba(16, 185, 129, 0.5) !important;
-            box-shadow: 0 0 0 4px rgba(16, 185, 129, 0.1) !important;
-        }
-        .lx-close-btn {
-            background: transparent !important;
-            border: none !important;
-            box-shadow: none !important;
-            outline: none !important;
-            cursor: pointer !important;
-            transition: all 0.2s !important;
-            display: flex !important;
-            align-items: center !important;
-            justify-content: center !important;
-        }
-        .lx-close-btn:hover {
-            background: rgba(255, 255, 255, 0.1) !important;
-        }
-    `;
-    document.head.appendChild(style);
 
     /**
      * Fresh Toast Notification (Solid Card Style)
      */
     function showToast(type, message, duration = 3000) {
         const config = {
-            success: { gradient: 'from-emerald-400 to-teal-500', icon: 'fa-check-circle' },
-            info: { gradient: 'from-blue-400 to-indigo-500', icon: 'fa-info-circle' },
-            error: { gradient: 'from-rose-400 to-red-500', icon: 'fa-exclamation-circle' }
+            success: { tone: 'tone-fill-success ', icon: 'fa-check-circle' },
+            info: { tone: 'tone-fill-info ', icon: 'fa-info-circle' },
+            error: { tone: 'tone-fill-danger ', icon: 'fa-exclamation-circle' }
         };
         const conf = config[type] || config.info;
 
@@ -95,13 +24,13 @@
 
         toast.innerHTML = `
             <div class="lx-toast-card px-5 py-3.5 rounded-2xl flex items-center gap-4 min-w-[320px] max-w-[450px]">
-                <div class="w-10 h-10 rounded-xl bg-gradient-to-br ${conf.gradient} flex items-center justify-center text-white shadow-lg shrink-0">
+                <div class="w-10 h-10 rounded-xl ${conf.tone} flex items-center justify-center shadow-lg shrink-0">
                     <i class="fas ${conf.icon} text-lg"></i>
                 </div>
                 <div class="flex-1 overflow-hidden">
-                    <div class="text-sm font-bold text-white pr-2">${message}</div>
+                    <div class="text-sm font-bold tone-text pr-2">${message}</div>
                 </div>
-                <button class="lx-close-btn w-8 h-8 text-white/50 hover:text-white rounded-full ml-1 shrink-0">
+                <button class="lx-close-btn w-8 h-8 tone-muted text-hover rounded-full ml-1 shrink-0">
                     <i class="fas fa-times text-sm"></i>
                 </button>
             </div>
@@ -161,35 +90,35 @@
             danger = false
         } = options;
 
-        const accentGradient = danger ? 'from-rose-400 to-red-500 shadow-rose-500/30' : 'from-emerald-400 to-teal-500 shadow-emerald-500/30';
+        const accentTone = danger ? 'tone-fill-danger  ' : 'tone-fill-success  ';
         const icon = danger ? 'fa-exclamation-triangle' : 'fa-question-circle';
-        const iconClass = danger ? 'text-rose-400' : 'text-emerald-400';
+        const iconClass = danger ? 'tone-danger' : 'tone-success';
 
         return new Promise((resolve) => {
             const modal = document.createElement('div');
             modal.className = "fixed inset-0 z-[3000] flex items-center justify-center p-6 animate-fade-in";
             modal.innerHTML = `
-                <div class="absolute inset-0 bg-black/40 backdrop-blur-[4px]"></div>
+                <div class="absolute inset-0 modal-backdrop backdrop-blur-[4px]"></div>
                 <div class="lx-glass rounded-[28px] w-full max-w-sm overflow-hidden lx-modal-in relative shadow-2xl">
-                    <button id="modal-close-x" class="lx-close-btn absolute top-5 right-5 w-8 h-8 text-white/50 hover:text-white rounded-full z-10">
+                    <button id="modal-close-x" class="lx-close-btn absolute top-5 right-5 w-8 h-8 tone-muted text-hover rounded-full z-10">
                         <i class="fas fa-times text-sm"></i>
                     </button>
                     <div class="p-8">
                         <div class="flex flex-col items-center text-center gap-5">
-                            <div class="w-16 h-16 rounded-3xl bg-white/5 flex items-center justify-center ${iconClass} border border-white/10 mb-2">
+                            <div class="w-16 h-16 rounded-3xl tone-inset flex items-center justify-center ${iconClass} border border-default mb-2">
                                 <i class="fas ${icon} text-3xl"></i>
                             </div>
                             <div class="space-y-2">
-                                <h3 class="text-xl font-bold text-white tracking-tight">${title}</h3>
-                                <p class="text-sm text-white/60 leading-relaxed px-4">${message.replace(/\n/g, '<br>')}</p>
+                                <h3 class="text-xl font-bold tone-text tracking-tight">${title}</h3>
+                                <p class="text-sm tone-secondary leading-relaxed px-4">${message.replace(/\n/g, '<br>')}</p>
                             </div>
                         </div>
                     </div>
                     <div class="p-5 flex gap-3">
-                        <button id="confirm-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-2xl">
+                        <button id="confirm-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold tone-muted text-hover tone-inset surface-hover rounded-2xl">
                             ${cancelText}
                         </button>
-                        <button id="confirm-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white bg-gradient-to-br ${accentGradient} rounded-2xl shadow-lg uppercase tracking-wider">
+                        <button id="confirm-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold ${accentTone} rounded-2xl shadow-lg uppercase tracking-wider">
                             ${confirmText}
                         </button>
                     </div>
@@ -235,30 +164,30 @@
             const modal = document.createElement('div');
             modal.className = "fixed inset-0 z-[3000] flex items-center justify-center p-6 animate-fade-in";
             modal.innerHTML = `
-                <div class="absolute inset-0 bg-black/40 backdrop-blur-[4px]"></div>
+                <div class="absolute inset-0 modal-backdrop backdrop-blur-[4px]"></div>
                 <div class="lx-glass rounded-[28px] w-full max-w-sm overflow-hidden lx-modal-in relative shadow-2xl">
-                    <button id="modal-close-x" class="lx-close-btn absolute top-5 right-5 w-8 h-8 text-white/50 hover:text-white rounded-full z-10">
+                    <button id="modal-close-x" class="lx-close-btn absolute top-5 right-5 w-8 h-8 tone-muted text-hover rounded-full z-10">
                         <i class="fas fa-times text-sm"></i>
                     </button>
                     <div class="p-8">
                         <div class="flex flex-col items-center text-center gap-5">
-                            <div class="w-16 h-16 rounded-3xl bg-white/5 flex items-center justify-center text-emerald-400 border border-white/10">
+                            <div class="w-16 h-16 rounded-3xl tone-inset flex items-center justify-center tone-success border border-default">
                                 <i class="fas fa-edit text-3xl"></i>
                             </div>
                             <div class="space-y-2 w-full text-center">
-                                <h3 class="text-xl font-bold text-white tracking-tight">${title}</h3>
-                                <p class="text-sm text-white/60 leading-relaxed mb-6">${message}</p>
-                                <input type="${inputType}" id="modal-input" 
-                                    class="lx-input w-full px-5 py-4 rounded-2xl outline-none text-base placeholder:text-white/20"
+                                <h3 class="text-xl font-bold tone-text tracking-tight">${title}</h3>
+                                <p class="text-sm tone-secondary leading-relaxed mb-6">${message}</p>
+                                <input type="${inputType}" id="modal-input"
+                                    class="lx-input w-full px-5 py-4 rounded-2xl outline-none text-base"
                                     placeholder="${placeholder}" value="${defaultValue}">
                             </div>
                         </div>
                     </div>
                     <div class="p-5 flex gap-3">
-                        <button id="confirm-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white/50 hover:text-white bg-white/5 hover:bg-white/10 rounded-2xl">
+                        <button id="confirm-cancel" class="lx-btn flex-1 py-3.5 text-sm font-bold tone-muted text-hover tone-inset surface-hover rounded-2xl">
                             ${cancelText}
                         </button>
-                        <button id="confirm-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold text-white bg-gradient-to-br from-emerald-400 to-teal-500 shadow-lg shadow-emerald-500/30 rounded-2xl uppercase tracking-wider">
+                        <button id="confirm-ok" class="lx-btn flex-1 py-3.5 text-sm font-bold tone-fill-success shadow-lg rounded-2xl uppercase tracking-wider">
                             ${confirmText}
                         </button>
                     </div>
@@ -310,7 +239,7 @@
                     const gap = '<span class="mx-8"></span>';
                     el.classList.remove('truncate');
                     el.classList.add('overflow-hidden');
-                    const maskStyle = 'mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%); -webkit-mask-image: linear-gradient(to right, transparent 0%, black 5%, black 95%, transparent 100%);';
+                    const maskStyle = ''; // Solid edges use the container's overflow clipping.
                     el.innerHTML = `
                     <div class="w-full relative" style="${maskStyle}">
                         <div class="inline-block whitespace-nowrap animate-marquee hover:pause-animation">

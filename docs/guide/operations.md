@@ -50,7 +50,7 @@ pm2 restart ecosystem.config.js --env production --update-env
 
 迁移本地库时同时保留账号状态和音频。Subsonic 的本地 ID 登记文件与本地歌单状态应一起保留；外部移动或重命名歌曲文件可能产生新身份。
 
-WebDAV 的增量检测间隔默认 60 分钟，全量备份间隔默认 24 小时，分别由 `SYNC_INTERVAL`、`BACKUP_INTERVAL` 控制。已配置 WebDAV 的启动过程会尝试恢复远端数据，随后重新加载配置和账号；它并不限于第一次启动空目录。
+WebDAV 的增量检测间隔默认 60 分钟，全量备份间隔默认 24 小时，分别由 `SYNC_INTERVAL`、`BACKUP_INTERVAL` 控制。仅配置 WebDAV 不会自动恢复。`backup.webdav.restoreOnStartup` 默认关闭；显式开启后，每次启动都会先恢复所选数据并重新加载配置、账号，成功后才开放服务，不限于空目录首次启动。手动恢复完成后需要重启；操作步骤见 [备份与恢复](./backup-recovery.md)。
 
 ## 反向代理
 

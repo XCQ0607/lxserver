@@ -248,9 +248,13 @@
         }
     });
     window.addEventListener('popstate', event => {
+        if (event.playerDetailHandled) return;
+        if (event.searchDetailHandled) return;
         if (!event.state?.lxMain || event.state.page) return;
         const state = event.state.lxMain;
         setTimeout(() => {
+            if (event.playerDetailHandled) return;
+            if (event.searchDetailHandled) return;
             restoring = true;
             try {
                 current = state;

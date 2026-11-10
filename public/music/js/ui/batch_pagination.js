@@ -39,9 +39,12 @@ function refreshBatchUI() {
     // Check if song list detail is open
     const slDetail = document.getElementById('songlist-detail-view');
     const artistHeader = document.getElementById('artist-detail-header');
-    if (slDetail && !slDetail.classList.contains('hidden')) {
+    const leaderboard = document.getElementById('view-leaderboard');
+    if (leaderboard && !leaderboard.classList.contains('hidden')) {
+        if (window.LeaderboardManager) window.LeaderboardManager.renderSongs();
+    } else if (slDetail && !slDetail.classList.contains('hidden')) {
         if (window.SongListManager) window.SongListManager.renderDetail();
-    } else if (artistHeader) {
+    } else if (artistHeader && !artistHeader.classList.contains('hidden')) {
         // Artist Detail Mode
         if (window.currentArtistSongsCache) {
             renderArtistSongsUI(window.currentArtistSongsCache);
@@ -108,9 +111,6 @@ function clearSelection() {
 
     // 重新渲染UI
     refreshBatchUI();
-    if (window.LeaderboardManager && document.getElementById('view-leaderboard') && !document.getElementById('view-leaderboard').classList.contains('hidden')) {
-        window.LeaderboardManager.renderSongs();
-    }
     updateBatchToolbar();
 }
 
@@ -336,13 +336,14 @@ function scrollToSearchResultsTop() {
 }
 
 function updatePaginationInfo(start, end, total, current, totalPages) {
+    const pagedNetwork = typeof isPagedNetworkResult === 'function' && isPagedNetworkResult(window.viewingPlaylist);
     const infoEl = document.getElementById('pagination-info');
     if (infoEl) {
         if (total === 0) {
             infoEl.textContent = '无结果';
         } else {
             // 显示 第 X / 共 Y 页 (Z 条)
-            infoEl.textContent = `第 ${current || 1} /  ${totalPages || 1} 页 (${total} 条)`;
+            infoEl.textContent = pagedNetwork ? `第 ${current || 1} / 已加载 ${totalPages || 1} 页 (${total} 首)` : `第 ${current || 1} /  ${totalPages || 1} 页 (${total} 条)`;
         }
     }
 
@@ -367,9 +368,12 @@ function updatePaginationInfo(start, end, total, current, totalPages) {
     if (firstBtn) firstBtn.disabled = pageNum <= 1;
     if (prevBtn) prevBtn.disabled = pageNum <= 1;
     // 歌手/专辑搜索还能向后端追加下一页，下一页按钮要一直可用；歌曲搜索已一次取回，末页就禁用
-    const canAppendFromServer = isNetwork && window.serverPagedSearch !== false;
-    if (nextBtn) nextBtn.disabled = pageNum >= pageCount && !canAppendFromServer;
+    const canLoadSongs = pagedNetwork && window.networkSongSearch.state.providers.some(p => !p.done);
+    const busy = pagedNetwork && (window.networkSongSearch.state.loading || window.networkSongSearch.navigating);
+    const canAppendFromServer = isNetwork && (window.serverPagedSearch !== false || canLoadSongs);
+    if (nextBtn) nextBtn.disabled = busy || (pageNum >= pageCount && !canAppendFromServer);
     if (lastBtn) lastBtn.disabled = pageNum >= pageCount;
+    if (lastBtn) lastBtn.title = pagedNetwork ? '已加载结果的末页' : '末页';
 }
 
 function goToResultPage(page) {
@@ -390,10 +394,12 @@ function lastPage() {
     const totalItems = window.viewingPlaylist ? window.viewingPlaylist.length : 0;
     const itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
     const totalPages = Math.max(1, Math.ceil((totalItems || 1) / (itemsPerPage || 1)));
+    if (typeof isPagedNetworkResult === 'function' && isPagedNetworkResult(window.viewingPlaylist)) return window.goToNetworkResultPage(totalPages);
     if (currentPage !== totalPages) goToResultPage(totalPages);
 }
 
 async function nextPage() {
+    if (typeof isPagedNetworkResult === 'function' && isPagedNetworkResult(window.viewingPlaylist)) return window.goToNetworkResultPage(currentPage + 1);
     const totalItems = window.viewingPlaylist ? window.viewingPlaylist.length : 0;
     const itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
     const totalPages = Math.ceil((totalItems || 1) / (itemsPerPage || 1));
@@ -428,9 +434,7 @@ async function nextPage() {
 
 function prevPage() {
     if (currentPage > 1) {
-        currentPage--;
-        renderResults(viewingPlaylist);
-        scrollToSearchResultsTop();
+        goToResultPage(currentPage - 1);
     }
 }
 
@@ -442,6 +446,11 @@ function jumpToPage() {
     const totalItems = window.viewingPlaylist ? window.viewingPlaylist.length : 0;
     const itemsPerPage = settings.itemsPerPage === 'all' ? totalItems : parseInt(settings.itemsPerPage);
     const totalPages = Math.ceil((totalItems || 1) / (itemsPerPage || 1));
+
+    if (typeof isPagedNetworkResult === 'function' && isPagedNetworkResult(window.viewingPlaylist)) {
+        const canLoad = window.networkSongSearch.state.providers.some(p => !p.done);
+        return window.goToNetworkResultPage(Math.min(Math.max(1, page || 1), Math.max(1, totalPages + (canLoad ? 1 : 0))));
+    }
 
     if (isNaN(page) || page < 1) page = 1;
     if (page > totalPages) page = totalPages;

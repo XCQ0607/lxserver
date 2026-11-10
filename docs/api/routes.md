@@ -16,6 +16,33 @@
 | --- | --- | --- |
 | GET | `/api/status` | — |
 
+## dashboard
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET | `/api/dashboard/overview` | — |
+
+## ratings
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| POST | `/api/subsonic/sync-link` | `user`, `direction`, `preview`, `reconcile` |
+| GET / POST | `/api/data/rating-sync` | 查询参数 `user` |
+| GET / POST | `/api/music/rating-preferences` | `dislikeAutoRating` |
+| GET / POST | `/api/music/ratings` | `operation`, `songs`, `includeDetails`, `song`, `rating` |
+
+## openlist/connection
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / POST | `/api/openlist/connection` | — |
+
+## files
+
+| 方法 | 路径 | 直接读取字段（部分） |
+| --- | --- | --- |
+| GET / HEAD | `/api/files` | 查询参数 `path`；委托 VueFinder，详见 API 参考 |
+
 ## users
 
 | 方法 | 路径 | 直接读取字段（部分） |
@@ -518,7 +545,7 @@
 
 | 方法 | 路径 | 直接读取字段（部分） |
 | --- | --- | --- |
-| POST | `/api/webdav/restore` | — |
+| POST | `/api/webdav/restore` | `preview,mode,targetFilename,strategy,keepCopies,token,cancel` |
 
 ## webdav/logs
 
@@ -578,3 +605,36 @@
 | POST | `/api/music/remaster/start` | — |
 | GET | `/api/music/remaster/status` | — |
 | POST | `/api/music/remaster/cancel` | — |
+
+## 备份恢复任务与内容校验
+
+鉴权、完整请求参数及执行顺序见 [备份接口说明](./reference.md#backup-api)。
+
+| 方法 | 路径 | 主要字段 / 用途 |
+| --- | --- | --- |
+| GET | `/api/webdav/restore/tasks` | `tasks` |
+| POST | `/api/webdav/restore/tasks/<id>/rollback` | `id` |
+| DELETE | `/api/webdav/restore/tasks/<id>` | `id` |
+| POST | `/api/openlist/test` | `endpoint,username,password,token,root` |
+| POST | `/api/openlist/sync` | `user,folder` |
+| GET | `/api/openlist/backups` | `list` |
+| GET | `/api/openlist/metadata` | `job,total` |
+| POST | `/api/openlist/metadata/start` | `target,ids?` |
+| POST | `/api/openlist/metadata/cancel` | `—` |
+| POST | `/api/openlist/retry` | `id` |
+| POST | `/api/openlist/retry-batch` | `ids` |
+| POST | `/api/openlist/delete` | `ids` |
+| POST | `/api/openlist/restore` | `preview,mode,types,backupBeforeRestore,snapshotId,planToken` |
+| GET | `/api/openlist/restore/history` | `history` |
+| GET | `/api/openlist/restore/jobs` | `tasks,maintenance` |
+| POST | `/api/openlist/restore/jobs/start` | `planToken,mode,types,backupBeforeRestore,snapshotId` |
+| POST | `/api/openlist/restore/jobs/<id>/cancel` | `id` |
+| POST | `/api/openlist/restore/jobs/<id>/resume` | `id` |
+| POST | `/api/openlist/restore/jobs/<id>/rollback` | `id` |
+| DELETE | `/api/openlist/restore/jobs/<id>` | `id` |
+| GET | `/api/openlist/integrity` | `job,results` |
+| POST | `/api/openlist/integrity/preview` | `type,user,scope` |
+| POST | `/api/openlist/integrity/start` | `token` |
+| POST | `/api/openlist/integrity/cancel` | `—` |
+
+| GET | `/api/backup/status` | `success,maintenance,webdav,openlist` |

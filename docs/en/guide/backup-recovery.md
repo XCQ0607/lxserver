@@ -1,60 +1,190 @@
-# Cloud backup and recovery
+# Backup and recovery
 
-Use **System settings → Cloud backup scope** to select data types independently for WebDAV and OpenList. Selecting both destinations stores two copies; it does not synchronize the destinations with each other. Each provider still needs its own enabled connection.
+Choose what to save and where to keep it before enabling automatic backups. You can keep a local copy, use WebDAV, use OpenList, or enable both cloud destinations. The two providers store independent copies; they do not synchronize with one another.
 
-## Included files
+## Choose a backup method
 
-| Type | Scope | Restore destination |
+| What you need | Use |
+| --- | --- |
+| Recover a previous playlist or dislike list | Playlist/dislike history snapshots |
+| Recover server settings | Local configuration history |
+| Download data for safekeeping or migration | Local ZIP export/import in Backup management |
+| Automatically copy data to cloud storage | WebDAV or OpenList data backup |
+| Upload playback cache to OpenList or free local cache space | Separate advanced per-user OpenList cache rules |
+
+Configuration history does not include all user files or audio. Playlist snapshots do not include audio either. To recover a full installation, select the required data types and separately protect external music libraries excluded from the backup.
+
+## Choose what to save
+
+Open **Backup management → Cloud backup → Backup scope**, select types independently for WebDAV and OpenList, and save. Clearing every type disables that destination's data backup without deleting files already uploaded.
+
+| Option | Includes |
+| --- | --- |
+| Songs and lyrics | Audio, LRC, artwork and music indexes under the data directory's `music` folder |
+| User source files | Source scripts, ordering/status files and uploaded user files |
+| Playlist and dislike snapshots | Historical snapshots, including the configured external snapshot location |
+| User data | User settings, playback history, favorites and other user files |
+| System and accounts | Server configuration, account list and system JSON files at the data directory root |
+
+**Ordinary data backup excludes cache, logs, temporary files, local backup archives and external custom music directories. Directory links are not followed.** A separate `music` directory in the program working directory is also excluded. Paths refer to your actual data directory, which may differ from the default `data`.
+
+New backup scans, new OpenList history manifests and full content verification exclude `test-evidence` directories. Existing cloud files are not automatically deleted, and older history remains restorable. Failed manual OpenList deletion preserves the affected records and local files for retry using the same records. Some remote files may already have been removed; retries skip missing files. Backup and full verification are blocked during deletion. The verification table shows all latest results for current versions, independently of the task scope selected above.
+
+Advanced OpenList playback caching can upload cache separately for selected users. It is not the same as ordinary data backup. System/account backups may contain credentials; store them somewhere you control.
+
+
+### Program directory versus data directory
+
+These paths are relative to the program working directory and assume the default `DATA_PATH=data`:
+
+| Location | Ordinary WebDAV / OpenList data backup |
+| --- | --- |
+| `cache/` | Excluded: program-directory cache |
+| `music/` | Excluded: program-directory music separate from the data directory |
+| `data/cache/` | Excluded: data-directory playback cache |
+| `data/users/account/cache/` | Excluded: per-user cache; cache directories at other levels are excluded too |
+| `data/music/` | Included when Songs and lyrics is selected and saved; audio, existing LRC, artwork and indexes |
+| External directory, e.g. `D:/Music/` | Excluded; protect separately |
+
+With a custom `DATA_PATH`, the scope is **music under the actual data directory**. For `D:/LXData`, that is `D:/LXData/music`. If the program working directory itself is configured as the data directory, its `music/` can be selected for backup. A blanket rule excluding every root-level music directory would be incorrect. Cache remains excluded.
+
+Saving a scope does not enable the service. WebDAV needs an enabled, configured connection for cloud backup. Local ZIP export/import also uses the WebDAV-column scope but does not require WebDAV to be enabled. Advanced OpenList playback caching has independent user rules that can handle cache without changing ordinary backup exclusions.
+
+## Configure local backups
+
+Open **Backup management → Local backups** for snapshot counts, local configuration history and storage paths.
+
+- Configuration history is enabled by default, runs every 24 hours, retains 7 days and uses the data directory's `backups` folder.
+- The default anchor time is `00:00` in the server's local time. Leave it empty to count intervals from startup or rescheduling.
+- An empty configuration-backup path uses the default. Relative paths start at the data directory; absolute paths are used directly.
+- An empty snapshot path keeps existing per-user snapshot locations. An additional configured location separates snapshots by user.
+
+Local ZIP export/import in **Backup management** does not require WebDAV. It uses the types saved in the WebDAV scope column, so check that selection before exporting.
+
+## Back up with WebDAV
+
+1. Open **Backup management → Cloud backup → WebDAV**, enter the URL and credentials, and enable it.
+2. Set incremental and ZIP directories; defaults are `/lx-sync` and `/lx-sync-backups`.
+3. Save, then test the connection on the same page. The test reads the saved directories without creating files; it does not prove upload or deletion permissions.
+4. Run file synchronization or a full ZIP backup and inspect the result. Start with a small backup and test recovery in a separate installation.
+
+Incremental backup uploads changed files and checks every 60 minutes by default. ZIP archives cover the same selected data; scheduled checks run every 24 hours and create an archive when data changed. A manual full backup can force a new archive.
+
+### Understand the two optional switches
+
+| Switch | Off: recommended default | On |
 | --- | --- | --- |
-| `music` | `data/music/**`, including audio, lyrics, covers and `music_index.json` | The current data directory, retaining relative paths |
-| `userFiles` | `users/source/**`, `source/**`, `uploads/**` | The same relative paths in the current data directory |
-| `snapshots` | Playlist/dislike snapshot bodies and `snapshotInfo.json`, including extensionless bodies | Original relative paths; external playlist snapshots use the current `snapshot.backupPath` |
-| `userData` | Other user files under `users/<account-directory>/**` | The same account directories and relative paths |
-| `system` | `config.js` and JSON files in the data directory root, including `users.json` and `serverInfo.json` | Current `CONFIG_PATH` for configuration; current data directory for JSON |
+| Delete the WebDAV incremental copy when its local file is deleted | Keep the cloud copy | Next incremental run deletes the tracked counterpart; historical ZIPs remain |
+| Overwrite selected local data from WebDAV before every startup | Restore manually when needed | Restore before opening the service; cloud files replace matching local files |
 
-Cache, runtime data, logs, temporary files, SQLite working databases/WAL and local backup archives are always excluded. Directory links are not followed. External custom music directories are not included. Preserve account directory names during recovery. Music indexes and audio are grouped together. System and user data can contain credentials or device information.
+Startup restoration is for deployments deliberately using the cloud as their recovery source. It is not limited to an empty first start and can overwrite newer local data. Failure leaves maintenance mode active and does not upload local data to the cloud.
 
-## System configuration
+### Retention and transfer usage
 
-```js
-module.exports = {
-  'backup.webdav.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
-  'backup.openlist.types': ['music', 'userFiles', 'snapshots', 'userData', 'system'],
-  'backup.webdav.mirrorDeletes': false,
-  'backup.webdav.restoreOnStartup': false,
-}
-```
+ZIP retention defaults to 5 archives and 0 days (no age limit). Successful uploads clean archives exceeding either limit, always keeping the newest. This does not clean the incremental directory.
 
-An empty type array disables data backup for that destination. The admin UI validates and saves these fields in the active configuration file. Deselecting a type does not remove existing cloud copies.
+Uploads check the response and remote size without downloading the whole file again. Safe replacement requires WebDAV `MOVE`; check server/proxy support if MOVE fails. Matching size is not proof of matching contents.
 
-The old `webdav.excludeCache` and `webdav.excludeMusic` interfaces remain for compatibility. Explicit type arrays control the new scope; cache is always excluded. The old `openlist.backupSystemConfig` applies only to the legacy flow without explicit types, avoiding a second system-backup switch in the new UI.
+## Back up with OpenList
 
-## Provider behavior
+1. Open **Backup management → Cloud backup → OpenList**, and enter the endpoint and token or account details.
+2. Enter an **existing OpenList mount path** such as `/local` as the root. Do not enter a Windows host path such as `E:\OpenList`; configure that physical path inside OpenList's storage settings.
+3. Enable, save and test, then run the immediate backup/cache-sync action.
+4. Inspect upload results in the corresponding record tab.
 
-WebDAV incremental backup stores selected files under `webdav.syncPath`; ZIP backup archives the same scope under `webdav.backupPath`. Separate successful baselines prevent incremental uploads from suppressing ZIP backups. Failed uploads remain eligible for retry.
+Ordinary backups keep relative paths under `_data` within the configured root. For example, a song might be stored at `/local/_data/music/account/song.mp3`. Its physical disk location depends on the OpenList mount.
 
-Local offline ZIP export/import uses the saved WebDAV-column scope without requiring an enabled connection or accessing the cloud. The UI states this explicitly so partial exports are not mistaken for whole-server backups. Daily local configuration history remains controlled by `configBackup.*`; it does not replace a data backup.
+Data backups retain local files. Deleting a local file does not automatically delete its `_data` backup. Advanced playback caching has separate user rules and locations; only an explicit upload-and-delete rule removes corresponding cache files after strict verification.
 
-Cloud files are retained after local deletion by default. Enable `backup.webdav.mirrorDeletes` to propagate deletions to scattered files; historical ZIPs remain unchanged. Backup and restore operations do not run concurrently within one WebDAV instance.
+### Upload completion versus content verification
 
-OpenList stores data at `<openlist.root>/_data/<relative-path>`. Data backup uploads files and retains local copies. `openlist.syncInterval` controls scheduled runs. Recovery enumerates cloud files directly, so a fresh installation can recover without the previous SQLite database.
+“Upload complete” means upload and remote size checks succeeded, not full content equality. Ordinary backup does not download songs for SHA-256 verification. The Backed up task state and the Content verification filter are independent. Verification results describe the current registered backup fingerprint at a past check time; changed versions or observed cloud changes require another check. Legacy internal verified states alone do not qualify. Upload-and-delete and restoration retain their automatic safety checks.
 
-Advanced permanent playback caching is separate. Per-user cache rules may upload disposable cache files, delete local copies after verification, or provide Subsonic direct/proxy delivery. Selecting `music` in the backup matrix does not enable cache uploading. Song, snapshot and system backup are no longer controlled twice by these per-user cache rules.
+To check contents, open **Backup management → Records and verification → OpenList → Content verification**:
 
-Before removing a local playback-cache copy, SHA-256 verification reads the actual cloud bytes. This adds a remote verification transfer. Files modified during transfer are retained. Normal data backup never removes local files after upload.
+1. Choose the user, type and scope, then preview estimated transfer usage.
+2. The default checks unchecked or changed versions. Choose all current files when investigating later cloud corruption.
+3. Confirm and start; the job runs in the background and can be stopped.
+4. Review matching contents, mismatches, missing files and read errors. Verification does not automatically repair or overwrite cloud files.
 
-## Recovery procedure
+If storage supplies a usable SHA-256 it can be compared directly; otherwise verification reads the remote body and consumes download transfer. Legacy records without upload fingerprints require another backup to establish a baseline. Upload-and-delete cache rules still require strict content verification and may read remote audio and attachments.
 
-1. Configure the destination server's cloud connection, data directory, `CONFIG_PATH` and snapshot mounts.
-2. Select and save the types to restore. Configure `snapshot.backupPath` before restoring external snapshots; cloud absolute paths are never used as destinations.
-3. Restore scattered files or a specified ZIP from WebDAV, or use OpenList's restore action. Only selected types are downloaded. Matching local files are replaced, local-only files remain, and no files are uploaded during restore.
-4. Check results and logs. Downloads use temporary files and rename after completion. A multi-file restore is not an atomic transaction; inspect partial failures and retry.
-5. Restart the service to reload accounts, playlists, sources and music indexes. Refreshing the browser alone does not reload all server-side state.
+## Filter OpenList backup records
 
-Startup restore is disabled by default. Set `backup.webdav.restoreOnStartup=true` only when unattended disaster recovery is intended; matching files will be overwritten. Automatic recovery tries ZIP only when the scattered directory is missing or has no selected files. Authentication/network errors do not imply an empty cloud. Failed recovery never initializes the cloud by uploading local files.
+In Backup management → Records and verification, select OpenList file records. The record panel contains one set of filters: type buttons, user, storage category, local availability and sorting. Click a status card to filter that status; click again to clear it. Counts reflect other active conditions. Active-condition chips can be removed individually.
 
-Old ZIPs are filtered using the current selection, even if they contain caches. Legacy per-user OpenList audio remains accessible through compatible cache flows; the new unified restore reads `_data` and does not guess or move legacy directories.
+Space-separated search terms must all match, across filenames, users, paths and available song metadata. More conditions adds path, snapshot subtype and an inclusive update-date range interpreted in browser-local time. Conditions combine; remove individual chips or reset if nothing matches. Filtering/pagination reuse loaded records; Refresh records and re-entering the record view fetch current results. These controls do not change backup scope or files.
 
-## Validation limits
+## Restore your data
 
-Regression coverage uses real SQLite, a local HTTP OpenList fixture, a WebDAV client substitute, ZIP archives and fresh restore directories. It covers selection, cache exclusion, retry behavior and selected Subsonic delivery paths. It does not establish compatibility with every real cloud mount, WebDAV server or Subsonic client. Verify a small backup in an independent directory before relying on it.
+Recovery runs **from the backup to the current server**. It does not upload local files or delete files that exist only locally.
+
+### WebDAV
+
+1. Confirm the current data/configuration locations and external snapshot path, then save the types to restore.
+2. Open **Backup management → Data recovery → WebDAV** and choose the incremental directory or a specific ZIP.
+3. Choose missing-only or overwrite. Keeping pre-restore copies is recommended.
+4. Preview additions, replacements, index merges and skips before confirming. ZIP preview downloads the entire archive once and reuses it on confirmation; cancelling or expiry removes that temporary archive.
+5. Restart the service to reload accounts, playlists, sources and music indexes.
+
+### OpenList
+
+Open **Backup management → Data recovery → OpenList**, select the current backup or an available historical version, choose scope and overwrite behavior, then scan and confirm. Restore records show progress and support continuation, cancellation or rollback where available. A fresh installation can enumerate cloud data without the old backup database.
+
+### Replacement rules and failures
+
+- **Missing-only:** retain existing files and add absent files. Required music/snapshot indexes merge entries; ordinary JSON files are not merged field by field.
+- **Overwrite:** matching files in the selected scope come from the backup. Local-only files remain; the directory is not cleared.
+- **Pre-restore copies:** kept by default for rollback. Rollback refuses files modified again after restoration. Delete records and copies explicitly when no longer needed.
+
+Required files are staged and checked before local replacement. Download failure changes no originals; write failure attempts rollback. Legacy backups without fingerprints receive size checks and a warning. Allow extra disk space for staged files and pre-restore copies.
+
+Recovery enters maintenance mode. Restart after a manual restore; refreshing the browser is insufficient. If a process stops during commit or rollback fails, use restore records to resolve rollback before restarting normal service.
+
+## Common questions
+
+**“Storage not found”?** Check that the OpenList mount exists, is enabled and matches the configured root. Connecting to OpenList alone does not create writable storage.
+
+**Why are LRC files uploaded?** Songs and lyrics includes existing LRC under the data directory's `music` folder. The advanced cache attachment switch only controls separate cache rules. Disabling lyric generation does not delete existing LRC.
+
+**Nothing changed after restore?** Check source, types, account directories and replacement mode. Missing-only skips existing files. Restart after completion before checking results.
+
+**Do WebDAV and OpenList synchronize with each other?** No. Choose one source explicitly when restoring.
+
+See [configuration](./configuration.md) for keys/defaults and the [backup API](../api/reference.md#backup-api) for scripting.
+
+### Task states and verification results
+
+Record states describe pending uploads, pending downloads, active transfers, backed-up files, items needing attention, failures and paused rules. Local size or modification-time changes flag enabled upload rules for the existing scheduled process. Background content comparison refreshes the baseline when only metadata changed. Disabled services or scopes appear paused. Removing local playback cache after upload does not request cloud deletion.
+
+Content verification is a separate historical result, not a real-time guarantee. Old matching badges are hidden while local changes or transfers are pending. Observed cloud changes mark previous results as needing rechecking and include them in the default verification scope. Select all current files to detect later corruption with unchanged size and timestamps. Refreshing records checks local metadata without downloading cloud bodies. Diagnostic states remain in details and advanced filters. User and type filters also apply to verification results.
+
+### Manual metadata checks and timestamps
+
+In records, choose Check files, select local, cloud or both, and selected records, current filtered results or all records for this connection. Checks cover primary record files; use content verification for attachments. Historical objects are excluded. Checks inspect existence, size and modification time without uploading, downloading bodies, deleting files or producing SHA-256 results. Cloud requests run sequentially and can be stopped while preserving completed observations.
+
+Advanced filters show checked X/Y records and the newest check time for the matching scope; hover for the oldest timestamp. This does not imply every file was checked successfully in one run. Details show per-file timestamps. Listing records refreshes local metadata; manual local check times are retained separately. Cloud observations persist by connection and backup version across restarts. Interrupted jobs must be restarted.
+
+### Subsonic ratings and snapshots
+
+The rating-playlist switch controls virtual playlist visibility only. Each link switch controls its own direction; a zero threshold disables linking. Links only fill missing data: raising or clearing a rating preserves dislike rules, removing a dislike preserves ratings, and existing ratings are never overwritten. The one-star playlist also includes disliked tracks while preserving their actual ratings.
+
+Restoring a rating snapshot replaces ratings only and preserves current artist and album favorites, including when reading legacy snapshots. Rating snapshots and their index belong to the snapshots backup scope; the current subsonic-meta.json belongs to user data. Select both scopes for a complete backup. If ratings are saved but dislike resolution or writing fails, the client receives a partial-success error and can retry or use manual synchronization. The two stores are not a cross-file transaction. Evicted rated tracks are resolved again when possible; unavailable sources retain their ratings but may temporarily prevent playlist display.
+
+New dislike rules are deduplicated and matched by source; rules without a source explicitly apply to all sources. Duplicate records with matching source and non-conflicting song identity fill missing fields while preserving valid data and display names. Dislikes record provenance and enrichedBy; rating provenance is stored in ratingOrigins. Manual linking previews candidates including the online cache, counts unresolved targets as failures, and reports enrichment separately.
+
+Configuration changes do not reconcile historical data. Raising the threshold allows manual linking to add newly qualifying rules. Lowering it, setting it to zero, disabling linking, or clearing ratings does not remove existing rules. Matching and visibility settings only change subsequent filtering and display. Automatic Web-to-rating linking applies only to individual songs with a source and song ID; artist and album dislikes are not written as song ratings.
+
+The admin Data view includes a Dislikes tab for the selected user, combining dislike rules and disliked artist/album libraries. Filter by type, creation channel, platform, or keyword; inspect saved covers, rules, ratings, and complete fields. Missing provenance is explicitly shown as unrecorded rather than inferred. The view is read-only and does not change linking or ratings.
+
+Rating identity migration and restore use a transaction journal: write failures roll back, and the next rating access completes an interrupted commit. Restore normalizes local/online scores against current file links and updates rating IDs in dislike reasons while preserving manual reasons and older snapshots. The temporary journal is stored in each user’s `rating/transaction.json` and removed after completion. Multiple server processes must not write to the same data directory concurrently.
+
+### OpenList connection status
+
+The backup records page shows destination health separately, including the latest probe and successful connection times. “探测连接” (Probe connection) checks authentication and the configured backup directory without uploading or downloading files. An unavailable destination preserves historical backup results and marks remote observations as temporarily unavailable. Automatic probes back off from 30 seconds to 5 minutes; recovery triggers a check of previously backed-up files. A successful connection or unchanged metadata does not prove content integrity.
+
+Connection failures use Chinese explanations, while record details retain raw diagnostics. Uploads, downloads, and attachment transfers return to pending on destination outages without consuming per-file retry attempts, then continue after recovery. File checks preserve their current position while disconnected, display a waiting state, and retry the current file after recovery. They remain cancellable. A process restart marks unfinished checks as interrupted; start a new check to proceed.
+
+“上次未变” means the last metadata observation was unchanged. The per-record “检查” action only checks local and remote metadata; “重试上传／重试下载” performs a transfer.
+
+Before propagating a bidirectional deletion, files and readable linked attachments are copied to `backups/openlist-recycle/<random-id>/` under the data directory. A `manifest.json` records original paths for manual recovery. A failed safety copy prevents deletion. Recycle copies are not automatically removed. More than 20 candidate deletions in one user folder pause that folder's synchronization before any deletion, upload, or download. Check the mount and local directory, then handle confirmed deletions manually in smaller batches. Explicit administrator deletion actions are unchanged.

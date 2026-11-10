@@ -414,8 +414,8 @@
                 ">${cancel_text}</button>` : ''}
                 
                 <button id="ph-btn-confirm" class="ph-btn" style="
-                    flex:1; padding:12px; border:none; background:${styleConfig.color}; 
-                    color:#ffffff; border-radius:14px; cursor:pointer; font-weight:600; font-size:14px;
+                    flex:1; padding:12px; border:none; background:var(--notification-button-bg, ${styleConfig.color});
+                    color:var(--notification-button-text, #ffffff); border-radius:14px; cursor:pointer; font-weight:600; font-size:14px;
                     box-shadow: 0 4px 16px color-mix(in srgb, ${styleConfig.color} 35%, transparent); letter-spacing: 0.3px;
                 ">${confirm_text}</button>
             </div>

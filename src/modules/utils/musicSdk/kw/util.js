@@ -2,7 +2,7 @@
 import { createCipheriv, createDecipheriv } from 'crypto'
 import { toMD5 } from '../utils'
 import { inflate } from 'zlib'
-import iconv from 'iconv-lite'
+// Legacy decoder import: import iconv from 'iconv-lite'
 
 // const kw_token = {
 //   token: null,
@@ -70,7 +70,49 @@ export const matchToken = headers => {
 // })
 
 // Server-side implementation of decodeLyric (ported from desktop main process)
-const handleInflate = async (data) => {
+// Legacy implementation retained for reference; inactive.
+// const handleInflate = async (data) => {
+//   return new Promise((resolve, reject) => {
+//     inflate(data, (err, result) => {
+//       if (err) {
+//         reject(err)
+//         return
+//       }
+//       resolve(result)
+//     })
+//   })
+// }
+//
+// const buf_key = Buffer.from('yeelion')
+// const buf_key_len = buf_key.length
+//
+// const decodeLyricInternal = async (buf, isGetLyricx) => {
+//   if (buf.toString('utf8', 0, 10) != 'tp=content') return ''
+//   const lrcData = await handleInflate(buf.subarray(buf.indexOf('\r\n\r\n') + 4))
+//
+//   if (!isGetLyricx) return iconv.decode(lrcData, 'gb18030')
+//
+//   const buf_str = Buffer.from(lrcData.toString(), 'base64')
+//   const buf_str_len = buf_str.length
+//   const output = new Uint8Array(buf_str_len)
+//   let i = 0
+//   while (i < buf_str_len) {
+//     let j = 0
+//     while (j < buf_key_len && i < buf_str_len) {
+//       output[i] = buf_str[i] ^ buf_key[j]
+//       i++
+//       j++
+//     }
+//   }
+//
+//   return iconv.decode(Buffer.from(output), 'gb18030')
+// }
+//
+// export const decodeLyric = async ({ lrcBase64, isGetLyricx }) => {
+//   const lrc = await decodeLyricInternal(Buffer.from(lrcBase64, 'base64'), isGetLyricx)
+//   return Buffer.from(lrc).toString('base64')
+// }
+const handleInflate = async(data) => {
   return new Promise((resolve, reject) => {
     inflate(data, (err, result) => {
       if (err) {
@@ -85,12 +127,11 @@ const handleInflate = async (data) => {
 const buf_key = Buffer.from('yeelion')
 const buf_key_len = buf_key.length
 
-const decodeLyricInternal = async (buf, isGetLyricx) => {
-  if (buf.toString('utf8', 0, 10) != 'tp=content') return ''
+export const decodeLyric = async(rawData, isGetLyricx) => {
+  const buf = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData)
+  if (buf.toString('utf8', 0, 10).toLowerCase() !== 'tp=content') return ''
   const lrcData = await handleInflate(buf.subarray(buf.indexOf('\r\n\r\n') + 4))
-
-  if (!isGetLyricx) return iconv.decode(lrcData, 'gb18030')
-
+  if (!isGetLyricx) return lrcData.toString('utf8')
   const buf_str = Buffer.from(lrcData.toString(), 'base64')
   const buf_str_len = buf_str.length
   const output = new Uint8Array(buf_str_len)
@@ -104,13 +145,10 @@ const decodeLyricInternal = async (buf, isGetLyricx) => {
     }
   }
 
-  return iconv.decode(Buffer.from(output), 'gb18030')
+  return Buffer.from(output).toString('utf8')
 }
 
-export const decodeLyric = async ({ lrcBase64, isGetLyricx }) => {
-  const lrc = await decodeLyricInternal(Buffer.from(lrcBase64, 'base64'), isGetLyricx)
-  return Buffer.from(lrc).toString('base64')
-}
+
 
 // export const tokenRequest = async(url, options = {}) => {
 //   let token = kw_token.token
@@ -148,8 +186,8 @@ export const lrcTools = {
   getWordInfo(str, str2, prevWord) {
     const offset = parseInt(str)
     const offset2 = parseInt(str2)
-    let startTime = Math.abs((offset + offset2) / (this.offset * 2))
-    let endTime = Math.abs((offset - offset2) / (this.offset2 * 2)) + startTime
+    let startTime = Math.trunc(Math.abs((offset + offset2) / (this.offset * 2)))
+    let endTime = Math.trunc(Math.abs((offset - offset2) / (this.offset2 * 2)) + startTime)
     if (prevWord) {
       if (startTime < prevWord.endTime) {
         prevWord.endTime = startTime

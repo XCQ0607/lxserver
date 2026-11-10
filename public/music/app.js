@@ -71,6 +71,7 @@ window.addEventListener('lx-cast-track', event => {
 
 // Initialize Unified Search for Global (Favorites/Search)
 window.goToPage = function (page) {
+    if (isPagedNetworkResult(window.viewingPlaylist)) return window.goToNetworkResultPage(page);
     currentPage = page;
     window.currentPage = page;
     // 歌曲搜索的结果已一次性取回，跳页只需本地重渲染；歌手/专辑仍要向后端追加
@@ -158,9 +159,10 @@ const DEFAULT_SETTINGS = {
     detailVisualizerStyle: 'pulse',
     visualizerOpacity: 0.5,
     visualizerGlobalStyle: 'blocks',
-    vuMeterTheme: 'vintage-amber',
+    vuMeterTheme: 'study-nocturne',
     // Cache Settings
     enableServerCache: true, // 开启服务器缓存
+    preferLocalLyrics: true, // 先读取服务器 music/cache/自定义曲库的 LRC
     enableServerLyricCache: true, // 开启服务器歌词文件缓存
     embedLyricToFile: true, // 下载时将歌词嵌入文件（标签+.lrc）
     serverCacheLocation: 'root', // 缓存位置: 'data' (synced) or 'root' (local)
@@ -202,6 +204,10 @@ function normalizeStoredSettings(nextSettings) {
     nextSettings.serverCacheNamingPattern = validPatterns.includes(nextSettings.serverCacheNamingPattern)
         ? nextSettings.serverCacheNamingPattern
         : 'simple';
+    const vuThemes = ['study-nocturne', 'study-heritage', 'study-atelier', 'study-riviera', 'study-cobalt'];
+    if (!vuThemes.includes(nextSettings.vuMeterTheme)) {
+        nextSettings.vuMeterTheme = 'study-nocturne';
+    }
     return nextSettings;
 }
 
@@ -1175,6 +1181,7 @@ async function ensureUserAuthToken(options = {}) {
                 headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
             });
             const result = response.ok ? await response.json() : null;
+            if ((localStorage.getItem('lx_sync_user') || '') !== username) return false;
             if (result?.valid && result.user === username) {
                 userToken = token;
                 return true;
@@ -1202,6 +1209,7 @@ async function ensureUserAuthToken(options = {}) {
 
             const result = await response.json();
             if (!result.success || !result.token) return false;
+            if ((localStorage.getItem('lx_sync_user') || '') !== username) return false;
 
             userToken = result.token;
             localStorage.setItem('lx_user_token', userToken);
@@ -1219,20 +1227,34 @@ async function ensureUserAuthToken(options = {}) {
 }
 window.ensureUserAuthToken = ensureUserAuthToken;
 
-async function restorePlaybackSession(allowRefresh = true) {
-    if (!isUserLoggedIn()) return false;
+async function restorePlaybackSession(allowRefresh = true, strict = false) {
+    const expectedUser = localStorage.getItem('lx_sync_user') || '';
+    const loggedIn = isUserLoggedIn();
+    if (!loggedIn && !strict) return false;
+    const checkAccount = () => {
+        if ((localStorage.getItem('lx_sync_user') || '') !== expectedUser) {
+            throw Object.assign(new Error('账号已切换，请重新发起下载'), { status: 409 });
+        }
+    };
     let valid;
     try {
         // Check the cookie alone: native audio cannot attach the API token header.
         const response = await fetch('/api/music/auth/verify', {
             cache: 'no-store', signal: AbortSignal.timeout(5000)
         });
-        if (!response.ok) return false;
+        if (!response.ok) {
+            if (strict) throw new Error('无法确认登录状态，请稍后重试');
+            return false;
+        }
         const session = await response.json();
-        valid = session.valid === true && session.user === localStorage.getItem('lx_sync_user');
-    } catch (_) { return false; }
+        valid = session.valid === true && (!loggedIn || session.user === expectedUser);
+    } catch (error) {
+        if (strict) throw error;
+        return false;
+    }
+    if (strict) checkAccount();
     if (valid !== false) return false;
-    if (allowRefresh) {
+    if (allowRefresh && loggedIn) {
         const token = (typeof userToken !== 'undefined' && userToken) || localStorage.getItem('lx_user_token');
         if (token) {
             try {
@@ -1241,13 +1263,27 @@ async function restorePlaybackSession(allowRefresh = true) {
                     headers: { 'x-user-token': token }, cache: 'no-store', signal: AbortSignal.timeout(5000)
                 });
                 const session = response.ok ? await response.json() : null;
-                if (session?.valid && session.user === localStorage.getItem('lx_sync_user')) return true;
-            } catch (_) { }
+                if (strict) checkAccount();
+                if (session?.valid && session.user === expectedUser) return true;
+            } catch (error) { if (error.status === 409) throw error; }
         }
-        if (localStorage.getItem('lx_sync_pass') && await ensureUserAuthToken({ force: true })) return true;
+        if (strict) checkAccount();
+        if (localStorage.getItem('lx_sync_pass') && await ensureUserAuthToken({ force: true })) {
+            if (strict) checkAccount();
+            return true;
+        }
     }
     throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
 }
+window.ensureDownloadSession = async () => {
+    const account = localStorage.getItem('lx_sync_user') || '';
+    const refreshed = await restorePlaybackSession(true, true);
+    // Verify that the browser actually accepted the replacement cookie.
+    if (refreshed) await restorePlaybackSession(false, true);
+    if ((localStorage.getItem('lx_sync_user') || '') !== account) {
+        throw Object.assign(new Error('账号已切换，请重新发起下载'), { status: 409 });
+    }
+};
 
 /**
  * 更新顶部栏的用户状态显示 (登录按钮/用户名)
@@ -1428,6 +1464,7 @@ async function handleHeaderLogout(e) {
             } catch (err) { }
             const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
             localStorage.clear();
+    window.dispatchEvent(new Event('ratingaccountchange'));
             sessionStorage.clear();
             if (agreementAccepted) localStorage.setItem('lx_agreement_accepted', agreementAccepted);
             window.location.reload();
@@ -1522,6 +1559,7 @@ async function handleLogout() {
 
     const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
     localStorage.clear();
+    window.dispatchEvent(new Event('ratingaccountchange'));
     sessionStorage.clear();
     if (agreementAccepted) localStorage.setItem('lx_agreement_accepted', agreementAccepted);
 
@@ -1815,6 +1853,7 @@ function changeQualityPreference(quality) {
 
 // Tab Switching
 function switchTab(tabId) {
+    clearSearchDetailView();
     // Favorites entry opens the default favorite list (love / default) or guidance view
     if (tabId === 'favorites') {
         exitListSecondaryModes();
@@ -1847,6 +1886,7 @@ function switchTab(tabId) {
     if (tabId !== 'search') window.SearchRequests?.cancel();
 
     activeView.classList.remove('hidden');
+    window.refreshSearchStatusVisibility?.();
     // small delay to allow display block to apply before opacity transition
     setTimeout(() => {
         activeView.classList.remove('opacity-0');
@@ -1897,11 +1937,10 @@ function switchTab(tabId) {
     if (tabId === 'search') {
         initGlobalListSearch(); // [New] 强制重置 ListSearch 为 'global' 模式
         currentSearchScope = 'network';
+        window.refreshSearchStatusVisibility?.();
         document.getElementById('search-source').classList.remove('hidden');
         document.getElementById('search-type').classList.remove('hidden');
         document.getElementById('page-title').innerText = "搜索音乐";
-        if (typeof hideAlbumDetailHeader === 'function') hideAlbumDetailHeader();
-        if (typeof hideArtistDetailHeader === 'function') hideArtistDetailHeader();
 
         const searchInput = document.getElementById('search-input');
         const searchTypeEl = document.getElementById('search-type');
@@ -2121,7 +2160,7 @@ document.addEventListener('DOMContentLoaded', () => {
 // ==================== 播放队列 (Queue) 逻辑 ====================
 let isQueueRendered = false;
 
-function toggleQueueDrawer() {
+function toggleQueueDrawer(targetIndex = null) {
     const drawer = document.getElementById('queue-drawer');
     if (!drawer) return;
 
@@ -2131,7 +2170,8 @@ function toggleQueueDrawer() {
         renderQueue();
         // 自动定位当前歌曲
         setTimeout(() => {
-            scrollToCurrentSongInQueue(false);
+            if (Number.isInteger(targetIndex)) scrollToSongInQueue(targetIndex);
+            else scrollToCurrentSongInQueue(false);
         }, 350); // 等待抽屉打开动画完成
 
         // Hide sidebar if open on mobile
@@ -2147,6 +2187,21 @@ function toggleQueueDrawer() {
     }
 }
 window.toggleQueueDrawer = toggleQueueDrawer;
+
+function scrollToSongInQueue(index) {
+    const item = document.getElementById('queue-list')?.children[index];
+    if (!item) return;
+    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    item.classList.add('ring-2', 'ring-emerald-500/50', 'ring-inset');
+    setTimeout(() => item.classList.remove('ring-2', 'ring-emerald-500/50', 'ring-inset'), 1000);
+}
+
+function revealSongInQueue(index) {
+    const drawer = document.getElementById('queue-drawer');
+    if (!drawer) return;
+    if (drawer.classList.contains('translate-x-full')) toggleQueueDrawer(index);
+    else scrollToSongInQueue(index);
+}
 
 /**
  * 定位播放队列中当前播放的歌曲
@@ -2214,7 +2269,7 @@ function renderQueue() {
                 
                 <div class="flex-1 min-w-0">
                     ${createMarqueeHtml(song.name, 'text-sm font-bold ' + (isActive ? 'text-emerald-500' : 't-text-main'))}
-                    <div class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
+                    <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
                         ${getSourceTag(song.source)}
                         ${getQualityTags(song)}
                         ${createMarqueeHtml(song.singer, 'text-[10px] t-text-muted flex-1')}
@@ -2349,6 +2404,7 @@ window.clearQueue = clearQueue;
 
 // Search Logic
 function handleSearchKeyPress(e) {
+    if (e.isComposing || e.keyCode === 229 || window.SearchSuggestions?.composing) return;
     if (e.key === 'Enter') {
         if (typeof hideSearchSuggestions === 'function') hideSearchSuggestions();
         doSearch();
@@ -2381,6 +2437,7 @@ function performSearch(query, source = null) {
     // 重置搜索范围到全网搜索
     if (typeof currentSearchScope !== 'undefined') {
         currentSearchScope = 'network';
+        window.refreshSearchStatusVisibility?.();
     }
 
     // 设置搜索框内容
@@ -2419,6 +2476,120 @@ window.handleSearchTypeChange = handleSearchTypeChange;
 
 const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg'];
 
+function isPagedNetworkResult(list) {
+    const detailVisible = ['artist-detail-header', 'album-detail-header'].some(id => {
+        const header = document.getElementById(id);
+        return header && !header.classList.contains('hidden');
+    });
+    return window.currentSearchScope === 'network' && !!window.networkSongSearch &&
+        !detailVisible && !window.glSortMode && window.networkSongSearch.state.list === list;
+}
+
+function renderNetworkSearchFooter(visible) {
+    const footer = document.getElementById('network-search-more');
+    if (!footer) return;
+    footer.classList.toggle('hidden', !visible);
+    if (!visible) return;
+    const state = window.networkSongSearch.state;
+    const remaining = state.providers.filter(provider => !provider.done);
+    const failed = state.providers.filter(provider => provider.error);
+    const info = document.getElementById('network-search-count');
+    if (info) info.textContent = `已加载 ${state.list.length} 首` + (failed.length ? ` · ${failed.map(p => getSourceName(p.source)).join('、')}暂未加载成功` : '');
+    const button = document.getElementById('network-search-load-more');
+    if (button) {
+        button.disabled = state.loading || window.networkSongSearch.navigating || !remaining.length;
+        button.textContent = state.loading ? '正在加载…' : !remaining.length ? '已加载全部可用结果' : failed.length ? '加载更多 / 重试失败音源' : '加载更多';
+    }
+    footer.setAttribute('aria-busy', String(state.loading));
+    if (state.loading || window.networkSongSearch.navigating) {
+        const next = document.getElementById('search-btn-next');
+        if (next) next.disabled = true;
+    }
+}
+
+async function searchNetworkSongs(keyword, source, headers, request, append = false) {
+    const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
+        keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
+    });
+    if (!append) window.networkSongSearch = search;
+    const current = () => request.current() && window.networkSongSearch === search &&
+        window.currentSearchScope === 'network';
+    window.serverPagedSearch = false;
+    window.lastSearchMeta = null;
+    const loading = search.load({
+        current,
+        fetchPage: (provider, page, limit) => request.json(`${API_BASE}/search?name=${encodeURIComponent(keyword)}&source=${provider}&page=${page}&limit=${limit}&type=song`, headers, 10000),
+        progress: (done, total) => window.setSearchStatus(`正在加载：${done}/${total} 个音源已完成`, true),
+    });
+    renderNetworkSearchFooter(append);
+    await loading;
+    if (!current()) {
+        if (isPagedNetworkResult(window.viewingPlaylist)) renderNetworkSearchFooter(true);
+        return;
+    }
+    const state = search.state;
+    const failed = state.providers.filter(provider => provider.error);
+    const message = `已加载 ${state.list.length} 首 · ${state.providers.filter(p => p.page > 0).length}/${state.providers.length} 个音源已返回` +
+        (failed.length ? ` · ${failed.map(p => getSourceName(p.source)).join('、')}可重试` : '');
+    window.setSearchStatus(message, false);
+    if (!append) currentPage = 1;
+    window.currentPage = currentPage;
+    window.savedNetworkSearchState = {
+        keyword, source, type: 'song', list: state.list, page: currentPage, meta: null, serverPagedSearch: false,
+    };
+    // The new round stays behind existing rows. Preserve scroll and selected IDs.
+    const container = document.getElementById('search-results');
+    const scrollTop = container?.scrollTop || 0;
+    window.viewingPlaylist = state.list;
+    if (append && window.ListSearch?.state.active) window.ListSearch.handleSearch();
+    else renderResults(state.list);
+    if (!state.list.length && failed.length && container) container.textContent = '暂未获得结果，可点击下方按钮重试失败音源。';
+    if (append && container) container.scrollTop = scrollTop;
+    renderNetworkSearchFooter(true);
+}
+
+window.loadMoreNetworkSongs = async function ({ navigation = false } = {}) {
+    const search = window.networkSongSearch;
+    if (!search || search.state.loading || (search.navigating && !navigation) || !isPagedNetworkResult(window.viewingPlaylist)) return;
+    if (document.getElementById('search-input')?.value.trim() !== search.state.keyword) return;
+    const request = window.SearchRequests.begin();
+    const headers = { ...getUserAuthHeaders() };
+    if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
+    await searchNetworkSongs(search.state.keyword, window.savedNetworkSearchState?.source || 'all', headers, request, true);
+    return request.current() && window.networkSongSearch === search;
+};
+
+window.goToNetworkResultPage = async function (page) {
+    const search = window.networkSongSearch;
+    if (!search || search.state.loading || search.navigating || !isPagedNetworkResult(window.viewingPlaylist)) return;
+    const displayCount = () => window.ListSearch ? window.ListSearch.getDisplayList(search.state.list).length : search.state.list.length;
+    const showAll = settings.itemsPerPage === 'all';
+    const size = Math.max(1, parseInt(settings.itemsPerPage) || 20);
+    const target = Math.max(1, Math.floor(Number(page) || 1));
+    const originPage = currentPage;
+    const current = () => window.networkSongSearch === search && isPagedNetworkResult(window.viewingPlaylist);
+    search.navigating = true;
+    try {
+        // Fill a partial page before moving onto it, so newly fetched rows are
+        // not silently skipped between the old last page and the next one.
+        while ((showAll || displayCount() < target * size) && search.state.providers.some(p => !p.done)) {
+            const before = search.state.list.length;
+            const beforeDisplay = displayCount();
+            const committed = await window.loadMoreNetworkSongs({ navigation: true });
+            if (!committed || !current() || currentPage !== originPage) return;
+            if (showAll || search.state.list.length === before || displayCount() === beforeDisplay || search.state.providers.some(p => p.error)) break;
+        }
+        if (!current()) return;
+        const maxPage = showAll ? 1 : Math.max(1, Math.ceil(displayCount() / size));
+        goToResultPage(Math.min(target, maxPage));
+    } finally {
+        search.navigating = false;
+        if (current()) {
+            renderResults(search.state.list);
+            renderNetworkSearchFooter(true);
+        }
+    }
+};
 
 //搜索歌曲
 async function doSearch(page = 1, append = false) {
@@ -2429,6 +2600,7 @@ async function doSearch(page = 1, append = false) {
     }
     const request = window.SearchRequests.begin();
     window.setSearchStatus();
+    renderNetworkSearchFooter(false);
     const typeEl = document.getElementById('search-type');
     const type = typeEl ? typeEl.value : 'song';
 
@@ -2502,7 +2674,7 @@ async function doSearch(page = 1, append = false) {
     const source = document.getElementById('search-source').value;
     localStorage.setItem('search-source', source);
 
-    // 只有歌手/专辑/歌单搜索还是「一次一页」，需要靠下一页追加；歌曲搜索一次取回全量后纯本地分页
+    // 歌手/专辑/歌单沿用原分页；网络歌曲由独立状态管理器分批加载。
     const appendableServerSearch = type !== 'song';
     window.serverPagedSearch = appendableServerSearch;
 
@@ -2532,6 +2704,12 @@ async function doSearch(page = 1, append = false) {
         const headers = {};
         if (typeof authToken !== 'undefined' && authToken) headers['x-user-token'] = authToken;
         Object.assign(headers, getUserAuthHeaders());
+
+        if (type === 'song') {
+            clearSearchDetailView();
+            await searchNetworkSongs(input, source, headers, request);
+            return;
+        }
 
         const pageInfoEl = document.getElementById('page-info');
         let list = [];
@@ -2754,7 +2932,7 @@ function renderHotSearch(data) {
     if (!container || !data || !data.list || data.list.length === 0 || settings.hotSearchLimit === 0) {
         // 显示默认空白状态
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-music text-6xl opacity-20"></i>
                 <p>输入关键词开始搜索音乐</p>
             </div>
@@ -2846,7 +3024,7 @@ function switchHotSearchTab(source) {
     const container = document.getElementById('search-results');
     if (container) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
                 <p>正在加载热门搜索...</p>
             </div>
@@ -2872,8 +3050,11 @@ function handleHotSearchClick(keyword) {
 
 function showInitialSearchState() {
     window.showInitialSearchState = showInitialSearchState;
+    hideSearchSuggestions();
     const initialRequest = window.SearchRequests?.begin();
     window.setSearchStatus?.();
+    window.networkSongSearch = null;
+    renderNetworkSearchFooter(false);
     document.getElementById('search-pagination-bar')?.classList.add('hidden');
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
@@ -2885,7 +3066,7 @@ function showInitialSearchState() {
 
     // 显示加载状态
     container.innerHTML = `
-        <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+        <div class="dislike-empty-state">
             <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
             <p>正在加载热门搜索...</p>
         </div>
@@ -2903,7 +3084,7 @@ function showInitialSearchState() {
         console.error('[HotSearch] 显示热搜失败:', err);
         // 失败时显示默认状态
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-music text-6xl opacity-20"></i>
                 <p>输入关键词开始搜索音乐</p>
             </div>
@@ -3154,10 +3335,14 @@ window.currentArtistSource = 'wy';
 window.currentArtistOrder = 'hot';
 
 async function enterArtist(id, source = 'wy', order = 'hot', tab = 'songs', isBack = false) {
+    window.SearchRequests?.cancel();
+    renderNetworkSearchFooter(false);
+    rememberSearchDetailOrigin();
     const typeEl = document.getElementById('search-type');
 
     // 记录返回状态 (仅当从非歌手列表进入 且 不是从子页面返回时)
-    if (!isBack && document.getElementById('artist-detail-header') === null) {
+    const existingArtistHeader = document.getElementById('artist-detail-header');
+    if (!isBack && (!existingArtistHeader || existingArtistHeader.classList.contains('hidden'))) {
         lastSearchType = typeEl ? typeEl.value : 'singer';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
         currentArtistInfo = null; // 重置缓存
@@ -3758,7 +3943,7 @@ function renderArtistSongsUI(list, page) {
                         </div>
                         <div class="min-w-0 flex-1">
                             <div class="font-bold t-text-main text-sm md:text-base leading-tight truncate group-hover:text-emerald-600 transition-colors">${item.name}</div>
-                            <div class="flex items-center gap-1 mt-1 overflow-hidden whitespace-nowrap">
+                            <div data-rating-badges class="flex items-center gap-1 mt-1 overflow-hidden whitespace-nowrap">
                                 ${getSourceTag ? getSourceTag(item.source) : ''}
                                 ${getQualityTags ? getQualityTags(item) : ''}
                                 <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
@@ -3783,6 +3968,7 @@ function renderArtistSongsUI(list, page) {
 
                     <!-- Actions -->
                     <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button type="button" data-rating-index="${index}" class="p-1 text-amber-500">☆ 评分</button>
                         <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
                             <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
@@ -3829,6 +4015,7 @@ function renderArtistSongsUI(list, page) {
     // Init Marquee if needed (though we use truncate here)
     if (window.applyMarqueeChecks) applyMarqueeChecks();
     if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
+    content.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, list[Number(button.dataset.ratingIndex)]));
     window.ServerFileState?.paintBadges(content);
 }
 window.renderArtistSongsUI = renderArtistSongsUI;
@@ -3989,7 +4176,7 @@ function renderArtistAlbumsUI(list) {
                                 <i class="fas fa-play"></i>
                              </div>
                         </div>
-                        <div class="absolute top-1.5 right-1.5 flex gap-1.5">
+                        <div class="absolute top-1 right-1 md:top-1.5 md:right-1.5 flex gap-1 md:gap-1.5">
                             <button type="button" class="artist-album-download-btn w-8 h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" data-album-index="${index}" title="下载本专辑全部歌曲">
                                 <i class="fas fa-download text-xs"></i>
                             </button>
@@ -4243,6 +4430,27 @@ function hideAlbumDetailHeader() {
     cleanupAlbumScrollListener();
 }
 window.hideAlbumDetailHeader = hideAlbumDetailHeader;
+
+// Sidebar destinations reuse the search view, including its sticky detail bars.
+function clearSearchDetailView() {
+    window.searchDetailOrigin = null;
+    hideAlbumDetailHeader();
+    hideArtistDetailHeader();
+    window.tempAlbumContext = null;
+    window.tempArtistContext = null;
+    const backBtn = document.getElementById('search-back-btn');
+    if (backBtn) backBtn.classList.add('hidden');
+}
+
+function rememberSearchDetailOrigin() {
+    if (window.searchDetailOrigin) return;
+    window.searchDetailOrigin = {
+        scope: currentSearchScope,
+        listId: window.currentViewingListId,
+        list: [...(window.viewingPlaylist || [])],
+        type: document.getElementById('search-type')?.value,
+    };
+}
 
 function updateAlbumHeaderFavButton(favorited) {
     // Hero Favorite Button
@@ -4578,27 +4786,33 @@ async function navigateToAlbumArtist(singerName, source, artistId) {
 window.navigateToAlbumArtist = navigateToAlbumArtist;
 window.searchSingerByName = navigateToAlbumArtist;
 
-async function enterAlbum(id, source = 'wy', initialInfo = null) {
+async function enterAlbum(id, source = 'wy', initialInfo = null, isBack = false) {
+    window.SearchRequests?.cancel();
+    renderNetworkSearchFooter(false);
+    rememberSearchDetailOrigin();
     // 保存进入专辑前的上下文，如果是从歌手页进入，则记录歌手 ID
     const artistHeader = document.getElementById('artist-detail-header');
-    if (artistHeader) {
+    const isArtistDetailVisible = artistHeader && !artistHeader.classList.contains('hidden');
+    if (isArtistDetailVisible) {
         window.tempArtistContext = {
             id: window.currentArtistId,
             source: window.currentArtistSource,
             tab: window.currentArtistTab || 'albums',
             order: window.currentArtistOrder || 'hot'
         };
-        artistHeader.remove(); // 进入专辑详情时移除歌手头部，保持界面整洁
     } else if (!window.tempAlbumContext) {
         window.tempArtistContext = null;
     }
 
     const typeEl = document.getElementById('search-type');
-    if (!artistHeader && !window.tempAlbumContext) {
+    if (!isArtistDetailVisible && !window.tempAlbumContext) {
         lastSearchType = typeEl ? typeEl.value : 'album';
         lastSearchResultList = [...(window.viewingPlaylist || [])];
     }
-    window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
+    if (!isBack) window.history.pushState({ ...window.history.state, page: 'search-detail' }, '');
+
+    // This header is a permanent layout node required when reopening an artist.
+    hideArtistDetailHeader();
 
     const resultsContainer = document.getElementById('search-results');
     resultsContainer.innerHTML = '<div class="flex items-center justify-center h-full"><i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i></div>';
@@ -4685,6 +4899,7 @@ function goBackToSearch(fromPopState = false) {
     if (!fromPopState && window.history.state && window.history.state.page === 'search-detail') {
         try {
             window.history.back();
+            return; // Restore once, in popstate, after the history entry changes.
         } catch (e) {
             console.warn('history.back error:', e);
         }
@@ -4699,7 +4914,7 @@ function goBackToSearch(fromPopState = false) {
         const ctx = window.tempAlbumContext;
         window.tempAlbumContext = null;
         if (ctx.id) {
-            enterAlbum(ctx.id, ctx.source || 'wy', ctx.initialInfo);
+            enterAlbum(ctx.id, ctx.source || 'wy', ctx.initialInfo, true);
             return;
         }
     }
@@ -4715,6 +4930,21 @@ function goBackToSearch(fromPopState = false) {
     const backBtn = document.getElementById('search-back-btn');
     if (backBtn) backBtn.classList.add('hidden');
 
+    const origin = window.searchDetailOrigin;
+    window.searchDetailOrigin = null;
+    if (origin) {
+        currentSearchScope = origin.scope;
+        window.refreshSearchStatusVisibility?.();
+        lastSearchResultList = origin.list;
+        lastSearchType = origin.type;
+        currentArtistId = null;
+        if (origin.scope === 'lib_artists') return handleArtistLibraryClick();
+        if (origin.scope === 'lib_albums') return handleAlbumLibraryClick();
+        if (origin.listId === 'dislike_artists') return handleDislikeArtistsClick();
+        if (origin.listId === 'dislike_albums') return handleDislikeAlbumsClick();
+        if (origin.scope === 'local_list' && origin.listId) return handleListClick(origin.listId, true, true);
+    }
+
     // 恢复搜索/收藏结果列表
     if (lastSearchResultList && lastSearchResultList.length > 0) {
         const header = document.getElementById('search-results-header');
@@ -4729,7 +4959,11 @@ function goBackToSearch(fromPopState = false) {
         } else if (lastSearchType === 'album') {
             renderAlbumResults(lastSearchResultList);
         } else {
-            renderResults(lastSearchResultList);
+            const savedSongs = window.networkSongSearch?.state.list;
+            const restorePaged = currentSearchScope === 'network' && savedSongs &&
+                savedSongs.length === lastSearchResultList.length &&
+                savedSongs.every((song, index) => song.id === lastSearchResultList[index].id);
+            renderResults(restorePaged ? savedSongs : lastSearchResultList);
         }
 
         const pageInfoEl = document.getElementById('page-info');
@@ -4984,6 +5218,8 @@ function renderResults(list) {
     // 搜索歌曲时恢复底部分页栏显示（非排序模式下）
     const paginationBar = document.getElementById('search-pagination-bar');
     if (paginationBar && !window.glSortMode) paginationBar.classList.remove('hidden');
+    const pagedNetwork = isPagedNetworkResult(list);
+    renderNetworkSearchFooter(pagedNetwork);
     // 重置歌手详情分页（进入歌曲搜索视图时清空）
     window.artistSongsPage = 1;
     // Update Header
@@ -5004,7 +5240,11 @@ function renderResults(list) {
     window.viewingPlaylist = list;
 
     if (!list || list.length === 0) {
-        container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
+        const emptyDislike = window.currentViewingListId === 'dislike_songs' && !document.getElementById('gl-local-search-input')?.value?.trim() && !document.getElementById('search-input')?.value?.trim();
+        if (emptyDislike) {
+            if (header) header.classList.add('hidden');
+            container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-music" aria-hidden="true"></i><p>还没有不喜欢任何歌曲</p><small>在歌曲操作菜单中点击“不喜欢”即可添加</small></div>';
+        } else container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
         updatePaginationInfo(0, 0, 0, 1, 1);
         return;
     }
@@ -5108,7 +5348,7 @@ function renderResults(list) {
                     <div class="font-bold t-text-main text-sm md:text-base leading-tight hover:text-emerald-600 transition-colors">
                          ${createMarqueeHtml(item.name)}
                     </div>
-                    <div class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
+                    <div data-rating-badges class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
                          ${getSourceTag(item.source)}
                          ${getQualityTags(item)}
                          <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
@@ -5174,6 +5414,12 @@ function renderResults(list) {
             menu.addEventListener('click', event => event.stopPropagation());
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
+            const rateButton = document.createElement('button');
+            rateButton.type = 'button';
+            rateButton.className = 'rating-menu-item';
+            menu.querySelector('.queue-actions-menu').appendChild(rateButton);
+            window.RatingManager?.attach(rateButton, item);
+            window.RatingManager?.attachTag(row.querySelector('[data-rating-badges]'), item);
             const popup = menu.querySelector('.queue-actions-menu');
             if (typeof popup.showPopover === 'function') {
                 popup.setAttribute('popover', 'auto');
@@ -5341,7 +5587,7 @@ function applyMarqueeChecks(root = document) {
                 wrapper.className = 'w-full relative';
                 wrapper.setAttribute('style', maskStyle);
                 const track = document.createElement('div');
-                track.className = 'inline-block whitespace-nowrap animate-marquee hover:pause-animation';
+                track.className = 'inline-block whitespace-nowrap animate-marquee';
                 const firstText = document.createElement('span');
                 firstText.textContent = text;
                 const firstGap = document.createElement('span');
@@ -5451,7 +5697,8 @@ function getSourceTypeText(sourceType, folder) {
     const map = {
         'server_cache': folder === 'music' ? '已下载文件' : '服务器缓存',
         'cache': '浏览器链接缓存',
-        'normal': '在线解析'
+        'normal': '在线解析',
+        'openlist': 'OpenList 已备份文件'
     };
     return map[sourceType] || '解析成功';
 }
@@ -5488,6 +5735,7 @@ async function probeUrl(url) {
 }
 
 const prefetchManager = {
+    generation: 0,
     cache: new Map(), // Map<songId, {url, quality, sourceType, timestamp}>
     bufferer: new Audio(), // 隐藏的缓冲器，用于预加载数据流
 
@@ -5496,12 +5744,17 @@ const prefetchManager = {
         this.bufferer.preload = 'auto'; // 强制浏览器尽可能多地预缓冲
     },
 
-    set(songId, data) {
-        this.cache.set(songId, { ...data, timestamp: Date.now() });
+    key(song, quality) {
+        const cleaned = cleanSongData(song);
+        return JSON.stringify([cleaned.source || '', String(cleaned.id), quality]);
+    },
+
+    set(song, quality, data) {
+        this.cache.set(this.key(song, quality), { ...data, timestamp: Date.now() });
 
         // 核心升级：触发数据流预加载
         if (data.url) {
-            console.log(`[Prefetch] Pre-loading data stream for ID: ${songId}`);
+            console.log(`[Prefetch] Pre-loading data stream for ID: ${song.id}`);
             this.bufferer.src = data.url;
             this.bufferer.load(); // 诱导浏览器开始填充缓冲区
         }
@@ -5511,19 +5764,65 @@ const prefetchManager = {
             this.cache.delete(oldestKey);
         }
     },
-    get(songId) {
-        const data = this.cache.get(songId);
+    get(song, quality) {
+        const key = this.key(song, quality);
+        const data = this.cache.get(key);
         if (data && (Date.now() - data.timestamp < 30 * 60 * 1000)) {
+            const explicitLocal = song.isLocal || song.url?.startsWith('/api/music/cache/file/');
+            if (settings.preferServerCache === false && !explicitLocal &&
+                (data.sourceType === 'server_cache' || data.sourceType === 'openlist')) {
+                this.cache.delete(key);
+                return null;
+            }
             return data;
         }
+        this.cache.delete(key);
         return null;
     },
+    invalidate(song, quality, expected) {
+        const key = this.key(song, quality);
+        // 只清除本次播放使用的记录，保留并发预读写入的新结果。
+        if (expected && this.cache.get(key) === expected) this.cache.delete(key);
+    },
+    stop() {
+        this.generation++;
+        this.bufferer.removeAttribute('src');
+        this.bufferer.load();
+    },
     clear() {
+        this.stop();
         this.cache.clear();
-        this.bufferer.src = '';
     }
 };
 prefetchManager.init(); // 立即初始化缓冲器
+
+async function refreshPrefetchedCache(song, result) {
+    if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
+
+    // 预读解析后，后台下载可能已经完成；播放接管前重新检查文件缓存。
+    const playbackSong = result.switchedSource && result.songInfo ? result.songInfo : song;
+    try {
+        // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
+        const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
+        if (!cached.exists || cached.isCollision) return result;
+        const url = await applyAutoProxy(cached.url, playbackSong);
+        const quality = cached.quality || result.quality;
+        checkAndTriggerBackgroundCacheUpgrade(cleanSongData(playbackSong), result.quality, quality);
+        return {
+            ...result,
+            url,
+            quality,
+            sourceType: cached.origin === 'openlist' ? 'openlist' : 'server_cache',
+            folder: cached.folder,
+            sourceName: undefined,
+            sourceId: undefined,
+            hasMoreSources: false
+        };
+    } catch (e) {
+        console.warn('[Prefetch] Cache refresh failed, keeping preloaded URL:', e);
+        return result;
+    }
+}
 
 // --- URL Fetching Logic (Unified Resolution) ---
 
@@ -5537,7 +5836,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
         if (result.errorMsg) throw new Error(result.errorMsg);
         return result;
     } catch (error) {
-        if (disableFallback) {
+        if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
             throw error;
         }
 
@@ -5625,6 +5924,7 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
             if (result.errorMsg) throw new Error(result.errorMsg);
             return result;
         } catch (err) {
+            if (err.errorCode === 'NO_AVAILABLE_SOURCE') throw err;
             lastError = err;
             console.warn(`[DownloadResolve] 解析失败: ${candidateSong.name} via ${candidateSong.source} (${targetQuality})`, err);
             return null;
@@ -6001,7 +6301,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 
     const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
     if (allowServerCache) {
-        let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry);
+        let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
         if (cacheResult.exists && !cacheResult.isCollision) {
             const actualQuality = cacheResult.quality || quality;
             console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
@@ -6011,7 +6311,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             if (typeof checkAndTriggerBackgroundCacheUpgrade === 'function') {
                 checkAndTriggerBackgroundCacheUpgrade(cleanedSong, quality, actualQuality);
             }
-            return { url: serverCacheUrl, sourceType: 'server_cache', quality: actualQuality, folder: cacheResult.folder };
+            return { url: serverCacheUrl, sourceType: cacheResult.origin === 'openlist' ? 'openlist' : 'server_cache', quality: actualQuality, folder: cacheResult.folder };
         }
     }
 
@@ -6099,7 +6399,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
                 result = await res.json();
                 if (result.error) errorMsg = result.error;
             } catch (e) { }
-            throw { message: errorMsg, status: res.status, attempts: result.attempts };
+            throw { message: errorMsg, status: res.status, errorCode: result.errorCode, attempts: result.attempts };
         }
 
         const result = await res.json();
@@ -6177,8 +6477,19 @@ function getNextIndex() {
 }
 
 // Prefetch next song helper (Recursive Discovery)
-async function prefetchNextSong(startFromIndex = null, depth = 0) {
+async function prefetchNextSong(startFromIndex = null, depth = 0, generation = null) {
     if (settings.enablePreloader === false || depth > 5) return;
+    if (generation === null) {
+        prefetchManager.stop();
+        generation = prefetchManager.generation;
+    }
+    if (generation !== prefetchManager.generation) return;
+    const playlist = currentPlaylist.slice();
+    const originIndex = currentIndex;
+    const originMode = playMode;
+    const isCurrent = () => settings.enablePreloader !== false &&
+        generation === prefetchManager.generation && originIndex === currentIndex && originMode === playMode &&
+        playlist.length === currentPlaylist.length && playlist.every((song, index) => song === currentPlaylist[index]);
 
     let targetIndex = startFromIndex;
     if (targetIndex === null) {
@@ -6195,41 +6506,53 @@ async function prefetchNextSong(startFromIndex = null, depth = 0) {
 
     try {
         const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
+        const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
 
         // 1. 检查内存缓存
-        let result = prefetchManager.get(nextSong.id);
+        let result = prefetchManager.get(nextSong, targetQual);
         if (result) {
-            if (await probeUrl(result.url)) return;
-            prefetchManager.cache.delete(nextSong.id);
+            const alive = await probeUrl(result.url);
+            if (!canCommit()) return;
+            if (alive) {
+                prefetchManager.set(nextSong, targetQual, result);
+                return;
+            }
+            prefetchManager.invalidate(nextSong, targetQual, result);
         }
 
         // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
         result = await resolveSongUrl(nextSong, targetQual, true);
+        if (!canCommit()) return;
 
         // 3. 探活获取到的链接
-        if (!(await probeUrl(result.url))) {
+        const alive = await probeUrl(result.url);
+        if (!canCommit()) return;
+        if (!alive) {
             localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
             result = await resolveSongUrl(nextSong, targetQual, true, true);
+            if (!canCommit()) return;
         }
 
-        prefetchManager.set(nextSong.id, result);
+        prefetchManager.set(nextSong, targetQual, result);
         const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
         console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
 
     } catch (e) {
+        if (!isCurrent()) return;
         // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
         console.warn(`[Prefetch] Could not preload [${nextSong.name}]:`, e.message);
+        if (e.errorCode === 'NO_AVAILABLE_SOURCE') return;
 
         // 递归探测
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
         if (followingIndex !== currentIndex) {
-            return prefetchNextSong(followingIndex, depth + 1);
+            return prefetchNextSong(followingIndex, depth + 1, generation);
         }
     }
 }
 
 // --- Server Cache Helpers ---
-async function checkServerCache(song, quality, exactQuality = false) {
+async function checkServerCache(song, quality, exactQuality = false, includeOpenlist = false, signal = undefined) {
     try {
         const username = currentListData?.username || '';
         const params = new URLSearchParams({
@@ -6238,13 +6561,14 @@ async function checkServerCache(song, quality, exactQuality = false) {
             source: song.source,
             songmid: song.songmid || (song.meta && (song.meta.songmid || song.meta.songId)) || '',
             songId: song.songId || (song.meta && song.meta.songId) || song.id,
-            quality: quality || ''
+            quality: quality || '',
+            includeOpenlist: includeOpenlist ? '1' : '0'
         });
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
 
-        const res = await fetch(`/api/music/cache/check?${params}`, { headers });
+        const res = await fetch(`/api/music/cache/check?${params}`, { headers, signal });
         if (res.ok) {
             const data = await res.json();
             return data; // 返回完整数据对象，包含 exists, isCollision, url 等
@@ -6558,6 +6882,8 @@ async function triggerServerCache(song, url, quality) {
                 url,
                 quality,
                 namingPattern: window.settings?.serverCacheNamingPattern || 'simple',
+                enableOnlyDownloadMode: !!window.settings?.enableOnlyDownloadMode,
+                cacheLyric: window.settings?.enableServerLyricCache !== false,
                 embedLyric: !!(window.settings?.embedLyricToFile ?? true)
             })
         });
@@ -6752,7 +7078,7 @@ async function showServerDirectories() {
                     <div class="text-xs text-gray-500 dark:text-gray-400 p-3 rounded-lg bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 flex items-start gap-2">
                         <i class="fas fa-info-circle text-amber-500 mt-0.5 shrink-0"></i>
                         <div class="space-y-1">
-                            <div>• <strong>缓存位置</strong>：选择「DATA_PATH」会将文件存放于 WebDAV 同步目录下，备份时可一并打包；选择「运行目录」则仅保存在当前服务器本地。</div>
+                            <div>• <strong>缓存位置</strong>：选择「DATA_PATH」将文件放在数据目录下；常规备份只包含所选 data/music 内容，始终排除 cache。运行目录及自定义外部曲库需另行备份。</div>
                             <div>• <strong>仅下载模式</strong>：开启后下载路径变更为 <code class="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[11px]">music${sep}${data.username}</code>；关闭时统一保存在 <code class="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/60 font-mono text-[11px]">cache${sep}${data.username}</code>。</div>
                         </div>
                     </div>
@@ -6809,6 +7135,43 @@ window.showServerDirectories = showServerDirectories;
  */
 function enqueueSong(song, next = false) {
     if (!song) return;
+    // Default-list entries have source-prefixed IDs and provider IDs in meta.
+    // Normalize both sides exactly as addToDefaultList does.
+    const queueSongId = item => {
+        if (!item || !(item.meta?.songId || item.songId || item.songmid || item.id != null)) return null;
+        return cleanSongData(item).id;
+    };
+    const targetId = queueSongId(song);
+    const matchesSong = item => item === song || (
+        targetId != null && queueSongId(item) != null &&
+        String(queueSongId(item)) === String(targetId) && item.source === song.source
+    );
+    const existingIndex = currentPlaylist.findIndex(matchesSong);
+    if (existingIndex !== -1) {
+        if (!next) {
+            showInfo('该歌曲已在播放队列中');
+            revealSongInQueue(existingIndex);
+            return;
+        }
+        if (matchesSong(currentPlaylist[currentIndex])) {
+            showInfo('该歌曲正在播放');
+            revealSongInQueue(currentIndex);
+            return;
+        }
+        // Keep the playing song selected when moving an entry from before it.
+        const queuedSong = currentPlaylist[existingIndex];
+        for (let i = currentPlaylist.length - 1; i >= 0; i--) {
+            if (!matchesSong(currentPlaylist[i])) continue;
+            currentPlaylist.splice(i, 1);
+            if (i < currentIndex) currentIndex--;
+        }
+        currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
+        preSelectedNextIndex = null;
+        renderQueue();
+        savePlaybackState();
+        showSuccess('已移至下一首播放');
+        return;
+    }
     if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
     const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
     currentPlaylist.splice(position, 0, song);
@@ -6857,6 +7220,21 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         return;
     }
     if (state !== currentRecoveryState) return;
+
+    // 无源是账号配置问题，换音质、换歌曲均无法修复；保留已完成的本地/缓存尝试。
+    if (error?.errorCode === 'NO_AVAILABLE_SOURCE') {
+        if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
+        window._autoSkipTimer = null;
+        shouldAutoRecoverPlayback = false;
+        setPlayerStatus('暂无可用音源，请在设置中添加或启用');
+        RecoveryToast.error(error.message);
+        updatePlayButton(false);
+        return;
+    }
+
+    if (error?.errorCode === 'PLATFORM_SOURCE_UNAVAILABLE') {
+        state.samePlatformExhausted = true;
+    }
 
     const currentPlatform = state.currentSong?.source || state.originalSong?.source;
 
@@ -6951,6 +7329,11 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     console.log(`[Recovery] Executing recovery step: ${currentStep} (${currentStepIndex + 1}/${steps.length})`);
 
     if (currentStep === 'degrade') {
+        if (error?.errorCode === 'PLATFORM_SOURCE_UNAVAILABLE') {
+            state.currentStepIndex++;
+            await runRecoveryFlow(error, effectiveResumeTime, state);
+            return;
+        }
         const nextQuality = window.QualityManager.getNextLowerQuality(state.currentQuality, state.currentSong);
         if (nextQuality && !state.triedQualities.includes(nextQuality)) {
             state.currentQuality = nextQuality;
@@ -7061,6 +7444,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     }
 
     const thisRequestId = ++loadingRequestCounter;
+    prefetchManager.stop();
     currentLoadingSongId = thisRequestSongId;
     currentLoadingRequestId = thisRequestId;
     shouldAutoRecoverPlayback = false;
@@ -7180,16 +7564,20 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     let targetQuality = forceQuality;
     let isPrefetchFound = false;
     let urlResult = null;
+    let prefetchedResult = null;
+    let prefetchQuality = null;
 
     // 提前检查预读缓存，以便淡出逻辑使用
     if (!targetQuality && !isRetry) {
-        urlResult = prefetchManager.get(song.id);
+        prefetchQuality = window.QualityManager.getBestQuality(song, settings.preferredQuality || 'flac');
+        urlResult = prefetchManager.get(song, prefetchQuality);
+        prefetchedResult = urlResult;
         if (urlResult) {
             urlResult.isPrefetch = true;
             isPrefetchFound = true;
 
             // [Optimize] 既然主播放器即将接管该 URL，立即清空缓冲器 src 以停止其后台加载
-            prefetchManager.bufferer.src = '';
+            // stop() 已在本次播放请求开始时停止预缓冲并作废旧任务。
         }
     }
 
@@ -7198,12 +7586,27 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         await fadeVolume(0, 300);
     }
 
+    if (currentLoadingRequestId !== thisRequestId) return;
     if (!noPlay) {
         try { audio.pause(); } catch (e) { }
     }
+    // A fresh request must not expose the previous track's position while resolving.
+    // Keep _resumeInfo intact: refresh/reconnect resumes are validated by song below.
+    if (!isRetry) {
+        try { audio.currentTime = 0; } catch (e) { }
+        lastKnownPlaybackTime = 0;
+        document.getElementById('time-current').innerText = formatTime(0);
+        document.getElementById('progress-bar').style.width = '0%';
+    }
     updatePlayButton(false);
 
+    let sourceAssigned = false;
     try {
+        if (urlResult) {
+            urlResult = await refreshPrefetchedCache(song, urlResult);
+            if (currentLoadingRequestId !== thisRequestId) return;
+        }
+
         // 1. 智能音质选择与 URL 解析
         if (!urlResult) {
             if (!targetQuality) {
@@ -7231,6 +7634,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         if (urlResult.isPrefetch) {
             let detail = '解析成功';
             if (urlResult.sourceType === 'cache') detail = '命中缓存链接';
+            else if (urlResult.sourceType === 'openlist') detail = '命中 OpenList 文件';
             else if (urlResult.sourceType === 'server_cache') detail = urlResult.folder === 'music' ? '命中已下载文件' : '命中服务器缓存';
             else if (sourceName) detail = `${sourceName} 解析成功`;
             showSuccess(`[预读] ${song.name} ${detail}`);
@@ -7294,6 +7698,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         // needs an explicit recovery entry point.
         currentPlaybackErrorHandler = async () => {
             if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
+            prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
             currentPlaybackErrorHandler = null;
 
             const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
@@ -7327,6 +7732,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
 
         audio.src = finalUrl;
+        sourceAssigned = true;
 
         if (window._resumeInfo && window._resumeInfo.time > 0) {
             const resumeInfo = window._resumeInfo;
@@ -7436,6 +7842,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 console.warn('[Player] Playback blocked by browser autoplay policy:', playError);
                 setPlayerStatus('请点击播放按钮');
             } else if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId) {
+                prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
                 shouldAutoRecoverPlayback = false;
                 playbackRecoveryTriggeredForRequestId = thisRequestId;
                 console.error('[Player] Playback failed:', playError);
@@ -7445,14 +7852,17 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
 
         // [Trigger Prefetch] 确保即便 play() 被拦截也尝试发起下一首预读
-        prefetchNextSong();
+        if (currentLoadingRequestId === thisRequestId) prefetchNextSong();
 
     } catch (error) {
         if (currentLoadingRequestId !== thisRequestId) return;
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
-            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
+            // Before src is assigned the media element still belongs to the old song.
+            const savedTime = sourceAssigned
+                ? Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0)
+                : (currentRecoveryState.savedResumeTime || 0);
             await runRecoveryFlow(error, savedTime);
         } else {
             setPlayerStatus('播放失败');
@@ -7522,6 +7932,8 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
         statusText += ' 【缓存链接】';
     } else if (currentSourceType === 'server_cache') {
         statusText += currentCacheFolder === 'music' ? ' 【已下载】' : ' 【缓存】';
+    } else if (currentSourceType === 'openlist') {
+        statusText += ' 【OpenList】';
     }
 
     statusEl.innerText = statusText;
@@ -7718,6 +8130,7 @@ window.setImg = (id, src) => {
 };
 
 function updatePlayerInfo(song, actualQuality) {
+    window.RatingManager?.current(song);
     // Bottom Player - 更新标题
     const titleEl = document.getElementById('player-title');
     if (titleEl) {
@@ -8137,7 +8550,7 @@ audio.addEventListener('pause', () => {
 // ========================================
 
 function savePlaybackState() {
-    if (!currentPlayingSong && !currentPlaylist?.length) return;
+    if (!currentPlayingSong && !currentPlaylist?.length) return null;
     try {
         const state = {
             song: currentPlayingSong,
@@ -8153,8 +8566,10 @@ function savePlaybackState() {
             timestamp: Date.now()
         };
         localStorage.setItem('lx_playback_state', JSON.stringify(state));
+        return true;
     } catch (e) {
         console.error('[Resume] 无法保存播放状态:', e);
+        return false;
     }
 }
 
@@ -8226,8 +8641,6 @@ async function restorePlaybackState() {
                 if (searchView && !searchView.classList.contains('hidden')) {
                     renderResults(currentPlaylist);
                 }
-            } else if (state.scope === 'local_list' || state.scope === 'local_all') {
-                window._pendingResumeListId = state.listId || 'default';
             }
 
             // 初始化音频源但不立即播放（除非设置了自动播放，当前 playSong handles resumeTime）
@@ -9040,6 +9453,7 @@ async function updateSetting(key, value) {
     }
     // 实时同步 UI 并应用效果
     syncSettingsUI(key, value);
+    if (key === 'preferLocalLyrics' && currentPlayingSong) { lastLyricSongId = null; void fetchLyric(currentPlayingSong, currentQuality); }
     if (key === 'networkListAutoCheckInterval' || key === 'autoUpdateNetworkList') {
         setupNetworkListAutoCheck();
         if (typeof refreshTaskScheduleStatus === 'function') {
@@ -9097,7 +9511,10 @@ const SETTINGS_UI_MAP = {
     enableAutoSkipOnError: { id: 'setting-auto-skip-on-error', type: 'checkbox' },
     enableAutoDegradeQuality: { id: 'setting-auto-degrade-quality', type: 'checkbox' },
     playbackErrorPriority: { id: 'setting-playback-error-priority', type: 'value' },
-    enablePreloader: { id: 'setting-enable-preloader', type: 'checkbox' },
+    enablePreloader: {
+        id: 'setting-enable-preloader', type: 'checkbox',
+        action: (enabled) => { if (!enabled) prefetchManager.clear(); }
+    },
     disablePreloadSkip: { id: 'setting-disable-preload-skip', type: 'checkbox', normalize: () => true, readOnly: true },
     deduplicatePlaylistByQuality: { id: 'setting-deduplicate-playlist', type: 'checkbox' },
     enableSmtcLyric: {
@@ -9259,6 +9676,7 @@ const SETTINGS_UI_MAP = {
     enableLyricCache: { id: 'setting-enable-lyric-cache', type: 'checkbox' },
     enableSongUrlCache: { id: 'setting-enable-url-cache', type: 'checkbox' },
     enableServerCache: { id: 'setting-enable-server-cache', type: 'checkbox' },
+    preferLocalLyrics: { id: 'setting-prefer-local-lyrics', type: 'checkbox' },
     enableServerLyricCache: { id: 'setting-enable-server-lyric-cache', type: 'checkbox' },
     embedLyricToFile: { id: 'setting-embed-lyric-to-file', type: 'checkbox' },
     preferServerCache: { id: 'setting-prefer-server-cache', type: 'checkbox' },
@@ -10204,9 +10622,11 @@ let scrollLockTimeout = null; // 滚动锁定计时器
 let isProgrammaticScroll = false; // 标记是否为程序自动滚动
 const SCROLL_LOCK_DURATION = 5000; // 5秒后解除锁定
 
+let lyricHistoryClosing = false;
 function toggleLyrics(fromPopState = false) {
     if (!fromPopState && isLyricViewOpen) {
         if (window.history.state && window.history.state.page === 'player-detail') {
+            lyricHistoryClosing = true;
             window.history.back();
         }
     }
@@ -10270,6 +10690,11 @@ function toggleLyrics(fromPopState = false) {
 
 // 监听浏览器返回，用于在移动端通过物理返回键/手势关闭歌词详情页及搜索详情页
 window.addEventListener('popstate', (e) => {
+    // Closing the player overlay does not navigate the underlying library again.
+    if (isLyricViewOpen || lyricHistoryClosing) {
+        e.playerDetailHandled = true;
+        lyricHistoryClosing = false;
+    }
     // 1. 优先处理歌词页
     if (isLyricViewOpen) {
         toggleLyrics(true);
@@ -10283,7 +10708,9 @@ window.addEventListener('popstate', (e) => {
     const backBtn = document.getElementById('search-back-btn');
     const isBackBtnVisible = backBtn && !backBtn.classList.contains('hidden');
 
-    if (isAlbumOpen || artistHeader || isBackBtnVisible) {
+    const isArtistOpen = artistHeader && !artistHeader.classList.contains('hidden');
+    if (isAlbumOpen || isArtistOpen || isBackBtnVisible) {
+        e.searchDetailHandled = true;
         goBackToSearch(true);
     }
 });
@@ -10397,6 +10824,23 @@ async function fetchLyric(song, quality = null) {
         source = song.meta.source;
     }
 
+    if (settings.preferLocalLyrics !== false && song.isLocal && song._localFilename) {
+        try {
+            const params = new URLSearchParams({ filename: song._localFilename, folder: song._isCustomDir ? 'custom' : (song._localFolder || song.folder || 'cache') });
+            if (['root', 'data'].includes(song._localLocation)) params.set('browseLocation', song._localLocation);
+            const response = await fetch(`${API_BASE}/cache/lyric?${params}`, { headers: getUserAuthHeaders() });
+            if (!isCurrent()) return;
+            if (response.ok) {
+                const data = (await response.json()).data;
+                if (!isCurrent()) return;
+                if (data?.lyric || data?.lrc) {
+                    currentRawLrc = data.lyric || data.lrc; currentRawTlrc = data.tlyric || ''; currentRawRlrc = data.rlyric || ''; currentRawKlrc = data.klyric || data.lxlyric || '';
+                    lastLyricSongId = getLyricSongKey(song); initLyricPlayer(); applyLyricUpdate(); return;
+                }
+            }
+        } catch (error) { if (!isCurrent()) return; console.warn('[Lyric] 本地同名 LRC 读取失败:', error); }
+    }
+
     // 如果还是没有必要的数据，检查是否为本地文件（可尝试读取内嵌歌词）
     if (!songmid || !source) {
         // [新增] 本地未关联歌曲：优先尝试读取音频文件内嵌歌词
@@ -10427,36 +10871,10 @@ async function fetchLyric(song, quality = null) {
     currentRawKlrc = '';
     lastLyricSongId = null;
 
-    // ===== 1. 尝试读取浏览器本地缓存 (最高优先级) =====
     const cacheKey = `lx_lyric_${source}_${songmid}`;
-    if (settings.enableLyricCache !== false) {
-        try {
-            const cached = localStorage.getItem(cacheKey);
-            if (cached) {
-                const data = JSON.parse(cached);
-                currentRawLrc = data.lrc || '';
-                currentRawTlrc = data.tlyric || '';
-                currentRawRlrc = data.rlyric || '';
-                currentRawKlrc = data.klyric || data.lxlyric || '';
-                lastLyricSongId = currentLyricKey;
-
-                console.log(`[Lyric] 使用浏览器本地缓存歌词: ${songmid}`);
-                initLyricPlayer();
-                applyLyricUpdate();
-                return; // 命中缓存，直接返回
-            }
-        } catch (e) {
-            console.warn('[Lyric] 读取浏览器本地缓存失败:', e);
-            localStorage.removeItem(cacheKey);
-        }
-    }
-
-    // ===== 2. 尝试读取服务器端缓存歌词 =====
-    const username = currentListData?.username || '';
-    const headers = {};
-    Object.assign(headers, getUserAuthHeaders());
-
-    if (settings.enableServerLyricCache !== false) {
+    const headers = { ...getUserAuthHeaders() };
+    // ===== 1. 优先读取服务器本地 LRC（独立于保存开关） =====
+    if (settings.preferLocalLyrics !== false) {
         try {
             const serverCacheUrl = `${API_BASE}/cache/lyric?source=${source}&songmid=${songmid}&songId=${encodeURIComponent(song.id || '')}&name=${encodeURIComponent(song.name || '')}&singer=${encodeURIComponent(song.singer || '')}`;
             const scRes = await fetch(serverCacheUrl, { headers });
@@ -10491,6 +10909,29 @@ async function fetchLyric(song, quality = null) {
         }
     }
 
+    // ===== 2. 尝试读取浏览器歌词缓存 =====
+    if (settings.enableLyricCache !== false) {
+        try {
+            const cached = localStorage.getItem(cacheKey);
+            if (cached) {
+                const data = JSON.parse(cached);
+                currentRawLrc = data.lrc || '';
+                currentRawTlrc = data.tlyric || '';
+                currentRawRlrc = data.rlyric || '';
+                currentRawKlrc = data.klyric || data.lxlyric || '';
+                lastLyricSongId = currentLyricKey;
+
+                console.log(`[Lyric] 使用浏览器本地缓存歌词: ${songmid}`);
+                initLyricPlayer();
+                applyLyricUpdate();
+                return; // 命中缓存，直接返回
+            }
+        } catch (e) {
+            console.warn('[Lyric] 读取浏览器本地缓存失败:', e);
+            localStorage.removeItem(cacheKey);
+        }
+    }
+
     // ===== 3. 从网络抓取最新歌词 =====
     try {
         const params = new URLSearchParams({
@@ -10507,6 +10948,7 @@ async function fetchLyric(song, quality = null) {
             trcUrl: song.trcUrl || ''
         });
 
+        params.set('preferLocal', settings.preferLocalLyrics !== false ? '1' : '0');
         const url = `${API_BASE}/lyric?${params.toString()}`;
         // [优化] 使用低优先级 fetch 获取歌词，避免阻塞主进程加载和 PWA 安装按钮出现
         const res = await fetch(url, { headers, priority: 'low' });
@@ -11744,7 +12186,7 @@ function renderLibraryArtists(list, isDislike = false) {
 
     if (!list || list.length === 0) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-user-slash text-6xl opacity-20"></i>
                 <p>${isDislike ? '还没有不喜欢任何歌手' : '还没有收藏任何歌手'}</p>
                 <p class="text-xs">在搜索结果中点击 ${isDislike ? '🚫 不喜欢歌手' : '♥ 收藏歌手'}</p>
@@ -11777,7 +12219,7 @@ function renderLibraryArtists(list, isDislike = false) {
     const grid = container.querySelector('#lib-artist-grid');
     list.forEach(singer => {
         const div = document.createElement('div');
-        div.className = 'group relative flex flex-col items-center p-2 md:p-4 rounded-2xl transition-all hover:t-bg-panel hover:shadow-md cursor-pointer border border-transparent hover:border-emerald-500/30';
+        div.className = 'group relative flex flex-col items-center p-2.5 md:p-4 rounded-2xl transition-all t-bg-main border t-border-main shadow-sm hover:shadow-lg cursor-pointer hover:border-emerald-500/30 active:scale-[0.98]';
         div.dataset.libArtistId = singer.id;
         div.dataset.libArtistSource = singer.source;
         div.onclick = (e) => {
@@ -11790,7 +12232,7 @@ function renderLibraryArtists(list, isDislike = false) {
         };
         div.innerHTML = `
             <div class="relative mb-2 md:mb-3">
-                <div class="w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full overflow-hidden shadow-sm">
+                <div class="w-[4.5rem] h-[4.5rem] sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full overflow-hidden shadow-md ring-2 ring-white/60 dark:ring-white/10">
                     <img src="${singer.picUrl || '/music/assets/logo.svg'}"
                          onerror="this.src='/music/assets/logo.svg'"
                          class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500">
@@ -11798,7 +12240,7 @@ function renderLibraryArtists(list, isDislike = false) {
                 <div class="lib-batch-check absolute inset-0 bg-black/40 hidden items-center justify-center rounded-full">
                     <i class="fas fa-check-circle text-white text-2xl"></i>
                 </div>
-                <button class="lib-fav-btn absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10"
+                <button class="lib-fav-btn absolute -top-1 -right-1 w-6 h-6 md:w-7 md:h-7 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 md:opacity-0 group-hover:opacity-100 transition-opacity shadow-md z-10"
                         title="${isDislike ? '取消不喜欢' : '取消收藏'}"
                         onclick="event.stopPropagation(); removeLibraryArtist('${singer.id}', '${singer.source}', ${isDislike})">
                     <i class="fas fa-times text-[10px]"></i>
@@ -11825,7 +12267,7 @@ function renderLibraryAlbums(list, isDislike = false) {
 
     if (!list || list.length === 0) {
         container.innerHTML = `
-            <div class="flex flex-col items-center justify-center h-full t-text-muted space-y-4">
+            <div class="dislike-empty-state">
                 <i class="fas fa-compact-disc text-6xl opacity-20"></i>
                 <p>${isDislike ? '还没有不喜欢任何专辑' : '还没有收藏任何专辑'}</p>
                 <p class="text-xs">在搜索结果中点击 ${isDislike ? '🚫 不喜欢专辑' : '♥ 收藏专辑'}</p>
@@ -11857,12 +12299,12 @@ function renderLibraryAlbums(list, isDislike = false) {
                 <i class="fas fa-trash"></i> 删除所选
             </button>
         </div>
-        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-6 p-6" id="lib-album-grid"></div>`;
+        <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 p-3 md:gap-6 md:p-6" id="lib-album-grid"></div>`;
 
     const grid = container.querySelector('#lib-album-grid');
     list.forEach(item => {
         const div = document.createElement('div');
-        div.className = 'group relative flex flex-col p-3 rounded-2xl transition-all hover:t-bg-panel hover:shadow-lg cursor-pointer border border-transparent hover:border-emerald-500/20';
+        div.className = 'group relative flex flex-col p-2 md:p-3 rounded-2xl transition-all t-bg-main border t-border-main shadow-sm hover:shadow-lg cursor-pointer hover:border-emerald-500/30 active:scale-[0.98]';
         div.dataset.libAlbumId = item.id;
         div.dataset.libAlbumSource = item.source;
         div.onclick = (e) => {
@@ -11874,7 +12316,7 @@ function renderLibraryAlbums(list, isDislike = false) {
             enterAlbum(item.id, item.source || 'wy', item);
         };
         div.innerHTML = `
-            <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-3 relative">
+            <div class="aspect-square rounded-xl overflow-hidden shadow-md mb-2 md:mb-3 relative">
                 <img src="${item.picUrl || '/music/assets/logo.svg'}"
                      onerror="this.src='/music/assets/logo.svg'"
                      class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500">
@@ -11882,29 +12324,29 @@ function renderLibraryAlbums(list, isDislike = false) {
                     <i class="fas fa-check-circle text-white text-3xl"></i>
                 </div>
                 ${!isDislike ? `
-                <div class="absolute top-1.5 right-1.5 flex gap-1.5">
-                    <button type="button" class="lib-album-download-btn w-8 h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" title="下载本专辑全部歌曲">
+                <div class="absolute top-1 right-1 md:top-1.5 md:right-1.5 flex gap-1 md:gap-1.5">
+                    <button type="button" class="lib-album-download-btn w-7 h-7 md:w-8 md:h-8 rounded-full bg-black/45 hover:bg-emerald-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm disabled:opacity-60 disabled:cursor-wait" title="下载本专辑全部歌曲">
                         <i class="fas fa-download text-xs"></i>
                     </button>
-                    <button type="button" class="lib-fav-btn w-8 h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消收藏"
+                    <button type="button" class="lib-fav-btn w-7 h-7 md:w-8 md:h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消收藏"
                             onclick="event.stopPropagation(); removeLibraryAlbum('${item.id}', '${item.source}')">
                         <i class="fas fa-times text-xs"></i>
                     </button>
                 </div>` : `
-                <div class="absolute top-1.5 right-1.5 flex gap-1.5">
-                    <button type="button" class="lib-fav-btn w-8 h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消不喜欢"
+                <div class="absolute top-1 right-1 md:top-1.5 md:right-1.5 flex gap-1 md:gap-1.5">
+                    <button type="button" class="lib-fav-btn w-7 h-7 md:w-8 md:h-8 rounded-full bg-red-400/80 hover:bg-red-500 text-white flex items-center justify-center opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all shadow-sm" title="取消不喜欢"
                             onclick="event.stopPropagation(); removeLibraryAlbum('${item.id}', '${item.source}', true)">
                         <i class="fas fa-times text-xs"></i>
                     </button>
                 </div>`}
             </div>
-            <span class="text-sm font-bold t-text-main line-clamp-2 h-10 leading-5 mb-1" title="${item.name}">${item.name}</span>
-            <div class="flex items-center justify-between mt-1">
-                <span class="text-[10px] t-text-muted truncate flex-1">
+            <span class="text-[13px] md:text-sm font-bold t-text-main line-clamp-2 min-h-[2.5rem] leading-5 mb-1 px-0.5" title="${item.name}">${item.name}</span>
+            <div class="flex items-center justify-between gap-1 mt-auto px-0.5">
+                <span class="text-[11px] t-text-muted truncate flex-1 min-w-0">
                     ${item.artistName || '未知歌手'}
                     ${item.list && item.list.length ? `<span class="ml-1 text-emerald-500 font-bold">(${item.list.length} 首)</span>` : ''}
                 </span>
-                <span class="text-[10px] t-text-muted ml-2">${getSourceTag ? getSourceTag(item.source) : ''}</span>
+                <span class="text-[10px] t-text-muted flex-shrink-0">${getSourceTag ? getSourceTag(item.source) : ''}</span>
             </div>`;
         const downloadButton = div.querySelector('.lib-album-download-btn');
         downloadButton?.addEventListener('click', async event => {
@@ -11918,6 +12360,8 @@ window.renderLibraryAlbums = renderLibraryAlbums;
 
 /** 点击侧边栏"收藏歌手"，切换到展示视图 */
 function handleArtistLibraryClick() {
+    if (window.innerWidth < 1025) { const sb = document.getElementById('main-sidebar'); if (sb && !sb.classList.contains('-translate-x-full')) toggleSidebar(); }
+    clearSearchDetailView();
     exitListSecondaryModes && exitListSecondaryModes();
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
     const activeView = document.getElementById('view-search');
@@ -11942,6 +12386,7 @@ function handleArtistLibraryClick() {
     document.getElementById('search-type').classList.add('hidden');
 
     currentSearchScope = 'lib_artists';
+    window.refreshSearchStatusVisibility?.();
     window.currentViewingListId = '__lib_artists__';
     renderLibraryArtists(window.libraryData.artists);
 }
@@ -11949,6 +12394,8 @@ window.handleArtistLibraryClick = handleArtistLibraryClick;
 
 /** 点击侧边栏"收藏专辑"，切换到展示视图 */
 function handleAlbumLibraryClick() {
+    if (window.innerWidth < 1025) { const sb = document.getElementById('main-sidebar'); if (sb && !sb.classList.contains('-translate-x-full')) toggleSidebar(); }
+    clearSearchDetailView();
     exitListSecondaryModes && exitListSecondaryModes();
     document.querySelectorAll('[id^="view-"]').forEach(el => el.classList.add('hidden'));
     const activeView = document.getElementById('view-search');
@@ -11973,6 +12420,7 @@ function handleAlbumLibraryClick() {
     document.getElementById('search-type').classList.add('hidden');
 
     currentSearchScope = 'lib_albums';
+    window.refreshSearchStatusVisibility?.();
     window.currentViewingListId = '__lib_albums__';
     renderLibraryAlbums(window.libraryData.albums);
 }
@@ -12433,6 +12881,7 @@ async function handleSyncLogout(skipConfirm = false) {
         // 7. 彻底清空 localStorage & sessionStorage
         const agreementAccepted = localStorage.getItem('lx_agreement_accepted');
         localStorage.clear();
+    window.dispatchEvent(new Event('ratingaccountchange'));
         sessionStorage.clear();
         if (agreementAccepted) {
             localStorage.setItem('lx_agreement_accepted', agreementAccepted);
@@ -12519,6 +12968,7 @@ async function handleLocalLogin() {
             }
             if (!tokenReady) throw new Error('登录已失效，请重新登录');
             localStorage.setItem('lx_sync_user', user);
+            window.dispatchEvent(new Event('ratingaccountchange'));
 
             // [新增] 显示并加载 Token 管理面板
             const tokenSection = document.getElementById('token-management-section');
@@ -12544,6 +12994,7 @@ async function handleLocalLogin() {
             // Save credentials to localStorage (Simple version)
             localStorage.setItem('lx_sync_mode', 'local'); // [Fix] Save mode
             localStorage.setItem('lx_sync_user', user);
+            window.dispatchEvent(new Event('ratingaccountchange'));
             if (pass) {
                 localStorage.setItem('lx_sync_pass', pass);
             }
@@ -13326,15 +13777,9 @@ function renderMyLists(data) {
     initFavoriteSidebarSortable(container);
     refreshFavoritesChildrenHeight();
 
-    // [Resume] 处理本地列表的自动恢复跳转或默认入口自动打开
-    if (window._pendingResumeListId) {
-        const listId = window._pendingResumeListId;
-        delete window._pendingResumeListId;
-        delete window._pendingDefaultFavoriteEntry;
-        console.log('[Resume] 正在同步本地播放列表上下文:', listId);
-        // 调用 handleListClick 以加载真实的列表数据并应用高亮
-        handleListClick(listId);
-    } else if (window._pendingDefaultFavoriteEntry) {
+    // Only an explicitly requested favorites entry may navigate when data arrives.
+    // Playback restoration must not override a later user search.
+    if (window._pendingDefaultFavoriteEntry) {
         delete window._pendingDefaultFavoriteEntry;
         const targetListId = (Array.isArray(data.loveList) && data.loveList.length > 0)
             ? 'love'
@@ -13350,6 +13795,8 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     exitListSecondaryModes();
 
     if (!currentListData) return;
+
+    clearSearchDetailView();
 
     if (!skipAutoUpdate) {
         // Selections belong to the previously rendered list. Keeping them here makes
@@ -13371,6 +13818,7 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
     // Set current viewing list ID for batch operations
     window.currentViewingListId = listId;
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
 
     let list = [];
     let title = '';
@@ -13413,6 +13861,7 @@ function handleListClick(listId, skipAutoUpdate = false, preservePage = false) {
 
     // Set Scope
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
     document.getElementById('search-source').classList.add('hidden'); // Hide selector
     document.getElementById('search-type').classList.add('hidden');
 
@@ -13569,7 +14018,7 @@ async function handleRefreshList(listId, event, silent = false) {
         await pushDataChange();
         renderMyLists(currentListData);
 
-        if (window.currentViewingListId === listId) {
+        if (currentSearchScope === 'local_list' && window.currentViewingListId === listId) {
             handleListClick(listId, true); // skipAutoUpdate=true 避免递归
         }
 
@@ -13641,9 +14090,12 @@ function handleDislikeSongsClick() {
 }
 
 function handleDislikeArtistsClick() {
+    clearSearchDetailView();
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_artists';
+    const pageTitle = document.getElementById('page-title'); if (pageTitle) pageTitle.textContent = '不喜欢歌手';
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
     
     // Highlight Header
     document.querySelectorAll('[id^="tab-"]').forEach(el => {
@@ -13680,9 +14132,12 @@ function handleDislikeArtistsClick() {
 }
 
 function handleDislikeAlbumsClick() {
+    clearSearchDetailView();
     exitListSecondaryModes();
     window.currentViewingListId = 'dislike_albums';
+    const pageTitle = document.getElementById('page-title'); if (pageTitle) pageTitle.textContent = '不喜欢专辑';
     currentSearchScope = 'local_list';
+    window.refreshSearchStatusVisibility?.();
     
     // Highlight Header
     document.querySelectorAll('[id^="tab-"]').forEach(el => {
@@ -15814,6 +16269,7 @@ function cleanSongData(song) {
     if (song.url) cleanSong.url = song.url;
     if (song.folder) cleanSong.folder = song.folder;
     if (song.filename) cleanSong.filename = song.filename;
+    for (const key of ['_localFilename', '_localFolder', '_localLocation', '_localUsername', '_isCustomDir']) if (song[key] !== undefined) cleanSong[key] = song[key];
 
     // Remove undefined keys
     const removeUndefined = (obj) => {
@@ -17038,7 +17494,7 @@ function showToast(type, message, duration = 3000) {
 
 // 封装旧 API
 function showSuccess(message) { showToast('success', message, 2000); }
-function showInfo(message) { showToast('info', message, 2000); }
+function showInfo(message, duration = 2000) { showToast('info', message, duration); }
 function showError(message) { showToast('error', message, 2000); }
 
 /**
@@ -17845,164 +18301,15 @@ window.togglePlay = function () {
 
 document.addEventListener('click', initAudioEngine, { once: true });
 
-// --- Search Suggestions Logic ---
-let searchTipsDebounceTimer = null;
-let currentSelectedTipIndex = -1;
-let currentTipAbortController = null;
-
-function initSearchTips() {
-    const searchInput = document.getElementById('search-input');
-    const suggestionsContainer = document.getElementById('search-suggestions');
-
-    if (!searchInput || !suggestionsContainer) return;
-
-    searchInput.addEventListener('input', (e) => {
-        const query = e.target.value.trim();
-        clearTimeout(searchTipsDebounceTimer);
-
-        if (!query) {
-            hideSearchSuggestions();
-            return;
-        }
-
-        searchTipsDebounceTimer = setTimeout(() => {
-            fetchSearchTips(query);
-        }, 300);
-    });
-
-    searchInput.addEventListener('focus', () => {
-        const query = searchInput.value.trim();
-        if (query) {
-            suggestionsContainer.classList.remove('hidden');
-        }
-    });
-
-    searchInput.addEventListener('keydown', (e) => {
-        const list = document.getElementById('search-suggestions-list');
-        const items = list ? list.querySelectorAll('.search-tip-item') : [];
-
-        if (e.key === 'ArrowDown') {
-            e.preventDefault();
-            if (items.length === 0) return;
-            currentSelectedTipIndex = (currentSelectedTipIndex + 1) % items.length;
-            updateTipSelection(items);
-        } else if (e.key === 'ArrowUp') {
-            e.preventDefault();
-            if (items.length === 0) return;
-            currentSelectedTipIndex = (currentSelectedTipIndex - 1 + items.length) % items.length;
-            updateTipSelection(items);
-        } else if (e.key === 'Enter') {
-            if (currentSelectedTipIndex >= 0 && items[currentSelectedTipIndex]) {
-                e.preventDefault();
-                const text = items[currentSelectedTipIndex].textContent.trim();
-                searchInput.value = text;
-                hideSearchSuggestions();
-                doSearch();
-            }
-        } else if (e.key === 'Escape') {
-            hideSearchSuggestions();
-        }
-    });
-
-    document.addEventListener('click', (e) => {
-        if (!searchInput.contains(e.target) && !suggestionsContainer.contains(e.target)) {
-            hideSearchSuggestions();
-        }
-    });
-}
-
-function updateTipSelection(items) {
-    items.forEach((item, index) => {
-        if (index === currentSelectedTipIndex) {
-            item.classList.add('t-bg-muted');
-            item.scrollIntoView({ block: 'nearest' });
-        } else {
-            item.classList.remove('t-bg-muted');
-        }
-    });
-}
-
-async function fetchSearchTips(query) {
-    if (currentTipAbortController) currentTipAbortController.abort();
-    currentTipAbortController = new AbortController();
-    const signal = currentTipAbortController.signal;
-
-    const source = (document.getElementById('search-source')) ? document.getElementById('search-source').value : 'kw';
-    try {
-        const resp = await fetch(`/api/music/tipSearch?name=${encodeURIComponent(query)}&source=${source}`, { signal });
-        if (!resp.ok) return;
-        const tips = await resp.json();
-        renderSearchTips(tips);
-    } catch (err) {
-        if (err.name === 'AbortError') return;
-        console.error('[TipSearch] Fetch error:', err);
-    } finally {
-        if (currentTipAbortController && currentTipAbortController.signal === signal) {
-            currentTipAbortController = null;
-        }
-    }
-}
-
-function renderSearchTips(tips) {
-    const container = document.getElementById('search-suggestions');
-    const list = document.getElementById('search-suggestions-list');
-    const input = document.getElementById('search-input');
-    if (!container || !list || !input) return;
-
-    // 如果输入框已失去焦点（除非是操作建议列表），或者已经触发了正式搜索，则不再渲染
-    if (document.activeElement !== input) {
-        container.classList.add('hidden');
-        return;
-    }
-
-    list.innerHTML = '';
-    currentSelectedTipIndex = -1;
-
-    if (!tips || tips.length === 0) {
-        container.classList.add('hidden');
-        return;
-    }
-
-    tips.forEach((tip, index) => {
-        const div = document.createElement('div');
-        div.className = 'search-tip-item px-4 py-2.5 hover:t-bg-muted cursor-pointer transition-colors text-sm flex items-center gap-3';
-        div.innerHTML = `<i class="fas fa-search t-text-muted text-xs"></i><span class="truncate">${tip}</span>`;
-        div.onclick = (e) => {
-            e.stopPropagation(); // 防止触发 document click
-            input.value = tip;
-            hideSearchSuggestions();
-            doSearch();
-        };
-        list.appendChild(div);
-    });
-
-    container.classList.remove('hidden');
-}
-
+// Search suggestion requests, IME and keyboard interactions live in their own module.
 function hideSearchSuggestions() {
-    const container = document.getElementById('search-suggestions');
-    if (container) container.classList.add('hidden');
-    currentSelectedTipIndex = -1;
-
-    // 清除待执行的防抖定时器
-    if (searchTipsDebounceTimer) {
-        clearTimeout(searchTipsDebounceTimer);
-        searchTipsDebounceTimer = null;
-    }
-
-    // 中止正在进行的请求
-    if (currentTipAbortController) {
-        currentTipAbortController.abort();
-        currentTipAbortController = null;
-    }
+    window.SearchSuggestions?.hide();
 }
 
-// Ensure initSearchTips runs on load
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initSearchTips);
-} else {
-    initSearchTips();
+function handleSearchSubmit(event) {
+    window.SearchSuggestions.submit(event);
 }
+
 // ===== 持久化 Token 管理逻辑 =====
 
 /**
@@ -18618,7 +18925,8 @@ window.CustomSelectManager = {
             if (opt.disabled) return;
             const li = document.createElement('li');
             li.className = 'cs-option' + (opt.selected ? ' selected' : '');
-            li.innerHTML = `<span>${opt.text}</span><i class="fas fa-check"></i>`;
+            const optionLabel = document.createElement('span'); optionLabel.textContent = opt.text;
+            const check = document.createElement('i'); check.className = 'fas fa-check'; li.append(optionLabel, check);
 
             li.onclick = (e) => {
                 e.stopPropagation();
@@ -18631,7 +18939,9 @@ window.CustomSelectManager = {
         });
 
         dropdown.appendChild(optionsList);
-        document.body.appendChild(dropdown);
+        const dialogHost = select.closest('dialog[open]');
+        (dialogHost || document.body).appendChild(dropdown);
+        dropdown._dialogHost = dialogHost;
 
         // 计算位置
         this.reposition(trigger, dropdown);
@@ -18647,17 +18957,23 @@ window.CustomSelectManager = {
     reposition(trigger, dropdown) {
         const rect = trigger.getBoundingClientRect();
         dropdown.style.width = rect.width + 'px';
-        dropdown.style.left = rect.left + 'px';
+        const host = dropdown._dialogHost;
+        const hostRect = host?.getBoundingClientRect();
+        dropdown.style.left = (host ? rect.left - hostRect.left + host.scrollLeft - host.clientLeft : rect.left + window.scrollX) + 'px';
 
         // 检查空间，自动决定向上还是向下展开
-        const spaceBelow = window.innerHeight - rect.bottom;
+        const spaceBelow = (hostRect ? Math.min(window.innerHeight, hostRect.bottom) : window.innerHeight) - rect.bottom;
         const dropdownHeight = dropdown.offsetHeight || 260;
 
-        if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
-            dropdown.style.top = (rect.top + window.scrollY - dropdownHeight - 6) + 'px';
+        const offsetTop = host ? -hostRect.top + host.scrollTop - host.clientTop : window.scrollY;
+        const spaceAbove = rect.top - (hostRect?.top || 0);
+        if (spaceBelow < dropdownHeight && spaceAbove > spaceBelow) {
+            dropdown.style.maxHeight = Math.max(80, Math.min(280, spaceAbove - 10)) + 'px';
+            dropdown.style.top = (rect.top + offsetTop - Math.min(dropdownHeight, Math.max(80, spaceAbove - 10)) - 6) + 'px';
             dropdown.classList.add('open-up');
         } else {
-            dropdown.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+            dropdown.style.maxHeight = Math.max(80, Math.min(280, spaceBelow - 10)) + 'px';
+            dropdown.style.top = (rect.bottom + offsetTop + 4) + 'px';
             dropdown.classList.remove('open-up');
         }
     },

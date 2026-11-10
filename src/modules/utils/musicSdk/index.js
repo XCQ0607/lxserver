@@ -5,6 +5,7 @@ import wy from './wy/index'
 import mg from './mg/index'
 import xm from './xm'
 import { supportQuality } from './api-source'
+import { versionChars } from './versionChars'
 export { dateFormat, dateFormat2, decodeName, sizeFormate, formatPlayTime, formatPlayCount } from '../index'
 
 
@@ -116,7 +117,9 @@ export default {
     const fAlbumName = filterStr(albumName).toLowerCase()
     const fInterval = getIntv(interval)
     const isEqualsInterval = (intv) => Math.abs((fInterval || intv) - (intv || fInterval)) < 5
-    const isIncludesName = (name) => (fMusicName.includes(name) || name.includes(fMusicName))
+    // Legacy: const isIncludesName = name => fMusicName.includes(name) || name.includes(fMusicName)
+    const isIncludesName = name => (fMusicName.includes(name) || name.includes(fMusicName)) &&
+      versionChars.every(char => name.includes(char) === fMusicName.includes(char))
     const isIncludesSinger = (singer) => fSinger ? (fSinger.includes(singer) || singer.includes(fSinger)) : true
     const isEqualsAlbum = (album) => fAlbumName ? fAlbumName == album : true
 

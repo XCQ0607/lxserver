@@ -5,9 +5,18 @@ export const BACKUP_TYPES = ['music', 'userFiles', 'snapshots', 'userData', 'sys
 export type BackupType = typeof BACKUP_TYPES[number]
 export type BackupDestination = 'webdav' | 'openlist'
 let cloudRestoreRunning = false
-export const isCloudRestoreRunning = () => cloudRestoreRunning
+let activeCloudBackups = 0
+export const isCloudRestoreActive = () => cloudRestoreRunning
+export const isCloudBackupRunning = () => activeCloudBackups > 0
+export function beginCloudBackup(): () => void {
+  if (isCloudRestoreRunning()) throw new Error('恢复维护中，不能执行云端备份')
+  activeCloudBackups++
+  let released = false
+  return () => { if (!released) { activeCloudBackups--; released = true } }
+}
+export const isCloudRestoreRunning = () => cloudRestoreRunning || global.lx?.restoreMaintenance === true
 export function beginCloudRestore(): () => void {
-  if (cloudRestoreRunning) throw new Error('另一项云端恢复正在执行，请稍后重试')
+  if (isCloudRestoreRunning() || activeCloudBackups) throw new Error('云端正在备份、校验或恢复，请等待完成；恢复维护后需重启')
   cloudRestoreRunning = true
   return () => { cloudRestoreRunning = false }
 }
@@ -18,9 +27,9 @@ export interface BackupContext {
 }
 
 export const BACKUP_TYPE_INFO = [
-  { id: 'music', label: '歌曲与歌词', description: 'data/music 内的歌曲、歌词、封面和音乐索引；不包含 cache 或外部歌曲目录。' },
+  { id: 'music', label: '歌曲与歌词', description: '当前数据目录的 music/（默认 data/music）内的歌曲、已有歌词、封面和音乐索引；不含各级 cache、数据目录外独立 music 或外部曲库。' },
   { id: 'userFiles', label: '用户音源文件', description: 'users/source 内的音源脚本、顺序和状态文件，以及上传的用户文件。' },
-  { id: 'snapshots', label: '歌单与不喜欢快照', description: '快照正文、snapshotInfo.json；包含没有扩展名的快照及已配置的外部歌单快照目录。' },
+  { id: 'snapshots', label: '歌单、不喜欢与评分快照', description: '快照正文、snapshotInfo.json；包含没有扩展名的快照及已配置的外部歌单快照目录。' },
   { id: 'userData', label: '用户数据', description: '用户设置、播放记录、收藏与其他 JSON 数据；不包含音源文件和快照。' },
   { id: 'system', label: '系统与账户', description: 'config.js、users.json、serverInfo.json 等系统 JSON；包含账号和连接凭据。' },
 ] as const
@@ -46,7 +55,7 @@ export function backupType(relative: string): BackupType | null {
   if (/^users\/[^/]+\/music\//i.test(rel)) return null
   if (/\.(tmp|oltmp|part|log|lock|db|sqlite)(-(wal|shm))?$/i.test(rel) || /(^|\/)temp-|(^|\/)lx-sync-backup-/.test(lower)) return null
   if (lower.startsWith('music/')) return 'music'
-  if (lower.startsWith('_snapshots/') || /^users\/[^/]+\/(list|dislike)\/snapshot(\/|info\.json$)/i.test(rel)) return 'snapshots'
+  if (lower.startsWith('_snapshots/') || /^users\/[^/]+\/(list|dislike|rating)\/snapshot(\/|info\.json$)/i.test(rel)) return 'snapshots'
   if (/^(users\/source|source|uploads)\//i.test(rel)) return 'userFiles'
   if (/^users\/[^/]+\//i.test(rel)) return 'userData'
   if (lower === 'config.js' || (!rel.includes('/') && lower.endsWith('.json'))) return 'system'
@@ -88,7 +97,7 @@ export function scanBackupFiles(context: BackupContext, types: readonly BackupTy
       const rel = prefix + entry.name
       const local = path.join(dir, entry.name)
       if (entry.isDirectory()) {
-        if (!entry.name.startsWith('.') && !/^(runtime|cache|logs|tmp|backups)$/i.test(entry.name)) walk(local, rel + '/')
+        if (!entry.name.startsWith('.') && !/^(runtime|cache|logs|tmp|backups|test-evidence)$/i.test(entry.name)) walk(local, rel + '/')
       } else if (entry.isFile()) {
         const type = backupType(rel)
         if (type && types.includes(type)) files.set(rel, local)
@@ -100,9 +109,12 @@ export function scanBackupFiles(context: BackupContext, types: readonly BackupTy
   const snapshots = String(context.config?.['snapshot.backupPath'] || '')
   if (types.includes('snapshots') && snapshots) {
     const base = path.isAbsolute(snapshots) ? snapshots : path.join(context.dataPath, snapshots)
-    // 外部快照目录只映射每个用户的 snapshot 子目录。
+    // 外部快照目录只映射每个用户的 snapshot 子目录（歌单与 dislike）。
     if (fs.existsSync(base)) for (const entry of fs.readdirSync(base, { withFileTypes: true })) {
-      if (entry.isDirectory() && !entry.isSymbolicLink()) walk(path.join(base, entry.name, 'snapshot'), `_snapshots/${entry.name}/snapshot/`)
+      if (entry.isDirectory() && !entry.isSymbolicLink()) {
+        walk(path.join(base, entry.name, 'snapshot'), `_snapshots/${entry.name}/snapshot/`)
+        walk(path.join(base, entry.name, 'dislike', 'snapshot'), `_snapshots/${entry.name}/dislike/snapshot/`)
+      }
     }
   }
   return files

@@ -16,6 +16,33 @@ See [API reference](./reference.md). File operations are delegated to VueFinder 
 | --- | --- | --- |
 | GET | `/api/status` | — |
 
+## dashboard
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| GET | `/api/dashboard/overview` | — |
+
+## ratings
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| POST | `/api/subsonic/sync-link` | `user`, `direction`, `preview`, `reconcile` |
+| GET / POST | `/api/data/rating-sync` | Query parameter `user` |
+| GET / POST | `/api/music/rating-preferences` | `dislikeAutoRating` |
+| GET / POST | `/api/music/ratings` | `operation`, `songs`, `includeDetails`, `song`, `rating` |
+
+## openlist/connection
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| GET / POST | `/api/openlist/connection` | — |
+
+## files
+
+| Method | Path | Direct fields (partial) |
+| --- | --- | --- |
+| GET / HEAD | `/api/files` | Query parameter `path`; delegated to VueFinder, see API reference |
+
 ## users
 
 | Method | Path | Direct fields (partial) |
@@ -518,7 +545,7 @@ See [API reference](./reference.md). File operations are delegated to VueFinder 
 
 | Method | Path | Direct fields (partial) |
 | --- | --- | --- |
-| POST | `/api/webdav/restore` | — |
+| POST | `/api/webdav/restore` | `preview,mode,targetFilename,strategy,keepCopies,token,cancel` |
 
 ## webdav/logs
 
@@ -578,3 +605,36 @@ See [API reference](./reference.md). File operations are delegated to VueFinder 
 | POST | `/api/music/remaster/start` | — |
 | GET | `/api/music/remaster/status` | — |
 | POST | `/api/music/remaster/cancel` | — |
+
+## Backup recovery and verification
+
+[Detailed contracts](./reference.md#backup-api).
+
+| Method | Path | Main fields / purpose |
+| --- | --- | --- |
+| GET | `/api/webdav/restore/tasks` | `tasks` |
+| POST | `/api/webdav/restore/tasks/<id>/rollback` | `id` |
+| DELETE | `/api/webdav/restore/tasks/<id>` | `id` |
+| POST | `/api/openlist/test` | `endpoint,username,password,token,root` |
+| POST | `/api/openlist/sync` | `user,folder` |
+| GET | `/api/openlist/backups` | `list` |
+| GET | `/api/openlist/metadata` | `job,total` |
+| POST | `/api/openlist/metadata/start` | `target,ids?` |
+| POST | `/api/openlist/metadata/cancel` | `—` |
+| POST | `/api/openlist/retry` | `id` |
+| POST | `/api/openlist/retry-batch` | `ids` |
+| POST | `/api/openlist/delete` | `ids` |
+| POST | `/api/openlist/restore` | `preview,mode,types,backupBeforeRestore,snapshotId,planToken` |
+| GET | `/api/openlist/restore/history` | `history` |
+| GET | `/api/openlist/restore/jobs` | `tasks,maintenance` |
+| POST | `/api/openlist/restore/jobs/start` | `planToken,mode,types,backupBeforeRestore,snapshotId` |
+| POST | `/api/openlist/restore/jobs/<id>/cancel` | `id` |
+| POST | `/api/openlist/restore/jobs/<id>/resume` | `id` |
+| POST | `/api/openlist/restore/jobs/<id>/rollback` | `id` |
+| DELETE | `/api/openlist/restore/jobs/<id>` | `id` |
+| GET | `/api/openlist/integrity` | `job,results` |
+| POST | `/api/openlist/integrity/preview` | `type,user,scope` |
+| POST | `/api/openlist/integrity/start` | `token` |
+| POST | `/api/openlist/integrity/cancel` | `—` |
+
+| GET | `/api/backup/status` | `success,maintenance,webdav,openlist` |
