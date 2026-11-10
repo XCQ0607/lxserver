@@ -1618,6 +1618,54 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      if (pathname === '/api/dashboard/overview' && req.method === 'GET') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) { res.writeHead(401); res.end('Unauthorized'); return }
+        const cfg: any = global.lx.config
+        const now = Date.now()
+        const HOURS = 12
+        const buckets = Array.from({ length: HOURS }, (_, k) => ({ t: now - (HOURS - 1 - k) * 3600000, info: 0, warn: 0, error: 0 }))
+        const totals = { info: 0, warn: 0, error: 0 }
+        const recent: Array<{ time: string, level: string, msg: string }> = []
+        try {
+          const file = path.join(global.lx.logPath, 'app.log')
+          const fd = fs.openSync(file, 'r')
+          const size = fs.fstatSync(fd).size
+          const len = Math.min(size, 512 * 1024)
+          const buf = Buffer.alloc(len)
+          fs.readSync(fd, buf, 0, len, size - len)
+          fs.closeSync(fd)
+          for (const line of buf.toString('utf8').split(/\r?\n/)) {
+            const m = line.match(/^\[([^\]]+)\]\s+\[?(INFO|WARN|WARNING|ERROR)\]?\s+(.*)$/)
+            if (!m) continue
+            const lv = m[2] === 'ERROR' ? 'error' : m[2] === 'INFO' ? 'info' : 'warn'
+            const ts = new Date(m[1]).getTime()
+            if (Number.isNaN(ts) || now - ts > 24 * 3600000) continue
+            totals[lv as 'info']++
+            const idx = HOURS - 1 - Math.floor((now - ts) / 3600000)
+            if (idx >= 0 && idx < HOURS) (buckets[idx] as any)[lv]++
+            if (lv !== 'info') { recent.push({ time: m[1], level: lv, msg: m[3].slice(0, 200) }); if (recent.length > 8) recent.shift() }
+          }
+        } catch { /* log file may not exist */ }
+        let disk: any = null
+        try {
+          const s: any = (fs as any).statfsSync(global.lx.dataPath)
+          disk = { total: s.blocks * s.bsize, free: s.bavail * s.bsize }
+        } catch { /* statfs unsupported */ }
+        const mu = process.memoryUsage()
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        res.end(JSON.stringify({
+          success: true,
+          logs: { totals, buckets: buckets.map(b => ({ t: b.t, info: b.info, warn: b.warn, error: b.error })), recent: recent.reverse() },
+          disk,
+          heap: { used: mu.rss, total: os.totalmem(), external: mu.external },
+          services: {
+            webdav: !!cfg['webdav.enable'], openlist: !!cfg['openlist.enable'],
+            publicFavorites: !!cfg['user.enablePublicFavorites'], maintenance: global.lx.restoreMaintenance === true,
+          },
+          node: process.version, pid: process.pid,
+        }))
+        return
+      }
       if (pathname === '/api/users') {
         const auth = req.headers['x-frontend-auth']
         if (auth !== global.lx.config['admin.password']) {

@@ -757,7 +757,7 @@ class App {
         this.monitorLabels.push(nowStr);
         this.systemCpuHistory.push(sysCpuVal);
         this.processCpuHistory.push(procCpuVal);
-        if (this.systemCpuHistory.length > 20) {
+        if (this.systemCpuHistory.length > (this.monitorWindow || 20)) {
             this.monitorLabels.shift();
             this.systemCpuHistory.shift();
             this.processCpuHistory.shift();
@@ -767,7 +767,7 @@ class App {
                 label: '系统 CPU (%)',
                 data: this.systemCpuHistory,
                 borderColor: '#3b82f6',
-                backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                backgroundColor: 'rgba(59, 130, 246, 0.08)',
                 borderWidth: 2,
                 pointRadius: 2,
                 pointHoverRadius: 5,
@@ -819,7 +819,7 @@ class App {
 
         this.systemMemHistory.push(sysMemVal);
         this.processMemHistory.push(procMemVal);
-        if (this.systemMemHistory.length > 20) {
+        if (this.systemMemHistory.length > (this.monitorWindow || 20)) {
             this.systemMemHistory.shift();
             this.processMemHistory.shift();
         }
@@ -828,7 +828,7 @@ class App {
                 label: '系统内存 (%)',
                 data: this.systemMemHistory,
                 borderColor: '#10b981',
-                backgroundColor: 'rgba(16, 185, 129, 0.15)',
+                backgroundColor: 'rgba(16, 185, 129, 0.08)',
                 borderWidth: 2,
                 pointRadius: 2,
                 pointHoverRadius: 5,
@@ -929,10 +929,10 @@ class App {
                             display: false
                         },
                         tooltip: {
-                            backgroundColor: 'rgba(15, 23, 42, 0.92)',
-                            titleColor: '#e2e8f0',
-                            bodyColor: '#cbd5e1',
-                            borderColor: 'rgba(255, 255, 255, 0.12)',
+                            backgroundColor: __themeColors().tipBg,
+                            titleColor: __themeColors().tipText,
+                            bodyColor: __themeColors().tipText,
+                            borderColor: __themeColors().grid,
                             borderWidth: 1,
                             padding: 10,
                             boxPadding: 4,
@@ -948,11 +948,11 @@ class App {
                         x: {
                             display: true,
                             grid: {
-                                color: 'rgba(255, 255, 255, 0.04)',
+                                color: __themeColors().grid,
                                 drawBorder: false
                             },
                             ticks: {
-                                color: 'rgba(255, 255, 255, 0.35)',
+                                color: __themeColors().tick,
                                 font: { size: 10 },
                                 maxTicksLimit: 6,
                                 maxRotation: 0
@@ -963,11 +963,11 @@ class App {
                             suggestedMin: 0,
                             suggestedMax: suggestedMax,
                             grid: {
-                                color: 'rgba(255, 255, 255, 0.05)',
+                                color: __themeColors().grid,
                                 drawBorder: false
                             },
                             ticks: {
-                                color: 'rgba(255, 255, 255, 0.4)',
+                                color: __themeColors().tick,
                                 font: { size: 10 },
                                 callback: function (value) {
                                     return value + '%';
