@@ -83,7 +83,7 @@
     "nodemon": "^3.1.14",
     "rimraf": "^5.0.5",
     "stylelint": "^17.16.0",
-    "stylelint-config-standard": "^40.0.0",
+    "stylelint-config-standard": "^41.0.0",
     "@tailwindcss/cli": "^4.3.3",
     "tailwindcss": "^4.3.3",
     "ts-node": "^10.9.2",
