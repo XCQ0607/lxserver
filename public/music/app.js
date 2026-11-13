@@ -3169,6 +3169,12 @@ window.getSourceTag = getSourceTag;
 // 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来
 function getSourceTags(song) {
     const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    // 手机上一行放不下四五个平台标签（会把音质标签挤出屏幕）：只显示主平台，其余折叠成 +N
+    if (members.length > 2 && window.innerWidth < 768) {
+        const others = members.slice(1).map(member => getSourceName(member.source)).join('、');
+        return getSourceTag(members[0].source) +
+            `<span class="song-tag t-bg-main t-text-muted t-border-main" title="${others}">+${members.length - 1}</span>`;
+    }
     return members.map(member => getSourceTag(member.source)).join('');
 }
 window.getSourceTags = getSourceTags;
