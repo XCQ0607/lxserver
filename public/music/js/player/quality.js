@@ -67,7 +67,18 @@ function isQualityEntryAvailable(entry) {
     return true;
 }
 
+// 聚合搜索合并出来的歌曲带有 _alternates（其他平台上的同一首歌），可用音质是各平台的并集；
+// 具体由哪个平台提供某个音质，在解析播放链接时再决定。
 function getAvailableQualities(songInfo) {
+    if (!songInfo) return ['128k'];
+    if (!Array.isArray(songInfo._alternates) || !songInfo._alternates.length) return getOwnQualities(songInfo);
+    const all = new Set(getOwnQualities(songInfo));
+    songInfo._alternates.forEach(alternate => getOwnQualities(alternate).forEach(quality => all.add(quality)));
+    return sortQualitiesLowToHigh([...all]);
+}
+
+// 只看这个条目自身所在平台提供的音质
+function getOwnQualities(songInfo) {
     if (!songInfo) return ['128k'];
 
     const types = getRawQualityData(songInfo);
@@ -80,9 +91,13 @@ function getAvailableQualities(songInfo) {
 }
 
 function getSelectableQualities(songInfo) {
-    const source = songInfo?.source || songInfo?.meta?.source;
-    const platformQualities = PLATFORM_SELECTABLE_QUALITIES[source];
-    return platformQualities ? [...platformQualities] : getAvailableQualities(songInfo);
+    const members = [songInfo, ...((songInfo && songInfo._alternates) || [])].filter(Boolean);
+    const all = new Set();
+    for (const member of members) {
+        const source = member.source || member.meta?.source;
+        (PLATFORM_SELECTABLE_QUALITIES[source] || getOwnQualities(member)).forEach(quality => all.add(quality));
+    }
+    return sortQualitiesLowToHigh([...all]);
 }
 
 function getBestQuality(songInfo, userPreference = '320k') {
@@ -150,6 +165,7 @@ window.QualityManager = {
     getBestQuality,
     getNextLowerQuality,
     getAvailableQualities,
+    getOwnQualities,
     getSelectableQualities,
     getQualityDisplayName,
     getQualityColor,

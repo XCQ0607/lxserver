@@ -72,6 +72,8 @@
     if (typeof document === 'undefined') return;
 
     let engine, timer, composing = false, selected = -1, context = '', lastContext = '';
+    // 手指 / 鼠标按在联想词上的那一下：期间输入框失焦或列表重绘都不能让这次点选落空
+    let press = null, chosenAt = 0;
     const input = () => document.getElementById('search-input');
     const box = () => document.getElementById('search-suggestions');
     const list = () => document.getElementById('search-suggestions-list');
@@ -100,6 +102,8 @@
         } else input()?.removeAttribute('aria-activedescendant');
     }
     function choose(text) {
+        chosenAt = Date.now();
+        press = null;
         input().value = text;
         hide();
         window.doSearch();
@@ -108,6 +112,9 @@
         const target = list(), field = input(), container = box();
         if (!target || !field || !container) return;
         const previous = selected >= 0 ? target.children[selected]?.dataset.tip : null;
+        // 各平台的结果陆续返回时内容常常没变：不重建节点，免得正被按住的那一项被换掉
+        const shown = [...target.children].map(item => item.dataset.tip);
+        if (tips.length && shown.length === tips.length && shown.every((tip, i) => tip === tips[i]) && !container.classList.contains('hidden')) return;
         target.replaceChildren();
         tips.forEach((tip, index) => {
             const item = document.createElement('div');
@@ -123,7 +130,9 @@
             label.textContent = tip;
             item.append(icon, label);
             item.onpointerdown = event => event.preventDefault();
-            item.onclick = event => { event.stopPropagation(); choose(tip); };
+            // 触屏上按下会让输入框失焦，mousedown 也拦住才能保住焦点
+            item.onmousedown = event => event.preventDefault();
+            item.onclick = event => { event.stopPropagation(); if (Date.now() - chosenAt > 600) choose(tip); };
             target.appendChild(item);
         });
         container.classList.toggle('hidden', !tips.length);
@@ -170,7 +179,20 @@
             if (!field.value.trim() && window.currentSearchScope === 'network') window.returnSearchHome?.();
         });
         field.addEventListener('focus', () => request());
-        field.addEventListener('blur', hide);
+        field.addEventListener('blur', () => { if (!press) hide(); });
+        // 点选以「按下和抬起都落在联想词上、且没有滑动」为准，不依赖 click：
+        // 触屏上输入框失焦或列表重绘后，click 可能根本不会触发
+        container.addEventListener('pointerdown', event => { press = { x: event.clientX, y: event.clientY }; });
+        const release = event => {
+            const start = press;
+            press = null;
+            if (!start || event.type === 'pointercancel') { if (start && document.activeElement !== field) hide(); return; }
+            if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) return;
+            const item = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.search-tip-item');
+            if (item && container.contains(item)) choose(item.dataset.tip);
+        };
+        document.addEventListener('pointerup', release);
+        document.addEventListener('pointercancel', release);
         field.addEventListener('keydown', event => {
             if (composing || event.isComposing || event.keyCode === 229) return;
             const items = container.classList.contains('hidden') ? [] : list()?.querySelectorAll('.search-tip-item') || [];

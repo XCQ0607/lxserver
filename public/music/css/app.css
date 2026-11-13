@@ -858,16 +858,27 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
     height: 0;
 }
 
-/* Detail Title multi-line support */
-#detail-title {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    line-clamp: 2;
-    -webkit-box-orient: vertical;
-    white-space: normal !important;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    line-height: 1.25;
+/* Detail Title multi-line support (desktop); phones and tablets show one line that scrolls when too long */
+@media (min-width: 1025px) {
+    #detail-title {
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        line-clamp: 2;
+        -webkit-box-orient: vertical;
+        white-space: normal !important;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        line-height: 1.25;
+    }
+}
+
+@media (max-width: 1024px) {
+    #detail-title,
+    #detail-artist {
+        display: block;
+        max-width: 100%;
+        line-height: 1.25;
+    }
 }
 
 #detail-title-container {
@@ -2438,4 +2449,252 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     max-height: min(24rem, 45dvh);
     overflow-y: auto;
     overscroll-behavior: contain;
+}
+
+/* Phone player bar: the icons stay the same size, their touch area grows towards 44px */
+@media (max-width: 767px) {
+    #player-footer #player-rating,
+    #player-footer #player-like-btn,
+    #player-footer [data-mobile-btn],
+    #player-footer #play-mode-btn,
+    #player-footer button[onclick="playPrev()"],
+    #player-footer button[onclick="playNext()"],
+    #player-footer #progress-container {
+        position: relative;
+    }
+
+    #player-footer #player-rating::after,
+    #player-footer #player-like-btn::after,
+    #player-footer [data-mobile-btn]::after,
+    #player-footer #play-mode-btn::after,
+    #player-footer button[onclick="playPrev()"]::after,
+    #player-footer button[onclick="playNext()"]::after,
+    #player-footer #progress-container::after {
+        content: '';
+        position: absolute;
+    }
+
+    #player-footer #player-like-btn::after,
+    #player-footer [data-mobile-btn]::after { inset: -11px -3px; }
+    #player-footer #player-rating::after { inset: -9px -12px -9px -4px; }
+    #player-footer #play-mode-btn::after { inset: 0 -14px; }
+    #player-footer button[onclick="playPrev()"]::after { inset: 0 -4px 0 -13px; }
+    #player-footer button[onclick="playNext()"]::after { inset: 0 -13px 0 -4px; }
+    #player-footer #progress-container::after { inset: -14px 0; }
+}
+
+/* Player bar rating star sits on the artist line: same line height, no extra row */
+#player-footer #player-rating {
+    padding: 0;
+    font-size: 13px;
+    line-height: 16px;
+    white-space: nowrap;
+}
+
+/* Header language picker: icon plus the current language name, no box */
+#header-language select {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    padding: 0;
+    color: var(--text-muted, inherit);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    max-width: 5.5em;
+}
+
+#header-language select option {
+    color: #111827;
+    background: #ffffff;
+}
+
+/* Nothing loaded yet: no song to rate, and the hint text needs the whole line */
+#player-footer #player-rating:not([data-score]) {
+    display: none;
+}
+
+/* Platform markers in song rows. Wide screens: text badges before the quality badges.
+   Phones: the same badges stacked to the right of the title (two columns when there are more than two),
+   so the badge line keeps its room for quality and artist. */
+.source-inline { display: contents; }
+.source-stack { display: none; }
+
+@media (max-width: 767px) {
+    .source-inline { display: none; }
+
+    .source-stack {
+        display: grid;
+        grid-template-columns: auto;
+        gap: 2px;
+        flex-shrink: 0;
+        margin-left: 4px;
+        align-content: center;
+        justify-items: stretch;
+    }
+
+    .source-stack.source-stack-2 { grid-template-columns: auto auto; }
+
+    .source-stack .song-tag {
+        height: 15px;
+        padding: 0 3px;
+        font-size: 9px;
+    }
+
+    /* Give the artist every pixel of the badge line: no trailing padding, no gap around a badge slot that is still empty */
+    [data-rating-badges] { padding-right: 0; }
+    [data-rating-badges] > [data-server-badge]:empty { display: none; }
+}
+
+/* Text that can scroll never needs an ellipsis: it either fits (a 1px rounding overflow is simply clipped)
+   or it is turned into a scrolling line */
+.dynamic-marquee.truncate {
+    text-overflow: clip;
+}
+
+/* Phones: tighter vertical rhythm. Song rows lose most of their padding (62px -> 52px, two more rows on screen),
+   the list header and the player bar give back a few pixels each. */
+@media (max-width: 767px) {
+    .grid.grid-cols-12:has([data-rating-badges]) {
+        padding-top: 5px;
+        padding-bottom: 5px;
+        margin-bottom: 1px;
+    }
+
+    #search-results-header {
+        padding-top: 6px;
+        padding-bottom: 6px;
+    }
+
+    /* The player bar lines up with the content panel above it: same 8px side inset, same border and corner radius */
+    #player-footer {
+        padding-top: 6px;
+        padding-bottom: 6px;
+        left: 8px;
+        width: calc(100% - 16px);
+        border: 1px solid var(--border-main, #374151);
+        border-bottom: 0;
+        border-radius: 16px 16px 0 0;
+    }
+
+    #player-footer #player-song-info { margin-bottom: 2px; }
+
+    #player-footer #player-progress-row {
+        margin-top: -5px;
+        margin-bottom: -3px;
+    }
+}
+
+/* Language control in the header: a single button on phones, the picker from 768px up */
+#header-language-btn { display: none; }
+
+@media (max-width: 767px) {
+    #header-language-btn { display: inline-flex; }
+    #header-language { display: none; }
+}
+
+/* Phones, search result rows: the title takes whatever the index and the action buttons leave.
+   The 12-column grid gave the title a fixed 7/12 and left ~20px unused beside the buttons, so titles scrolled
+   although there was room. Platform badges sit right against the buttons. */
+@media (max-width: 767px) {
+    #search-results > .grid.grid-cols-12:has([data-rating-badges]) {
+        grid-template-columns: 18px minmax(0, 1fr) auto;
+        column-gap: 4px;
+        padding-left: 8px;
+        padding-right: 6px;
+    }
+
+    #search-results > .grid.grid-cols-12:has([data-rating-badges]) > * { grid-column: auto; }
+
+    #search-results [class*="col-span-7"] { padding-right: 0; }
+    #search-results [class*="col-span-7"] > .relative { margin-right: 8px; }
+    #search-results .source-stack { margin-left: 0; margin-right: 4px; }
+}
+
+/* Mini player: what stays on screen when the player bar is collapsed.
+   Cover, title and a play / pause button; tapping anywhere else brings the full bar back. */
+#btn-expand-panel.mini-player {
+    right: 24px;
+    bottom: 24px;
+    width: 300px;
+    height: 52px;
+    gap: 10px;
+    padding: 6px 4px 6px 6px;
+    border-radius: 16px;
+    cursor: pointer;
+}
+
+/* While it is slid away it must not catch taps; it never fades out like the old arrow button did */
+#btn-expand-panel.mini-player.opacity-0 { pointer-events: none; }
+
+#btn-expand-panel.mini-player.faint {
+    opacity: 1 !important;
+    background-color: var(--bg-panel, #1f2937) !important;
+    border-color: var(--border-main, #374151) !important;
+}
+
+#mini-player-cover {
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    object-fit: cover;
+}
+
+.mini-player-text {
+    flex: 1;
+    min-width: 0;
+}
+
+#mini-player-title {
+    color: var(--text-main, inherit);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 18px;
+}
+
+#mini-player-artist {
+    overflow: hidden;
+    color: var(--text-muted, inherit);
+    font-size: 11px;
+    line-height: 15px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#mini-player-play {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: #10b981;
+    color: #ffffff;
+    font-size: 14px;
+}
+
+.mini-player-expand {
+    padding: 0 8px 0 2px;
+    color: var(--text-muted, inherit);
+    font-size: 13px;
+}
+
+@media (max-width: 767px) {
+    /* Same inset as the content panel and the player bar */
+    #btn-expand-panel.mini-player {
+        left: 8px;
+        right: 8px;
+        bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+        width: auto;
+    }
+
+/* The views take their bottom padding from --player-footer-inset; leave room for the mini player */
+    body.player-collapsed #main-views > [id^="view-"],
+    body.player-collapsed #songlist-detail-view {
+        --player-footer-inset: calc(68px + env(safe-area-inset-bottom, 0px));
+    }
 }

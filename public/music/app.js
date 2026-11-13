@@ -31,6 +31,9 @@ let currentIndex = -1;
 let preSelectedNextIndex = null; // 预先选定的下一首索引 (用于确保随机模式下的预读一致性)
 window.viewingPlaylist = []; // Currently displayed list in UI
 let currentPlayingScope = 'network'; // Scope for active playback
+let searchRadioArmed = false; // 当前播放是否由歌曲搜索结果起播（playFromView / 续播维护）
+const searchRadioSongs = new WeakSet(); // 不该被续播顶替的下一首：续播插入的相似歌曲、用户点了「下一首播放」的歌曲
+let searchRadioCache = null; // { seedId, promise }：同一首种子歌只请求一次，预读与续播共用
 window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' - Scope for UI view
 let currentPlayingSong = null; // Track currently playing song independently of view
 window.batchCollectSongs = null; // Store songs for batch collection modal
@@ -132,6 +135,8 @@ const DEFAULT_SETTINGS = {
     lyricFontSize: 1.25, // 歌词字体大小 (rem)
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
+    autoPlaySimilarAfterSearch: true, // 搜索歌曲播完后自动续播相似歌曲 (默认开启)
+    mergeAggregatedSearch: true, // 聚合搜索合并各平台的同一首歌 (默认开启)
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
@@ -2107,6 +2112,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (searchSourceEl) searchSourceEl.value = cachedSearchSource;
     }
 
+    // 封面是异步换上的：换好后同步到迷你播放条
+    const footerCover = document.getElementById('player-cover');
+    if (footerCover) new MutationObserver(() => syncMiniPlayer()).observe(footerCover, { attributes: true, attributeFilter: ['src'] });
+
     // 为展开按钮添加悬放恢复逻辑
     const expandBtn = document.getElementById('btn-expand-panel');
     if (expandBtn) {
@@ -2510,6 +2519,7 @@ function renderNetworkSearchFooter(visible) {
 async function searchNetworkSongs(keyword, source, headers, request, append = false) {
     const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
         keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
+        merge: source === 'all' && (window.settings || {}).mergeAggregatedSearch !== false,
     });
     if (!append) window.networkSongSearch = search;
     const current = () => request.current() && window.networkSongSearch === search &&
@@ -3099,7 +3109,10 @@ function getQualityTags(item) {
     // 1. types / _types (旧版/部分源)
     // 2. qualitys / _qualitys (新版/标准)
     // 3. meta.qualitys (收藏列表)
-    const rawTypes = item.types || item._types ||
+    // 聚合搜索合并出来的歌曲：取各平台音质的并集
+    const merged = Array.isArray(item._alternates) && item._alternates.length && window.QualityManager;
+    const rawTypes = merged ? window.QualityManager.getAvailableQualities(item).map(type => ({ type })) :
+        item.types || item._types ||
         item.qualitys || item._qualitys ||
         (item.meta && (item.meta.qualitys || item.meta._qualitys)) ||
         {};
@@ -3160,6 +3173,22 @@ function getSourceTag(source) {
     return `<span class="song-tag ${color}">${name}</span>`;
 }
 window.getSourceTag = getSourceTag;
+
+// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来。
+// 宽屏上排在音质标签前面；手机上一行放不下，改成在歌名右侧竖着叠放（见 getSourceStack）
+function getSourceTags(song) {
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    return `<span class="source-inline">${members.map(member => getSourceTag(member.source)).join('')}</span>`;
+}
+
+// 手机上的平台标记：同样的文字标签，竖着叠起来（超过两个时排成两列）放在播放按钮左边，不占歌名和音质标签的位置
+function getSourceStack(song) {
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    const columns = members.length > 2 ? ' source-stack-2' : '';
+    return `<div class="source-stack${columns}">${members.map(member => getSourceTag(member.source)).join('')}</div>`;
+}
+window.getSourceStack = getSourceStack;
+window.getSourceTags = getSourceTags;
 
 
 
@@ -5349,7 +5378,7 @@ function renderResults(list) {
                          ${createMarqueeHtml(item.name)}
                     </div>
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
-                         ${getSourceTag(item.source)}
+                         ${getSourceTags(item)}
                          ${getQualityTags(item)}
                          <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
@@ -5378,6 +5407,7 @@ function renderResults(list) {
 
             <!-- Actions -->
             <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                ${getSourceStack(item)}
                 <button class="p-1 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" 
                         title="播放" 
                         onclick="event.stopPropagation(); playFromView(${actualIndexInOriginal})">
@@ -5573,7 +5603,8 @@ function applyMarqueeChecks(root = document) {
         const scope = root || document;
         const elements = scope.querySelectorAll('.dynamic-marquee.truncate');
         elements.forEach(el => {
-            if (el.scrollWidth > el.clientWidth) {
+            // 差 1px 以内是取整误差，不算放不下
+            if (el.scrollWidth > el.clientWidth + 1) {
                 const text = el.getAttribute('data-text') || el.innerText;
 
                 // 必须保留 overflow-hidden 以限制宽度
@@ -5796,6 +5827,32 @@ const prefetchManager = {
 };
 prefetchManager.init(); // 立即初始化缓冲器
 
+// 服务器缓存是否可直接播放：本平台的缓存直接可用；别的平台缓存的同名同歌手文件（撞名），
+// 时长一致才当作同一首歌，这样原平台连不上时也能播放已缓存的文件
+function isUsableServerCache(song, cached) {
+    if (!cached || !cached.exists) return false;
+    if (!cached.isCollision) return true;
+    if (!cached.url) return false;
+    const seconds = value => {
+        const parts = String(value || '').split(':').map(Number);
+        return parts.length < 2 || parts.some(Number.isNaN) ? 0 : parts.reduce((total, part) => total * 60 + part, 0);
+    };
+    const wanted = seconds(song.interval), have = seconds(cached.interval);
+    return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
+}
+
+// 合并歌曲的各平台条目里，已有所选音质缓存文件的排到最前面：
+// 无论这次按速度该先试哪个平台，都先播已缓存的那份，避免同一首歌换个平台又解析、又缓存一遍
+async function cachedMembersFirst(candidates, quality) {
+    if (candidates.length < 2 || settings.preferServerCache === false) return candidates;
+    const cached = await Promise.all(candidates.map(async member => {
+        const wanted = window.SongMerge.requestQuality(member, quality);
+        const hit = await checkServerCache(cleanSongData(member), wanted, true, false, AbortSignal.timeout(1500));
+        return isUsableServerCache(member, hit);
+    }));
+    return [...candidates.filter((_, i) => cached[i]), ...candidates.filter((_, i) => !cached[i])];
+}
+
 async function refreshPrefetchedCache(song, result) {
     if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
 
@@ -5832,9 +5889,29 @@ async function refreshPrefetchedCache(song, result) {
  */
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
     try {
-        const result = await fetchSongUrl(song, quality, isRetry, isSilent);
-        if (result.errorMsg) throw new Error(result.errorMsg);
-        return result;
+        // 聚合搜索合并出来的歌曲：在各平台的条目里按「有该音质、可解析、历史最快」的顺序逐个尝试
+        const candidates = song._alternates?.length
+            ? await cachedMembersFirst(await window.SongMerge.candidates(song, quality), quality)
+            : [song];
+        let lastError = null;
+        for (const candidate of candidates) {
+            const startedAt = Date.now();
+            try {
+                // 同一档音质各平台叫法不同（hires / flac24bit），按该平台自己的叫法请求
+                const candidateQuality = song._alternates?.length ? window.SongMerge.requestQuality(candidate, quality) : quality;
+                const result = await fetchSongUrl(candidate, candidateQuality, isRetry, isSilent);
+                if (result.errorMsg) throw new Error(result.errorMsg);
+                // 只统计真正的在线解析，命中缓存的耗时不代表平台快慢
+                if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
+                return candidate === song ? result : { ...result, songInfo: candidate, switchedSource: true, originalSource: song.source };
+            } catch (candidateError) {
+                // 没有可用解析源时，单个条目直接报错；合并歌曲还要看其余平台的条目有没有缓存可用
+                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE' && candidates.length < 2) throw candidateError;
+                if (song._alternates?.length) window.SongMerge.record(candidate.source, false, 0);
+                lastError = candidateError;
+            }
+        }
+        throw lastError;
     } catch (error) {
         if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
             throw error;
@@ -5875,6 +5952,8 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
+                // 合并歌曲的各平台条目上面已经逐个试过，不必再拿同一批平台重试一遍，直接看后面的降级
+                if (song._alternates?.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
                     RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
@@ -5930,6 +6009,15 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
             return null;
         }
     };
+
+    // 0. 聚合搜索合并出来的歌曲：先在各平台的条目里按「有该音质、可解析、历史最快」的顺序找所请求音质
+    if (song._alternates?.length) {
+        for (const candidate of await window.SongMerge.candidates(song, requestedQuality)) {
+            const mergedExact = await trySingle(candidate, window.SongMerge.requestQuality(candidate, requestedQuality));
+            if (!mergedExact) continue;
+            return candidate === song ? mergedExact : { ...mergedExact, songInfo: candidate, switchedSource: true, originalSource: song.source };
+        }
+    }
 
     // 1. 先在原平台尝试所请求音质
     const originalExact = await trySingle(song, requestedQuality);
@@ -6041,6 +6129,8 @@ async function findOtherSourceMatch(song, isSilent = false) {
 }
 
 async function findOtherSourceMatches(song, isSilent = false, options = {}) {
+    // 聚合搜索时已经对上的其他平台条目，直接用，不必再全网搜索一遍
+    if (Array.isArray(song._alternates) && song._alternates.length) return song._alternates;
     if (!song.name || !song.singer) return [];
 
     try {
@@ -6302,7 +6392,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
     if (allowServerCache) {
         let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
-        if (cacheResult.exists && !cacheResult.isCollision) {
+        if (isUsableServerCache(song, cacheResult)) {
             const actualQuality = cacheResult.quality || quality;
             console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
             let serverCacheUrl = cacheResult.url;
@@ -6505,38 +6595,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
     if (!nextSong) return;
 
     try {
-        const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
-        const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
-
-        // 1. 检查内存缓存
-        let result = prefetchManager.get(nextSong, targetQual);
-        if (result) {
-            const alive = await probeUrl(result.url);
-            if (!canCommit()) return;
-            if (alive) {
-                prefetchManager.set(nextSong, targetQual, result);
-                return;
-            }
-            prefetchManager.invalidate(nextSong, targetQual, result);
-        }
-
-        // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
-        result = await resolveSongUrl(nextSong, targetQual, true);
-        if (!canCommit()) return;
-
-        // 3. 探活获取到的链接
-        const alive = await probeUrl(result.url);
-        if (!canCommit()) return;
-        if (!alive) {
-            localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
-            result = await resolveSongUrl(nextSong, targetQual, true, true);
-            if (!canCommit()) return;
-        }
-
-        prefetchManager.set(nextSong, targetQual, result);
-        const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
-        console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
-
+        await prefetchSongUrl(nextSong, isCurrent);
     } catch (e) {
         if (!isCurrent()) return;
         // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
@@ -6549,6 +6608,41 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
             return prefetchNextSong(followingIndex, depth + 1, generation);
         }
     }
+}
+
+// 解析并缓存一首歌的播放链接，失败时抛出；isCurrent 失效后不再写入缓存
+async function prefetchSongUrl(nextSong, isCurrent) {
+    const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
+    const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
+
+    // 1. 检查内存缓存
+    let result = prefetchManager.get(nextSong, targetQual);
+    if (result) {
+        const alive = await probeUrl(result.url);
+        if (!canCommit()) return;
+        if (alive) {
+            prefetchManager.set(nextSong, targetQual, result);
+            return;
+        }
+        prefetchManager.invalidate(nextSong, targetQual, result);
+    }
+
+    // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
+    result = await resolveSongUrl(nextSong, targetQual, true);
+    if (!canCommit()) return;
+
+    // 3. 探活获取到的链接
+    const alive = await probeUrl(result.url);
+    if (!canCommit()) return;
+    if (!alive) {
+        localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
+        result = await resolveSongUrl(nextSong, targetQual, true, true);
+        if (!canCommit()) return;
+    }
+
+    prefetchManager.set(nextSong, targetQual, result);
+    const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
+    console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
 }
 
 // --- Server Cache Helpers ---
@@ -6564,6 +6658,8 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
             quality: quality || '',
             includeOpenlist: includeOpenlist ? '1' : '0'
         });
+        // 时长用于在同名的缓存记录里挑出同一版
+        if (song.interval) params.append('interval', song.interval);
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
@@ -7166,6 +7262,7 @@ function enqueueSong(song, next = false) {
             if (i < currentIndex) currentIndex--;
         }
         currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
+        if (typeof keepAsNextSong === 'function') keepAsNextSong(queuedSong);
         preSelectedNextIndex = null;
         renderQueue();
         savePlaybackState();
@@ -7175,6 +7272,7 @@ function enqueueSong(song, next = false) {
     if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
     const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
     currentPlaylist.splice(position, 0, song);
+    if (next && typeof keepAsNextSong === 'function') keepAsNextSong(song);
     preSelectedNextIndex = null;
     renderQueue();
     savePlaybackState();
@@ -7185,7 +7283,9 @@ window.enqueueSong = enqueueSong;
 function playFromView(index) {
     if (!viewingPlaylist || !viewingPlaylist[index]) return;
     // Update playlist and scope when user explicitly clicks a song to play
+    const fromSongSearch = isSongSearchView();
     updatePlaylist(viewingPlaylist, index, currentSearchScope);
+    setSearchRadioArmed(fromSongSearch);
 }
 window.playFromView = playFromView;
 
@@ -7852,7 +7952,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
 
         // [Trigger Prefetch] 确保即便 play() 被拦截也尝试发起下一首预读
-        if (currentLoadingRequestId === thisRequestId) prefetchNextSong();
+        if (currentLoadingRequestId === thisRequestId) prefetchUpcomingSong();
 
     } catch (error) {
         if (currentLoadingRequestId !== thisRequestId) return;
@@ -7914,29 +8014,8 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
         isPlaying = !audio.paused;
     }
 
-    const playStatus = isPlaying ? '播放中' : '暂停中';
-
-
-    // 获取音质显示名称
-    const qualityName = currentQuality ? window.QualityManager.getQualityDisplayName(currentQuality) : '';
-
-    // 组合状态文本
-    if (qualityName) {
-        statusText = `${playStatus} (${qualityName})`;
-    } else {
-        statusText = playStatus;
-    }
-
-    // 根据链接来源添加提示
-    if (currentSourceType === 'cache') {
-        statusText += ' 【缓存链接】';
-    } else if (currentSourceType === 'server_cache') {
-        statusText += currentCacheFolder === 'music' ? ' 【已下载】' : ' 【缓存】';
-    } else if (currentSourceType === 'openlist') {
-        statusText += ' 【OpenList】';
-    }
-
-    statusEl.innerText = statusText;
+    // 播放 / 暂停看播放键，音质和来源看歌名下面的标签：平时这一行留空，只显示加载、缓冲、出错等提示
+    statusEl.innerText = statusText.trim();
 }
 
 
@@ -8084,6 +8163,7 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
     // [New] Use a shallow copy to prevent mutations from affecting the source list
     currentPlaylist = [...list];
     currentPlayingScope = scope;
+    setSearchRadioArmed(false);
 
     // 如果是从网络搜索或歌单来源，确保 playSong 能识别并更新 UI/历史
     playSong(currentPlaylist[startIndex], startIndex, null, false, false, shouldAddToDefault);
@@ -8128,6 +8208,15 @@ window.setImg = (id, src) => {
         };
     }
 };
+
+// 设置一行文字；放不下时由 applyMarqueeChecks 换成滚动显示
+function setRollingText(el, text) {
+    if (!el) return;
+    el.innerText = text;
+    el.setAttribute('data-text', text);
+    el.classList.add('truncate', 'dynamic-marquee');
+    el.classList.remove('overflow-hidden');
+}
 
 function updatePlayerInfo(song, actualQuality) {
     window.RatingManager?.current(song);
@@ -8226,8 +8315,8 @@ function updatePlayerInfo(song, actualQuality) {
     const detailContainer = document.getElementById('detail-title-container');
 
     if (detailTitle && detailContainer) {
-        // 直接设置文本，由 CSS 处理双行换行和省略号
-        detailTitle.innerText = song.name;
+        // 桌面端由 CSS 处理双行换行；手机 / 平板上单行显示，太长时滚动
+        setRollingText(detailTitle, song.name);
         detailTitle.classList.remove('animate-marquee');
         detailTitle.onclick = (e) => {
             e.stopPropagation();
@@ -8242,7 +8331,9 @@ function updatePlayerInfo(song, actualQuality) {
 
     const detailArtist = document.getElementById('detail-artist');
     if (detailArtist) {
-        detailArtist.innerText = song.singer;
+        setRollingText(detailArtist, song.singer);
+        applyMarqueeChecks(document.getElementById('view-player-detail'));
+        syncMiniPlayer();
         detailArtist.onclick = async (e) => {
             e.stopPropagation();
             if (window.innerWidth < 1025) {
@@ -8330,6 +8421,8 @@ async function togglePlay() {
             await fadeVolume(0, 600);
         }
         shouldAutoRecoverPlayback = false;
+        // 用户暂停了：还在等相似歌曲的话，取回来也不要自动开播
+        if (typeof cancelSearchRadioContinuation === 'function') cancelSearchRadioContinuation();
         audio.pause();
         if (window._autoSkipTimer) {
             clearTimeout(window._autoSkipTimer);
@@ -8343,6 +8436,25 @@ function updatePlayButton(isPlaying) {
     const btn = document.getElementById('btn-play');
     btn.setAttribute('aria-label', isPlaying ? '暂停' : '播放');
     btn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play ml-1"></i>';
+    const mini = document.getElementById('mini-player-play');
+    if (mini) {
+        mini.setAttribute('aria-label', isPlaying ? '暂停' : '播放');
+        mini.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
+    }
+}
+
+// 迷你播放条（播放栏收起时显示）跟随播放栏的歌名、歌手和封面
+function syncMiniPlayer() {
+    const pill = document.getElementById('btn-expand-panel');
+    const title = document.getElementById('mini-player-title');
+    if (!pill || !title) return;
+    const text = id => document.getElementById(id)?.getAttribute('data-text') || '';
+    setRollingText(title, text('player-title'));
+    const artist = document.getElementById('mini-player-artist');
+    if (artist) artist.textContent = currentPlayingSong ? text('player-artist') : '';
+    const cover = document.getElementById('player-cover'), mini = document.getElementById('mini-player-cover');
+    if (cover && mini && mini.src !== cover.src) mini.src = cover.src;
+    applyMarqueeChecks(pill);
 }
 
 /**
@@ -8350,6 +8462,146 @@ function updatePlayButton(isPlaying) {
  * @param {Number} depth 递归尝试深度，防止死循环
  */
 function playNext() {
+    if (isSearchRadioDue()) {
+        continueWithSimilarSongs();
+        return;
+    }
+    playNextInQueue();
+}
+
+// --- 搜索电台：搜索歌曲播到队列末尾后，用相似歌曲自动续播 ---
+
+function isSearchRadioDue() {
+    if (settings.autoPlaySimilarAfterSearch === false || !searchRadioArmed) return false;
+    if (playMode !== 'list' && playMode !== 'order') return false;
+    if (!currentPlaylist[currentIndex]) return false;
+    // 下一首是续播插入的相似歌曲、或用户指定的「下一首播放」时照常播放；
+    // 否则（搜索结果里的其他条目或队列末尾）取新的相似歌曲
+    const next = currentPlaylist[currentIndex + 1];
+    return !(next && (searchRadioSongs.has(next) || next._searchRadio));
+}
+
+// 用户点了「下一首播放」：这首歌不让续播顶替
+function keepAsNextSong(song) {
+    if (song) searchRadioSongs.add(song);
+}
+
+// 用户暂停或睡眠定时到点时调用：正在等待的续播请求回来后不再自动开播
+let searchRadioEpoch = 0;
+function cancelSearchRadioContinuation() {
+    searchRadioEpoch++;
+}
+
+
+// 记到 localStorage，刷新页面恢复播放后仍能续播
+function setSearchRadioArmed(armed) {
+    searchRadioArmed = armed;
+    try {
+        localStorage.setItem('lx_search_radio_armed', armed ? '1' : '0');
+    } catch (e) { /* 存储不可用时仅本次会话生效 */ }
+}
+
+// 歌曲搜索结果视图（不含歌手 / 专辑详情里的歌曲列表）
+function isSongSearchView() {
+    if (currentSearchScope !== 'network') return false;
+    return !['artist-detail-header', 'album-detail-header'].some(id => {
+        const header = document.getElementById(id);
+        return header && !header.classList.contains('hidden');
+    });
+}
+
+function loadSearchRadioSongs(seed) {
+    const seedId = cleanSongData(seed).id;
+    if (searchRadioCache && searchRadioCache.seedId === seedId) return searchRadioCache.promise;
+    const meta = seed.meta || {};
+    const params = new URLSearchParams({
+        source: seed.source || '',
+        // QQ 音乐的相似歌曲接口要数字 ID，列表里的歌把它存在 meta.id
+        songId: String((seed.source === 'tx' ? (meta.id || seed.songId) : (seed.songId || meta.songId)) || ''),
+        songmid: String(seed.songmid || meta.songId || ''),
+        name: seed.name || '',
+        singer: seed.singer || '',
+    });
+    // 用户上传的版本歌名常是乱写的，专辑名能帮服务端认出原曲
+    const album = seed.albumName || meta.albumName || '';
+    if (album) params.set('album', album);
+    const promise = fetch(`${API_BASE}/similar?${params}`, { headers: getUserAuthHeaders() })
+        .then(res => {
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return res.json();
+        })
+        .then(data => {
+            const list = Array.isArray(data && data.list) ? data.list : [];
+            list.forEach(item => {
+                if (!item.id || item.id === 'undefined') {
+                    item.id = item.songmid || item.songId || item.hash || item.copyrightId;
+                }
+            });
+            console.log(`[SearchRadio] ${seed.name}: ${list.length} 首 (${data && data.strategy})`);
+            return list.filter(item => item.id && item.source);
+        })
+        .catch(e => {
+            console.warn('[SearchRadio] 获取相似歌曲失败:', e.message);
+            if (searchRadioCache && searchRadioCache.promise === promise) searchRadioCache = null;
+            return [];
+        });
+    searchRadioCache = { seedId, promise };
+    return promise;
+}
+
+// 去掉已在队列里的和标记为不喜欢的歌曲
+function pickSearchRadioSongs(songs) {
+    const queued = new Set(currentPlaylist.map(item => cleanSongData(item).id));
+    const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
+    return songs.filter(item => {
+        const id = cleanSongData(item).id;
+        if (queued.has(id)) return false;
+        queued.add(id);
+        return !(skipDisliked && window.DislikeManager.isDisliked(item));
+    }).slice(0, Math.max(0, 1000 - currentPlaylist.length));
+}
+
+// 队列将尽时提前取好相似歌曲并预读第一首，减少续播时的停顿；不适用时走普通预读
+async function prefetchUpcomingSong() {
+    if (!isSearchRadioDue() || settings.enablePreloader === false) return prefetchNextSong();
+    const seed = currentPlaylist[currentIndex];
+    prefetchManager.stop();
+    const generation = prefetchManager.generation;
+    const isCurrent = () => settings.enablePreloader !== false &&
+        generation === prefetchManager.generation && currentPlaylist[currentIndex] === seed;
+    const radioSong = pickSearchRadioSongs(await loadSearchRadioSongs(seed))[0];
+    if (!isCurrent()) return;
+    if (!radioSong) return prefetchNextSong();
+    try {
+        await prefetchSongUrl(radioSong, isCurrent);
+    } catch (e) {
+        console.warn(`[Prefetch] Could not preload [${radioSong.name}]:`, e.message);
+    }
+}
+
+async function continueWithSimilarSongs() {
+    const seed = currentPlaylist[currentIndex];
+    const epoch = searchRadioEpoch;
+    const requestId = loadingRequestCounter;
+    const songs = await loadSearchRadioSongs(seed);
+    // 等待期间用户已切歌、暂停，或又发起过播放（比如切走再切回同一首）：不再干预
+    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch || loadingRequestCounter !== requestId) return;
+    const fresh = isSearchRadioDue() ? pickSearchRadioSongs(songs) : [];
+    if (!fresh.length) {
+        playNextInQueue();
+        return;
+    }
+    showInfo(`已续播 ${fresh.length} 首相似歌曲`);
+    // 标记写在歌曲对象上，随播放队列一起保存，刷新页面后仍认得出这些是续播插入的
+    fresh.forEach(item => { item._searchRadio = true; });
+    // 相似歌曲插在当前歌曲之后，未播放的搜索结果留在其后。
+    // 与点击搜索结果播放走同一条路径：加入试听列表、遵循「播放搜索歌曲时切换歌单」设置
+    const nextIndex = currentIndex + 1;
+    updatePlaylist([...currentPlaylist.slice(0, nextIndex), ...fresh, ...currentPlaylist.slice(nextIndex)], nextIndex, 'network');
+    setSearchRadioArmed(true);
+}
+
+function playNextInQueue() {
     const nextIndex = getNextIndex();
     if (nextIndex !== -1 && currentPlaylist[nextIndex]) {
         const nextSong = currentPlaylist[nextIndex];
@@ -8610,6 +8862,7 @@ async function restorePlaybackState() {
         if (state.playlist && state.playlist.length > 0) {
             currentPlaylist = state.playlist;
             currentPlayingScope = state.scope || 'network';
+            searchRadioArmed = state.scope === 'network' && localStorage.getItem('lx_search_radio_armed') === '1';
         } else if (['local_list', 'local_all', 'songlist'].includes(state.scope)) {
             // 回退逻辑：如果队列没存，根据作用域恢复
             currentPlayingScope = state.scope;
@@ -9502,6 +9755,8 @@ const SETTINGS_UI_MAP = {
     // 逻辑 (Logic)
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
+    autoPlaySimilarAfterSearch: { id: 'setting-auto-play-similar', type: 'checkbox' },
+    mergeAggregatedSearch: { id: 'setting-merge-aggregated-search', type: 'checkbox' },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
@@ -10716,8 +10971,9 @@ window.addEventListener('popstate', (e) => {
 });
 
 function updateDetailInfo(song) {
-    document.getElementById('detail-title').innerText = song.name;
-    document.getElementById('detail-artist').innerText = song.singer;
+    setRollingText(document.getElementById('detail-title'), song.name);
+    setRollingText(document.getElementById('detail-artist'), song.singer);
+    applyMarqueeChecks(document.getElementById('view-player-detail'));
     const imgUrl = getImgUrl(song);
     // Use high res image if possible or same URL
     setImg('detail-cover', imgUrl);
@@ -15070,6 +15326,26 @@ async function loadCustomSources() {
 
 // ========== 自定义源管理逻辑 ==========
 
+// 解析源支持的平台，供聚合搜索合并出来的歌曲挑选平台用；一分钟内复用上次的结果
+let supportedPlatformsCache = null;
+if (window.SongMerge) {
+    window.SongMerge.getSupportedPlatforms = async () => {
+        if (supportedPlatformsCache && Date.now() - supportedPlatformsCache.at < 60000) return supportedPlatformsCache.value;
+        const list = await fetchCustomSources();
+        let value = null;
+        if (Array.isArray(list)) {
+            value = new Set();
+            list.forEach(src => {
+                if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
+                    src.supportedSources.forEach(platform => value.add(platform));
+                }
+            });
+        }
+        supportedPlatformsCache = { at: Date.now(), value };
+        return value;
+    };
+}
+
 async function fetchCustomSources() {
     try {
         const username = currentListData?.username || 'default';
@@ -17650,6 +17926,7 @@ function updateSleepTimerDisplay() {
 
 function finishSleepTimer() {
     cancelSleepTimer();
+    if (typeof cancelSearchRadioContinuation === 'function') cancelSearchRadioContinuation();
     // Use audio.pause directly or togglePlay if music is active
     if (audio && !audio.paused) {
         shouldAutoRecoverPlayback = false;
@@ -18163,6 +18440,9 @@ function togglePlayerPanel() {
     // 检查是否已经隐藏 (通过 transform 判断)
     // 注意: Tailwind 的 translate-y-full 等同于 transform: translateY(100%)
     const isHidden = footer.classList.contains('translate-y-[110%]');
+    // 收起后手机上给迷你播放条留出位置（见 app.css 的 body.player-collapsed）
+    document.body.classList.toggle('player-collapsed', !isHidden);
+    if (!isHidden) syncMiniPlayer();
 
     const views = ['view-search', 'view-settings', 'view-favorites', 'view-about', 'main-sidebar', 'view-songlist', 'songlist-detail-view'];
     const playerDetail = document.getElementById('view-player-detail');

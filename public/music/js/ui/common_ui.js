@@ -138,7 +138,7 @@ function readAgreementInAbout() {
         setTimeout(() => {
             const aboutContainer = document.getElementById('view-about');
             if (aboutContainer) {
-                const agreementHeader = Array.from(aboutContainer.querySelectorAll('h2')).find(h => h.innerText.includes('项目协议'));
+                const agreementHeader = Array.from(aboutContainer.querySelectorAll('h2')).find(h => h.innerText.includes(window.LXI18n?.t('项目协议') ?? '项目协议'));
                 if (agreementHeader) {
                     agreementHeader.scrollIntoView({ behavior: 'smooth' });
                 } else {
