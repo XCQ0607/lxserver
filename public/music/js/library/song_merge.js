@@ -10,7 +10,8 @@
     const fold = text => String(text || '').normalize('NFKC').toLowerCase();
     // 只去掉空白和标点，括号里的附注保留：「晴天」和「晴天 (Live)」是不同的键
     const compact = text => fold(text).replace(/[\s·・,，.。!！?？:：;；'"‘’“”《》<>【】[\]()（）\-_/\\]/g, '');
-    const singerParts = text => fold(text).split(/[、,，/&／|;；]+| feat\.? | ft\.? /).map(compact).filter(Boolean);
+    // 歌手名：去掉括号里的别名（「周杰伦 (Jay Chou)」→「周杰伦」）再按分隔符拆开
+    const singerParts = text => fold(text).replace(/[（(\[【].*?[）)\]】]/g, ' ').split(/[、,，/&／|;；]+| feat\.? | ft\.? /).map(compact).filter(Boolean);
     const seconds = interval => {
         const parts = String(interval || '').split(':').map(Number);
         if (parts.length < 2 || parts.some(Number.isNaN)) return 0;
@@ -20,7 +21,8 @@
     function singersOverlap(a, b) {
         const left = singerParts(a), right = singerParts(b);
         if (!left.length || !right.length) return false;
-        return left.some(l => right.some(r => l.includes(r) || r.includes(l)));
+        // 要有一位歌手的名字完全相同；只是名字里互相包含（「张杰」与「张杰伦」）不算
+        return left.some(l => right.includes(l));
     }
 
     function sameSong(a, b) {
@@ -28,7 +30,8 @@
         if (!name || name !== compact(b.name)) return false;
         if (!singersOverlap(a.singer, b.singer)) return false;
         const da = seconds(a.interval), db = seconds(b.interval);
-        return !da || !db || Math.abs(da - db) <= MAX_DURATION_DIFF;
+        // 两边都要有时长才比得出是不是同一版；缺时长的条目各占一行，不合并
+        return da > 0 && db > 0 && Math.abs(da - db) <= MAX_DURATION_DIFF;
     }
 
     const sources = song => (song ? [song, ...(song._alternates || [])] : []);

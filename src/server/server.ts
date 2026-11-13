@@ -4360,7 +4360,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
+        const interval = urlObj.searchParams.get('interval') || undefined
+        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality, interval }, username)
         if (!result.exists && urlObj.searchParams.get('includeOpenlist') === '1') {
           const id = fileCache.normalizeSongId({ source, songmid, id: songId })
           const song = { source, songmid, id, name, singer }

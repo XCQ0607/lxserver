@@ -1722,6 +1722,9 @@ export const getCacheLocation = () => currentCacheLocation
 const HIRES_QUALITY_NAMES = new Set(['hires', 'flac24bit'])
 export const isSameQualityTier = (a: string, b: string) =>
     a === b || (HIRES_QUALITY_NAMES.has(a) && HIRES_QUALITY_NAMES.has(b))
+// 与 quality 同档的其他叫法
+export const sameTierQualities = (quality: string): string[] =>
+    HIRES_QUALITY_NAMES.has(quality) ? [...HIRES_QUALITY_NAMES].filter(name => name !== quality) : []
 
 export const checkCache = (songInfo: any, username?: string, isLyricCheck: boolean = false) => {
     try {
@@ -1740,10 +1743,13 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
             { folder: 'music', anyQuality: true }
         ]
         for (const { folder, anyQuality } of lookupOrder) {
-            const cached = indexManager.get(normalizedUsername, id, folder, quality, !anyQuality || useExact)
+            const exact = !anyQuality || useExact
+            // 精确查找时，同一档音质的另一种叫法（hires / flac24bit）也算命中
+            const cached = indexManager.get(normalizedUsername, id, folder, quality, exact) ||
+                (exact ? sameTierQualities(quality).map(alias => indexManager.get(normalizedUsername, id, folder, alias, true)).find(Boolean) : undefined)
             if (cached) {
                 // 二次校验：exactQuality 模式下确保音质匹配
-                if (useExact && quality && cached.quality !== quality) continue
+                if (useExact && quality && !isSameQualityTier(cached.quality, quality)) continue
                 const dir = getCacheDir(normalizedUsername, folder === 'music')
                 const fileName = isLyricCheck ? cached.lyricFilename : cached.filename
                 if (!fileName) continue
@@ -1784,19 +1790,29 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
             ...indexManager.getAll(normalizedUsername, 'music')
         ]
 
-        const collision = allItems.find(item =>
+        const collisions = allItems.filter(item =>
             item.id !== id && // 排除当前正在查询的 ID 本身
             item.name.toLowerCase() === String(songInfo.name || '').toLowerCase() &&
             item.singer.toLowerCase() === String(songInfo.singer || '').toLowerCase() &&
             isSameQualityTier(item.quality, quality) &&
             (!isLyricCheck || item.hasLyric)
         )
+        const collisionFileExists = (item: any) => !isLyricCheck && !!item.filename &&
+            fs.existsSync(path.join(getCacheDir(normalizedUsername, item.folder === 'music'), item.filename))
+        // 同名记录可能不止一条：优先选文件还在、且时长与请求一致的那条，其次是文件还在的
+        const wantedSec = parseDurationSeconds(songInfo.interval || songInfo.meta?.interval)
+        const sameLength = (item: any) => {
+            const have = parseDurationSeconds(item.interval)
+            return wantedSec > 0 && have > 0 && Math.abs(wantedSec - have) <= 3
+        }
+        const playable = collisions.filter(collisionFileExists)
+        const collision = playable.find(sameLength) || playable[0] || collisions[0]
 
         if (collision) {
             // 同名同歌手但来自别的平台：附上文件地址和时长，由调用方判断是否就是同一首歌
             const collisionFolder: 'cache' | 'music' = collision.folder === 'music' ? 'music' : 'cache'
             const collisionFile = isLyricCheck ? '' : collision.filename
-            const collisionExists = !!collisionFile && fs.existsSync(path.join(getCacheDir(normalizedUsername, collisionFolder === 'music'), collisionFile))
+            const collisionExists = collisionFileExists(collision)
             return {
                 exists: true,
                 isCollision: true,

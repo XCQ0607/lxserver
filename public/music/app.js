@@ -5892,7 +5892,8 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                 if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
                 return candidate === song ? result : { ...result, songInfo: candidate, switchedSource: true, originalSource: song.source };
             } catch (candidateError) {
-                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE') throw candidateError;
+                // 没有可用解析源时，单个条目直接报错；合并歌曲还要看其余平台的条目有没有缓存可用
+                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE' && candidates.length < 2) throw candidateError;
                 if (song._alternates?.length) window.SongMerge.record(candidate.source, false, 0);
                 lastError = candidateError;
             }
@@ -5938,6 +5939,8 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
+                // 合并歌曲的各平台条目上面已经逐个试过，不必再拿同一批平台重试一遍，直接看后面的降级
+                if (song._alternates?.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
                     RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
@@ -6638,6 +6641,8 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
             quality: quality || '',
             includeOpenlist: includeOpenlist ? '1' : '0'
         });
+        // 时长用于在同名的缓存记录里挑出同一版
+        if (song.interval) params.append('interval', song.interval);
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
