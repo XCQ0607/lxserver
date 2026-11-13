@@ -32,7 +32,7 @@ let preSelectedNextIndex = null; // 预先选定的下一首索引 (用于确保
 window.viewingPlaylist = []; // Currently displayed list in UI
 let currentPlayingScope = 'network'; // Scope for active playback
 let searchRadioArmed = false; // 当前播放是否由歌曲搜索结果起播（playFromView / 续播维护）
-const searchRadioSongs = new WeakSet(); // 由续播插入队列的相似歌曲
+const searchRadioSongs = new WeakSet(); // 不该被续播顶替的下一首：续播插入的相似歌曲、用户点了「下一首播放」的歌曲
 let searchRadioCache = null; // { seedId, promise }：同一首种子歌只请求一次，预读与续播共用
 window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' - Scope for UI view
 let currentPlayingSong = null; // Track currently playing song independently of view
@@ -7174,6 +7174,7 @@ function enqueueSong(song, next = false) {
             if (i < currentIndex) currentIndex--;
         }
         currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
+        if (typeof keepAsNextSong === 'function') keepAsNextSong(queuedSong);
         preSelectedNextIndex = null;
         renderQueue();
         savePlaybackState();
@@ -7183,6 +7184,7 @@ function enqueueSong(song, next = false) {
     if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
     const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
     currentPlaylist.splice(position, 0, song);
+    if (next && typeof keepAsNextSong === 'function') keepAsNextSong(song);
     preSelectedNextIndex = null;
     renderQueue();
     savePlaybackState();
@@ -8341,6 +8343,8 @@ async function togglePlay() {
             await fadeVolume(0, 600);
         }
         shouldAutoRecoverPlayback = false;
+        // 用户暂停了：还在等相似歌曲的话，取回来也不要自动开播
+        if (typeof cancelSearchRadioContinuation === 'function') cancelSearchRadioContinuation();
         audio.pause();
         if (window._autoSkipTimer) {
             clearTimeout(window._autoSkipTimer);
@@ -8374,9 +8378,23 @@ function isSearchRadioDue() {
     if (settings.autoPlaySimilarAfterSearch === false || !searchRadioArmed) return false;
     if (playMode !== 'list' && playMode !== 'order') return false;
     if (!currentPlaylist[currentIndex]) return false;
-    // 下一首已是续播插入的相似歌曲时照常播放；否则（搜索结果里的其他条目或队列末尾）取新的相似歌曲
-    return !searchRadioSongs.has(currentPlaylist[currentIndex + 1]);
+    // 下一首是续播插入的相似歌曲、或用户指定的「下一首播放」时照常播放；
+    // 否则（搜索结果里的其他条目或队列末尾）取新的相似歌曲
+    const next = currentPlaylist[currentIndex + 1];
+    return !(next && (searchRadioSongs.has(next) || next._searchRadio));
 }
+
+// 用户点了「下一首播放」：这首歌不让续播顶替
+function keepAsNextSong(song) {
+    if (song) searchRadioSongs.add(song);
+}
+
+// 用户暂停或睡眠定时到点时调用：正在等待的续播请求回来后不再自动开播
+let searchRadioEpoch = 0;
+function cancelSearchRadioContinuation() {
+    searchRadioEpoch++;
+}
+
 
 // 记到 localStorage，刷新页面恢复播放后仍能续播
 function setSearchRadioArmed(armed) {
@@ -8463,16 +8481,18 @@ async function prefetchUpcomingSong() {
 
 async function continueWithSimilarSongs() {
     const seed = currentPlaylist[currentIndex];
+    const epoch = searchRadioEpoch;
     const songs = await loadSearchRadioSongs(seed);
-    // 等待期间用户已切歌：不再干预
-    if (currentPlaylist[currentIndex] !== seed) return;
+    // 等待期间用户已切歌或暂停：不再干预
+    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch) return;
     const fresh = isSearchRadioDue() ? pickSearchRadioSongs(songs) : [];
     if (!fresh.length) {
         playNextInQueue();
         return;
     }
     showInfo(`已续播 ${fresh.length} 首相似歌曲`);
-    fresh.forEach(item => searchRadioSongs.add(item));
+    // 标记写在歌曲对象上，随播放队列一起保存，刷新页面后仍认得出这些是续播插入的
+    fresh.forEach(item => { item._searchRadio = true; });
     // 相似歌曲插在当前歌曲之后，未播放的搜索结果留在其后。
     // 与点击搜索结果播放走同一条路径：加入试听列表、遵循「播放搜索歌曲时切换歌单」设置
     const nextIndex = currentIndex + 1;
@@ -17783,6 +17803,7 @@ function updateSleepTimerDisplay() {
 
 function finishSleepTimer() {
     cancelSleepTimer();
+    if (typeof cancelSearchRadioContinuation === 'function') cancelSearchRadioContinuation();
     // Use audio.pause directly or togglePlay if music is active
     if (audio && !audio.paused) {
         shouldAutoRecoverPlayback = false;

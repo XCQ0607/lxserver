@@ -148,3 +148,38 @@ test('disliked songs are skipped and repeated triggers share one request', async
     assert.deepEqual(c.updated.ids, ['a', 'y']);
     assert.equal(c.searchRadioArmed, true);
 });
+
+test('a song the user queued as next plays before any similar songs', async () => {
+    const c = setup({ list: [song('a'), song('b'), song('c')], index: 0, similar: [song('x')] });
+    c.keepAsNextSong(c.currentPlaylist[1]);
+    c.playNext();
+    await settle();
+    assert.equal(c.fetched.length, 0);
+    assert.equal(c.updated, null);
+    assert.deepEqual(c.played, [1]);
+});
+
+test('pausing while similar songs are being fetched cancels the automatic continuation', async () => {
+    let release;
+    const c = setup({
+        list: [song('a'), song('b')], index: 1,
+        fetchImpl: () => new Promise(resolve => {
+            release = () => resolve({ ok: true, json: async () => ({ list: [song('x')] }) });
+        }),
+    });
+    c.playNext();
+    c.cancelSearchRadioContinuation();
+    release();
+    await settle();
+    assert.equal(c.updated, null);
+    assert.deepEqual(c.played, []);
+});
+
+test('similar songs restored with a saved queue are still recognised after a reload', async () => {
+    const restored = { ...song('x'), _searchRadio: true };
+    const c = setup({ list: [song('a'), restored, song('b')], index: 0, similar: [song('y')] });
+    c.playNext();
+    await settle();
+    assert.equal(c.fetched.length, 0);
+    assert.deepEqual(c.played, [1]);
+});
