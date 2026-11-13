@@ -155,6 +155,16 @@ export const findOriginalOfUpload = (rows: Array<{ id: string, title: string, ar
   return ''
 }
 
+// 搜索结果里第一个名字出现在上传的歌名 / 歌手里的歌手（即被翻传的原歌手）
+export const creditedArtist = (rows: Array<{ artist: string }>, seed: SimilarSeed): string => {
+  const credits = normalizeText(`${seed.name} ${seed.singer}`)
+  for (const row of rows) {
+    const hit = splitSingers(row.artist).find(name => normalizeText(name).length >= 3 && credits.includes(normalizeText(name)))
+    if (hit) return hit
+  }
+  return ''
+}
+
 const fetchYtmRadio = async (seed: SimilarSeed): Promise<RadioTrack[]> => {
   if (!seed.name) return []
   const query = [seed.name, splitSingers(seed.singer)[0]].filter(Boolean).join(' ')
@@ -175,8 +185,13 @@ const fetchYtmRadio = async (seed: SimilarSeed): Promise<RadioTrack[]> => {
   // 用「专辑名 + 歌名」再找一次，标题要等于专辑名，且原歌手名出现在上传的歌名 / 歌手里才算数
   const album = normalizeText(seed.album)
   if (!videoId && album && album !== normalizeText(seed.name)) {
-    const retry = await ytmPost('search', { query: `${seed.album} ${seed.name}`, params: YTM_SONG_FILTER })
-    videoId = findOriginalOfUpload(rows(retry), seed)
+    const retryRows = rows(await ytmPost('search', { query: `${seed.album} ${seed.name}`, params: YTM_SONG_FILTER }))
+    videoId = findOriginalOfUpload(retryRows, seed)
+    if (!videoId) {
+      // 搜索结果不稳定，原曲不一定排得上来；但结果里通常已经出现了原歌手，用「专辑名 + 原歌手」再精确找一次
+      const artist = creditedArtist([...retryRows, ...rows(found)], seed)
+      if (artist) videoId = findOriginalOfUpload(rows(await ytmPost('search', { query: `${seed.album} ${artist}`, params: YTM_SONG_FILTER })), seed)
+    }
   }
   if (!videoId) return []
 
