@@ -136,6 +136,7 @@ const DEFAULT_SETTINGS = {
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
     autoPlaySimilarAfterSearch: true, // 搜索歌曲播完后自动续播相似歌曲 (默认开启)
+    mergeAggregatedSearch: true, // 聚合搜索合并各平台的同一首歌 (默认开启)
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
@@ -2514,6 +2515,7 @@ function renderNetworkSearchFooter(visible) {
 async function searchNetworkSongs(keyword, source, headers, request, append = false) {
     const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
         keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
+        merge: source === 'all' && (window.settings || {}).mergeAggregatedSearch !== false,
     });
     if (!append) window.networkSongSearch = search;
     const current = () => request.current() && window.networkSongSearch === search &&
@@ -3103,7 +3105,10 @@ function getQualityTags(item) {
     // 1. types / _types (旧版/部分源)
     // 2. qualitys / _qualitys (新版/标准)
     // 3. meta.qualitys (收藏列表)
-    const rawTypes = item.types || item._types ||
+    // 聚合搜索合并出来的歌曲：取各平台音质的并集
+    const merged = Array.isArray(item._alternates) && item._alternates.length && window.QualityManager;
+    const rawTypes = merged ? window.QualityManager.getAvailableQualities(item).map(type => ({ type })) :
+        item.types || item._types ||
         item.qualitys || item._qualitys ||
         (item.meta && (item.meta.qualitys || item.meta._qualitys)) ||
         {};
@@ -3164,6 +3169,19 @@ function getSourceTag(source) {
     return `<span class="song-tag ${color}">${name}</span>`;
 }
 window.getSourceTag = getSourceTag;
+
+// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来
+function getSourceTags(song) {
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    // 手机上一行放不下四五个平台标签（会把音质标签挤出屏幕）：只显示主平台，其余折叠成 +N
+    if (members.length > 2 && window.innerWidth < 768) {
+        const others = members.slice(1).map(member => getSourceName(member.source)).join('、');
+        return getSourceTag(members[0].source) +
+            `<span class="song-tag t-bg-main t-text-muted t-border-main" title="${others}">+${members.length - 1}</span>`;
+    }
+    return members.map(member => getSourceTag(member.source)).join('');
+}
+window.getSourceTags = getSourceTags;
 
 
 
@@ -5353,7 +5371,7 @@ function renderResults(list) {
                          ${createMarqueeHtml(item.name)}
                     </div>
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
-                         ${getSourceTag(item.source)}
+                         ${getSourceTags(item)}
                          ${getQualityTags(item)}
                          <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
@@ -5800,6 +5818,32 @@ const prefetchManager = {
 };
 prefetchManager.init(); // 立即初始化缓冲器
 
+// 服务器缓存是否可直接播放：本平台的缓存直接可用；别的平台缓存的同名同歌手文件（撞名），
+// 时长一致才当作同一首歌，这样原平台连不上时也能播放已缓存的文件
+function isUsableServerCache(song, cached) {
+    if (!cached || !cached.exists) return false;
+    if (!cached.isCollision) return true;
+    if (!cached.url) return false;
+    const seconds = value => {
+        const parts = String(value || '').split(':').map(Number);
+        return parts.length < 2 || parts.some(Number.isNaN) ? 0 : parts.reduce((total, part) => total * 60 + part, 0);
+    };
+    const wanted = seconds(song.interval), have = seconds(cached.interval);
+    return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
+}
+
+// 合并歌曲的各平台条目里，已有所选音质缓存文件的排到最前面：
+// 无论这次按速度该先试哪个平台，都先播已缓存的那份，避免同一首歌换个平台又解析、又缓存一遍
+async function cachedMembersFirst(candidates, quality) {
+    if (candidates.length < 2 || settings.preferServerCache === false) return candidates;
+    const cached = await Promise.all(candidates.map(async member => {
+        const wanted = window.SongMerge.requestQuality(member, quality);
+        const hit = await checkServerCache(cleanSongData(member), wanted, true, false, AbortSignal.timeout(1500));
+        return isUsableServerCache(member, hit);
+    }));
+    return [...candidates.filter((_, i) => cached[i]), ...candidates.filter((_, i) => !cached[i])];
+}
+
 async function refreshPrefetchedCache(song, result) {
     if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
 
@@ -5836,9 +5880,28 @@ async function refreshPrefetchedCache(song, result) {
  */
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
     try {
-        const result = await fetchSongUrl(song, quality, isRetry, isSilent);
-        if (result.errorMsg) throw new Error(result.errorMsg);
-        return result;
+        // 聚合搜索合并出来的歌曲：在各平台的条目里按「有该音质、可解析、历史最快」的顺序逐个尝试
+        const candidates = song._alternates?.length
+            ? await cachedMembersFirst(await window.SongMerge.candidates(song, quality), quality)
+            : [song];
+        let lastError = null;
+        for (const candidate of candidates) {
+            const startedAt = Date.now();
+            try {
+                // 同一档音质各平台叫法不同（hires / flac24bit），按该平台自己的叫法请求
+                const candidateQuality = song._alternates?.length ? window.SongMerge.requestQuality(candidate, quality) : quality;
+                const result = await fetchSongUrl(candidate, candidateQuality, isRetry, isSilent);
+                if (result.errorMsg) throw new Error(result.errorMsg);
+                // 只统计真正的在线解析，命中缓存的耗时不代表平台快慢
+                if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
+                return candidate === song ? result : { ...result, songInfo: candidate, switchedSource: true, originalSource: song.source };
+            } catch (candidateError) {
+                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE') throw candidateError;
+                if (song._alternates?.length) window.SongMerge.record(candidate.source, false, 0);
+                lastError = candidateError;
+            }
+        }
+        throw lastError;
     } catch (error) {
         if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
             throw error;
@@ -5934,6 +5997,15 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
             return null;
         }
     };
+
+    // 0. 聚合搜索合并出来的歌曲：先在各平台的条目里按「有该音质、可解析、历史最快」的顺序找所请求音质
+    if (song._alternates?.length) {
+        for (const candidate of await window.SongMerge.candidates(song, requestedQuality)) {
+            const mergedExact = await trySingle(candidate, window.SongMerge.requestQuality(candidate, requestedQuality));
+            if (!mergedExact) continue;
+            return candidate === song ? mergedExact : { ...mergedExact, songInfo: candidate, switchedSource: true, originalSource: song.source };
+        }
+    }
 
     // 1. 先在原平台尝试所请求音质
     const originalExact = await trySingle(song, requestedQuality);
@@ -6045,6 +6117,8 @@ async function findOtherSourceMatch(song, isSilent = false) {
 }
 
 async function findOtherSourceMatches(song, isSilent = false, options = {}) {
+    // 聚合搜索时已经对上的其他平台条目，直接用，不必再全网搜索一遍
+    if (Array.isArray(song._alternates) && song._alternates.length) return song._alternates;
     if (!song.name || !song.singer) return [];
 
     try {
@@ -6306,7 +6380,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
     if (allowServerCache) {
         let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
-        if (cacheResult.exists && !cacheResult.isCollision) {
+        if (isUsableServerCache(song, cacheResult)) {
             const actualQuality = cacheResult.quality || quality;
             console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
             let serverCacheUrl = cacheResult.url;
@@ -9658,6 +9732,7 @@ const SETTINGS_UI_MAP = {
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
     autoPlaySimilarAfterSearch: { id: 'setting-auto-play-similar', type: 'checkbox' },
+    mergeAggregatedSearch: { id: 'setting-merge-aggregated-search', type: 'checkbox' },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
@@ -15225,6 +15300,26 @@ async function loadCustomSources() {
 }
 
 // ========== 自定义源管理逻辑 ==========
+
+// 解析源支持的平台，供聚合搜索合并出来的歌曲挑选平台用；一分钟内复用上次的结果
+let supportedPlatformsCache = null;
+if (window.SongMerge) {
+    window.SongMerge.getSupportedPlatforms = async () => {
+        if (supportedPlatformsCache && Date.now() - supportedPlatformsCache.at < 60000) return supportedPlatformsCache.value;
+        const list = await fetchCustomSources();
+        let value = null;
+        if (Array.isArray(list)) {
+            value = new Set();
+            list.forEach(src => {
+                if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
+                    src.supportedSources.forEach(platform => value.add(platform));
+                }
+            });
+        }
+        supportedPlatformsCache = { at: Date.now(), value };
+        return value;
+    };
+}
 
 async function fetchCustomSources() {
     try {
