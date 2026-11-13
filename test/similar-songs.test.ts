@@ -188,3 +188,27 @@ test('the original artist is picked out of search results by the credits in the 
     assert.equal(creditedArtist([{ artist: '王菲' }], { name: '王菲经典现场', singer: '某上传者', album: '红豆' }), '王菲', 'two-character names count')
     assert.equal(creditedArtist([{ artist: 'U2' }], { name: 'u2000 remix', singer: 'x', album: 'y' }), '', 'short latin names are too ambiguous')
 })
+
+test('a version suffix without brackets or a dash is still a variant, a title that merely ends alike is not', async () => {
+    const { deps } = fakeDeps({
+        txSimilar: async () => [
+            song('tx', 1, '稻香 Live', '周杰伦'),
+            song('tx', 2, '七里香 Acoustic', '周杰伦'),
+            song('tx', 3, '夜曲现场版', '周杰伦'),
+            song('tx', 4, 'Alive', 'Sia'),
+            song('tx', 5, 'Live', 'Someone'),
+            song('tx', 6, 'Long Live', 'Taylor Swift'),
+            song('tx', 7, '简单爱', '周杰伦'),
+            song('tx', 8, '听妈妈的话', '周杰伦'),
+            song('tx', 9, '彩虹', '周杰伦'),
+        ],
+    })
+    const result = await fetchSimilarSongs({ source: 'tx', songId: 97773, name: '晴天', singer: '周杰伦' }, 30, deps)
+    assert.deepEqual(result.list.map(s => s.songId), [4, 5, 7, 8, 9])
+})
+
+test('an original artist credited inside brackets in the upload title is recognised', () => {
+    const seed = { source: 'kw', name: '经典现场（王菲）', singer: '某上传者', album: '红豆' }
+    assert.equal(findOriginalOfUpload([{ id: 'x', title: '红豆', artist: '王菲' }], seed), 'x')
+    assert.equal(creditedArtist([{ artist: '王菲' }], seed), '王菲')
+})

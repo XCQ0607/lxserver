@@ -26,6 +26,7 @@ function setup({ list, index, similar = [], settings = {}, playMode = 'list', ar
         settings, playMode,
         currentPlaylist: list, currentIndex: index, preSelectedNextIndex: null,
         searchRadioArmed: armed, searchRadioCache: null, searchRadioSongs: new WeakSet(),
+        loadingRequestCounter: 0,
         getUserAuthHeaders: () => ({}),
         localStorage: { setItem() {} },
         showInfo() {},
@@ -182,4 +183,20 @@ test('similar songs restored with a saved queue are still recognised after a rel
     await settle();
     assert.equal(c.fetched.length, 0);
     assert.deepEqual(c.played, [1]);
+});
+
+test('playing something else and coming back to the same song cancels the pending continuation', async () => {
+    let release;
+    const c = setup({
+        list: [song('a'), song('b')], index: 1,
+        fetchImpl: () => new Promise(resolve => {
+            release = () => resolve({ ok: true, json: async () => ({ list: [song('x')] }) });
+        }),
+    });
+    c.playNext();
+    c.loadingRequestCounter += 2; // the user played another song, then this one again
+    release();
+    await settle();
+    assert.equal(c.updated, null);
+    assert.deepEqual(c.played, []);
 });

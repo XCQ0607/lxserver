@@ -53,6 +53,11 @@ const normalizeText = (value: unknown): string => toSimplified(String(value ?? '
   .replace(/[（(\[【].*?[）)\]】]/g, '')
   .replace(/[\s·・,，.。!！?？:：;；'"‘’“”《》<>\-_/\\]/g, '')
 
+// 署名比对用：与 normalizeText 相同，但保留括号里的内容——上传的版本常把原唱写在括号里（「经典现场（王菲）」）
+const normalizeCredits = (value: unknown): string => toSimplified(String(value ?? ''))
+  .toLowerCase()
+  .replace(/[\s·・,，.。!！?？:：;；'"‘’“”《》<>\-_/\\（()）\[\]【】]/g, '')
+
 const splitSingers = (value: unknown): string[] => String(value ?? '')
   .split(/[、,，/&／|;；]+| 和 | feat\.? | ft\.? /i)
   .map(part => part.trim())
@@ -145,7 +150,7 @@ const runsText = (node: any): string => (node?.runs || []).map((run: any) => run
 // 在搜索结果里找用户上传版本对应的原曲：标题等于专辑名，且原歌手名出现在上传的歌名 / 歌手里
 export const findOriginalOfUpload = (rows: Array<{ id: string, title: string, artist: string }>, seed: SimilarSeed): string => {
   const album = normalizeText(seed.album)
-  const credits = normalizeText(`${seed.name} ${seed.singer}`)
+  const credits = normalizeCredits(`${seed.name} ${seed.singer}`)
   if (!album) return ''
   for (const row of rows) {
     if (!row.id || normalizeText(row.title) !== album) continue
@@ -157,7 +162,7 @@ export const findOriginalOfUpload = (rows: Array<{ id: string, title: string, ar
 
 // 搜索结果里第一个名字出现在上传的歌名 / 歌手里的歌手（即被翻传的原歌手）
 export const creditedArtist = (rows: Array<{ artist: string }>, seed: SimilarSeed): string => {
-  const credits = normalizeText(`${seed.name} ${seed.singer}`)
+  const credits = normalizeCredits(`${seed.name} ${seed.singer}`)
   for (const row of rows) {
     const hit = splitSingers(row.artist).find(name => isDistinctName(normalizeText(name)) && credits.includes(normalizeText(name)))
     if (hit) return hit
@@ -227,11 +232,14 @@ const versionKey = (value: unknown): string => normalizeText(String(value ?? '')
 // 改编 / 衍生版本：DJ、Remix、不插电、Live、伴奏、加速、翻唱、「××版」等。续播只要原版。
 const VARIANT_NOTE = /\b(dj|remix|mix|live|acoustic|unplugged|karaoke|instrumental|inst|sped\s*up|slowed|nightcore|cover|demo|version|ver|edit)\b|伴奏|纯音乐|现场|演唱会|不插电|加速|降调|翻唱|串烧|铃声|片段|版/i
 const VARIANT_TITLE = /\b(dj|remix|nightcore)\b|dj版|伴奏|串烧/i
+// 没有括号也没有破折号、直接跟在歌名后面的版本后缀（「稻香 Live」「七里香 Acoustic」）。
+// 只认结尾的独立单词，不误伤 Alive 这类本来的歌名
+const VARIANT_SUFFIX = /\S\s+(live|acoustic|unplugged|karaoke|instrumental|demo|cover)\s*$|\S\s*(现场版|伴奏版|纯音乐版|演唱会版)\s*$/i
 const isVariant = (value: unknown): boolean => {
   const name = toSimplified(String(value ?? ''))
   // 附注 = 括号里的内容，以及「歌名 - 附注」里破折号之后的部分
   const notes = `${bracketNotes(name)} ${name.split(/\s[-–—]\s/).slice(1).join(' ')}`
-  return VARIANT_NOTE.test(notes) || VARIANT_TITLE.test(name)
+  return VARIANT_NOTE.test(notes) || VARIANT_TITLE.test(name) || VARIANT_SUFFIX.test(name)
 }
 
 // Fisher-Yates：每次请求给出不同的播放顺序

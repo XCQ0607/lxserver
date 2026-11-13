@@ -8485,9 +8485,10 @@ async function prefetchUpcomingSong() {
 async function continueWithSimilarSongs() {
     const seed = currentPlaylist[currentIndex];
     const epoch = searchRadioEpoch;
+    const requestId = loadingRequestCounter;
     const songs = await loadSearchRadioSongs(seed);
-    // 等待期间用户已切歌或暂停：不再干预
-    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch) return;
+    // 等待期间用户已切歌、暂停，或又发起过播放（比如切走再切回同一首）：不再干预
+    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch || loadingRequestCounter !== requestId) return;
     const fresh = isSearchRadioDue() ? pickSearchRadioSongs(songs) : [];
     if (!fresh.length) {
         playNextInQueue();
