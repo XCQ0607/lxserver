@@ -300,6 +300,25 @@
                         <span id="sleep-timer-countdown"
                             class="text-[10px] md:text-xs font-mono font-bold text-emerald-600 hidden">00:00</span>
                     </div>
+                    <!-- Interface language: the icon opens the system picker (same setting as 设置 → 显示) -->
+                    <!-- Phones: one button that steps through the languages; wider screens: the picker below -->
+                    <button type="button" id="header-language-btn" onclick="window.LXI18n.cycleLanguage()"
+                        class="items-center gap-1 px-2 py-1.5 rounded-full hover:t-bg-track cursor-pointer transition-all t-text-muted shrink-0"
+                        title="Language / 语言" aria-label="Language" data-i18n-skip>
+                        <i class="fas fa-language text-base"></i>
+                        <span data-language-label class="text-[11px] font-bold">简</span>
+                    </button>
+                    <div id="header-language"
+                        class="relative flex items-center gap-1 px-2 md:px-3 py-1.5 rounded-full hover:t-bg-track cursor-pointer transition-all border border-transparent hover:t-border-main group shrink-0"
+                        title="Language / 语言" data-i18n-skip>
+                        <i class="fas fa-language t-text-muted group-hover:text-emerald-500 transition-colors text-base"></i>
+                        <select data-language-select onchange="window.LXI18n.setLanguage(this.value)"
+                            aria-label="Language">
+                            <option value="zh-CN">简体中文</option>
+                            <option value="zh-Hant">繁體中文</option>
+                            <option value="en">English</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="flex items-center gap-1.5 md:gap-4 shrink-0">
@@ -2842,6 +2861,23 @@
 
                         <!-- Display Settings Panel -->
                         <div id="settings-panel-display" class="hidden space-y-8 animate-fade-in">
+                            <!-- Interface Language -->
+                            <div>
+                                <h3 class="font-bold t-text-main text-lg mb-4 flex items-center">
+                                    <i class="fas fa-language mr-2 text-emerald-500"></i> 界面语言
+                                </h3>
+                                <div class="t-bg-panel rounded-xl border t-border-main p-4 flex flex-col gap-3">
+                                    <select onchange="window.LXI18n.setLanguage(this.value)" id="setting-ui-language"
+                                        data-language-select data-i18n-skip class="lm-select !w-full !py-2"
+                                        aria-label="Language">
+                                        <option value="zh-CN">简体中文</option>
+                                        <option value="zh-Hant">繁體中文</option>
+                                        <option value="en">English</option>
+                                    </select>
+                                    <p class="text-xs t-text-muted">繁体由简体自动转换，歌名和歌手名也会一并转换；英文只翻译界面文字。</p>
+                                </div>
+                            </div>
+
                             <!-- Appearance Selection -->
                             <div>
                                 <h3 class="font-bold t-text-main text-lg mb-4 flex items-center">
@@ -4237,10 +4273,13 @@
                     <div id="player-source" class="flex-shrink-0 flex items-center gap-1.5"></div>
                 </div>
                 <div class="flex flex-col min-w-0">
-                    <div id="player-artist"
-                        class="text-xs text-gray-500 truncate dynamic-marquee min-w-0 w-fit self-start"
-                        data-text="选择一首歌曲播放">选择一首歌曲播放</div>
-                    <button type="button" id="player-rating" class="player-rating-button" aria-label="歌曲评分" title="选择歌曲后评分">☆ 评分</button>
+                    <!-- 评分星号与歌手同一行：单独占一行时比其他行高，星号又小，看起来错位 -->
+                    <div class="flex items-center gap-2 min-w-0">
+                        <div id="player-artist"
+                            class="text-xs text-gray-500 truncate dynamic-marquee min-w-0 w-fit"
+                            data-text="选择一首歌曲播放">选择一首歌曲播放</div>
+                        <button type="button" id="player-rating" class="player-rating-button flex-shrink-0" aria-label="歌曲评分" title="选择歌曲后评分">☆ 评分</button>
+                    </div>
                     <div id="player-status" class="text-xs text-emerald-600 font-medium whitespace-nowrap"></div>
                 </div>
             </div>
@@ -4473,10 +4512,20 @@
     </footer>
 
     <!-- Expand Panel Button (Hidden by default, shown when panel is collapsed) -->
-    <button aria-label="展开播放器" id="btn-expand-panel" onclick="togglePlayerPanel()"
-        class="fixed bottom-24 right-6 z-40 w-12 h-12 flex items-center justify-center t-bg-panel/80 backdrop-blur-md rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.12)] text-gray-500 hover:text-emerald-500 transform transition-all duration-300 translate-y-20 opacity-0 border border-white/50">
-        <i class="fas fa-chevron-up text-lg"></i>
-    </button>
+    <!-- 收起播放栏后留下的迷你播放条：封面、歌名、播放 / 暂停；点其余位置展开播放栏 -->
+    <div role="button" tabindex="0" aria-label="展开播放器" id="btn-expand-panel" onclick="togglePlayerPanel()"
+        onkeydown="if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); togglePlayerPanel(); }"
+        class="mini-player fixed z-40 flex items-center t-bg-panel/80 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] transform transition-all duration-300 translate-y-20 opacity-0 border t-border-main">
+        <img id="mini-player-cover" src="/music/assets/logo.svg" alt=""
+            onerror="this.src='/music/assets/logo.svg';">
+        <div class="mini-player-text">
+            <div id="mini-player-title" class="truncate dynamic-marquee" data-text="暂无播放">暂无播放</div>
+            <div id="mini-player-artist"></div>
+        </div>
+        <button type="button" id="mini-player-play" aria-label="播放"
+            onclick="event.stopPropagation(); togglePlay()"><i class="fas fa-play"></i></button>
+        <i class="fas fa-chevron-up mini-player-expand" aria-hidden="true"></i>
+    </div>
 
     <!-- External Song List Modal -->
     <div id="external-list-modal"
@@ -6342,6 +6391,7 @@
     <!-- External Scripts Section (Placed at the end for performance) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pako/2.1.0/pako.min.js"></script>
     <script src="js/vendor/NoSleep.min.js"></script>
+    <script src="js/ui/i18n.js"></script>
     <script src="js/ui/log_viewer.js"></script>
     <script src="js/lyrics/lyric-utils.js"></script>
     <script src="js/lyrics/lyric-parser.js"></script>

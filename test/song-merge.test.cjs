@@ -73,7 +73,8 @@ test('candidates keep only platforms with the chosen quality, supported and fast
     merge.getSupportedPlatforms = async () => new Set(['tx', 'kw', 'wy', 'kg']);
     assert.deepEqual(ids(await merge.candidates(entry, 'flac')), ['wy_3', 'kw_2', 'kg_4', 'mg_5']);
     assert.deepEqual(ids(await merge.candidates(entry, '320k')), ['tx_1']);
-    assert.deepEqual(ids(await merge.candidates(entry, 'master')).length, 5, 'nobody has it: all are kept');
+    assert.deepEqual(ids(await merge.candidates(entry, 'master')), ['tx_1', 'wy_3'], 'nobody lists it: only platforms that offer that tier at all are tried');
+    assert.equal(ids(await merge.candidates(entry, 'bogus')).length, 5, 'no platform offers it: all are kept');
     merge.getSupportedPlatforms = async () => { throw new Error('denied'); };
     assert.deepEqual(ids(await merge.candidates(entry, 'flac')), ['mg_5', 'wy_3', 'kw_2', 'kg_4'], 'an untried platform gets its first chance ahead of measured ones');
 });

@@ -120,7 +120,11 @@
         const ordered = order(song, quality, { ownQualities, supported });
         if (!ownQualities) return ordered;
         const capable = ordered.filter(member => qualityFor(member, quality, ownQualities) !== null);
-        return capable.length ? capable : ordered;
+        if (capable.length) return capable;
+        // 没有平台标明有这个音质（如旧歌单条目没带音质信息）：只试本来就提供这一档的平台
+        const selectable = window.QualityManager.getSelectableQualities;
+        const offering = selectable ? ordered.filter(member => selectable({ ...member, _alternates: undefined }).includes(quality)) : [];
+        return offering.length ? offering : ordered;
     }
 
     // 向某个平台条目请求所选音质时该用的音质名（该平台没有这一档时仍返回所选音质）

@@ -2112,6 +2112,10 @@ document.addEventListener('DOMContentLoaded', () => {
         if (searchSourceEl) searchSourceEl.value = cachedSearchSource;
     }
 
+    // 封面是异步换上的：换好后同步到迷你播放条
+    const footerCover = document.getElementById('player-cover');
+    if (footerCover) new MutationObserver(() => syncMiniPlayer()).observe(footerCover, { attributes: true, attributeFilter: ['src'] });
+
     // 为展开按钮添加悬放恢复逻辑
     const expandBtn = document.getElementById('btn-expand-panel');
     if (expandBtn) {
@@ -3170,17 +3174,20 @@ function getSourceTag(source) {
 }
 window.getSourceTag = getSourceTag;
 
-// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来
+// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来。
+// 宽屏上排在音质标签前面；手机上一行放不下，改成在歌名右侧竖着叠放（见 getSourceStack）
 function getSourceTags(song) {
     const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
-    // 手机上一行放不下四五个平台标签（会把音质标签挤出屏幕）：只显示主平台，其余折叠成 +N
-    if (members.length > 2 && window.innerWidth < 768) {
-        const others = members.slice(1).map(member => getSourceName(member.source)).join('、');
-        return getSourceTag(members[0].source) +
-            `<span class="song-tag t-bg-main t-text-muted t-border-main" title="${others}">+${members.length - 1}</span>`;
-    }
-    return members.map(member => getSourceTag(member.source)).join('');
+    return `<span class="source-inline">${members.map(member => getSourceTag(member.source)).join('')}</span>`;
 }
+
+// 手机上的平台标记：同样的文字标签，竖着叠起来（超过两个时排成两列）放在播放按钮左边，不占歌名和音质标签的位置
+function getSourceStack(song) {
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    const columns = members.length > 2 ? ' source-stack-2' : '';
+    return `<div class="source-stack${columns}">${members.map(member => getSourceTag(member.source)).join('')}</div>`;
+}
+window.getSourceStack = getSourceStack;
 window.getSourceTags = getSourceTags;
 
 
@@ -5400,6 +5407,7 @@ function renderResults(list) {
 
             <!-- Actions -->
             <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                ${getSourceStack(item)}
                 <button class="p-1 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" 
                         title="播放" 
                         onclick="event.stopPropagation(); playFromView(${actualIndexInOriginal})">
@@ -5595,7 +5603,8 @@ function applyMarqueeChecks(root = document) {
         const scope = root || document;
         const elements = scope.querySelectorAll('.dynamic-marquee.truncate');
         elements.forEach(el => {
-            if (el.scrollWidth > el.clientWidth) {
+            // 差 1px 以内是取整误差，不算放不下
+            if (el.scrollWidth > el.clientWidth + 1) {
                 const text = el.getAttribute('data-text') || el.innerText;
 
                 // 必须保留 overflow-hidden 以限制宽度
@@ -5942,6 +5951,8 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
+                // 合并歌曲的各平台条目上面已经逐个试过，不必再拿同一批平台重试一遍
+                if (song._alternates?.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
                     RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
@@ -8000,29 +8011,8 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
         isPlaying = !audio.paused;
     }
 
-    const playStatus = isPlaying ? '播放中' : '暂停中';
-
-
-    // 获取音质显示名称
-    const qualityName = currentQuality ? window.QualityManager.getQualityDisplayName(currentQuality) : '';
-
-    // 组合状态文本
-    if (qualityName) {
-        statusText = `${playStatus} (${qualityName})`;
-    } else {
-        statusText = playStatus;
-    }
-
-    // 根据链接来源添加提示
-    if (currentSourceType === 'cache') {
-        statusText += ' 【缓存链接】';
-    } else if (currentSourceType === 'server_cache') {
-        statusText += currentCacheFolder === 'music' ? ' 【已下载】' : ' 【缓存】';
-    } else if (currentSourceType === 'openlist') {
-        statusText += ' 【OpenList】';
-    }
-
-    statusEl.innerText = statusText;
+    // 播放 / 暂停看播放键，音质和来源看歌名下面的标签：平时这一行留空，只显示加载、缓冲、出错等提示
+    statusEl.innerText = statusText.trim();
 }
 
 
@@ -8216,6 +8206,15 @@ window.setImg = (id, src) => {
     }
 };
 
+// 设置一行文字；放不下时由 applyMarqueeChecks 换成滚动显示
+function setRollingText(el, text) {
+    if (!el) return;
+    el.innerText = text;
+    el.setAttribute('data-text', text);
+    el.classList.add('truncate', 'dynamic-marquee');
+    el.classList.remove('overflow-hidden');
+}
+
 function updatePlayerInfo(song, actualQuality) {
     window.RatingManager?.current(song);
     // Bottom Player - 更新标题
@@ -8313,8 +8312,8 @@ function updatePlayerInfo(song, actualQuality) {
     const detailContainer = document.getElementById('detail-title-container');
 
     if (detailTitle && detailContainer) {
-        // 直接设置文本，由 CSS 处理双行换行和省略号
-        detailTitle.innerText = song.name;
+        // 桌面端由 CSS 处理双行换行；手机 / 平板上单行显示，太长时滚动
+        setRollingText(detailTitle, song.name);
         detailTitle.classList.remove('animate-marquee');
         detailTitle.onclick = (e) => {
             e.stopPropagation();
@@ -8329,7 +8328,9 @@ function updatePlayerInfo(song, actualQuality) {
 
     const detailArtist = document.getElementById('detail-artist');
     if (detailArtist) {
-        detailArtist.innerText = song.singer;
+        setRollingText(detailArtist, song.singer);
+        applyMarqueeChecks(document.getElementById('view-player-detail'));
+        syncMiniPlayer();
         detailArtist.onclick = async (e) => {
             e.stopPropagation();
             if (window.innerWidth < 1025) {
@@ -8432,6 +8433,25 @@ function updatePlayButton(isPlaying) {
     const btn = document.getElementById('btn-play');
     btn.setAttribute('aria-label', isPlaying ? '暂停' : '播放');
     btn.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play ml-1"></i>';
+    const mini = document.getElementById('mini-player-play');
+    if (mini) {
+        mini.setAttribute('aria-label', isPlaying ? '暂停' : '播放');
+        mini.innerHTML = isPlaying ? '<i class="fas fa-pause"></i>' : '<i class="fas fa-play"></i>';
+    }
+}
+
+// 迷你播放条（播放栏收起时显示）跟随播放栏的歌名、歌手和封面
+function syncMiniPlayer() {
+    const pill = document.getElementById('btn-expand-panel');
+    const title = document.getElementById('mini-player-title');
+    if (!pill || !title) return;
+    const text = id => document.getElementById(id)?.getAttribute('data-text') || '';
+    setRollingText(title, text('player-title'));
+    const artist = document.getElementById('mini-player-artist');
+    if (artist) artist.textContent = currentPlayingSong ? text('player-artist') : '';
+    const cover = document.getElementById('player-cover'), mini = document.getElementById('mini-player-cover');
+    if (cover && mini && mini.src !== cover.src) mini.src = cover.src;
+    applyMarqueeChecks(pill);
 }
 
 /**
@@ -10947,8 +10967,9 @@ window.addEventListener('popstate', (e) => {
 });
 
 function updateDetailInfo(song) {
-    document.getElementById('detail-title').innerText = song.name;
-    document.getElementById('detail-artist').innerText = song.singer;
+    setRollingText(document.getElementById('detail-title'), song.name);
+    setRollingText(document.getElementById('detail-artist'), song.singer);
+    applyMarqueeChecks(document.getElementById('view-player-detail'));
     const imgUrl = getImgUrl(song);
     // Use high res image if possible or same URL
     setImg('detail-cover', imgUrl);
@@ -18415,6 +18436,9 @@ function togglePlayerPanel() {
     // 检查是否已经隐藏 (通过 transform 判断)
     // 注意: Tailwind 的 translate-y-full 等同于 transform: translateY(100%)
     const isHidden = footer.classList.contains('translate-y-[110%]');
+    // 收起后手机上给迷你播放条留出位置（见 app.css 的 body.player-collapsed）
+    document.body.classList.toggle('player-collapsed', !isHidden);
+    if (!isHidden) syncMiniPlayer();
 
     const views = ['view-search', 'view-settings', 'view-favorites', 'view-about', 'main-sidebar', 'view-songlist', 'songlist-detail-view'];
     const playerDetail = document.getElementById('view-player-detail');
