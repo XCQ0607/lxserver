@@ -5822,6 +5822,18 @@ function isUsableServerCache(song, cached) {
     return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
 }
 
+// 合并歌曲的各平台条目里，已有所选音质缓存文件的排到最前面：
+// 无论这次按速度该先试哪个平台，都先播已缓存的那份，避免同一首歌换个平台又解析、又缓存一遍
+async function cachedMembersFirst(candidates, quality) {
+    if (candidates.length < 2 || settings.preferServerCache === false) return candidates;
+    const cached = await Promise.all(candidates.map(async member => {
+        const wanted = window.SongMerge.requestQuality(member, quality);
+        const hit = await checkServerCache(cleanSongData(member), wanted, true, false, AbortSignal.timeout(1500));
+        return isUsableServerCache(member, hit);
+    }));
+    return [...candidates.filter((_, i) => cached[i]), ...candidates.filter((_, i) => !cached[i])];
+}
+
 async function refreshPrefetchedCache(song, result) {
     if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
 
@@ -5859,7 +5871,9 @@ async function refreshPrefetchedCache(song, result) {
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
     try {
         // 聚合搜索合并出来的歌曲：在各平台的条目里按「有该音质、可解析、历史最快」的顺序逐个尝试
-        const candidates = song._alternates?.length ? await window.SongMerge.candidates(song, quality) : [song];
+        const candidates = song._alternates?.length
+            ? await cachedMembersFirst(await window.SongMerge.candidates(song, quality), quality)
+            : [song];
         let lastError = null;
         for (const candidate of candidates) {
             const startedAt = Date.now();
