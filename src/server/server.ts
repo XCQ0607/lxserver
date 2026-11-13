@@ -36,6 +36,7 @@ import { handleFileManager } from './integrations/fileManager'
 import formidable from 'formidable'
 // @ts-ignore
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
+import { fetchSimilarSongs } from '@/server/utils/similarSongs'
 const musicSdk = musicSdkRaw as any
 import { initUserApis, unloadUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
 import { startVerifyScheduler, runSyncNow, listBackups, startOpenlistMetadata, openlistMetadataStatus, cancelMetadata, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete } from '@/server/openlist/openlistBackup'
@@ -6714,6 +6715,31 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           res.end(JSON.stringify(data))
         } catch (err: any) {
           res.writeHead(500); res.end(err.message)
+        }
+        return
+      }
+
+      // [新增] 相似歌曲推荐 API（搜索播放结束后的自动续播用）
+      if (pathname === '/api/music/similar' && req.method === 'GET') {
+        const name = urlObj.searchParams.get('name') || ''
+        if (!name) {
+          res.writeHead(400); res.end('Missing name'); return
+        }
+        try {
+          const data = await fetchSimilarSongs({
+            source: urlObj.searchParams.get('source'),
+            songId: urlObj.searchParams.get('songId'),
+            songmid: urlObj.searchParams.get('songmid'),
+            name,
+            singer: urlObj.searchParams.get('singer'),
+            album: urlObj.searchParams.get('album'),
+          }, parseInt(urlObj.searchParams.get('limit') || '30'))
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(data))
+        } catch (err: any) {
+          console.error('[相似歌曲] 接口出错:', err)
+          res.writeHead(500, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ error: err.message, code: 500 }))
         }
         return
       }
