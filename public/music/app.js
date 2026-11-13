@@ -5853,11 +5853,11 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                 const result = await fetchSongUrl(candidate, quality, isRetry, isSilent);
                 if (result.errorMsg) throw new Error(result.errorMsg);
                 // 只统计真正的在线解析，命中缓存的耗时不代表平台快慢
-                if (candidates.length > 1 && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
+                if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
                 return candidate === song ? result : { ...result, songInfo: candidate, switchedSource: true, originalSource: song.source };
             } catch (candidateError) {
                 if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE') throw candidateError;
-                if (candidates.length > 1) window.SongMerge.record(candidate.source, false, 0);
+                if (song._alternates?.length) window.SongMerge.record(candidate.source, false, 0);
                 lastError = candidateError;
             }
         }

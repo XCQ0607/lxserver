@@ -75,7 +75,7 @@ test('candidates keep only platforms with the chosen quality, supported and fast
     assert.deepEqual(ids(await merge.candidates(entry, '320k')), ['tx_1']);
     assert.deepEqual(ids(await merge.candidates(entry, 'master')).length, 5, 'nobody has it: all are kept');
     merge.getSupportedPlatforms = async () => { throw new Error('denied'); };
-    assert.equal(ids(await merge.candidates(entry, 'flac'))[0], 'wy_3');
+    assert.deepEqual(ids(await merge.candidates(entry, 'flac')), ['mg_5', 'wy_3', 'kw_2', 'kg_4'], 'an untried platform gets its first chance ahead of measured ones');
 });
 
 test('recorded results move a failing platform behind a working one', async () => {

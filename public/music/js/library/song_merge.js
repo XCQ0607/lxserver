@@ -89,14 +89,14 @@
                 member, rank,
                 hasQuality: !ownQualities || ownQualities(member).includes(quality),
                 isSupported: !supported || supported.has(member.source),
-                // 没试过的平台按满分算，先给一次机会
+                // 没试过的平台按满分、零耗时算，先给一次机会，之后才有真实数据可比
                 rate: entry.count ? Math.round(entry.rate * 10) / 10 : 1,
                 ms: entry.ms || 0,
             };
         });
         return scored.sort((a, b) =>
             (b.hasQuality - a.hasQuality) || (b.isSupported - a.isSupported) ||
-            (b.rate - a.rate) || ((a.ms || Infinity) - (b.ms || Infinity)) || (a.rank - b.rank)
+            (b.rate - a.rate) || (a.ms - b.ms) || (a.rank - b.rank)
         ).map(entry => entry.member);
     }
 
