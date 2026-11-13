@@ -25,6 +25,7 @@ export interface SimilarSeed {
   songmid?: string | number | null
   name?: string | null
   singer?: string | null
+  album?: string | null
 }
 
 export interface SimilarResult {
@@ -141,26 +142,49 @@ const collect = (node: any, key: string, out: any[] = []): any[] => {
 
 const runsText = (node: any): string => (node?.runs || []).map((run: any) => run?.text || '').join('')
 
+// 在搜索结果里找用户上传版本对应的原曲：标题等于专辑名，且原歌手名出现在上传的歌名 / 歌手里
+export const findOriginalOfUpload = (rows: Array<{ id: string, title: string, artist: string }>, seed: SimilarSeed): string => {
+  const album = normalizeText(seed.album)
+  const credits = normalizeText(`${seed.name} ${seed.singer}`)
+  if (!album) return ''
+  for (const row of rows) {
+    if (!row.id || normalizeText(row.title) !== album) continue
+    const artists = splitSingers(row.artist).map(normalizeText).filter(name => name.length >= 3)
+    if (artists.some(name => credits.includes(name))) return row.id
+  }
+  return ''
+}
+
 const fetchYtmRadio = async (seed: SimilarSeed): Promise<RadioTrack[]> => {
   if (!seed.name) return []
   const query = [seed.name, splitSingers(seed.singer)[0]].filter(Boolean).join(' ')
   const found = await ytmPost('search', { query, params: YTM_SONG_FILTER })
-  let videoId = ''
-  for (const item of collect(found, 'musicResponsiveListItemRenderer')) {
+  const rows = (response: any) => collect(response, 'musicResponsiveListItemRenderer').map((item: any) => {
     const columns = (item.flexColumns || []).map((column: any) => runsText(column?.musicResponsiveListItemFlexColumnRenderer?.text))
-    const id = collect(item, 'videoId')[0]
+    return { id: String(collect(item, 'videoId')[0] || ''), title: String(columns[0] || ''), artist: String(columns[1] || '').split(' • ')[0] }
+  })
+  let videoId = ''
+  for (const row of rows(found)) {
     // 标题对不上就不用：以错的歌做种子，整个电台都会跑偏
-    if (!id || normalizeText(columns[0]) !== normalizeText(seed.name)) continue
-    const byline = String(columns[1] || '').split(' • ')[0]
-    if (normalizeText(seed.singer) && !isSingerMatch(byline, seed.singer)) continue
-    videoId = String(id)
+    if (!row.id || normalizeText(row.title) !== normalizeText(seed.name)) continue
+    if (normalizeText(seed.singer) && !isSingerMatch(row.artist, seed.singer)) continue
+    videoId = row.id
     break
+  }
+  // 用户上传的版本常把歌名写成别的（如「theweeknd神级现场」），真正的歌名在专辑名里：
+  // 用「专辑名 + 歌名」再找一次，标题要等于专辑名，且原歌手名出现在上传的歌名 / 歌手里才算数
+  const album = normalizeText(seed.album)
+  if (!videoId && album && album !== normalizeText(seed.name)) {
+    const retry = await ytmPost('search', { query: `${seed.album} ${seed.name}`, params: YTM_SONG_FILTER })
+    videoId = findOriginalOfUpload(rows(retry), seed)
   }
   if (!videoId) return []
 
   const next = await ytmPost('next', { videoId, playlistId: `RDAMVM${videoId}`, isAudioOnly: true })
   const tracks: RadioTrack[] = []
   for (const item of collect(next, 'playlistPanelVideoRenderer')) {
+    // 电台的第一首就是种子歌曲本身
+    if (collect(item, 'videoId')[0] === videoId) continue
     // 只要正式发行的歌曲（ATV），跳过用户上传的视频 / 合辑
     if (collect(item, 'musicVideoType')[0] !== 'MUSIC_VIDEO_TYPE_ATV') continue
     const name = runsText(item.title)

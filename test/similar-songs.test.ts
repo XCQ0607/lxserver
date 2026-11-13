@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { fetchSimilarSongs, type SimilarDeps } from '../src/server/utils/similarSongs'
+import { fetchSimilarSongs, findOriginalOfUpload, type SimilarDeps } from '../src/server/utils/similarSongs'
 
 const song = (source: string, id: number, name: string, singer: string) => ({
     source, songId: id, songmid: `mid${id}`, name, singer,
@@ -165,4 +165,17 @@ test('other versions of the seed and derivative versions are never recommended',
     })
     const result = await fetchSimilarSongs({ source: 'tx', songId: 97773, name: '晴天', singer: '周杰伦' }, 30, deps)
     assert.deepEqual(result.list.map(s => s.songId), [7, 9, 10, 11, 12])
+})
+
+test('an uploaded copy with a made-up title is traced to the original through its album name', () => {
+    const rows = [
+        { id: 'a', title: 'Blinding Lights', artist: 'The Weeknd' },
+        { id: 'b', title: 'Hong Kong（合作音乐人：王菲季候風）', artist: 'The Weeknd' },
+        { id: 'c', title: 'Hong Kong', artist: 'Someone Else' },
+    ]
+    const seed = { source: 'kw', name: 'theweeknd神级现场', singer: '我的心真不冷', album: 'Hong Kong' }
+    assert.equal(findOriginalOfUpload(rows, seed), 'b')
+    assert.equal(findOriginalOfUpload(rows, { ...seed, name: '让我们爱到天荒地老' }), '', 'the original artist is not credited anywhere')
+    assert.equal(findOriginalOfUpload(rows, { ...seed, album: 'two' }), '', 'no result is titled like the album')
+    assert.equal(findOriginalOfUpload(rows, { ...seed, album: '' }), '')
 })

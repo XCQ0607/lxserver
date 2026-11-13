@@ -8425,6 +8425,9 @@ function loadSearchRadioSongs(seed) {
         name: seed.name || '',
         singer: seed.singer || '',
     });
+    // 用户上传的版本歌名常是乱写的，专辑名能帮服务端认出原曲
+    const album = seed.albumName || meta.albumName || '';
+    if (album) params.set('album', album);
     const promise = fetch(`${API_BASE}/similar?${params}`, { headers: getUserAuthHeaders() })
         .then(res => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
