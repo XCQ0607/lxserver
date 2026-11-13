@@ -22,7 +22,10 @@ export function integrityStatus() {
   const context = integrityContext()
   return getIntegrityStatus(context.files, context.source)
 }
-import { metadataObservations, recordRemoteObservation, metadataStatus, startMetadata, cancelMetadata } from './openlistMetadata'
+import { metadataBaseline, metadataObservations, recordRemoteObservation, metadataStatus, startMetadata, cancelMetadata } from './openlistMetadata'
+import { createLocalChangedChecker } from './openlistLocalChange'
+import { createSyncThrottle } from './openlistSyncThrottle'
+import { isTaskRunning, runExclusive } from './openlistTaskLock'
 export { cancelMetadata }
 function metadataSource() { const cfg = getConfig(); return crypto.createHash('sha256').update(JSON.stringify([cfg.endpoint, cfg.root.replace(/\\/g, '/').replace(/\/+$/, '') || '/', cfg.username, cfg.token || cfg.password])).digest('hex') }
 let connectionSource = ''
@@ -141,8 +144,10 @@ export async function getOpenlistRecoveryHistory() {
     return { versions: [], tasks: listRestoreTasks(), warning: '云端历史暂不可用：' + error.message }
   }
 }
+
 import { OpenListClient, OpenListNotFoundError } from './openlistClient'
-import { registerOpenListCacheFile, unregisterOpenListCacheFile, getCacheDir, getIndexItemByFilename } from '@/server/music/fileCache'
+import { registerOpenListCacheFile, unregisterOpenListCacheFile, getCacheDir, getIndexItemByFilename, findCachedFilesBySongId, getUserNamingPattern } from '@/server/music/fileCache'
+import { parseCloudFilename } from './openlistFilenameParser'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
 import { getUserDirname } from '@/user/data'
 import { getUserSpace } from '@/user'
@@ -174,6 +179,7 @@ import {
   linkAttachment,
   unlinkAttachment,
 } from './openlistBackupDb'
+import type { BackupStatus } from './openlistBackupDb'
 
 type SyncMode = 'upload-delete' | 'upload' | 'sync' | 'download'
 
@@ -181,6 +187,56 @@ type SyncMode = 'upload-delete' | 'upload' | 'sync' | 'download'
 const MAX_AUTO_RETRIES = 5
 /** 单次上传内置重试次数（覆盖网络抖动 / token 过期） */
 const UPLOAD_RETRY_TIMES = 3
+/**
+ * 事件驱动同步的最小间隔：配置保存、音频落盘、歌单快照落盘等密集事件
+ * 只置脏标记，最多每 5 分钟合并成一次全量同步；定时与手动同步不受限制。
+ */
+const EVENT_SYNC_MIN_INTERVAL_MS = 5 * 60 * 1000
+/**
+ * 已验证记录的远端低频兜底核对周期。常态轮询不再逐行 getFileInfo，
+ * 但基线变化、状态异常、upload-delete 待清理或到达本周期时仍会核对。
+ */
+const VERIFIED_RECHECK_INTERVAL_MS = 60 * 60 * 1000
+
+const localChangeChecker = createLocalChangedChecker({
+  exists: p => fs.existsSync(p),
+  stat: p => fs.statSync(p),
+  hash: p => hashFile(p),
+  onBaseline: (row, size, mtimeMs) => setBackupStatus(row.id!, (row.status || 'verified') as BackupStatus, { size, localMtime: mtimeMs }),
+})
+
+const eventSyncThrottle = createSyncThrottle({
+  minIntervalMs: EVENT_SYNC_MIN_INTERVAL_MS,
+  now: () => Date.now(),
+  schedule: (fn, delayMs) => {
+    const timer = setTimeout(fn, delayMs)
+    timer.unref()
+    return timer
+  },
+  cancel: timer => clearTimeout(timer),
+  run: () => runSyncNow({}),
+  onError: error => console.warn('[OpenList] 事件同步失败:', (error as any)?.message || error),
+})
+
+/** 事件（配置保存 / 文件落盘 / 快照落盘）请求一次自动同步；密集事件会被合并节流。 */
+export function requestEventSync(): void {
+  if (!getConfig().enable) return
+  eventSyncThrottle.request()
+}
+
+/** 供状态面板或测试读取事件同步节流状态。 */
+export function getEventSyncState() { return eventSyncThrottle.state() }
+
+/** 停止调度器时一并清理挂起的事件同步，避免旧配置遗留的定时器。 */
+export function cancelEventSync(): void { eventSyncThrottle.cancel() }
+
+/**
+ * 是否有会改动云端/本地/备份库的任务正在进行。
+ * 供「存量文件批量改名」等外部入口在开工前拒绝重叠执行。
+ */
+export function isOpenlistBusy(): boolean {
+  return !!(syncJob || verifyRunning || manualTransfers || activeUploads || uploadQueue.length) || isCloudRestoreRunning()
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms))
@@ -215,9 +271,15 @@ interface BackupConfig {
   root: string
   verifyInterval: number
   includeNonAudio: boolean
+  /** 仅上传实际播放过的播放缓存（排除预加载/探测文件） */
+  onlyPlayed: boolean
+  /** 严格模式：只认「完成播放」（submission=true），"听一下就切走"不算播放 */
+  onlyPlayedCompleted: boolean
   syncInterval: number
   externalUrl: string
   backupSystemConfig: boolean
+  /** OpenList /d/ 直链签名的有效期(小时)，0 表示不过期 */
+  signExpireHours: number
   userBackups: UserBackupCfg[]
 }
 
@@ -233,11 +295,14 @@ function getConfig(): BackupConfig {
     password: c['openlist.password'] || '',
     token: c['openlist.token'] || '',
     root: c['openlist.root'] || '/lx_music',
-    verifyInterval: Number(c['openlist.verifyInterval'] || 5),
+    verifyInterval: Number(c['openlist.verifyInterval'] || 15),
     includeNonAudio: c['openlist.includeNonAudio'] === true,
-    syncInterval: Number(c['openlist.syncInterval'] || 60),
+    onlyPlayed: c['openlist.onlyPlayed'] === true,
+    onlyPlayedCompleted: c['openlist.onlyPlayedCompleted'] === true,
+    syncInterval: Number(c['openlist.syncInterval'] || 120),
     externalUrl: normalizeTrailingSlash(String(c['openlist.externalUrl'] || c['openlist.endpoint'] || '')),
     backupSystemConfig: c['openlist.backupSystemConfig'] === true,
+    signExpireHours: Number(c['openlist.signExpireHours'] ?? 6),
     userBackups: parseUserBackups(c['openlist.userBackups']),
   }
 }
@@ -254,6 +319,33 @@ function parseUserBackups(raw: any): UserBackupCfg[] {
 
 /** 去掉结尾斜杠（兼容用户误填的 / 或 \），用于规范化 externalUrl */
 const normalizeTrailingSlash = (u: string) => u.replace(/[\\/]+$/, '')
+
+/**
+ * 生成 OpenList `/d/` 直链签名，与上游 internal/sign 的 HMACSign 完全一致：
+ *   sign = base64url(HMAC-SHA256(token, path + ":" + expire)) + ":" + expire
+ * - token 为站点「令牌」，不出现在 URL 里，只作为 HMAC 密钥；
+ * - path 必须带前导斜杠（上游按 FixAndCleanPath 后的路径校验，少斜杠会 sign invalid）；
+ * - expire=0 表示永不过期，否则是 unix 秒。
+ */
+export function signOpenlistPath(token: string, rawPath: string, expireAtSeconds: number): string {
+  const mac = crypto.createHmac('sha256', token).update(`${rawPath}:${expireAtSeconds}`).digest()
+  return `${mac.toString('base64').replace(/\+/g, '-').replace(/\//g, '_')}:${expireAtSeconds}`
+}
+
+/**
+ * 拼出带签名的 OpenList `/d/` 直链（用于「没有网盘直链」的驱动 / 交给客户端直连的场景）：
+ * 驱动支持直链时上游 302 到网盘，否则由 OpenList 自身代理流式返回，故对所有驱动都成立。
+ * 未配置 externalUrl/token 时返回 null，调用方继续走服务端代理或原始回源。
+ */
+export function buildSignedOpenlistDownUrl(base: string, remotePath: string, token: string, expireHours: number): string | null {
+  const root = normalizeTrailingSlash(base || '')
+  if (!root || !token) return null
+  const p = remotePath.startsWith('/') ? remotePath : `/${remotePath}`
+  const hours = Number(expireHours)
+  const expire = hours > 0 && Number.isFinite(hours) ? Math.floor(Date.now() / 1000) + Math.round(hours * 3600) : 0
+  const sign = signOpenlistPath(token, p, expire)
+  return `${root}/d${p.split('/').map((s) => encodeURIComponent(s)).join('/')}?sign=${encodeURIComponent(sign)}`
+}
 
 // 这些 folder_type 属于“应用运行规则/用户数据”（系统配置、歌单与不喜欢快照、统一模型用户数据）。
 // 它们的本地副本必须保留：OpenList 的“不保留本地(upload-delete)”对它们不生效，
@@ -357,7 +449,7 @@ function currentUploadRow(row: any, cl: OpenListClient): any {
   return getBackupById(row.id)!
 }
 
-function getClient(): OpenListClient | null {
+export function getClient(): OpenListClient | null {
   const cfg = getConfig()
   if (!cfg.enable || !cfg.endpoint) { client = null; clientSig = ''; return null }
   // 按配置签名缓存客户端：签名未变时复用，变化时才重建
@@ -531,8 +623,10 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
   const row = getBackupByLocalPath(user, folderType, localPath)
   let metadata: any = {}
   try { metadata = JSON.parse(row?.cache_metadata || '{}') } catch { /* 旧记录无元数据 */ }
-  // 优先使用上传记录里的规范化歌曲 ID，避免以文件名生成的缓存键无法匹配
-  const id = (row && row.songmid) ? row.songmid : base.slice(0, Math.max(0, base.length - ext.length))
+  // 数据库/清单丢失时，按「该用户配置的命名模式」反解析文件名补出歌名、歌手、专辑、音质；
+  // 不硬编码任何命名格式，也不因为解析失败去改写文件名。
+  const parsed = parseCloudFilename(base, getUserNamingPattern(normalizeUser(user)))
+  const id = (row && row.songmid) ? row.songmid : (parsed.songId || base.slice(0, Math.max(0, base.length - ext.length)))
   let size = 0
   let mtime = Date.now()
   try {
@@ -544,20 +638,20 @@ function registerDownloadedCache(user: string, folderType: 'cache' | 'music', lo
     id,
     songmid: id,
     ...metadata,
-    name: metadata.name || id,
-    singer: metadata.singer || '',
-    album: metadata.album || '',
+    name: metadata.name || parsed.name || id,
+    singer: metadata.singer || parsed.singer || '',
+    album: metadata.album || parsed.album || '',
     albumId: metadata.albumId || '',
     img: metadata.img || '',
     interval: metadata.interval || 0,
-    // source 与 quality 均从 openlist_backup_files 回填（上传时已持久化原始音源平台与音质），
+    // source 与 quality 依次从上传记录、文件名解析回填；
     // 恢复后的缓存条目同时保留准确来源与音质，供按平台解析与精确音质检索的请求使用
-    source: row?.source || '',
+    source: row?.source || parsed.source || '',
     requestedSource: metadata.requestedSource || '',
     downloadSource: metadata.downloadSource || '',
     sourceName: metadata.sourceName || '',
     origin: 'openlist',
-    quality: row?.quality || 'unknown',
+    quality: row?.quality || parsed.quality || 'unknown',
     filename: path.relative(getCacheDir(user, folderType === 'music'), localPath).replace(/\\/g, '/'),
     folder: folderType,
     mtime,
@@ -829,10 +923,11 @@ export async function resolveOpenlistCacheEntry(
       if (info.size != null && row.size != null && info.size !== row.size) return null
       const filename = path.basename(row.remote_path)
       if (info?.rawUrl) return { url: info.rawUrl, filename, quality: row.quality || song?.quality || 'unknown' }
-      const base = normalizeTrailingSlash(cfg.externalUrl || cfg.endpoint || '')
-      if (!base) return null
-      const p = row.remote_path.replace(/^\/+/, '')
-      return { url: `${base}/d/${p.split('/').map((s: string) => encodeURIComponent(s)).join('/')}`, filename, quality: row.quality || song?.quality || 'unknown' }
+      // 无网盘直链的驱动（Local/WebDAV 等）只能用 OpenList 自己的 /d/：
+      // 站点开启「对所有直链签名」时，匿名请求会 401 expire missing，故必须带上 HMAC 签名。
+      const signed = buildSignedOpenlistDownUrl(cfg.externalUrl || cfg.endpoint || '', row.remote_path, cfg.token, cfg.signExpireHours)
+      if (!signed) return null
+      return { url: signed, filename, quality: row.quality || song?.quality || 'unknown' }
     })().catch(() => null)
     playbackLinks.set(key, { until: Date.now() + 30000, pending })
     return await waitPlaybackLink(pending, signal)
@@ -957,6 +1052,68 @@ function queueAttachmentsForFile(
   }
 }
 
+// ---------- 播放记录（决定是否上传「播放缓存」）----------
+
+/** 播放记录缓存，按「用户 + 判定模式」分别缓存，避免两种模式互相覆盖。 */
+const playedIdsCache = new Map<string, { key: string; ids: Set<string> }>()
+
+/** 服务端播放记录文件（Subsonic scrobble 历史），与 subsonic.ts 的落盘位置一致。 */
+function getScrobbleFilePath(user: string): string | null {
+  try {
+    return path.join(global.lx.userPath, getUserDirname(user), 'subsonic-scrobbles.json')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * 读取该用户「服务端认为播放过」的歌曲 ID 集合。
+ * 只认 scrobble 上报：客户端预加载/探测只会发 stream，不会发 scrobble，因此可用来排除预加载。
+ * requireCompleted=true 时只统计 submission=true 的「听完」记录（旧记录没有 completed 字段，按未完成处理）。
+ * 按文件 mtime+size+模式缓存，避免每次落盘都解析整份历史。
+ */
+function readPlayedSongIds(user: string, requireCompleted: boolean): Set<string> {
+  const file = getScrobbleFilePath(user)
+  const cacheKey = `${user}:${requireCompleted ? 'completed' : 'any'}`
+  if (!file) return new Set()
+  try {
+    const st = fs.statSync(file)
+    const key = `${st.mtimeMs}:${st.size}`
+    const cached = playedIdsCache.get(cacheKey)
+    if (cached?.key === key) return cached.ids
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8'))
+    const ids = new Set<string>()
+    if (Array.isArray(raw)) {
+      for (const entry of raw) {
+        if (requireCompleted && entry?.completed !== true) continue
+        const id = String(entry?.id || '').trim()
+        if (id) ids.add(id)
+      }
+    }
+    playedIdsCache.set(cacheKey, { key, ids })
+    return ids
+  } catch {
+    return playedIdsCache.get(cacheKey)?.ids || new Set()
+  }
+}
+
+function isSongPlayed(user: string, ids: Array<string | null | undefined>, requireCompleted = false): boolean {
+  const played = readPlayedSongIds(user, requireCompleted)
+  if (!played.size) return false
+  for (const raw of ids) {
+    const id = String(raw || '').trim()
+    if (id && played.has(id)) return true
+  }
+  return false
+}
+
+/** onlyPlayed 只约束播放缓存（cache），已下载歌曲目录（music）与常规数据备份不受影响。 */
+function shouldSkipUnplayed(cfg: BackupConfig, user: string, folderType: 'cache' | 'music' | 'list', songId?: string | null, localPath?: string): boolean {
+  if (!cfg.onlyPlayed || folderType !== 'cache') return false
+  const item = localPath ? getIndexItemByFilename(path.basename(localPath), user) : null
+  return !isSongPlayed(user, [songId, item?.id, item?.songmid], cfg.onlyPlayedCompleted)
+}
+
 // ---------- 落盘钩子（事件驱动上传）----------
 
 /**
@@ -967,7 +1124,7 @@ export function onFileCached(
   user: string,
   folderType: 'cache' | 'music',
   localPath: string,
-  meta: { source?: string; songmid?: string; quality?: string; origin?: 'openlist' | 'platform' | 'local' } = {},
+  meta: { source?: string; songmid?: string; quality?: string; origin?: 'openlist' | 'platform' | 'local'; explicit?: boolean } = {},
 ): void {
   const cfg = getConfig()
   if (!cfg.enable) return
@@ -982,6 +1139,9 @@ export function onFileCached(
 
   const mode = effectiveMode(entry, cfg)
   if (mode === 'download') return
+  // [onlyPlayed] 预加载/探测落盘的文件先不排队，等客户端上报播放（scrobble）后由 onSongPlayed 补传。
+  // 用户在客户端显式点「下载」属于明确要留档，即使没有播放记录也照常上传。
+  if (!meta.explicit && shouldSkipUnplayed(cfg, user, folderType, meta.songmid, localPath)) return
 
   const cl = getClient()
   if (!cl) return
@@ -991,7 +1151,7 @@ export function onFileCached(
   const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${relative}`)
 
   const existing = getBackupByLocalPath(user, folderType, localPath)
-  if (existing && !existing.deleted_at && (['uploading', 'completed'].includes(existing.status) || (existing.status === 'verified' && !localChanged(existing)))) {
+  if (existing && !existing.deleted_at && (['uploading', 'completed'].includes(existing.status) || (existing.status === 'verified' && !localChanged(existing, false)))) {
     return
   }
 
@@ -1014,6 +1174,43 @@ export function onFileCached(
     queueAttachmentsForFile(user, folderType, localPath, row, dir, cl, cfg)
   }
   lazyStartScheduler()
+}
+
+/**
+ * 播放上报（Subsonic scrobble）到达后调用：把该曲已落盘的播放缓存排队上传。
+ * 仅在 openlist.onlyPlayed 开启时有实际动作——这些文件落盘时被跳过了。
+ * 幂等：已在队列或已上传的文件会被 onFileCached 内部的既有状态检查挡掉。
+ */
+export function onSongPlayed(user: string, songIds: string[]): void {
+  queueCachedUpload(user, songIds, false)
+}
+
+/**
+ * 用户显式点「下载」时调用：即便没有播放记录，也要把该曲的播放缓存留档到云端。
+ * 覆盖「文件早已落盘、当时被 onlyPlayed 跳过」的情况（命中缓存不会再触发落盘事件）。
+ */
+export function onExplicitDownload(user: string, songIds: string[]): void {
+  queueCachedUpload(user, songIds, true)
+}
+
+function queueCachedUpload(user: string, songIds: string[], explicit: boolean): void {
+  const cfg = getConfig()
+  if (!cfg.enable || !cfg.onlyPlayed || isCloudRestoreRunning()) return
+  const entry = cfg.userBackups.find(u => u.user === user && u.enabled)
+  if (!entry || effectiveMode(entry, cfg) === 'download') return
+  if (!folderEnabled(user, 'cache', cfg)) return
+  for (const raw of songIds) {
+    const id = String(raw || '').trim()
+    if (!id) continue
+    for (const file of findCachedFilesBySongId(user, id)) {
+      if (file.folder !== 'cache') continue
+      try {
+        onFileCached(user, file.folder, file.localPath, { songmid: id, explicit })
+      } catch (e: any) {
+        console.warn('[openlist-backup] 播放/下载后补传失败:', file.localPath, e?.message || e)
+      }
+    }
+  }
 }
 
 /**
@@ -1040,6 +1237,8 @@ export async function triggerBackfillUploadDelete(user: string): Promise<void> {
     for (const localPath of locals) {
       const existing = getBackupByLocalPath(user, folderType, localPath)
       if (existing && enqueuedIds.has(`f:${existing.id}`)) continue
+      // [onlyPlayed] 回填迁移同样只处理播放过的缓存，避免把预加载文件批量搬上云
+      if (shouldSkipUnplayed(cfg, user, folderType, existing?.songmid, localPath)) continue
       const relative = path.relative(dir, localPath).replace(/\\/g, '/')
       const remotePath = cl.resolveRemotePath(`${user}/${folderType}/${relative}`)
       const item = getIndexItemByFilename(path.basename(localPath), user)
@@ -1094,7 +1293,8 @@ export function registerFileCacheSyncHook(): void {
 // ---------- 验证轮询（确认网盘已落库，并按模式决定删本地/补缓存）----------
 
 export async function verifyPending(): Promise<void> {
-  if (verifyRunning || syncJob || manualTransfers || isCloudRestoreRunning()) return
+  // isTaskRunning() 覆盖「存量文件批量改名」：改名期间不改动远端基线。
+  if (verifyRunning || syncJob || manualTransfers || isCloudRestoreRunning() || isTaskRunning()) return
   const releaseBackup = beginCloudBackup()
   verifyRunning = true
   try {
@@ -1104,7 +1304,19 @@ export async function verifyPending(): Promise<void> {
     const health = getOpenlistConnection()
     if (health.nextProbeAt > Date.now()) return
     if ((await probeOpenlistConnection()).state !== 'online') return
-    const rows = [...listBackupByStatus('completed'), ...listBackupByStatus('verified')]
+    const source = metadataSource()
+    const observations = metadataObservations(source)
+    const probeNow = Date.now()
+    // 常态轮询不再对每条已验证记录发一次 getFileInfo：只有待确认落库、基线变化、
+    // 异常状态、upload-delete 待清理，或到达低频兜底周期的记录才需要远端核对。
+    const needsRecheck = (row: any): boolean => {
+      if (row.status !== 'verified' || row.error) return true
+      if (effectiveModeFromRow(row, cfg) === 'upload-delete' && row.local_path && fs.existsSync(row.local_path)) return true
+      const observed = observations(row.remote_path, 'remote')
+      if (!observed || observed.state !== 'same' || observed.baseline !== metadataBaseline(row)) return true
+      return probeNow - (observed.checkedAt || 0) >= VERIFIED_RECHECK_INTERVAL_MS
+    }
+    const rows = [...listBackupByStatus('completed'), ...listBackupByStatus('verified')].filter(needsRecheck)
     for (const row of rows) {
       if (!rowEnabled(row, cfg) || enqueuedIds.has(`f:${row.id}`)) continue
       try {
@@ -1264,6 +1476,7 @@ export function startVerifyScheduler(): void {
 }
 
 export function stopVerifyScheduler(): void {
+  cancelEventSync()
   if (connectionTimer) clearInterval(connectionTimer)
   connectionTimer = null
   nextScheduledCheck = 0
@@ -1304,18 +1517,12 @@ function walkLocalAll(dir: string, map = new Map<string, string>(), root = dir):
   return map
 }
 
-function localChanged(row: any): boolean {
-  if (!fs.existsSync(row.local_path)) return false
-  const st = fs.statSync(row.local_path)
-  if (!row.local_hash) return row.size !== st.size || row.local_mtime == null || st.mtimeMs !== row.local_mtime
-  const changed = hashFile(row.local_path) !== row.local_hash
-  const after = fs.statSync(row.local_path)
-  if (after.size !== st.size || after.mtimeMs !== st.mtimeMs) return true
-  // 后台已确认内容相同，更新观察基线，避免仅 touch 后永久显示待上传。
-  if (!changed && row.id && (row.size !== st.size || row.local_mtime !== st.mtimeMs)) {
-    setBackupStatus(row.id, row.status, { size: st.size, localMtime: st.mtimeMs })
-  }
-  return changed
+/**
+ * 本地内容是否变化。一轮同步内同一路径只算一次 SHA-256（见 openlistLocalChange）；
+ * 跨轮一律重算，因此「同大小 + 恢复 mtime 的内容改写」仍能被检测到。
+ */
+function localChanged(row: any, useMemo = true): boolean {
+  return localChangeChecker.changed(row, useMemo)
 }
 
 async function downloadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: BackupConfig, folderType: 'cache' | 'music' | 'list', summary: SyncSummary): Promise<void> {
@@ -1385,7 +1592,10 @@ async function uploadDirection(entry: UserBackupCfg, cl: OpenListClient, cfg: Ba
     if (existing?.status === 'completed' && existing.remote_path === remotePath && !localChanged(existing) && await remoteMatchesBackup(cl, existing, remotePath)) continue
     if (existing?.status === 'failed' && existing.retry_count >= MAX_AUTO_RETRIES && existing.remote_path === remotePath) continue
     const unchanged = existing?.status === 'verified' && !localChanged(existing) && existing.remote_path === remotePath && await remoteMatchesBackup(cl, existing, remotePath)
-    const item = getIndexItemByFilename(path.basename(lp), entry.user)
+    // 缓存条目带子目录时 filename 是相对路径，优先按相对路径匹配，回退到文件名
+    const item = getIndexItemByFilename(rel, entry.user) || getIndexItemByFilename(path.basename(lp), entry.user)
+    // [onlyPlayed] 定时/手动全量同步也只上传播放过的缓存，避免预加载文件被顺带推上云
+    if (cfg.onlyPlayed && folderType === 'cache' && !isSongPlayed(entry.user, [item?.id, item?.songmid, existing?.songmid], cfg.onlyPlayedCompleted)) continue
     let row = existing
     if (!unchanged) {
       row = upsertBackupFile({
@@ -1641,10 +1851,19 @@ export async function restoreOpenlistData(options: OpenlistRestoreOptions = {}) 
 /**
  * 手动触发同步（UI 按钮调用）。可选按 user / folder 过滤。
  * 与定时同步串行执行，上传完成后才返回结果。
+ * 也经互斥闸门与「存量文件批量改名」串行，避免改名中间态被当成新文件重复上传。
  */
-export async function runSyncNow(opts: { user?: string; folder?: 'cache' | 'music' | 'list' } = {}): Promise<SyncSummary> {
+export function runSyncNow(opts: { user?: string; folder?: 'cache' | 'music' | 'list' } = {}): Promise<SyncSummary> {
+  return runExclusive(() => runSyncExclusive(opts))
+}
+
+async function runSyncExclusive(opts: { user?: string; folder?: 'cache' | 'music' | 'list' }): Promise<SyncSummary> {
   while (syncJob) await syncJob.catch(() => {})
   const releaseBackup = beginCloudBackup()
+  // 本轮内同一本地路径的 SHA-256 只算一次；跨轮清空，保证内容改写仍能被检测。
+  localChangeChecker.beginRound()
+  // 全量同步（定时/手动/事件）统一更新事件节流基线；按 user/folder 过滤的同步不算。
+  if (!opts.user && !opts.folder) eventSyncThrottle.noteRun()
   const job = runSyncImpl(opts)
   syncJob = job
   try {
@@ -1654,7 +1873,11 @@ export async function runSyncNow(opts: { user?: string; folder?: 'cache' | 'musi
   } catch (error: any) {
     lastSyncResult = { at: Date.now(), uploaded: 0, downloaded: 0, deleted: 0, errors: [error.message] }
     throw error
-  } finally { if (syncJob === job) syncJob = null; releaseBackup() }
+  } finally {
+    localChangeChecker.endRound()
+    if (syncJob === job) syncJob = null
+    releaseBackup()
+  }
 }
 
 async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | 'list' }): Promise<SyncSummary> {
@@ -1723,6 +1946,10 @@ async function runSyncImpl(opts: { user?: string; folder?: 'cache' | 'music' | '
       summary.errors.push('system-config-history: ' + (e?.message || e))
     }
   }
+  // 灾备清单是全量同步结束时生成的一份「整体快照」，不是逐条记录备份。
+  // publishRecoveryManifest 内部先算本地指纹：与云端上一份相同即零写入、零对象探测、零历史遍历；
+  // 只有内容变化时才补新增的按 hash 内容寻址对象并写 history + latest 两个小文件。
+  // 因此这里按同步周期调用不会随歌单/数据库累加数据线性增长开销；
   if (!summary.errors.length && !opts.user && !opts.folder) {
     try { await publishRecoveryManifest(cl) } catch (e: any) { summary.errors.push('recovery-manifest: ' + (e?.message || e)) }
   }
@@ -1797,7 +2024,7 @@ export async function retryBackup(id: number): Promise<{ ok: boolean; message?: 
   const row = getBackupById(id)
   if (!row || row.deleted_at || row.status === 'deleted') return { ok: false, message: '备份记录不存在或已删除' }
   if (!rowEnabled(row, cfg)) return { ok: false, message: '该用户或目录未启用 OpenList 同步' }
-  if (syncJob || verifyRunning || manualTransfers || isCloudRestoreRunning() || enqueuedIds.has('f:' + id)) return { ok: false, message: '文件正在同步或校验，请稍后重试' }
+  if (syncJob || verifyRunning || manualTransfers || isCloudRestoreRunning() || isTaskRunning() || enqueuedIds.has('f:' + id)) return { ok: false, message: '文件正在同步或校验，请稍后重试' }
   const cl = getClient()
   if (!cl) return { ok: false, message: 'OpenList 客户端不可用' }
   if (!await connectionReady(cl)) return { ok: false, message: getOpenlistConnection().message }
@@ -1831,7 +2058,7 @@ export async function deleteOpenlistBackups(ids: number[], skipMainRemote = fals
   remoteRemoved: number
   remoteFailed: string[]
 }> {
-  if (!skipMainRemote && (syncJob || verifyRunning || manualTransfers)) throw new Error('OpenList 正在同步或校验，请稍后删除')
+  if (!skipMainRemote && (syncJob || verifyRunning || manualTransfers || isTaskRunning())) throw new Error('OpenList 正在同步或校验，请稍后删除')
   const release = skipMainRemote ? () => {} : beginCloudRestore()
   try {
     const db = getBackupDb()

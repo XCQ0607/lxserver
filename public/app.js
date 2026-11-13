@@ -3019,6 +3019,9 @@ class App {
             if (form.elements['cache.maxAgeDays']) {
                 form.elements['cache.maxAgeDays'].value = config['cache.maxAgeDays'] ?? 14;
             }
+            if (form.elements['cache.unplayedMaxAgeDays']) {
+                form.elements['cache.unplayedMaxAgeDays'].value = config['cache.unplayedMaxAgeDays'] ?? 7;
+            }
             if (form.elements['system.allowUnsafeVM']) {
                 form.elements['system.allowUnsafeVM'].checked = config['system.allowUnsafeVM'] === true;
             }
@@ -3478,6 +3481,8 @@ class App {
         // 备份相关字段已迁移至「备份管理」独立表单，此处仅提交「系统配置」表单自身字段，避免 FormData 缺失导致覆盖为默认值或 false
         const rawMaxAge = formData.get('cache.maxAgeDays');
         const parsedMaxAge = rawMaxAge !== null && rawMaxAge !== '' ? parseInt(rawMaxAge, 10) : NaN;
+        const rawUnplayedMaxAge = formData.get('cache.unplayedMaxAgeDays');
+        const parsedUnplayedMaxAge = rawUnplayedMaxAge !== null && rawUnplayedMaxAge !== '' ? parseInt(rawUnplayedMaxAge, 10) : NaN;
         const config = {
             serverName: formData.get('serverName'),
             'debug.enabled': formData.get('debug.enabled') === 'on',
@@ -3509,6 +3514,7 @@ class App {
             'user.enableCacheSizeLimit': formData.get('user.enableCacheSizeLimit') === 'on',
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,
             ...(Number.isFinite(parsedMaxAge) ? { 'cache.maxAgeDays': Math.max(0, parsedMaxAge) } : {}),
+            ...(Number.isFinite(parsedUnplayedMaxAge) ? { 'cache.unplayedMaxAgeDays': Math.max(0, parsedUnplayedMaxAge) } : {}),
             'admin.password': formData.get('admin.password'),
             'player.name': (formData.get('player.name') || '').trim() || 'LX Music Web',
             'player.enableAuth': formData.get('player.enableAuth') === 'on',
@@ -3693,6 +3699,9 @@ class App {
             if (form.elements['subsonic.cacheOnPlay']) {
                 form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
             }
+            if (form.elements['subsonic.saveDownload']) {
+                form.elements['subsonic.saveDownload'].checked = config['subsonic.saveDownload'] === true;
+            }
             if (form.elements['subsonic.playCacheFirst']) {
                 form.elements['subsonic.playCacheFirst'].checked = config['subsonic.playCacheFirst'] === true;
             }
@@ -3788,6 +3797,7 @@ class App {
             'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
             'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
             'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
+            'subsonic.saveDownload': formData.get('subsonic.saveDownload') === 'on',
             'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
             'subsonic.playCacheFirstUseOpenlist': formData.get('subsonic.playCacheFirstUseOpenlist') === 'on',
             'subsonic.openlistDelivery': (formData.get('subsonic.openlistDelivery') || 'direct').trim(),
@@ -4508,7 +4518,12 @@ class App {
         if (hint) hint.style.display = enabled ? 'none' : 'block'
         if (cacheHint) cacheHint.style.display = enabled ? 'none' : 'block'
         const active = enabled && this.loadedConfig?.['openlist.enable'] === true
-        for (const id of ['openlist-operation-panel', 'openlist-cache-form', 'openlist-cache-shortcut']) {
+        const advice = document.getElementById('openlist-naming-advice')
+        if (advice) {
+            const pattern = this.loadedConfig?.['cache.namingPattern'] || 'simple'
+            advice.textContent = '当前生效的命名格式为「' + pattern + '」（用户级设置可覆盖全局）。在「设置 → 歌曲命名方式」切换格式后，已有文件不会自动改名；请在此先只读预览，确认无误再执行，把本地文件名、缓存索引、备份库记录与云端文件名一起改成新格式。'
+        }
+        for (const id of ['openlist-operation-panel', 'openlist-rename-panel', 'openlist-cache-form', 'openlist-cache-shortcut']) {
             const element = document.getElementById(id)
             if (element) element.style.display = active ? '' : 'none'
         }
@@ -4658,6 +4673,58 @@ class App {
         } catch (e) {
             console.error(e)
             if (window.showError) window.showError('测试连接出错: ' + (e && e.message || e))
+        }
+    }
+
+    async previewCacheRename() {
+        const out = document.getElementById('openlist-rename-result')
+        try {
+            if (window.showInfo) window.showInfo('正在只读生成改名清单…')
+            const r = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'preview', limit: 200 }) })
+            if (!r || !r.success) throw new Error((r && r.error) || '预览失败')
+            const lines = [
+                '扫描 ' + r.scanned + ' 首；待改名 ' + r.ready + '，已是目标格式 ' + r.unchanged + '，冲突 ' + r.conflicts + '，本地文件缺失 ' + r.missing,
+                '云端同步：' + (r.cloudEnabled ? '已启用（执行时会同步改云端文件名，不重传音频）' : '未启用（只改本地与备份库）'),
+                '各用户生效格式：' + Object.entries(r.namingPatterns || {}).map(([u, p]) => u + '=' + p).join('，'),
+            ]
+            if (r.warning) lines.push('提示：' + r.warning)
+            if (r.truncated) lines.push('（仅列出前 ' + r.items.length + ' 条）')
+            for (const item of (r.items || [])) {
+                lines.push('[' + item.status + (item.reason ? '/' + item.reason : '') + '] ' + item.user + '/' + item.folder + '/' + item.oldFilename + '  →  ' + item.newFilename)
+            }
+            if (out) { out.style.display = 'block'; out.textContent = lines.join('\n') }
+            if (window.showSuccess) window.showSuccess('预览完成（只读，未改动任何内容）')
+        } catch (e) {
+            if (out) { out.style.display = 'block'; out.textContent = '预览失败：' + (e && e.message || e) }
+            if (window.showError) window.showError('预览失败: ' + (e && e.message || e))
+        }
+    }
+
+    async applyCacheRename() {
+        const out = document.getElementById('openlist-rename-result')
+        const ready = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'preview', limit: 1 }) })
+        if (!ready || !ready.success) {
+            if (window.showError) window.showError('无法预览：' + ((ready && ready.error) || '未知错误'))
+            return
+        }
+        if (!window.confirm('将按当前命名格式重命名 ' + ready.ready + ' 个文件（本地 + 备份库记录 + 云端文件名），冲突 ' + ready.conflicts + ' 项会跳过。确认执行？')) return
+        try {
+            if (window.showInfo) window.showInfo('正在同步重命名…')
+            const r = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'apply', limit: 2000 }) })
+            if (!r || !r.success) throw new Error((r && r.error) || '执行失败')
+            const lines = [
+                '成功 ' + r.renamed + '，跳过 ' + r.skipped + '，冲突 ' + r.conflicts + '，失败 ' + r.failed,
+                '云端重命名 ' + r.cloudRenamed + '，备份库更新 ' + r.dbUpdated,
+            ]
+            for (const item of (r.items || [])) {
+                if (item.status === 'ok') continue
+                lines.push('[' + item.status + (item.reason ? '/' + item.reason : '') + '] ' + item.oldFilename + '  →  ' + item.newFilename)
+            }
+            if (out) { out.style.display = 'block'; out.textContent = lines.join('\n') }
+            if (window.showSuccess) window.showSuccess('重命名完成：成功 ' + r.renamed + '，失败 ' + r.failed)
+            if (r.failed || r.conflicts) this.previewCacheRename()
+        } catch (e) {
+            if (window.showError) window.showError('重命名失败: ' + (e && e.message || e))
         }
     }
 
@@ -7521,8 +7588,8 @@ class App {
                 if (olForm.elements['openlist.token']) olForm.elements['openlist.token'].value = config['openlist.token'] || '';
                 if (olForm.elements['openlist.externalUrl']) olForm.elements['openlist.externalUrl'].value = config['openlist.externalUrl'] || '';
                 if (olForm.elements['openlist.root']) olForm.elements['openlist.root'].value = config['openlist.root'] || '/lx_music';
-                if (olForm.elements['openlist.syncInterval']) olForm.elements['openlist.syncInterval'].value = config['openlist.syncInterval'] || 60;
-                if (olForm.elements['openlist.verifyInterval']) olForm.elements['openlist.verifyInterval'].value = config['openlist.verifyInterval'] || 5;
+                if (olForm.elements['openlist.syncInterval']) olForm.elements['openlist.syncInterval'].value = config['openlist.syncInterval'] || 120;
+                if (olForm.elements['openlist.verifyInterval']) olForm.elements['openlist.verifyInterval'].value = config['openlist.verifyInterval'] || 15;
                 if (olForm.elements['openlist.historyRetentionDays']) olForm.elements['openlist.historyRetentionDays'].value = config['openlist.historyRetentionDays'] || 7;
                 this.toggleOpenlistVisibility();
             }
@@ -7532,6 +7599,8 @@ class App {
             if (cacheForm && (forceDiscard || !dirty.has('openlist-cache-form'))) {
                 if (cacheForm.elements['openlist.playback.enable']) cacheForm.elements['openlist.playback.enable'].checked = config['openlist.playback.enable'] === true;
                 if (cacheForm.elements['openlist.includeNonAudio']) cacheForm.elements['openlist.includeNonAudio'].checked = config['openlist.includeNonAudio'] === true;
+                if (cacheForm.elements['openlist.onlyPlayed']) cacheForm.elements['openlist.onlyPlayed'].checked = config['openlist.onlyPlayed'] === true;
+                if (cacheForm.elements['openlist.onlyPlayedCompleted']) cacheForm.elements['openlist.onlyPlayedCompleted'].checked = config['openlist.onlyPlayedCompleted'] === true;
                 let users = [];
                 this._olbUsersLoaded = true;
                 try {
@@ -7631,8 +7700,8 @@ class App {
             'openlist.token': fd.get('openlist.token') || '',
             'openlist.externalUrl': (fd.get('openlist.externalUrl') || '').trim(),
             'openlist.root': (fd.get('openlist.root') || '').trim() || '/lx_music',
-            'openlist.syncInterval': Math.max(1, parseInt(fd.get('openlist.syncInterval'), 10) || 60),
-            'openlist.verifyInterval': Math.max(1, parseInt(fd.get('openlist.verifyInterval'), 10) || 5),
+            'openlist.syncInterval': Math.max(1, parseInt(fd.get('openlist.syncInterval'), 10) || 120),
+            'openlist.verifyInterval': Math.max(1, parseInt(fd.get('openlist.verifyInterval'), 10) || 15),
             'openlist.historyRetentionDays': Math.max(1, Math.min(3650, parseInt(fd.get('openlist.historyRetentionDays'), 10) || 7)),
         };
         try {
@@ -7665,6 +7734,8 @@ class App {
         const payload = {
             'openlist.playback.enable': fd.get('openlist.playback.enable') === 'on',
             'openlist.includeNonAudio': fd.get('openlist.includeNonAudio') === 'on',
+            'openlist.onlyPlayed': fd.get('openlist.onlyPlayed') === 'on',
+            'openlist.onlyPlayedCompleted': fd.get('openlist.onlyPlayedCompleted') === 'on',
             'openlist.userBackups': this._olbUsersLoaded ? userBackupsRaw : undefined,
         };
         try {
@@ -7840,7 +7911,7 @@ class App {
                     badgeCls: olEnabled ? (failedRows.length ? 'is-error' : (olHasUrl ? 'is-on' : 'is-warn')) : '',
                     last: runtime.openlist?.lastRun ? `${time(runtime.openlist.lastRun.at)} · 上传 ${runtime.openlist.lastRun.uploaded} / 下载 ${runtime.openlist.lastRun.downloaded} / 删除 ${runtime.openlist.lastRun.deleted} / 错误 ${runtime.openlist.lastRun.errors.length}` : latestTs ? `${time(latestTs)} · 文件记录更新（上传完成 ${completed} 项，非整轮执行结果）` : '暂无记录',
                     next: nextTime(runtime.openlist?.nextSyncAt),
-                    scope: `备份 ${cfg['openlist.syncInterval'] || 60} 分钟 / 检查 ${cfg['openlist.verifyInterval'] || 5} 分钟 · 已选 ${olTypesCount} 类数据`,
+                    scope: `备份 ${cfg['openlist.syncInterval'] || 120} 分钟 / 检查 ${cfg['openlist.verifyInterval'] || 15} 分钟 · 事件同步最小间隔 5 分钟 · 已选 ${olTypesCount} 类数据`,
                     error: failedRows.length ? `${failedRows.length} 个文件上传或校验失败（${failedRows[0].error || failedRows[0].name}）` : runtime.openlist?.lastRun?.errors?.join('；') || '当前无失败文件记录',
                 });
             } catch (err) {

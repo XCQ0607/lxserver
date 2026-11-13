@@ -29,7 +29,7 @@ import { scopeDislikeRules, parseDislikeRules, splitSingers } from '@/modules/di
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
-import { invalidateSubsonicPlaylistCache, syncRatingsToDislike, syncDislikesToRating, readSubsonicMeta } from '@/server/integrations/subsonic'
+import { invalidateSubsonicPlaylistCache, syncRatingsToDislike, syncDislikesToRating, readSubsonicMeta, readScrobbles } from '@/server/integrations/subsonic'
 import { exportRatingBackup, createRatingSnapshot, saveRatingImport, listRatingSnapshots, readRatingSnapshot, restoreRatingSnapshot, deleteRatingSnapshot, normalizeRatingMeta, isValidSnapshotId } from './rating/ratingSnapshot'
 import { createMsg2call } from 'message2call'
 import { handleFileManager } from './integrations/fileManager'
@@ -38,8 +38,9 @@ import formidable from 'formidable'
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
 import { initUserApis, unloadUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
-import { startVerifyScheduler, runSyncNow, listBackups, startOpenlistMetadata, openlistMetadataStatus, cancelMetadata, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete } from '@/server/openlist/openlistBackup'
+import { startVerifyScheduler, runSyncNow, listBackups, startOpenlistMetadata, openlistMetadataStatus, cancelMetadata, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete, requestEventSync } from '@/server/openlist/openlistBackup'
 import { getOpenlistRecoveryHistory, startOpenlistRestore, listRestoreTasks, cancelRestoreTask, rollbackRestoreTask, deleteRestoreTask } from '@/server/openlist/openlistBackup'
+import { planCacheRename, applyCacheRename } from '@/server/openlist/openlistRenameSync'
 import { prepareOpenlistIntegrity, startOpenlistIntegrity, integrityStatus, cancelIntegrity } from '@/server/openlist/openlistBackup'
 import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes, isCloudBackupRunning } from '@/utils/backupPolicy'
 import { OpenListClient } from '@/server/openlist/openlistClient'
@@ -106,10 +107,8 @@ function scheduleOpenlistSync(): void {
   if (pendingOpenlistSyncTimer) clearTimeout(pendingOpenlistSyncTimer)
   pendingOpenlistSyncTimer = setTimeout(() => {
     pendingOpenlistSyncTimer = null
-    if (!global.lx.config['openlist.enable']) return
-    void runSyncNow({}).catch((e: any) => {
-      console.warn('[OpenList] 自动同步失败:', e?.message || e)
-    })
+    // 事件同步带最小间隔与脏标记合并；手动按钮与定时同步直接走 runSyncNow，不受节流。
+    requestEventSync()
   }, 8000)
 }
 import * as customSourceHandlers from './sources/customSourceHandlers'
@@ -7524,6 +7523,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
             'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
+            'cache.unplayedMaxAgeDays': typeof global.lx.config['cache.unplayedMaxAgeDays'] !== 'undefined' ? global.lx.config['cache.unplayedMaxAgeDays'] : 7,
             'admin.password': global.lx.config['admin.password'],
             'player.name': global.lx.config['player.name'] || 'LX Music Web',
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
@@ -7582,6 +7582,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'] ?? true,
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
+            // 未显式配置时默认否：下载只投递给客户端，服务器不落盘、不占缓存、不触发备份。
+            'subsonic.saveDownload': global.lx.config['subsonic.saveDownload'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? false,
             'subsonic.playCacheFirstUseOpenlist': global.lx.config['subsonic.playCacheFirstUseOpenlist'] ?? false,
             'subsonic.openlistDelivery': global.lx.config['subsonic.openlistDelivery'] || 'direct',
@@ -7607,12 +7609,15 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'openlist.password': global.lx.config['openlist.password'] || '',
             'openlist.token': global.lx.config['openlist.token'] || '',
             'openlist.root': global.lx.config['openlist.root'] || '/lx_music',
-            'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 5,
-            'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 60,
+            'openlist.verifyInterval': global.lx.config['openlist.verifyInterval'] || 15,
+            'openlist.syncInterval': global.lx.config['openlist.syncInterval'] || 120,
             'openlist.historyRetentionDays': global.lx.config['openlist.historyRetentionDays'] || 7,
             'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
             'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
+            'openlist.onlyPlayed': global.lx.config['openlist.onlyPlayed'] === true,
+            'openlist.onlyPlayedCompleted': global.lx.config['openlist.onlyPlayedCompleted'] === true,
             'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
+            'openlist.signExpireHours': global.lx.config['openlist.signExpireHours'] ?? 6,
             'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
             subsonicPortConflict: global.lx.subsonicPortConflict || null,
             restoreMaintenance: global.lx.restoreMaintenance === true,
@@ -7661,6 +7666,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['user.enableCacheSizeLimit'] !== undefined) global.lx.config['user.enableCacheSizeLimit'] = newConfig['user.enableCacheSizeLimit']
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
               if (newConfig['cache.maxAgeDays'] !== undefined) global.lx.config['cache.maxAgeDays'] = Math.max(0, parseInt(newConfig['cache.maxAgeDays']) || 0)
+              if (newConfig['cache.unplayedMaxAgeDays'] !== undefined) global.lx.config['cache.unplayedMaxAgeDays'] = Math.max(0, parseInt(newConfig['cache.unplayedMaxAgeDays']) || 0)
               if (newConfig['system.allowUnsafeVM'] !== undefined) global.lx.config['system.allowUnsafeVM'] = newConfig['system.allowUnsafeVM']
 
               let warning = ''
@@ -7804,12 +7810,16 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['openlist.password'] !== undefined) global.lx.config['openlist.password'] = newConfig['openlist.password']
               if (newConfig['openlist.token'] !== undefined) global.lx.config['openlist.token'] = newConfig['openlist.token']
               if (newConfig['openlist.root'] !== undefined) global.lx.config['openlist.root'] = newConfig['openlist.root']
-              if (newConfig['openlist.verifyInterval'] !== undefined) global.lx.config['openlist.verifyInterval'] = parseInt(newConfig['openlist.verifyInterval']) || 5
-              if (newConfig['openlist.syncInterval'] !== undefined) global.lx.config['openlist.syncInterval'] = parseInt(newConfig['openlist.syncInterval']) || 60
+              if (newConfig['openlist.verifyInterval'] !== undefined) global.lx.config['openlist.verifyInterval'] = parseInt(newConfig['openlist.verifyInterval']) || 15
+              if (newConfig['openlist.syncInterval'] !== undefined) global.lx.config['openlist.syncInterval'] = parseInt(newConfig['openlist.syncInterval']) || 120
               if (newConfig['openlist.historyRetentionDays'] !== undefined) global.lx.config['openlist.historyRetentionDays'] = Math.min(3650, Math.max(1, Math.floor(Number(newConfig['openlist.historyRetentionDays']) || 7)))
               if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
               if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
+              if (newConfig['openlist.onlyPlayed'] !== undefined) global.lx.config['openlist.onlyPlayed'] = newConfig['openlist.onlyPlayed'] === true
+              if (newConfig['openlist.onlyPlayedCompleted'] !== undefined) global.lx.config['openlist.onlyPlayedCompleted'] = newConfig['openlist.onlyPlayedCompleted'] === true
               if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
+              // 0 允许（=不过期），上限 30 天，避免误填永久凭据
+              if (newConfig['openlist.signExpireHours'] !== undefined) global.lx.config['openlist.signExpireHours'] = Math.min(720, Math.max(0, Math.floor(Number(newConfig['openlist.signExpireHours']) || 0)))
               if (newConfig['openlist.backupSystemConfig'] !== undefined) global.lx.config['openlist.backupSystemConfig'] = newConfig['openlist.backupSystemConfig']
 
               if (newConfig['snapshot.backupPath'] !== undefined) {
@@ -7886,6 +7896,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
+              if (newConfig['subsonic.saveDownload'] !== undefined) global.lx.config['subsonic.saveDownload'] = newConfig['subsonic.saveDownload'] === true
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
               if (newConfig['subsonic.playCacheFirstUseOpenlist'] !== undefined) global.lx.config['subsonic.playCacheFirstUseOpenlist'] = newConfig['subsonic.playCacheFirstUseOpenlist']
               if (newConfig['subsonic.openlistDelivery'] !== undefined) global.lx.config['subsonic.openlistDelivery'] = newConfig['subsonic.openlistDelivery']
@@ -7939,7 +7950,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (typeof global.lx?.saveConfig === 'function') {
                 global.lx.saveConfig()
               }
-              if (['user.enableCacheSizeLimit', 'user.cacheSizeLimit', 'cache.maxAgeDays'].some(key => newConfig[key] !== undefined)) {
+              if (['user.enableCacheSizeLimit', 'user.cacheSizeLimit', 'cache.maxAgeDays', 'cache.unplayedMaxAgeDays'].some(key => newConfig[key] !== undefined)) {
                 setImmediate(() => void fileCache.cleanupAllCaches())
               }
 
@@ -8111,6 +8122,34 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, ok: false, error: e?.message || String(e) }))
           }
         })
+        return
+      }
+
+      // [切换命名格式后同步存量文件名] preview=只读预览，apply=手动执行
+      if (pathname === '/api/openlist/cache/rename' && req.method === 'POST') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: 'Unauthorized' })); return
+        }
+        void (async () => {
+          try {
+            const body = JSON.parse(await readBody(req) || '{}')
+            const options = {
+              user: typeof body.user === 'string' && body.user ? body.user : undefined,
+              folder: body.folder === 'cache' || body.folder === 'music' ? body.folder : undefined,
+              limit: body.limit === undefined ? undefined : Number(body.limit),
+              cloud: body.cloud === false ? false : undefined,
+            }
+            if (body.mode === 'apply') {
+              const result = await applyCacheRename(options)
+              res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+            } else {
+              const result = await planCacheRename(options)
+              res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+            }
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })()
         return
       }
 
@@ -9721,6 +9760,19 @@ export const removeDevice = async (userName: string, clientId: string) => {
   }
   const userSpace = getUserSpace(userName)
   await userSpace.removeDevice(clientId)
+}
+
+// 缓存滚动清理需要知道哪些播放缓存「从未播放」，据此提前淘汰预加载/试听文件。
+// 由 subsonic 播放历史提供（起播与完成都算播放过，避免误删听了半首的歌），fileCache 侧通过钩子读取，避免循环依赖。
+;(global.lx as any).getPlayedSongIds = (username: string) => {
+  try {
+    const list = readScrobbles(username)
+    // 没有任何播放记录时返回 null：说明该用户不走 Subsonic 播放上报，不据此加速清理
+    if (!list.length) return null
+    return new Set(list.map(entry => entry.id))
+  } catch {
+    return null
+  }
 }
 
 // Cache-only expiration and size sweeps share backup and index protection.
