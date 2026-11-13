@@ -185,4 +185,6 @@ test('the original artist is picked out of search results by the credits in the 
     const rows = [{ artist: '方大同' }, { artist: 'The Weeknd和Ariana Grande' }, { artist: 'The Weeknd' }]
     assert.equal(creditedArtist(rows, seed), 'The Weeknd')
     assert.equal(creditedArtist([{ artist: '方大同' }], seed), '')
+    assert.equal(creditedArtist([{ artist: '王菲' }], { name: '王菲经典现场', singer: '某上传者', album: '红豆' }), '王菲', 'two-character names count')
+    assert.equal(creditedArtist([{ artist: 'U2' }], { name: 'u2000 remix', singer: 'x', album: 'y' }), '', 'short latin names are too ambiguous')
 })

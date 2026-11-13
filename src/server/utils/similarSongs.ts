@@ -149,7 +149,7 @@ export const findOriginalOfUpload = (rows: Array<{ id: string, title: string, ar
   if (!album) return ''
   for (const row of rows) {
     if (!row.id || normalizeText(row.title) !== album) continue
-    const artists = splitSingers(row.artist).map(normalizeText).filter(name => name.length >= 3)
+    const artists = splitSingers(row.artist).map(normalizeText).filter(isDistinctName)
     if (artists.some(name => credits.includes(name))) return row.id
   }
   return ''
@@ -159,11 +159,14 @@ export const findOriginalOfUpload = (rows: Array<{ id: string, title: string, ar
 export const creditedArtist = (rows: Array<{ artist: string }>, seed: SimilarSeed): string => {
   const credits = normalizeText(`${seed.name} ${seed.singer}`)
   for (const row of rows) {
-    const hit = splitSingers(row.artist).find(name => normalizeText(name).length >= 3 && credits.includes(normalizeText(name)))
+    const hit = splitSingers(row.artist).find(name => isDistinctName(normalizeText(name)) && credits.includes(normalizeText(name)))
     if (hit) return hit
   }
   return ''
 }
+
+// 歌手名够不够长到可以拿去做子串匹配：中日韩名字两个字就算（王菲），拉丁字母至少三个
+const isDistinctName = (name: string): boolean => name.length >= (/[^\x00-\x7f]/.test(name) ? 2 : 3)
 
 const fetchYtmRadio = async (seed: SimilarSeed): Promise<RadioTrack[]> => {
   if (!seed.name) return []
@@ -316,7 +319,7 @@ export const fetchSimilarSongs = async (
 ): Promise<SimilarResult> => {
   const safeLimit = Math.min(Math.max(parseInt(String(limit)) || 30, 1), MAX_LIMIT)
   const cacheKey = deps === defaultDeps
-    ? [seed.source, normalizeText(seed.name), normalizeText(splitSingers(seed.singer)[0]), safeLimit].join('|')
+    ? [seed.source, normalizeText(seed.name), normalizeText(splitSingers(seed.singer)[0]), normalizeText(seed.album), safeLimit].join('|')
     : ''
   const cached = cacheKey ? resultCache.get(cacheKey) : undefined
   let result = cached && cached.expires > Date.now() ? cached.result : null
