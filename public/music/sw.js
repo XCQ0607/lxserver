@@ -33,6 +33,7 @@ const ASSETS_TO_CACHE = [
     './js/core/pwa.js',
     './js/ui/theme_manager.js',
     './js/ui/log_viewer.js',
+    './js/ui/i18n.js',
     './js/player/ios-background-audio.js',
     './js/player/airplay.js',
     './js/player/playback.js',
