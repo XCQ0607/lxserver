@@ -3495,6 +3495,35 @@
                                                 </div>
                                             </div>
 
+                                            <!-- Merge Identical Songs in Aggregated Search -->
+                                            <div
+                                                class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
+                                                <div class="flex items-center justify-between">
+                                                    <div>
+                                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                            聚合搜索合并相同歌曲
+                                                            <span class="setting-tooltip-trigger">
+                                                                <i class="fas fa-question-circle"></i>
+                                                                <span class="setting-tooltip-content">
+                                                                    开启：聚合搜索时，各平台上的同一首歌（歌名、歌手、时长一致）合并为一条，音质取各平台的并集。<br>
+                                                                    播放或下载时，自动选用有所选音质、且历史解析最快的平台。<br>
+                                                                    关闭：每个平台的结果各占一条。
+                                                                </span>
+                                                            </span>
+                                                        </h4>
+                                                    </div>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" id="setting-merge-aggregated-search"
+                                                            aria-label="聚合搜索合并相同歌曲"
+                                                            class="sr-only peer"
+                                                            onchange="updateSetting('mergeAggregatedSearch', this.checked)">
+                                                        <div
+                                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            </div>
+
                                             <!-- Deduplicate Playlist by Quality -->
                                             <div
                                                 class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
@@ -6312,6 +6341,7 @@
     <script src="js/local/auto_link.js"></script>
     <script src="js/local/customDir.js"></script>
     <script src="js/ui/common_ui.js"></script>
+    <script src="js/library/song_merge.js"></script>
     <script src="js/library/paged_music_search.js"></script>
     <script src="js/library/search_suggestions.js"></script>
     <script src="js/download/sync_download.js"></script>
