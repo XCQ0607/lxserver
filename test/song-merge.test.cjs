@@ -96,6 +96,16 @@ test('the 24-bit tier is one quality whatever each platform calls it', async () 
     assert.equal(quality.getBestQuality(entry, 'hires'), 'hires');
 });
 
+test('only a fully identical artist name and two known durations make two entries the same song', () => {
+    const { merge } = load();
+    const base = song('tx', 1, '晴天', '周杰伦', '04:29', ['flac']);
+    assert.equal(merge.sameSong(base, song('kw', 2, '晴天', '周杰伦 (Jay Chou)', '04:30', ['flac'])), true, 'a bracketed alias is ignored');
+    assert.equal(merge.sameSong(base, song('kw', 3, '晴天', '周杰伦、杨瑞代', '04:29', ['flac'])), true, 'one shared artist is enough');
+    assert.equal(merge.sameSong(base, song('kw', 4, '晴天', '周杰', '04:29', ['flac'])), false, 'a name contained in another is a different artist');
+    assert.equal(merge.sameSong(base, song('kw', 5, '晴天', '周杰伦', '', ['flac'])), false, 'unknown duration: cannot tell the version');
+    assert.equal(merge.sameSong(base, song('kw', 6, '晴天', '周杰伦', '--:--', ['flac'])), false);
+});
+
 test('recorded results move a failing platform behind a working one', async () => {
     const { merge } = load();
     const [entry] = merge.mergeInto([], [

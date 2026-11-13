@@ -5905,7 +5905,8 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                 if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
                 return candidate === song ? result : { ...result, songInfo: candidate, switchedSource: true, originalSource: song.source };
             } catch (candidateError) {
-                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE') throw candidateError;
+                // 没有可用解析源时，单个条目直接报错；合并歌曲还要看其余平台的条目有没有缓存可用
+                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE' && candidates.length < 2) throw candidateError;
                 if (song._alternates?.length) window.SongMerge.record(candidate.source, false, 0);
                 lastError = candidateError;
             }
@@ -5951,7 +5952,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
-                // 合并歌曲的各平台条目上面已经逐个试过，不必再拿同一批平台重试一遍
+                // 合并歌曲的各平台条目上面已经逐个试过，不必再拿同一批平台重试一遍，直接看后面的降级
                 if (song._alternates?.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
@@ -6657,6 +6658,8 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
             quality: quality || '',
             includeOpenlist: includeOpenlist ? '1' : '0'
         });
+        // 时长用于在同名的缓存记录里挑出同一版
+        if (song.interval) params.append('interval', song.interval);
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
@@ -8579,9 +8582,10 @@ async function prefetchUpcomingSong() {
 async function continueWithSimilarSongs() {
     const seed = currentPlaylist[currentIndex];
     const epoch = searchRadioEpoch;
+    const requestId = loadingRequestCounter;
     const songs = await loadSearchRadioSongs(seed);
-    // 等待期间用户已切歌或暂停：不再干预
-    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch) return;
+    // 等待期间用户已切歌、暂停，或又发起过播放（比如切走再切回同一首）：不再干预
+    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch || loadingRequestCounter !== requestId) return;
     const fresh = isSearchRadioDue() ? pickSearchRadioSongs(songs) : [];
     if (!fresh.length) {
         playNextInQueue();
