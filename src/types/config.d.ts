@@ -150,6 +150,12 @@ declare namespace LX {
     'cache.maxAgeDays'?: number
 
     /**
+     * 未完成播放的播放缓存（预加载、试听、只拉流未播完）的保留天数。
+     * 这类文件优先滚动清理，避免占满缓存空间；0 表示不额外加速清理，仍按 cache.maxAgeDays 处理。
+     */
+    'cache.unplayedMaxAgeDays'?: number
+
+    /**
      * 公共最大备份快照数
      */
     maxSnapshotNum: number
@@ -474,14 +480,23 @@ declare namespace LX {
     'subsonic.cacheOnPlay'?: boolean
 
     /**
+     * Subsonic 下载请求是否保存到服务器 (默认 false)
+     * 下载请求的识别是内建能力：标准 /rest/download，以及部分客户端（如 Substreamer）
+     * 不走标准下载接口、而用裸 OkHttp 拉 stream（UA=okhttp/x.y.z + Accept-Encoding: gzip）。
+     * 识别结果一律落到 music 下载目录（与 cache 播放缓存分开）；本开关只决定是否保存：
+     * false 时仍正常把音频投递给客户端，但服务器不落盘、不触发播放预缓存、不补传备份。
+     */
+    'subsonic.saveDownload'?: boolean
+
+    /**
      * 是否在 Subsonic 播放音乐时优先使用本地缓存/下载文件直接流式传输 (默认 false)
      * 开启后,若服务器该用户目录下已存在此歌曲的缓存或下载文件,直接传输本地流,避免向源站请求在线直链;默认关闭以免服务器自担出向流量
      */
     'subsonic.playCacheFirst'?: boolean
     /** 在「缓存优先」开启的前提下，是否优先使用 OpenList 备份：缓存未命中时若 OpenList 已有该文件，则把网盘/外网直链直接给客户端(省服务器出向流量)。默认 false */
     'subsonic.playCacheFirstUseOpenlist'?: boolean
-    /** OpenList 命中后的交付方式：'direct'=给直链(302 跳转，客户端直连网盘/OpenList，省服务器流量)；'proxy'=服务端代理转发(兼容不支持跳转的客户端)。默认 'direct' */
-    'subsonic.openlistDelivery'?: 'direct' | 'proxy'
+    /** OpenList 命中后的交付方式：'direct'=给直链(302 跳转，客户端直连网盘/OpenList，省服务器流量)；'proxy'=服务端代理转发(兼容不支持跳转的客户端)；'sign'=给带签名的 OpenList /d/ 直链(适用于没有网盘直链的驱动，预检失败自动降级 proxy)。默认 'direct' */
+    'subsonic.openlistDelivery'?: 'direct' | 'proxy' | 'sign'
 
     /**
      * Subsonic 服务端转码总开关 (默认 false)。开启后,当音源无客户端请求音质(及更低音质)时,
@@ -564,17 +579,23 @@ declare namespace LX {
     'openlist.token'?: string
     /** OpenList 中 lx-music 备份根目录 */
     'openlist.root'?: string
-    /** 远端可用性校验周期(分钟) */
+    /** 远端可用性校验周期(分钟)，默认 15；已验证记录不逐轮探测 */
     'openlist.verifyInterval'?: number
-    /** 双向同步周期(分钟) */
+    /** 双向同步周期(分钟)，默认 120；事件同步另有 5 分钟最小间隔 */
     'openlist.syncInterval'?: number
     'openlist.historyRetentionDays'?: number
     /** 各用户备份目录配置(JSON 数组) */
     'openlist.userBackups'?: string
     /** 是否同步非音频文件(图片/封面等) */
     'openlist.includeNonAudio'?: boolean
+    /** 是否仅上传实际播放过的播放缓存（排除预加载、探测、只拉流未播放的文件）。仅作用于用户 cache 目录，不影响已下载歌曲 music 目录 */
+    'openlist.onlyPlayed'?: boolean
+    /** 严格模式：onlyPlayed 只认「完成播放」（Subsonic scrobble submission=true），"听一下就切走"不算播放。需同时开启 onlyPlayed */
+    'openlist.onlyPlayedCompleted'?: boolean
     /** OpenList 外网可访问地址(默认同 openlist.endpoint)。用于把网盘/代理直链回传给客户端；填写时结尾可带或不带斜杠，后台规范化 */
     'openlist.externalUrl'?: string
+    /** OpenList /d/ 直链签名有效期(小时)，0 表示不过期。签名用站点令牌做 HMAC，令牌本身不会出现在 URL 里。默认 6 */
+    'openlist.signExpireHours'?: number
     /** 是否把系统配置(config.js)同步备份到 OpenList（全局开关，开启后每次同步会上传 config.js 到 <root>/_system/config.js） */
     'openlist.backupSystemConfig'?: boolean
   }

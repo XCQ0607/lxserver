@@ -35,23 +35,13 @@ import { formatPlayTime } from '../../utils/common'
 import { getUserSpace } from '../../user'
 
 // --- Cache Naming Patterns ---
-export const CACHE_NAMING_PATTERNS = {
-    STANDARD: 'standard',       // {Name}_-_{Singer}_-_{Source}_-_{ID}_-_{Quality}
-    SIMPLE: 'simple',            // {Name} - {Singer} - {Quality} - {Album}
-    SINGER_NAME_QUALITY_ALBUM: 'singer_name_quality_album', // {Singer} - {Name} - {Quality} - {Album}
-    SINGER_NAME: 'singer_name', // {Singer} - {Name}
-    NAME_SINGER: 'name_singer'  // {Name} - {Singer}
-}
+// 常量与归一化函数抽出到无副作用模块，便于灾备解析等只读工具按配置复用；
+// 这里原样重新导出，既有 import 路径与行为保持不变。
+import { CACHE_NAMING_PATTERNS, normalizeNamingPattern } from './cacheNamingPattern'
+export { CACHE_NAMING_PATTERNS, normalizeNamingPattern } from './cacheNamingPattern'
 
 let currentNamingPattern = CACHE_NAMING_PATTERNS.SIMPLE
 const userNamingPatternMap = new Map<string, string>()
-
-export const normalizeNamingPattern = (pattern: unknown) => {
-    if (Object.values(CACHE_NAMING_PATTERNS).includes(pattern as string)) {
-        return pattern as string
-    }
-    return CACHE_NAMING_PATTERNS.SIMPLE
-}
 
 export const setNamingPattern = (pattern: unknown) => {
     currentNamingPattern = normalizeNamingPattern(pattern)
@@ -263,6 +253,8 @@ export interface DownloadProvenance {
     requestedSource?: string
     downloadSource?: string
     sourceName?: string
+    /** 用户显式发起的下载（而非播放预加载/探测）。备份侧据此跳过「仅播放过才上传」的过滤。 */
+    explicitDownload?: boolean
 }
 
 class CacheIndexManager {
@@ -422,6 +414,19 @@ const readCoverCache = (filename: string, username: string, stats?: Stats) => {
 
 const hasCachedCover = (filename: string, username: string, stats?: Stats) => {
     return !!readCoverCache(filename, username, stats)
+}
+
+/**
+ * 重命名音频时迁移外部封面缓存：缓存文件名由「原文件名 + 原 stats」哈希得出，
+ * 改名后必须按新文件名与新 stats 重写，否则封面丢失。仅操作缓存，不改音频文件。
+ */
+export const migrateCoverCacheOnRename = (
+    oldFilename: string, newFilename: string, username: string,
+    oldStats?: Stats, newStats?: Stats,
+) => {
+    if (oldFilename === newFilename) return
+    const cover = readCoverCache(oldFilename, username, oldStats)
+    if (cover) writeCoverCache(newFilename, username, cover.data, cover.mime, newStats)
 }
 
 const writeCoverCache = (filename: string, username: string, data: Buffer | Uint8Array, mime: string, stats?: Stats) => {
@@ -2713,7 +2718,7 @@ const downloadAndCacheImpl = async (songInfo: any, url: string, quality?: string
                     if (lxU?.fileCachedUploadListeners?.length) {
                         for (const fn of lxU.fileCachedUploadListeners) {
                             try {
-                                fn({ user: normalizedUsername, folderType, localPath: finalPath, meta: { source: metadata.source, songmid: id, quality: actualQuality, origin: 'platform' } })
+                                fn({ user: normalizedUsername, folderType, localPath: finalPath, meta: { source: metadata.source, songmid: id, quality: actualQuality, origin: 'platform', explicit: provenance.explicitDownload === true } })
                             } catch (e) {
                                 console.warn('[fileCache] fileCachedUpload listener error:', e)
                             }
@@ -3006,6 +3011,31 @@ export const getIndexItemByFilename = (filename: string, username: string) => {
 // [新增] 暴露 lyricFetcher 引用，供外部接口（如 embedLyric）使用
 export const getLyricFetcher = () => _lyricFetcher
 
+/**
+ * 按歌曲 ID 查找该用户已落盘的缓存/下载文件（cache 与 music 两个目录）。
+ * 用于「仅上传实际播放过的缓存」：播放上报到达后按 ID 反查本地文件再排队上传。
+ * 命中多个音质版本时会全部返回，由调用方决定上传哪些。
+ */
+export const findCachedFilesBySongId = (username: string, songId: string): Array<{ folder: 'cache' | 'music', localPath: string }> => {
+    const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
+    const target = String(songId || '').trim()
+    if (!target || isRemasterStage(normalizedUsername)) return []
+    const result: Array<{ folder: 'cache' | 'music', localPath: string }> = []
+    for (const folder of ['cache', 'music'] as const) {
+        const dir = getCacheDir(normalizedUsername, folder === 'music')
+        for (const item of indexManager.getAll(normalizedUsername, folder)) {
+            if (normalizeSongId(item) !== target && String(item.songmid || '') !== target) continue
+            const localPath = path.join(dir, item.filename)
+            try {
+                if (fs.statSync(localPath).isFile()) result.push({ folder, localPath })
+            } catch {
+                // 索引残留但文件已被清理，忽略
+            }
+        }
+    }
+    return result
+}
+
 // [新增] 更新索引中指定文件的 hasEmbedLyric 状态（由 embedLyric 接口成功写入后调用）
 export const setIndexEmbedLyric = (
     filename: string,
@@ -3243,16 +3273,38 @@ const runUserCacheCleanup = async (username: string, location: string, directory
     const days = Number(config['cache.maxAgeDays'] ?? 14)
     const limitBytes = config['user.enableCacheSizeLimit'] && Number.isFinite(limit) && limit > 0 ? limit * 1024 * 1024 : undefined
     const retentionMs = expire && Number.isFinite(days) && days > 0 ? days * 86400000 : undefined
+    // 未完成播放的播放缓存（预加载/试听）用更短的保留期，优先滚动清理
+    const unplayedDays = Number(config['cache.unplayedMaxAgeDays'] ?? 7)
+    const unplayedRetentionMs = retentionMs !== undefined && Number.isFinite(unplayedDays) && unplayedDays > 0
+        ? unplayedDays * 86400000
+        : undefined
     if (limitBytes === undefined && retentionMs === undefined) return
     const lx = (globalThis as any).lx
     const getProtectedPaths = () => {
         const activePaths: Set<string> = lx.getActiveBackupLocalPaths?.() || new Set<string>()
         return new Set(Array.from(activePaths, file => path.resolve(file)))
     }
+    const unplayedPaths = new Set<string>()
+    if (unplayedRetentionMs !== undefined) {
+        try {
+            // 由 subsonic 播放历史提供（任意上报都算播放过）；没有历史（如纯 Web 使用）时返回 null，跳过加速清理
+            const playedIds: Set<string> | null = lx.getPlayedSongIds?.(username) ?? null
+            if (playedIds) {
+                for (const item of indexManager.getAll(username, 'cache', location)) {
+                    if (!item?.filename) continue
+                    if (playedIds.has(String(item.id || '')) || playedIds.has(normalizeSongId(item))) continue
+                    unplayedPaths.add(path.resolve(directory, item.filename))
+                }
+            }
+        } catch (error) {
+            console.warn('[文件缓存] 计算未播完缓存失败:', error)
+        }
+    }
     const deleted = new Set<string>()
     try {
         const result = await cleanupCacheDirectory(directory, {
-            limitBytes, retentionMs, protectedPaths: getProtectedPaths(), refreshProtectedPaths: getProtectedPaths,
+            limitBytes, retentionMs, unplayedPaths, unplayedRetentionMs,
+            protectedPaths: getProtectedPaths(), refreshProtectedPaths: getProtectedPaths,
             isProtected: file => cacheUsageGuard.protects(file),
             shouldStop: () => !!global.lx?.restoreMaintenance,
             onDeleted(file) {

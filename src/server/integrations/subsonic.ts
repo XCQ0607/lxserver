@@ -10,7 +10,7 @@ import { getUserSpace, getUserDirname, getUserConfig } from '@/user'
 import { createRatingSnapshot, withMetaLock } from '../rating/ratingSnapshot'
 import { callUserApiGetMusicUrl } from '@/server/sources/userApi'
 import { downloadAndCache, checkCache, serveCacheFile, getFileName, getCacheDir } from '@/server/music/fileCache'
-import { resolveOpenlistCacheEntry } from '@/server/openlist/openlistBackup'
+import { resolveOpenlistCacheEntry, onSongPlayed, onExplicitDownload } from '@/server/openlist/openlistBackup'
 import {
     getSingerPic, getSingerDetail, getSingerMid, nameSimilarity,
     resolveSingerSources, getOrderedSingerSources, normalizeName as normalizeSingerName,
@@ -236,13 +236,15 @@ const ICY_META_INTERVAL = 16000 // 标准 ICY 元数据间隔 16KB
 
 function safeRedirect(res: http.ServerResponse, targetUrl: string, extraHeaders?: Record<string, string | number>) {
     let loc = String(targetUrl || '').trim()
-    try {
-        if (/^https?:\/\//i.test(loc)) {
-            // 避免 encodeURI 对已编码的 URL 进行二次转义（如 %20 -> %2520）破坏上游签名参数
-            loc = encodeURI(decodeURI(loc))
+    // 纯 ASCII 的 URL 必须原样透传：直链 query 里通常已带签名(AWS4 X-Amz-Signature、云盘 token 等)，
+    // 任何 encodeURI/decodeURI 往返都会改写已转义序列(%3B -> %253B、%2B -> %252B)，导致上游签名校验失败(403)。
+    // 只有含非 ASCII 字符时才需要编码，否则 Node 的 writeHead 会因 header 非 latin1 报错。
+    if (/[^\x20-\x7E]/.test(loc)) {
+        try {
+            loc = encodeURI(loc)
+        } catch {
+            // fallback to raw
         }
-    } catch {
-        // fallback to raw
     }
     res.writeHead(302, {
         Location: loc,
@@ -506,6 +508,12 @@ export function writeSubsonicMeta(username: string, meta: SubsonicMeta) {
 export interface ScrobbleEntry {
     id: string
     time: number
+    /**
+     * 是否是「完成播放」上报（submission=true）。
+     * 起播上报（submission=false）不写该字段，因此旧记录天然表现为「未完成」。
+     * 备份侧可据此区分「听了一下」和「听完」，见 openlist.onlyPlayedCompleted。
+     */
+    completed?: boolean
 }
 
 /** 播放队列状态（savePlayQueue / getPlayQueue 跨设备续播用） */
@@ -6366,6 +6374,21 @@ class SubsonicHandler {
         const id = params.get('id')
         if (!id) return this.sendError(res, 10, 'Required parameter is missing: id', format)
 
+        // [下载识别] 部分客户端（如 Substreamer）的「下载」不调用 /rest/download，而是用裸 OkHttp
+        // 直接拉 stream：UA=okhttp/x.y.z + Accept-Encoding: gzip；播放则走应用自身 HTTP 栈
+        // （UA 带应用名，音流是空 UA + gzip/br），因此不会被误判。识别是内建能力，不设开关；
+        // 是否把文件保存到服务器由 subsonic.saveDownload 决定（默认否）。
+        const downloadUa = String(req.headers['user-agent'] || '')
+        const downloadEnc = String(req.headers['accept-encoding'] || '')
+        const downloadLike = method === 'download' || (
+            /^okhttp\//i.test(downloadUa) &&
+            /\bgzip\b/i.test(downloadEnc)
+        )
+        const saveDownload = global.lx.config['subsonic.saveDownload'] === true
+        if (downloadLike && method !== 'download') {
+            subsonicLog.info(`[Subsonic] 识别为下载请求(stream): ${id} (ua=${downloadUa || '-'}, save=${saveDownload})`)
+        }
+
         // 解析 source 和 songmid
         let source = ''
         let songmid = ''
@@ -6511,6 +6534,10 @@ class SubsonicHandler {
                 const dlName = `${id}.${dlExt}`
                 res.setHeader('Content-Disposition', `attachment; filename="${dlName}"; filename*=UTF-8''${encodeURIComponent(dlName)}`)
             }
+            if (downloadLike && saveDownload) {
+                // 显式下载视为明确留档：即使没有播放记录，也补传该曲已落盘的缓存（openlist.onlyPlayed 下同样生效）
+                try { onExplicitDownload(username, [String(id).replace(/^(al-|ar-|tr-|sg-|mg-)/, '')]) } catch { /* ignore */ }
+            }
 
             // 本地缓存优先播放：受 subsonic.playCacheFirst 开关控制(默认开启)。
             // 按确定性规则探测缓存(精确优先 + cap 内降序, 见 getCacheProbeOrder)，命中即直接回传本地文件；
@@ -6572,7 +6599,17 @@ class SubsonicHandler {
                   return
                 }
                 const delivery = (global.lx.config['subsonic.openlistDelivery'] as string) || 'direct'
-                if (delivery === 'proxy') {
+                // sign：把网盘直链 / 带签名的 OpenList /d/ 地址交给客户端直连（省服务器出向带宽）。
+                // 部分客户端不跟随 302，故先做 Range 0-0 预检，明确不可读(401/403/404/HTML)才降级服务端代理，
+                // 避免出现「客户端拿到死链后每秒重试」的情况。预检超时按既有策略视为不可判定，仍交客户端尝试。
+                let deliveryProxy = delivery === 'proxy'
+                if (delivery === 'sign') {
+                    const probe = await probeAudioUrl(directUrl)
+                    deliveryProxy = probe === 'invalid'
+                    if (deliveryProxy) subsonicLog.warn(`[Subsonic] ${method} OpenList 直链预检失败，降级服务端代理: ${id}`)
+                    else subsonicLog.debug(`[Subsonic] ${method} OpenList sign delivery probe=${probe} for ${id}`)
+                }
+                if (deliveryProxy) {
                   try {
                     const fwd: Record<string, string> = {}
                     if (req.headers.range) fwd['Range'] = String(req.headers.range)
@@ -6772,20 +6809,28 @@ class SubsonicHandler {
                 //   回源可能把 320k 降级成 192k；若按 result.quality 落盘，本地探测候选(由全局
                 //   subsonic.quality.priority 与请求音质组成)永远不含该实际音质，后续播放无法命中缓存。
                 //   改用请求音质作缓存键后，它天然落在探测候选内，「下载即缓存」才真正成立。
-                // - 下载(download)无论 cacheOnPlay 是否开启都强制落盘；但与可取消的「播放预缓存」分开管理：
-                //   播放预缓存进 subsonicActiveTasks 单用户可取消槽(切歌自动 abort 上一首)，避免连切刷歌堆积带宽；
-                //   下载缓存进独立任务(不进该槽、不被后续下载 abort)，否则连续下载第二首会中断第一首的落盘。
-                if (method === 'download') {
-                    // 下载即缓存：独立任务，强制落盘；不设 abort 槽位，确保批量连续下载每首都能完整写入
-                    void downloadAndCache(musicInfo, result.url, quality, username, undefined, false, true, true, {
-                        requestedSource: source,
-                        downloadSource: source,
-                        sourceName: source,
-                    }).catch((err: any) => {
-                        if (err?.message !== 'Aborted') {
-                            subsonicLog.error('[Subsonic] download cache failed:', err?.message || err)
-                        }
-                    })
+                // - 下载(download)与 cacheOnPlay 相互独立；是否保存到服务器由 subsonic.saveDownload 控制，
+                //   关闭时仍把音频投递给客户端，但既不落 music、也不退回播放预缓存（避免「关了还写 cache」）。
+                // - 落盘的下载与可取消的「播放预缓存」分开管理：播放预缓存进 subsonicActiveTasks
+                //   单用户可取消槽(切歌自动 abort 上一首)，避免连切刷歌堆积带宽；下载缓存进独立任务，
+                //   否则连续下载第二首会中断第一首的落盘。
+                if (downloadLike) {
+                    if (saveDownload) {
+                        // 显式下载与播放缓存分开存放：按 Web 端下载语义写入 music 下载目录，
+                        // 而不是 cache 播放缓存目录，避免被缓存滚动清理误删、也便于备份侧区分。
+                        // 独立任务，强制落盘；不设 abort 槽位，确保批量连续下载每首都能完整写入
+                        void downloadAndCache(musicInfo, result.url, quality, username, undefined, true, true, true, {
+                            requestedSource: source,
+                            downloadSource: source,
+                            sourceName: source,
+                            // 用户显式下载视为明确留档：开启 openlist.onlyPlayed 时不受播放记录限制
+                            explicitDownload: true,
+                        }).catch((err: any) => {
+                            if (err?.message !== 'Aborted') {
+                                subsonicLog.error('[Subsonic] download cache failed:', err?.message || err)
+                            }
+                        })
+                    }
                 } else if (global.lx.config['subsonic.cacheOnPlay'] && username) {
                     // 播放预缓存：可随切歌取消(避免连切刷歌堆积带宽)
                     if (global.lx.config['subsonic.enableDebug']) {
@@ -7393,9 +7438,19 @@ class SubsonicHandler {
             ? (String(Math.floor(parsed)).length >= 13 ? parsed : parsed * 1000)
             : Date.now()
 
+        // [onlyPlayedCompleted] submission=true 表示「完成播放」，写进历史供备份侧区分
+        // 「听了一下就切走」和「完整播完」；起播(false)不写该字段
+        const submissionParam = params.get('submission')
+        const completed = submissionParam != null && /^(true|1)$/i.test(submissionParam)
+
         const list = readScrobbles(username)
-        for (const id of ids) list.push({ id, time: eventTime })
+        for (const id of ids) list.push(completed ? { id, time: eventTime, completed: true } : { id, time: eventTime })
         writeScrobbles(username, list)
+
+        // [onlyPlayed] 播放缓存落盘时可能因未播放被跳过，这里在收到播放上报后补传
+        try { onSongPlayed(username, ids) } catch (e: any) {
+            subsonicLog.warn('[Subsonic] 播放后触发 OpenList 补传失败:', e?.message || e)
+        }
 
         subsonicLog.debug(`[Subsonic] scrobble: ${ids.length} 首 (${ids.slice(0, 3).join(', ')}) time=${new Date(eventTime).toISOString()} (user=${username})`)
         return this.sendResponse(res, {}, format)

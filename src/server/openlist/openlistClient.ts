@@ -226,6 +226,29 @@ export class OpenListClient {
     }
   }
 
+  /**
+   * 云端重命名（元数据操作，不重传字节）。
+   * 走 OpenList/AList v3 的 /api/fs/rename：只把同一路径下的文件改成新名字，
+   * 文件内容与 hash 均不变，避免为改名重新上传整个音频库。
+   * 目标名已存在时会直接失败（overwrite=false），由调用方按冲突处理。
+   */
+  async rename(remotePath: string, newName: string): Promise<void> {
+    await this.ensureToken()
+    const resp = await this.request('/api/fs/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.authHeader() },
+      body: JSON.stringify({ path: remotePath, name: newName, overwrite: false }),
+      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    })
+    const data: any = await resp.json().catch(() => ({}))
+    if (resp.status === 404 || data?.code === 404 || (data?.code !== 200 && /object not found|no such file/i.test(data?.message || ''))) {
+      throw new OpenListNotFoundError('OpenList 文件不存在：' + remotePath)
+    }
+    if (!resp.ok || data?.code !== 200) {
+      throw new Error('OpenList 重命名失败：' + (data?.message || data?.code || resp.status))
+    }
+  }
+
   async remove(remotePath: string): Promise<void> {
     await this.ensureToken()
     const dir = path.posix.dirname(remotePath)

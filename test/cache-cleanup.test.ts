@@ -18,7 +18,7 @@ const fixture = (t: any) => {
     return file
   }
   const deleted: string[] = []
-  const clean = (options: { limitBytes?: number, retentionMs?: number, protectedPaths?: Set<string> } = {}) => cleanupCacheDirectory(path.join(root, 'cache'), {
+  const clean = (options: { limitBytes?: number, retentionMs?: number, protectedPaths?: Set<string>, unplayedPaths?: Set<string>, unplayedRetentionMs?: number } = {}) => cleanupCacheDirectory(path.join(root, 'cache'), {
     now, protectedPaths: new Set(), onDeleted: file => { deleted.push(file) }, ...options,
   })
   return { root, put, deleted, clean }
@@ -130,4 +130,22 @@ test('backup protection is refreshed after asynchronous traversal and between de
   })
   assert.ok(refreshes >= 3)
   assert.ok(fs.existsSync(protectedFile))
+})
+
+test('unplayed cache expires earlier than completed playback', async t => {
+  const f = fixture(t)
+  const unplayed = f.put('cache/unplayed.mp3', 100, 10)
+  const played = f.put('cache/played.mp3', 100, 10)
+  await f.clean({ retentionMs: 14 * day, unplayedPaths: new Set([unplayed]), unplayedRetentionMs: 7 * day })
+  assert.ok(!fs.existsSync(unplayed))
+  assert.ok(fs.existsSync(played))
+})
+
+test('unplayed cache is evicted before older completed playback under size pressure', async t => {
+  const f = fixture(t)
+  const unplayedRecent = f.put('cache/unplayed-recent.mp3', 100, 1)
+  const playedOld = f.put('cache/played-old.mp3', 100, 30)
+  await f.clean({ limitBytes: 150, unplayedPaths: new Set([unplayedRecent]) })
+  assert.deepEqual(f.deleted, [unplayedRecent])
+  assert.ok(fs.existsSync(playedOld))
 })

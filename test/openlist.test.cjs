@@ -85,8 +85,22 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     plugins: [{ name: 'application-boundaries', setup(b) {
       b.onResolve({ filter: /^@\/(server\/music\/fileCache|server\/sources\/userApi|user(\/data)?|constants)$/ }, a => ({ path: a.path, namespace: 'boundary' }))
       b.onLoad({ filter: /.*/, namespace: 'boundary' }, () => ({ loader: 'js', contents: `
+        const fs = require('node:fs')
         export function getCacheDir(user, music) { return global.__openlistTest.dirs[music ? 'music' : 'cache'] }
         export function getIndexItemByFilename(name) { return global.__openlistTest.items.get(name) }
+        export function getUserNamingPattern() { return 'simple' }
+        export function findCachedFilesBySongId(user, songId) {
+          const test = global.__openlistTest
+          const out = []
+          for (const [name, item] of test.items) {
+            if ((item.id || '') !== songId && (item.songmid || '') !== songId) continue
+            for (const folder of ['cache', 'music']) {
+              const localPath = test.dirs[folder] + '/' + name
+              if (fs.existsSync(localPath)) out.push({ folder, localPath })
+            }
+          }
+          return out
+        }
         export function registerOpenListCacheFile(user, item) { global.__openlistTest.registered.push(item) }
         export function unregisterOpenListCacheFile(user, id) { global.__openlistTest.removed.push(id) }
         export function callUserApiGetMusicUrl() { return null }
@@ -111,6 +125,8 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     for (const dir of Object.values(state.dirs)) { fs.rmSync(dir, { recursive: true, force: true }); fs.mkdirSync(dir) }
     Object.assign(rule, { enabled: true, backupCache: true, backupDownload: true, mode: 'sync' })
     config['openlist.includeNonAudio'] = false
+    config['openlist.onlyPlayed'] = false
+    config['openlist.onlyPlayedCompleted'] = false
     config['subsonic.playCacheFirst'] = true
     config['subsonic.playCacheFirstUseOpenlist'] = true
     remote.clear(); state.items.clear(); state.registered.length = 0; state.removed.length = 0
@@ -798,6 +814,102 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
     assert.ok(current.files.some(f => f.relative.endsWith('/retention.json')))
     assert.deepEqual((await api.restoreOpenlistData({ types: ['userData'], mode: 'missing' })).errors, [])
     assert.equal(fs.readFileSync(file, 'utf8'), 'version-two')
+  })
+  await t.test('onlyPlayed keeps preloaded cache local until the song is actually played', async () => {
+    reset()
+    config['openlist.onlyPlayed'] = true
+    const localFile = putLocal('cache', 'prefetch.mp3', 'prefetch-audio')
+    // 预加载/探测落盘：没有播放上报，不应上传
+    api.onFileCached('alice', 'cache', localFile, { songmid: 'tx_song123' })
+    await new Promise(resolve => setTimeout(resolve, 30))
+    assert.equal(uploads, 0)
+    assert.equal(remote.has(rp('cache', 'prefetch.mp3')), false)
+    // 定时/手动全量同步也不应把未播放缓存推上云
+    await sync('cache')
+    assert.equal(remote.has(rp('cache', 'prefetch.mp3')), false)
+    // 收到播放上报（scrobble 落盘）后补传
+    const scrobbleFile = path.join(temp, 'alice', 'subsonic-scrobbles.json')
+    fs.mkdirSync(path.dirname(scrobbleFile), { recursive: true })
+    fs.writeFileSync(scrobbleFile, JSON.stringify([{ id: 'tx_song123', time: Date.now() }]))
+    api.onSongPlayed('alice', ['tx_song123'])
+    await sync('cache')
+    assert.equal(remote.has(rp('cache', 'prefetch.mp3')), true)
+    assert.equal(remote.get(rp('cache', 'prefetch.mp3')).body.toString(), 'prefetch-audio')
+    // 显式下载命中已有缓存：即使从未播放也要留档
+    const manual = putLocal('cache', 'manual-download.mp3', 'manual-audio')
+    state.items.set('manual-download.mp3', { id: 'kw_777', songmid: 'kw_777', source: 'kw', quality: '128k', name: 'Manual', singer: 'S' })
+    api.onExplicitDownload('alice', ['kw_777'])
+    await sync('cache')
+    assert.equal(remote.has(rp('cache', 'manual-download.mp3')), true)
+    assert.equal(remote.get(rp('cache', 'manual-download.mp3')).body.toString(), 'manual-audio')
+    // 新下载落盘：explicit 标记同样绕过播放记录过滤
+    const fresh = putLocal('cache', 'fresh-download.mp3', 'fresh-audio')
+    state.items.set('fresh-download.mp3', { id: 'kw_888', songmid: 'kw_888', source: 'kw', quality: '128k', name: 'Fresh', singer: 'S' })
+    api.onFileCached('alice', 'cache', fresh, { songmid: 'kw_888', explicit: true })
+    await sync('cache')
+    assert.equal(remote.has(rp('cache', 'fresh-download.mp3')), true)
+    assert.equal(manual, path.join(state.dirs.cache, 'manual-download.mp3'))
+  })
+  await t.test('onlyPlayedCompleted waits for a completed-playback report', async () => {
+    reset()
+    config['openlist.onlyPlayed'] = true
+    config['openlist.onlyPlayedCompleted'] = true
+    const preview = putLocal('cache', 'preview.mp3', 'preview-audio')
+    state.items.set('preview.mp3', { id: 'kw_preview', songmid: 'kw_preview', source: 'kw', quality: '128k', name: 'P', singer: 'S' })
+    const scrobbleFile = path.join(temp, 'alice', 'subsonic-scrobbles.json')
+    fs.mkdirSync(path.dirname(scrobbleFile), { recursive: true })
+    // 只起了个头：submission=false 写入的记录没有 completed 字段
+    fs.writeFileSync(scrobbleFile, JSON.stringify([{ id: 'kw_preview', time: Date.now() }]))
+    api.onFileCached('alice', 'cache', preview, { songmid: 'kw_preview' })
+    api.onSongPlayed('alice', ['kw_preview'])
+    await sync('cache')
+    assert.equal(remote.has(rp('cache', 'preview.mp3')), false)
+    // 完成播放：submission=true 写入 completed=true
+    fs.writeFileSync(scrobbleFile, JSON.stringify([{ id: 'kw_preview', time: Date.now(), completed: true }]))
+    api.onSongPlayed('alice', ['kw_preview'])
+    await sync('cache')
+    assert.equal(remote.has(rp('cache', 'preview.mp3')), true)
+    assert.equal(remote.get(rp('cache', 'preview.mp3')).body.toString(), 'preview-audio')
+  })
+
+  await t.test('periodic verification stops probing unchanged verified rows', async () => {
+    reset(); rule.mode = 'upload'; putLocal()
+    await sync('cache'); await api.verifyPending()
+    assert.equal(api.listBackups()[0].status, 'verified')
+    // 状态转换本身会刷新一次观察基线，之后再进入稳态。
+    await api.verifyPending()
+    const before = metadataReads
+    await api.verifyPending()
+    await api.verifyPending()
+    assert.equal(metadataReads - before, 0, 'steady-state rounds must not issue per-row getFileInfo')
+    assert.equal(uploads, 1)
+    // 待确认落库的 completed 行仍然逐行核对，跳过的只有稳态 verified 行。
+    putLocal('cache', 'another.mp3', 'another')
+    await sync('cache')
+    const beforeCompleted = metadataReads
+    await api.verifyPending()
+    assert.ok(metadataReads > beforeCompleted, 'completed rows are still confirmed against the remote')
+  })
+
+  await t.test('event-driven sync is coalesced and throttled while manual sync stays immediate', async () => {
+    reset(); rule.mode = 'upload'; putLocal()
+    await api.runSyncNow()
+    const baseline = api.getEventSyncState().lastRunAt
+    assert.ok(baseline > 0, 'a full sync seeds the throttle baseline')
+    const sent = uploads
+    putLocal('cache', 'second.mp3', 'second')
+    api.requestEventSync(); api.requestEventSync(); api.requestEventSync()
+    const pending = api.getEventSyncState()
+    assert.equal(pending.dirty, true, 'events only set the dirty flag')
+    assert.equal(pending.queued, true, 'bursts share one queued run')
+    assert.ok(pending.nextRunAt - baseline >= 5 * 60 * 1000 - 1000, 'next run respects the 5-minute floor')
+    await new Promise(resolve => setTimeout(resolve, 30))
+    assert.equal(uploads, sent, 'queued event must not run a full sync inside the interval')
+    // 手动按钮直接走 runSyncNow，不受节流限制。
+    assert.deepEqual((await api.runSyncNow()).errors, [])
+    assert.ok(uploads > sent, 'manual sync still uploads immediately')
+    api.cancelEventSync()
+    assert.equal(api.getEventSyncState().dirty, false)
   })
 })
 
