@@ -4371,7 +4371,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (hit) { result = { exists: true, url: hit.url, filename: hit.filename, quality: hit.quality, folder, origin: 'openlist' }; break }
           }
         }
-        if (result && result.exists && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
+        if (result && result.exists && result.url && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
           const token = req.headers['x-user-token']
           if (token) {
             result.url += `&token=${encodeURIComponent(token as string)}`

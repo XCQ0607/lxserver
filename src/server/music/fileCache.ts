@@ -1788,9 +1788,15 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
         )
 
         if (collision) {
+            // 同名同歌手但来自别的平台：附上文件地址和时长，由调用方判断是否就是同一首歌
+            const collisionFolder: 'cache' | 'music' = collision.folder === 'music' ? 'music' : 'cache'
+            const collisionFile = isLyricCheck ? '' : collision.filename
+            const collisionExists = !!collisionFile && fs.existsSync(path.join(getCacheDir(normalizedUsername, collisionFolder === 'music'), collisionFile))
             return {
                 exists: true,
                 isCollision: true,
+                interval: collision.interval,
+                url: collisionExists ? `/api/music/cache/file/${encodeURIComponent(normalizedUsername)}/${encodeURIComponent(collisionFile)}?folder=${collisionFolder}` : undefined,
                 collisionSource: collision.source,
                 collisionSongmid: collision.songmid,
                 filename: isLyricCheck ? collision.lyricFilename : collision.filename,

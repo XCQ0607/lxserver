@@ -5808,6 +5808,20 @@ const prefetchManager = {
 };
 prefetchManager.init(); // 立即初始化缓冲器
 
+// 服务器缓存是否可直接播放：本平台的缓存直接可用；别的平台缓存的同名同歌手文件（撞名），
+// 时长一致才当作同一首歌，这样原平台连不上时也能播放已缓存的文件
+function isUsableServerCache(song, cached) {
+    if (!cached || !cached.exists) return false;
+    if (!cached.isCollision) return true;
+    if (!cached.url) return false;
+    const seconds = value => {
+        const parts = String(value || '').split(':').map(Number);
+        return parts.length < 2 || parts.some(Number.isNaN) ? 0 : parts.reduce((total, part) => total * 60 + part, 0);
+    };
+    const wanted = seconds(song.interval), have = seconds(cached.interval);
+    return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
+}
+
 async function refreshPrefetchedCache(song, result) {
     if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
 
@@ -6340,7 +6354,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
     if (allowServerCache) {
         let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
-        if (cacheResult.exists && !cacheResult.isCollision) {
+        if (isUsableServerCache(song, cacheResult)) {
             const actualQuality = cacheResult.quality || quality;
             console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
             let serverCacheUrl = cacheResult.url;
