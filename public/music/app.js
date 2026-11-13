@@ -5864,7 +5864,9 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
         for (const candidate of candidates) {
             const startedAt = Date.now();
             try {
-                const result = await fetchSongUrl(candidate, quality, isRetry, isSilent);
+                // 同一档音质各平台叫法不同（hires / flac24bit），按该平台自己的叫法请求
+                const candidateQuality = song._alternates?.length ? window.SongMerge.requestQuality(candidate, quality) : quality;
+                const result = await fetchSongUrl(candidate, candidateQuality, isRetry, isSilent);
                 if (result.errorMsg) throw new Error(result.errorMsg);
                 // 只统计真正的在线解析，命中缓存的耗时不代表平台快慢
                 if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
@@ -5975,7 +5977,7 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
     // 0. 聚合搜索合并出来的歌曲：先在各平台的条目里按「有该音质、可解析、历史最快」的顺序找所请求音质
     if (song._alternates?.length) {
         for (const candidate of await window.SongMerge.candidates(song, requestedQuality)) {
-            const mergedExact = await trySingle(candidate, requestedQuality);
+            const mergedExact = await trySingle(candidate, window.SongMerge.requestQuality(candidate, requestedQuality));
             if (!mergedExact) continue;
             return candidate === song ? mergedExact : { ...mergedExact, songInfo: candidate, switchedSource: true, originalSource: song.source };
         }

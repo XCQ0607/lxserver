@@ -1718,6 +1718,11 @@ export const setCacheLocation = (location: string) => {
 
 export const getCacheLocation = () => currentCacheLocation
 
+// 24bit 无损在不同平台上叫 hires 或 flac24bit，是同一档音质
+const HIRES_QUALITY_NAMES = new Set(['hires', 'flac24bit'])
+export const isSameQualityTier = (a: string, b: string) =>
+    a === b || (HIRES_QUALITY_NAMES.has(a) && HIRES_QUALITY_NAMES.has(b))
+
 export const checkCache = (songInfo: any, username?: string, isLyricCheck: boolean = false) => {
     try {
         const id = normalizeSongId(songInfo)
@@ -1783,7 +1788,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
             item.id !== id && // 排除当前正在查询的 ID 本身
             item.name.toLowerCase() === String(songInfo.name || '').toLowerCase() &&
             item.singer.toLowerCase() === String(songInfo.singer || '').toLowerCase() &&
-            item.quality === quality &&
+            isSameQualityTier(item.quality, quality) &&
             (!isLyricCheck || item.hasLyric)
         )
 

@@ -78,6 +78,23 @@ test('candidates keep only platforms with the chosen quality, supported and fast
     assert.deepEqual(ids(await merge.candidates(entry, 'flac')), ['mg_5', 'wy_3', 'kw_2', 'kg_4'], 'an untried platform gets its first chance ahead of measured ones');
 });
 
+test('the 24-bit tier is one quality whatever each platform calls it', async () => {
+    const { merge, quality } = load();
+    const [entry] = merge.mergeInto([], [
+        song('mg', 1, '晴天', '周杰伦', '04:29', ['128k', 'flac']),
+        song('kw', 2, '晴天', '周杰伦', '04:29', ['128k', 'flac', 'flac24bit']),
+        song('tx', 3, '晴天', '周杰伦', '04:29', ['128k', 'flac', 'flac24bit', 'hires']),
+    ]);
+    assert.deepEqual(ids(await merge.candidates(entry, 'hires')), ['kw_2', 'tx_3'], 'kw only calls it flac24bit but still qualifies');
+    const [mg, kw, tx] = merge.sources(entry);
+    assert.equal(merge.requestQuality(kw, 'hires'), 'flac24bit');
+    assert.equal(merge.requestQuality(tx, 'hires'), 'hires');
+    assert.equal(merge.requestQuality(tx, 'flac24bit'), 'flac24bit');
+    assert.equal(merge.requestQuality(mg, 'hires'), 'hires', 'no such tier: the request is left as chosen');
+    assert.equal(merge.requestQuality(kw, 'flac'), 'flac');
+    assert.equal(quality.getBestQuality(entry, 'hires'), 'hires');
+});
+
 test('recorded results move a failing platform behind a working one', async () => {
     const { merge } = load();
     const [entry] = merge.mergeInto([], [

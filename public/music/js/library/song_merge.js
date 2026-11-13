@@ -4,6 +4,8 @@
     const STATS_KEY = 'lx_source_stats';
     // 两个平台的时长相差超过这个秒数，就当作不同版本（Live、重录等），不合并
     const MAX_DURATION_DIFF = 3;
+    // 同一档音质在不同平台上的不同叫法：24bit 无损在酷我 / 酷狗 / 咪咕只叫 flac24bit，QQ / 网易同时叫 hires
+    const QUALITY_ALIASES = [['hires', 'flac24bit']];
 
     const fold = text => String(text || '').normalize('NFKC').toLowerCase();
     // 只去掉空白和标点，括号里的附注保留：「晴天」和「晴天 (Live)」是不同的键
@@ -55,6 +57,14 @@
         return result;
     }
 
+    // 这个平台条目上与所选音质同档的音质名：自身有就原样返回，否则找同档的别名；都没有返回 null
+    function qualityFor(member, quality, ownQualities) {
+        const own = ownQualities ? ownQualities(member) : null;
+        if (!own || own.includes(quality)) return quality;
+        const group = QUALITY_ALIASES.find(names => names.includes(quality));
+        return (group && group.find(name => own.includes(name))) || null;
+    }
+
     function readStats() {
         try {
             return JSON.parse(localStorage.getItem(STATS_KEY) || '{}') || {};
@@ -87,7 +97,7 @@
             const entry = stats[member.source] || {};
             return {
                 member, rank,
-                hasQuality: !ownQualities || ownQualities(member).includes(quality),
+                hasQuality: qualityFor(member, quality, ownQualities) !== null,
                 isSupported: !supported || supported.has(member.source),
                 // 没试过的平台按满分、零耗时算，先给一次机会，之后才有真实数据可比
                 rate: entry.count ? Math.round(entry.rate * 10) / 10 : 1,
@@ -109,11 +119,15 @@
         } catch (e) { /* 不知道哪些平台可解析时不按这一项排序 */ }
         const ordered = order(song, quality, { ownQualities, supported });
         if (!ownQualities) return ordered;
-        const capable = ordered.filter(member => ownQualities(member).includes(quality));
+        const capable = ordered.filter(member => qualityFor(member, quality, ownQualities) !== null);
         return capable.length ? capable : ordered;
     }
 
+    // 向某个平台条目请求所选音质时该用的音质名（该平台没有这一档时仍返回所选音质）
+    const requestQuality = (member, quality) =>
+        qualityFor(member, quality, window.QualityManager && window.QualityManager.getOwnQualities) || quality;
+
     // getSupportedPlatforms 由 app.js 提供：返回解析源支持的平台 Set，未知时返回 null
-    const api = { mergeInto, sameSong, sources, order, record, candidates, getSupportedPlatforms: null };
+    const api = { mergeInto, sameSong, sources, order, record, candidates, requestQuality, getSupportedPlatforms: null };
     window.SongMerge = api;
 })();
