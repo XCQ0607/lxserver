@@ -19,10 +19,8 @@
     };
 
     function singersOverlap(a, b) {
-        const left = singerParts(a), right = singerParts(b);
-        if (!left.length || !right.length) return false;
-        // 要有一位歌手的名字完全相同；只是名字里互相包含（「张杰」与「张杰伦」）不算
-        return left.some(l => right.includes(l));
+        const left = new Set(singerParts(a)), right = new Set(singerParts(b));
+        return left.size > 0 && left.size === right.size && [...left].every(name => right.has(name));
     }
 
     function sameSong(a, b) {

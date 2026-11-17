@@ -5875,6 +5875,7 @@ async function refreshPrefetchedCache(song, result) {
  * 包含：本地/服务器缓存检查、在线解析、自动降级逻辑
  */
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
+    const triedCandidates = new Set();
     try {
         // 聚合搜索合并出来的歌曲：在各平台的条目里按「有该音质、可解析、历史最快」的顺序逐个尝试
         const candidates = song._alternates?.length
@@ -5882,6 +5883,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
             : [song];
         let lastError = null;
         for (const candidate of candidates) {
+            triedCandidates.add(candidate);
             const startedAt = Date.now();
             try {
                 // 同一档音质各平台叫法不同（hires / flac24bit），按该平台自己的叫法请求
@@ -5898,8 +5900,10 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                 lastError = candidateError;
             }
         }
-        throw lastError;
+        throw lastError || new Error('No playable candidate');
     } catch (error) {
+        // Carry local failures to the owning playback request; prefetch/download never mutate recovery state.
+        error.triedPlatforms = [...new Set([...triedCandidates].map(candidate => candidate.source).filter(Boolean))];
         if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
             throw error;
         }
@@ -5939,14 +5943,15 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
-                // 合并歌曲的各平台条目上面已经逐个试过，不必再拿同一批平台重试一遍，直接看后面的降级
-                if (song._alternates?.length) continue;
+                // Requested-quality filtering can leave lower-quality alternatives untried.
+                const matches = await findOtherSourceMatches(song, isSilent);
+                const untried = matches.filter(candidate => !triedCandidates.has(candidate));
+                if (!untried.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
                     RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
                 }
-                const matchedSong = await findOtherSourceMatch(song, isSilent);
-                if (matchedSong) {
+                for (const matchedSong of untried) {
                     const targetPlatform = getSourceName(matchedSong.source);
                     if (!isSilent) {
                         RecoveryToast.show(matchedSong, `找到备选源，尝试从 [${targetPlatform}] 播放...`, {
@@ -5955,7 +5960,12 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                         });
                     }
                     const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
-                    const matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent);
+                    let matchedResult;
+                    try {
+                        triedCandidates.add(matchedSong);
+                        matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent);
+                        if (matchedResult.errorMsg) throw new Error(matchedResult.errorMsg);
+                    } catch (_) { continue; }
                     return {
                         ...matchedResult,
                         songInfo: matchedSong,
@@ -7938,6 +7948,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
+            for (const platform of error.triedPlatforms || []) {
+                if (!currentRecoveryState.triedPlatforms.includes(platform)) currentRecoveryState.triedPlatforms.push(platform);
+            }
             // Before src is assigned the media element still belongs to the old song.
             const savedTime = sourceAssigned
                 ? Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0)

@@ -31,8 +31,8 @@ test('the same song on several platforms becomes one entry; different versions s
         song('mg', 6, '晴天', '翻唱歌手', '04:29'),
         song('tx', 7, '晴天', '周杰伦', '04:29'),
     ]);
-    assert.deepEqual(ids(list), ['tx_1', 'kw_4', 'kg_5', 'mg_6', 'tx_7']);
-    assert.deepEqual(ids(list[0]._alternates), ['kw_2', 'wy_3']);
+    assert.deepEqual(ids(list), ['tx_1', 'wy_3', 'kw_4', 'kg_5', 'mg_6', 'tx_7']);
+    assert.deepEqual(ids(list[0]._alternates), ['kw_2']);
     assert.equal(list[1]._alternates, undefined);
 });
 
@@ -99,7 +99,7 @@ test('only a fully identical artist name and two known durations make two entrie
     const { merge } = load();
     const base = song('tx', 1, '晴天', '周杰伦', '04:29', ['flac']);
     assert.equal(merge.sameSong(base, song('kw', 2, '晴天', '周杰伦 (Jay Chou)', '04:30', ['flac'])), true, 'a bracketed alias is ignored');
-    assert.equal(merge.sameSong(base, song('kw', 3, '晴天', '周杰伦、杨瑞代', '04:29', ['flac'])), true, 'one shared artist is enough');
+    assert.equal(merge.sameSong(base, song('kw', 3, '晴天', '周杰伦、杨瑞代', '04:29', ['flac'])), false, 'a duet is not the solo recording');
     assert.equal(merge.sameSong(base, song('kw', 4, '晴天', '周杰', '04:29', ['flac'])), false, 'a name contained in another is a different artist');
     assert.equal(merge.sameSong(base, song('kw', 5, '晴天', '周杰伦', '', ['flac'])), false, 'unknown duration: cannot tell the version');
     assert.equal(merge.sameSong(base, song('kw', 6, '晴天', '周杰伦', '--:--', ['flac'])), false);
@@ -129,4 +129,21 @@ test('aggregated paged search merges across providers only when asked to', async
         await search.load({ fetchPage });
         assert.equal(search.state.list.length, expected);
     }
+});
+
+test('default quality honours both directions of the 24-bit alias', () => {
+    const { quality } = load();
+    for (const [preferred, actual] of [['flac24bit', 'hires'], ['hires', 'flac24bit']]) {
+        const entry = song('kw', 1, 'Song', 'Singer', '04:00', ['flac']);
+        entry._alternates = [song('tx', 2, 'Song', 'Singer', '04:00', [actual])];
+        assert.equal(quality.getBestQuality(entry, preferred), actual);
+    }
+});
+
+test('artist sets are order-independent but solo, duet and substring names stay separate', () => {
+    const { merge } = load();
+    const a = song('tx', 1, 'Song', '张杰、张靓颖', '04:00');
+    assert.equal(merge.sameSong(a, song('kw', 2, 'Song', '张靓颖 / 张杰', '04:00')), true);
+    assert.equal(merge.sameSong(a, song('kw', 3, 'Song', '张杰', '04:00')), false);
+    assert.equal(merge.sameSong(a, song('kw', 4, 'Song', '张杰伦、张靓颖', '04:00')), false);
 });
