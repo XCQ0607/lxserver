@@ -267,7 +267,7 @@ async function setupAudioDeviceChangeListener() {
             console.log('[Audio] Audio device removed (e.g. earphone disconnected). Halting playback to prevent speaker blast.');
             shouldAutoRecoverPlayback = false;
             try {
-                if (audio) audio.pause();
+                if (audio) { cancelSearchRadioContinuation(); audio.pause(); }
             } catch (e) { }
             if (typeof setPlayerStatus === 'function') setPlayerStatus('', false);
             if (typeof updatePlayButton === 'function') updatePlayButton(false);
@@ -8386,7 +8386,7 @@ function isSearchRadioDue() {
 
 // 用户点了「下一首播放」：这首歌不让续播顶替
 function keepAsNextSong(song) {
-    if (song) searchRadioSongs.add(song);
+    if (song) { searchRadioSongs.add(song); song._searchRadio = true; }
 }
 
 // 用户暂停或睡眠定时到点时调用：正在等待的续播请求回来后不再自动开播

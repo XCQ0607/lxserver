@@ -200,3 +200,37 @@ test('playing something else and coming back to the same song cancels the pendin
     assert.equal(c.updated, null);
     assert.deepEqual(c.played, []);
 });
+
+
+test('saving and restoring a recommendation queue preserves the next-song identity', async () => {
+    const c = setup({ list: [song('a'), song('b')], index: 0, similar: [song('x'), song('y')] });
+    c.playNext();
+    await settle();
+    let saved;
+    Object.assign(c, { currentPlayingSong: c.currentPlaylist[1], currentPlayingScope: 'network',
+        currentQuality: 'flac', audio: { currentTime: 4 },
+        localStorage: { setItem(key, value) { saved = value; } } });
+    vm.runInContext(slice('function savePlaybackState() {', '\nasync function restorePlaybackState()'), c);
+    assert.equal(c.savePlaybackState(), true);
+    const state = JSON.parse(saved);
+    const restored = setup({ list: state.playlist, index: state.index, similar: [song('z')] });
+    restored.playNext();
+    await settle();
+    assert.equal(restored.fetched.length, 0);
+    assert.deepEqual(restored.played, [2]);
+});
+
+test('explicit play-next identity also survives JSON persistence', async () => {
+    const c = setup({ list: [song('a'), song('b')], index: 0 });
+    c.keepAsNextSong(c.currentPlaylist[1]);
+    const restored = setup({ list: JSON.parse(JSON.stringify(c.currentPlaylist)), index: 0 });
+    restored.playNext();
+    await settle();
+    assert.equal(restored.fetched.length, 0);
+    assert.deepEqual(restored.played, [1]);
+});
+
+test('device-disconnect pause cancels pending radio continuation before pausing', () => {
+    const deviceHandler = slice('const handleDeviceChange = async () => {', "navigator.mediaDevices.addEventListener");
+    assert.match(deviceHandler, /cancelSearchRadioContinuation\(\);\s*audio.pause\(\)/);
+});
