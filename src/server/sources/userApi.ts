@@ -519,6 +519,196 @@ const validateReturnedMusicUrl = (rawUrl: any, sourceName?: string): string => {
     return trimmed
 }
 
+const LOSSLESS_QUALITIES = new Set([
+    'flac',
+    'flac24bit',
+    'hires',
+    'atmos',
+    'atmos_plus',
+    'master',
+    'wav',
+])
+
+const LOSSLESS_EXTENSIONS = ['.flac', '.wav', '.ape', '.alac', '.mflac', '.mgg']
+const LOSSY_EXTENSIONS = ['.mp3', '.aac', '.opus']
+const LOSSY_PREFIX_REGEX = /^(c400|m500|m800|o400|o600|o800)/i
+
+export const isLosslessQualityRequest = (quality: string): boolean => {
+    return LOSSLESS_QUALITIES.has(String(quality || '').toLowerCase())
+}
+
+const extractFilenameFromUrl = (urlStr: string): string => {
+    try {
+        const pathname = new URL(urlStr).pathname.toLowerCase()
+        return pathname.split('/').pop() || ''
+    } catch {
+        return urlStr.split('?')[0].toLowerCase().split('/').pop() || ''
+    }
+}
+
+const extractFilenameFromDisposition = (contentDisposition?: string): string => {
+    if (!contentDisposition) return ''
+    const match = contentDisposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)["']?/i)
+    return match ? match[1].trim().toLowerCase() : ''
+}
+
+export const isLikelyLossyAudio = (
+    urlStr: string,
+    contentType?: string,
+    contentDisposition?: string
+): boolean => {
+    const filename = extractFilenameFromUrl(urlStr)
+    const cdFilename = extractFilenameFromDisposition(contentDisposition)
+
+    // 某些 CDN 会把 .flac 标成 audio/mpeg，显式无损扩展名优先视为无损
+    if (
+        LOSSLESS_EXTENSIONS.some(ext => filename.endsWith(ext) || cdFilename.endsWith(ext))
+    ) {
+        return false
+    }
+
+    if (
+        LOSSY_EXTENSIONS.some(ext => filename.endsWith(ext) || cdFilename.endsWith(ext)) ||
+        LOSSY_PREFIX_REGEX.test(filename) ||
+        LOSSY_PREFIX_REGEX.test(cdFilename)
+    ) {
+        return true
+    }
+
+    const ct = String(contentType || '').toLowerCase()
+    if (['audio/mpeg', 'audio/mp3', 'audio/aac', 'audio/aacp', 'audio/opus', 'audio/vorbis'].includes(ct.split(';')[0].trim())) {
+        return true
+    }
+
+    return false
+}
+
+export interface MusicUrlProbeResult {
+    ok: boolean
+    reason?: string
+    isLossyDowngrade?: boolean
+}
+
+// Use the same network category/headers as audio playback; recompute agents across redirects.
+export const requestMusicUrlHead = async (
+    url: string,
+    timeoutMs: number,
+    requestImpl: typeof needle = needle,
+    agentFor: typeof getProxyAgent = getProxyAgent
+) => {
+    const deadline = Date.now() + timeoutMs
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error('Music URL probe timed out'))
+            controller.abort()
+        }, timeoutMs)
+    })
+    const probe = async () => {
+        for (let redirects = 0; redirects <= 5; redirects++) {
+            const remaining = deadline - Date.now()
+            if (remaining <= 0) throw new Error('Music URL probe timed out')
+            const parsed = new URL(url)
+            if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported redirect protocol')
+            const agent = await agentFor(url, 'music')
+            if (controller.signal.aborted) throw new Error('Music URL probe timed out')
+            const response = await requestImpl('head', url, null, {
+                follow_max: 0,
+                open_timeout: remaining,
+                response_timeout: remaining,
+                read_timeout: remaining,
+                agent,
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    Referer: parsed.origin,
+                },
+            })
+            const status = response.statusCode || 0
+            if ([301, 302, 303, 307, 308].includes(status) && response.headers.location) {
+                url = new URL(response.headers.location, url).href
+                continue
+            }
+            return { status, url, headers: { get: (name: string) => String(response.headers[name] || '') } }
+        }
+        throw new Error('Too many music URL redirects')
+    }
+    try {
+        return await Promise.race([probe(), timeout])
+    } finally {
+        clearTimeout(timer)
+    }
+}
+
+export const probeReturnedMusicUrl = async (
+    url: string,
+    requestedQuality: string,
+    sourceName?: string,
+    options?: { timeoutMs?: number; fetchImpl?: typeof fetch }
+): Promise<MusicUrlProbeResult> => {
+    const isLossless = isLosslessQualityRequest(requestedQuality)
+    const timeoutMs = options?.timeoutMs ?? 2500
+    const fetchImpl = options?.fetchImpl
+
+    try {
+        const res = fetchImpl ? await fetchImpl(url, {
+            method: 'HEAD',
+            redirect: 'follow',
+            signal: AbortSignal.timeout(timeoutMs),
+        }) : await requestMusicUrlHead(url, timeoutMs)
+
+        const status = res.status
+        const ct = (res.headers.get('content-type') || '').toLowerCase()
+        const cd = (res.headers.get('content-disposition') || '').toLowerCase()
+
+        // Unsupported HEAD is not evidence about the GET response's content type.
+        if (status === 405 || status === 501) {
+            return { ok: true, isLossyDowngrade: isLossless && isLikelyLossyAudio(res.url || url) }
+        }
+        if (status < 200 || status >= 300) {
+            return {
+                ok: false,
+                reason: `音源 [${sourceName || '未知'}] 返回的链接不可用 (HTTP ${status})`,
+            }
+        }
+
+        if (
+            ct.includes('text/html') ||
+            ct.includes('application/json') ||
+            ct.includes('text/plain') ||
+            ct.includes('application/xml')
+        ) {
+            return {
+                ok: false,
+                reason: `音源 [${sourceName || '未知'}] 返回了非音频内容 (${ct.split(';')[0]})`,
+            }
+        }
+
+        // 部分 CDN 不支持 HEAD (405/501)，此时仅根据 URL 特征判断有损降级，不误判为死链
+        const headerCt = status >= 200 && status < 300 ? ct : ''
+        if (isLossless && isLikelyLossyAudio(res.url || url, headerCt, cd)) {
+            return {
+                ok: true,
+                isLossyDowngrade: true,
+                reason: `音源 [${sourceName || '未知'}] 请求 ${requestedQuality} 但返回了有损音频`,
+            }
+        }
+
+        return { ok: true, isLossyDowngrade: false }
+    } catch {
+        // HEAD 超时或网络抖动时不误杀可用链接，回退到 URL 特征检查
+        if (isLossless && isLikelyLossyAudio(url)) {
+            return {
+                ok: true,
+                isLossyDowngrade: true,
+                reason: `音源 [${sourceName || '未知'}] 请求 ${requestedQuality} 但返回了有损音频`,
+            }
+        }
+        return { ok: true, isLossyDowngrade: false }
+    }
+}
+
 // 调用自定义源的 getMusicUrl
 export async function callUserApiGetMusicUrl(
     source: string,
@@ -528,7 +718,7 @@ export async function callUserApiGetMusicUrl(
     onProgress?: (attempt: any) => Promise<void> | void,
     enableAutoSwitchApiSource?: boolean,
     excludeApiSources?: string[]
-): Promise<{ url: string, type: string, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean }> {
+): Promise<{ url: string, type: string, requestedQuality?: string, isLossyDowngrade?: boolean, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean }> {
     // 标准化 songInfo 格式：将 meta 中的字段提升到顶层
     const normalizedSongInfo = { ...songInfo }
     if (songInfo.meta) {
@@ -756,8 +946,25 @@ export async function callUserApiGetMusicUrl(
     // 逻辑分歧：
     // 1. 如果只有一个源支持 -> 重试 3 次
     // 2. 如果有多个源支持 -> 每个源试一次 (轮询)
+    return await selectCandidateMusicUrl(candidates, source, normalizedSongInfo, quality, onProgress)
+}
 
+export interface CandidateApiLike {
+    info: { id: string; name: string; owner?: string }
+    callRequest: (action: string, source: string, info: any) => Promise<any>
+}
+
+export async function selectCandidateMusicUrl(
+    candidates: CandidateApiLike[],
+    source: string,
+    normalizedSongInfo: any,
+    quality: string,
+    onProgress?: (attempt: any) => Promise<void> | void,
+    probeFn: typeof probeReturnedMusicUrl = probeReturnedMusicUrl
+): Promise<{ url: string, type: string, requestedQuality?: string, isLossyDowngrade?: boolean, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean }> {
+    const supportedCount = candidates.length
     const attempts: any[] = []
+    let lastError: any = null
 
     if (supportedCount === 1) {
         const api = candidates[0]
@@ -773,12 +980,16 @@ export async function callUserApiGetMusicUrl(
                     type: quality
                 })
                 const url = validateReturnedMusicUrl(rawUrl, api.info.name)
+                const probe = await probeFn(url, quality, api.info.name)
+                if (!probe.ok) {
+                    throw new Error(probe.reason || '音源返回的链接不可用')
+                }
 
                 console.log(`[自定义源] ✓ ${api.info.name} 成功返回链接 (所属: ${api.info.owner})`)
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
-                return { url, type: quality, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false }
+                return { url, type: probe.isLossyDowngrade ? 'lossy' : quality, requestedQuality: quality, isLossyDowngrade: !!probe.isLossyDowngrade, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false }
             } catch (error: any) {
                 console.error(`[自定义源] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
                 lastError = error
@@ -792,7 +1003,9 @@ export async function callUserApiGetMusicUrl(
             }
         }
     } else {
-        // 多个源，轮流尝试
+        // 多个源，轮流尝试；若遇静默有损降级，暂存为备选并继续尝试后续音源
+        let downgradedFallback: { url: string, sourceName: string, sourceId: string, reason?: string } | null = null
+
         for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
             const api = candidates[candidateIndex]
             try {
@@ -804,6 +1017,27 @@ export async function callUserApiGetMusicUrl(
                     type: quality
                 })
                 const url = validateReturnedMusicUrl(rawUrl, api.info.name)
+                const probe = await probeFn(url, quality, api.info.name)
+                if (!probe.ok) {
+                    throw new Error(probe.reason || '音源返回的链接不可用')
+                }
+
+                if (probe.isLossyDowngrade) {
+                    if (!downgradedFallback) {
+                        downgradedFallback = {
+                            url,
+                            sourceName: api.info.name,
+                            sourceId: api.info.id,
+                            reason: probe.reason,
+                        }
+                    }
+                    const downgradeMsg = probe.reason || `请求 ${quality} 但返回有损音频，继续尝试下一个音源`
+                    console.warn(`[自定义源] ⚠ ${api.info.name} ${downgradeMsg}`)
+                    const att = { name: api.info.name, status: 'fail', message: `音源日志：${downgradeMsg}` }
+                    attempts.push(att)
+                    if (onProgress) await onProgress(att)
+                    continue
+                }
 
                 console.log(`[自定义源] ✓ ${api.info.name} 成功返回链接 (所属: ${api.info.owner})`)
                 const att = { name: api.info.name, status: 'success' }
@@ -824,6 +1058,23 @@ export async function callUserApiGetMusicUrl(
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
                 continue
+            }
+        }
+
+        if (downgradedFallback) {
+            console.warn(`[自定义源] 所有后续音源均未返回无损音质，回退使用 ${downgradedFallback.sourceName} 的有损链接`)
+            const att = { name: downgradedFallback.sourceName, status: 'success', message: '无损音源均不可用，已回退使用有损链接' }
+            attempts.push(att)
+            if (onProgress) await onProgress(att)
+            return {
+                url: downgradedFallback.url,
+                type: 'lossy', // Codec is known to be lossy, bitrate is not measured.
+                requestedQuality: quality,
+                isLossyDowngrade: true,
+                sourceName: downgradedFallback.sourceName,
+                sourceId: downgradedFallback.sourceId,
+                attempts,
+                hasMoreSources: false
             }
         }
     }
