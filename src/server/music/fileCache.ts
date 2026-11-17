@@ -1931,7 +1931,7 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
         return acc
     }
 
-    const cleanId = (sid: string) => String(sid || '').replace(/^(tx|mg|wy|kg|kw|bd|mg)_/, '')
+    const cleanId = (sid: string) => String(sid || '')
     const targetCleanId = cleanId(id)
 
     for (const dirPath of basePaths) {
