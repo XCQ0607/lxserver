@@ -129,3 +129,22 @@ test('a pending metadata timer never writes old observations into another runtim
   assert.equal(savedState(), 'same')
   assert.equal(fs.existsSync(other), false)
 })
+
+for (const phase of ['writeFileSync', 'renameSync'] as const) {
+  test(`explicit metadata flush retries after a failed ${phase}`, t => {
+    const { savedState, timers, runTimers } = pendingMetadata(t)
+    const original = fs[phase]
+    let fail = true
+    t.mock.method(fs, phase, ((...args: any[]) => {
+      if (fail) { fail = false; throw Object.assign(new Error('No space left'), { code: 'ENOSPC' }) }
+      return (original as any)(...args)
+    }) as any)
+    assert.throws(() => metadata.flushMetadata(), { code: 'ENOSPC' })
+    assert.equal(savedState(), 'same')
+    assert.equal(timers.size, 0)
+    metadata.flushMetadata()
+    assert.equal(savedState(), 'changed', 'a failed save stays dirty without requiring another observation')
+    runTimers()
+    assert.equal(savedState(), 'changed')
+  })
+}

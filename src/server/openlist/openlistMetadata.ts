@@ -12,6 +12,7 @@ type Store = { observations: Record<string, Observation>; job?: Job }
 let controller: AbortController | undefined
 let cachedFile = '', cachedStore: Store | undefined
 let lastWrite = 0
+let dirty = false
 let saveTimer: ReturnType<typeof setTimeout> | undefined
 const location = () => path.join(global.lx.dataPath, 'runtime', 'openlist-metadata.json')
 const key = (source: string, remote: string, side: string) => crypto.createHash('sha256').update(JSON.stringify([source, remote, side])).digest('hex')
@@ -20,13 +21,14 @@ function read(): Store {
   const file = location()
   if (cachedFile === file && cachedStore) return cachedStore
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
-  cachedFile = file; cachedStore = undefined; lastWrite = 0
+  cachedFile = file; cachedStore = undefined; lastWrite = 0; dirty = false
   try { cachedStore = JSON.parse(fs.readFileSync(file, 'utf8')) }
   catch (error: any) { if (error.code === 'ENOENT') cachedStore = { observations: {} }; else throw error }
   return cachedStore!
 }
 function write(store: Store, force = false) {
   cachedStore = store
+  dirty = true
   if (!force && Date.now() - lastWrite < 500) {
     if (!saveTimer) saveTimer = setTimeout(() => { try { flushMetadata() } catch (error) { console.error('[OpenList] 保存检查结果失败', error) } }, 500)
     saveTimer?.unref()
@@ -36,13 +38,15 @@ function write(store: Store, force = false) {
   const file = location(); fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file + '.tmp', JSON.stringify(store), { mode: 0o600 }); fs.renameSync(file + '.tmp', file)
   lastWrite = Date.now()
+  dirty = false
 }
 /** Persist pending observations before the owning runtime is torn down. */
 export function flushMetadata(): void {
-  if (!saveTimer) return
-  clearTimeout(saveTimer); saveTimer = undefined
+  if (!dirty) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = undefined
   // A delayed writer must not follow a replaced/missing runtime into another root.
-  if (!cachedStore || typeof global.lx?.dataPath !== 'string' || !global.lx.dataPath || cachedFile !== location()) return
+  if (!cachedStore || typeof global.lx?.dataPath !== 'string' || !global.lx.dataPath || cachedFile !== location()) { dirty = false; return }
   write(cachedStore, true)
 }
 export function metadataObservations(source: string) {
