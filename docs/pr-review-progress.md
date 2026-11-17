@@ -21,3 +21,10 @@ Full branch validation: 203 TypeScript tests and 288 CJS tests passed; CJS runne
 - Validation: 6/6 resolution/recovery tests and the merge/paged-search suites pass. Full CJS: 292 passed, one pre-existing OpenList teardown failure; no-emit compilation and diff checks passed.
 
 These PR changes have not been deployed. The separate live marquee-only release is unchanged. The OpenList failure in #528/#530/#531 is the previously reproduced asynchronous teardown error, not a passing full-suite result.
+
+
+## 2026-11-17 — OpenList CI failure repaired
+
+The previously reported asynchronous OpenList teardown failure is now fixed. A pending metadata persistence timer outlived the test runtime; explicit flushing and runtime-root validation now prevent the late undefined-path exception. Both HTTP fixtures restore their previous global runtime. See `docs/openlist-ci-progress.md`.
+
+Final integrated local validation: **292/292 CJS and 208/208 TypeScript tests passed**, and `npm run build --ignore-scripts` passed. No test suppression or added waiting sleeps; no deployment. Node 22/24 GitHub Actions results will be recorded in the PR follow-up.
