@@ -1101,6 +1101,7 @@ const resolveServerSong = async (
     ? getDownloadQualityCandidates(requestedQuality)
     : [requestedQuality]
   const errors: string[] = []
+  let downgradedFallback: ServerSongResolveResult | null = null
 
   const tryCandidates = async (quality: string, rawCandidates: any[]) => {
     for (const rawCandidate of rawCandidates) {
@@ -1111,7 +1112,7 @@ const resolveServerSong = async (
       try {
         const result = await callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true)
         if (!result?.url) throw new Error('audio source returned no URL')
-        return {
+        const resolved = {
           url: result.url,
           quality: result.type || quality,
           songInfo: candidate,
@@ -1119,6 +1120,11 @@ const resolveServerSong = async (
           downloadSource: fileCache.detectDownloadSource(result.url, source),
           sourceName: result.sourceName,
         }
+        if (result.isLossyDowngrade) {
+          downgradedFallback ??= resolved
+          continue
+        }
+        return resolved
       } catch (err: any) {
         errors.push(`${source}/${quality}: ${err?.message || 'resolve failed'}`)
       }
@@ -1138,6 +1144,7 @@ const resolveServerSong = async (
     if (fallbackResult) return fallbackResult
   }
 
+  if (downgradedFallback) return downgradedFallback
   throw new Error(`No downloadable source found (${errors.join('; ')})`)
 }
 

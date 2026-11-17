@@ -5,6 +5,7 @@ import {
     isLosslessQualityRequest,
     isLikelyLossyAudio,
     probeReturnedMusicUrl,
+    requestMusicUrlHead,
     selectCandidateMusicUrl,
     type CandidateApiLike,
 } from '../src/server/sources/userApi'
@@ -72,7 +73,7 @@ test('probeReturnedMusicUrl rejects 401/403/404 and non-audio pages while tolera
             return
         }
         if (req.url === '/head-unsupported.flac') {
-            res.writeHead(405)
+            res.writeHead(405, { 'Content-Type': 'text/html' })
             res.end()
             return
         }
@@ -201,5 +202,83 @@ test('selectCandidateMusicUrl skips 401 and silent lossy downgrades to prefer lo
         assert.equal(s2Called, false)
     } finally {
         await srv.close()
+    }
+})
+
+test('AAC/Opus are lossy but M4A alone does not exclude ALAC', () => {
+    for (const [ext, mime] of [['aac', 'audio/aac'], ['opus', 'audio/opus']]) {
+        assert.equal(isLikelyLossyAudio(`https://cdn.test/song.${ext}`), true)
+        assert.equal(isLikelyLossyAudio('https://cdn.test/stream', mime), true)
+        assert.equal(isLikelyLossyAudio('https://cdn.test/stream', '', `attachment; filename="song.${ext}"`), true)
+    }
+    assert.equal(isLikelyLossyAudio('https://cdn.test/song.m4a', 'audio/mp4'), false)
+    assert.equal(isLikelyLossyAudio('https://cdn.test/song.ogg', 'audio/ogg'), false)
+    assert.equal(isLikelyLossyAudio('https://cdn.test/song.wma', 'audio/x-ms-wma'), false)
+    assert.equal(isLikelyLossyAudio('https://cdn.test/stream', 'audio/vorbis'), true)
+})
+
+test('HEAD error pages distinguish unsupported methods from failed resources', async () => {
+    for (const status of [405, 501, 429, 500, 503]) {
+        for (const contentType of ['', 'text/html', 'application/json']) {
+            const fetchImpl = (async () => new Response(null, { status, headers: { 'Content-Type': contentType } })) as typeof fetch
+            const result = await probeReturnedMusicUrl('https://cdn.test/song.flac', 'flac', 'test', { fetchImpl })
+            assert.equal(result.ok, status === 405 || status === 501, `${status}/${contentType}`)
+        }
+    }
+})
+
+test('all-lossy and single-source fallback report lossy with unknown bitrate, retaining first priority', async () => {
+    const make = (id: string): CandidateApiLike => ({ info: { id, name: id, owner: 'open' }, callRequest: async () => `https://cdn.test/${id}.mp3` })
+    for (const candidates of [[make('first')], [make('first'), make('last')]]) {
+        const result = await selectCandidateMusicUrl(candidates, 'tx', {}, 'flac', undefined, async () => ({ ok: true, isLossyDowngrade: true }))
+        assert.equal(result.sourceId, 'first')
+        assert.equal(result.type, 'lossy')
+        assert.equal(result.requestedQuality, 'flac')
+        assert.equal(result.isLossyDowngrade, true)
+    }
+})
+
+test('probe recomputes the music proxy agent for every redirect scheme', async () => {
+    const calls: any[] = [], agents: any[] = []
+    const agentFor = async (url: string, category: string) => { const agent = { url, category }; agents.push(agent); return agent }
+    const request = (async (_method: string, url: string, _data: unknown, options: any) => {
+        calls.push({ url, options })
+        return calls.length === 1
+            ? { statusCode: 302, headers: { location: 'https://other.test/song.flac' } }
+            : { statusCode: 200, headers: { 'content-type': 'audio/flac' } }
+    }) as any
+    const response = await requestMusicUrlHead('http://first.test/song', 2500, request, agentFor)
+    assert.equal(response.status, 200)
+    assert.equal(calls.length, 2)
+    for (let i = 0; i < calls.length; i++) {
+        assert.equal(calls[i].options.agent, agents[i])
+        assert.equal(agents[i].category, 'music')
+        assert.equal(calls[i].options.follow_max, 0)
+        assert.ok(calls[i].options.read_timeout > 0)
+    }
+})
+
+test('default probe transport reaches a proxy-only host through the configured agent', async () => {
+    const tunnel = await import('tunnel')
+    const sockets = new Set<any>()
+    const proxy = http.createServer()
+    proxy.on('connect', (_req, socket) => {
+        sockets.add(socket)
+        socket.on('close', () => sockets.delete(socket))
+        socket.write('HTTP/1.1 200 Connection Established\r\n\r\n')
+        socket.once('data', () => socket.end('HTTP/1.1 200 OK\r\nContent-Type: audio/flac\r\nContent-Length: 0\r\nConnection: close\r\n\r\n'))
+    })
+    await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve))
+    try {
+        const port = (proxy.address() as any).port
+        const response = await requestMusicUrlHead('http://proxy-only.invalid/song.flac', 2500, undefined, async (_url: string, category: string) => {
+            assert.equal(category, 'music')
+            return tunnel.httpOverHttp({ proxy: { host: '127.0.0.1', port } })
+        })
+        assert.equal(response.status, 200)
+        assert.equal(response.headers.get('content-type'), 'audio/flac')
+    } finally {
+        for (const socket of sockets) socket.destroy()
+        await new Promise<void>(resolve => proxy.close(() => resolve()))
     }
 })
