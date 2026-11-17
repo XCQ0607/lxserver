@@ -57,3 +57,5 @@ Final integrated local validation: **324/324 CJS and 224/224 TypeScript tests pa
 - [x] Added two real recovery/error-handler regressions; both failed before correction.
 
 Validation: 341/341 CJS and 226/226 TypeScript tests passed; the production build and diff checks passed. No additional live deployment was made for this review pass.
+
+- [x] Final #530 review: replacing a remote prefetch with cached audio clears old attempted-platform metadata in both merged and single-member paths. The miss path preserves the original result. Two replacement assertions failed before correction; full test/build validation above passed again.
