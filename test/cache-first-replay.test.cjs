@@ -82,10 +82,11 @@ test('an ordinary single-platform replay also avoids support and online resoluti
 test('a remote prefetch is replaced by another merged member cached since prefetch', async () => {
     const { c, events } = setup({ hits: { kw: cache('320k') } });
     const primary = { ...song('tx', 'master'), _alternates: [song('kw', '320k')] };
-    const result = await timely(c.refreshPrefetchedCache(primary, { url: 'https://provider.invalid/audio', sourceType: 'normal', quality: 'master', isPrefetch: true }));
+    const result = await timely(c.refreshPrefetchedCache(primary, { url: 'https://provider.invalid/audio', sourceType: 'normal', quality: 'master', isPrefetch: true, triedPlatforms: ['tx', 'kg'] }));
     assert.equal(result.sourceType, 'server_cache');
     assert.equal(result.songInfo.source, 'kw');
     assert.equal(result.isPrefetch, true);
+    assert.equal(result.triedPlatforms, undefined, 'old online prefetch attempts must not exclude recovery platforms');
     assert.equal(events.some(e => e.kind === 'support' || e.kind === 'provider'), false);
 });
 
