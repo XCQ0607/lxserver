@@ -67,10 +67,10 @@
     if (typeof window !== 'undefined') window.LXI18n = api;
     if (typeof document === 'undefined') return;
 
-    let language = 'zh-CN';
+    let language = 'zh-CN', initialLanguage = 'zh-CN', languageRequest = 0;
     try {
         const saved = localStorage.getItem(STORAGE_KEY);
-        if (LANGUAGES.includes(saved)) language = saved;
+        if (LANGUAGES.includes(saved)) initialLanguage = saved;
     } catch (e) { /* 存储不可用时用默认语言 */ }
 
     let english = null, toTraditional = null, observer = null, applying = false;
@@ -92,7 +92,8 @@
     async function prepare(target) {
         if (target === 'en' && !english) {
             await loadScript('i18n_en.js');
-            english = createTranslator(window.LX_I18N_EN || {});
+            if (!window.LX_I18N_EN) throw new Error('Missing English language table');
+            english = createTranslator(window.LX_I18N_EN);
         }
         if (target === 'zh-Hant' && !toTraditional) {
             await loadScript('../vendor/opencc-cn2t.js');
@@ -170,6 +171,10 @@
         try {
             applyTree(document.body);
             applyTitle();
+            // Visible custom-select labels may be new nodes containing translated text.
+            // The native options retain their source records, so rebuild labels after translation.
+            window.CustomSelectManager?.closeAll();
+            document.querySelectorAll('select').forEach(select => window.CustomSelectManager?.syncUI(select));
         } finally {
             // 自己写入引起的变更记录在这一轮里丢弃
             observer?.takeRecords();
@@ -208,15 +213,21 @@
 
     async function setLanguage(next) {
         if (!LANGUAGES.includes(next)) return;
-        language = next;
-        try { localStorage.setItem(STORAGE_KEY, next); } catch (e) { /* 仅本次会话生效 */ }
-        syncControls();
+        const request = ++languageRequest;
         try {
             await prepare(next);
         } catch (e) {
+            if (request !== languageRequest) return;
             console.warn('[i18n]', e.message);
+            syncControls();
+            const message = language === 'en' ? 'Language could not be loaded. Please try again.' : '语言加载失败，请重试';
+            window.showError?.(message);
+            return false;
         }
-        if (language !== next) return;
+        if (request !== languageRequest) return;
+        language = next;
+        try { localStorage.setItem(STORAGE_KEY, next); } catch (e) { /* 仅本次会话生效 */ }
+        syncControls();
         // 简体是原文：之前没切换过语言就不必监听
         if (next !== 'zh-CN' || observer) { watch(); applyAll(); }
         window.dispatchEvent(new CustomEvent('lx-language-change', { detail: { language: next } }));
@@ -227,7 +238,7 @@
     // t(原文) 返回当前语言下显示的文字，给需要按界面文字查找元素的代码用
     Object.assign(api, { setLanguage, cycleLanguage, getLanguage: () => language, refresh: applyAll, t: convert });
 
-    const start = () => { syncControls(); if (language !== 'zh-CN') setLanguage(language); };
+    const start = () => { syncControls(); if (initialLanguage !== 'zh-CN') setLanguage(initialLanguage); };
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', start);
     else start();
 })();

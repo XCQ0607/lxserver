@@ -1549,6 +1549,7 @@ async function handleLogout() {
     try {
         if (typeof audio !== 'undefined' && audio) {
             shouldAutoRecoverPlayback = false;
+            cancelSearchRadioContinuation();
             audio.pause();
             audio.currentTime = 0;
             audio.src = '';
@@ -8019,7 +8020,8 @@ function setPlayerStatus(status, isPlaying = null, isLoading = false) {
     }
 
     // 构建状态文本
-    let statusText = '';
+    let statusText = typeof status === 'string' ? status : '';
+    if (statusText.includes('请点击') && audio && !audio.paused) statusText = '';
 
     // 确定播放状态
     if (isPlaying === null) {
@@ -13110,6 +13112,7 @@ async function handleSyncLogout(skipConfirm = false) {
         if (typeof audio !== 'undefined' && audio) {
             try {
                 shouldAutoRecoverPlayback = false;
+                cancelSearchRadioContinuation();
                 audio.pause();
                 audio.currentTime = 0;
                 audio.src = '';

@@ -2598,7 +2598,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 /* Phones, search result rows: the title takes whatever the index and the action buttons leave.
    The 12-column grid gave the title a fixed 7/12 and left ~20px unused beside the buttons, so titles scrolled
    although there was room. Platform badges sit right against the buttons. */
-@media (max-width: 767px) {
+@media (max-width: 639px) {
     #search-results > .grid.grid-cols-12:has([data-rating-badges]) {
         grid-template-columns: 18px minmax(0, 1fr) auto;
         column-gap: 4px;

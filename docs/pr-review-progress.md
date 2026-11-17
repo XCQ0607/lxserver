@@ -18,3 +18,15 @@
 - [x] Track actual candidate attempts; pass failed platforms to the owning playback recovery only, without altering prefetch/download state.
 - [x] Regression tests: 13 song-merge/resolution tests pass; TypeScript no-emit, JavaScript syntax and diff checks pass.
 - [ ] Physical browser/audio qualification (not claimed by unit tests).
+
+## 2026-11-17 — UI/language review (#531)
+
+- [x] Preserve non-loading error/status messages while leaving normal playback status quiet.
+- [x] Cancel pending recommendation continuation on device disconnect and logout; keep natural endings/internal source transitions separate.
+- [x] Restrict phone search-row layout to below 640px and isolate mini-player keyboard activation from child controls.
+- [x] Suggestion selection validates primary button, pointer identity, movement and pressed item identity; rejected releases also suppress compatibility clicks.
+- [x] Resync custom dropdowns after native-option translation. Commit language/store/controls only after resources load; retain old language on failure, show retry feedback, and guard stale requests.
+- [x] 14 UI/language regressions pass. Shared recommendation, merge and resolution regressions pass. Stalled JSON body abort verified with a local HTTP fixture.
+- [ ] Physical touch/receiver playback verification (not performed).
+
+Full branch validation before the final timeout test: 218 TypeScript tests and 317 CJS tests passed; CJS runner reports one pre-existing OpenList asynchronous teardown failure. The identical failure was reproduced on unchanged head fcf9ca3. No live deployment performed.

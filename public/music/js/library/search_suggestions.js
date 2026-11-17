@@ -132,7 +132,7 @@
             item.onpointerdown = event => event.preventDefault();
             // 触屏上按下会让输入框失焦，mousedown 也拦住才能保住焦点
             item.onmousedown = event => event.preventDefault();
-            item.onclick = event => { event.stopPropagation(); if (Date.now() - chosenAt > 600) choose(tip); };
+            item.onclick = event => { event.stopPropagation(); if (event.button === 0 && Date.now() - chosenAt > 600) choose(tip); };
             target.appendChild(item);
         });
         container.classList.toggle('hidden', !tips.length);
@@ -182,14 +182,22 @@
         field.addEventListener('blur', () => { if (!press) hide(); });
         // 点选以「按下和抬起都落在联想词上、且没有滑动」为准，不依赖 click：
         // 触屏上输入框失焦或列表重绘后，click 可能根本不会触发
-        container.addEventListener('pointerdown', event => { press = { x: event.clientX, y: event.clientY }; });
+        container.addEventListener('pointerdown', event => {
+            if (event.button !== 0 || event.isPrimary === false) return;
+            const item = event.target?.closest?.('.search-tip-item');
+            if (!item || !container.contains(item)) return;
+            press = { x: event.clientX, y: event.clientY, pointerId: event.pointerId, tip: item.dataset.tip };
+        });
         const release = event => {
             const start = press;
+            if (!start || event.pointerId !== start.pointerId) return;
             press = null;
-            if (!start || event.type === 'pointercancel') { if (start && document.activeElement !== field) hide(); return; }
+            // Suppress the compatibility click even when movement, cancellation or a re-render rejected the gesture.
+            chosenAt = Date.now();
+            if (event.type === 'pointercancel') { if (start && document.activeElement !== field) hide(); return; }
             if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 10) return;
             const item = document.elementFromPoint(event.clientX, event.clientY)?.closest?.('.search-tip-item');
-            if (item && container.contains(item)) choose(item.dataset.tip);
+            if (item && container.contains(item) && item.dataset.tip === start.tip) choose(start.tip);
         };
         document.addEventListener('pointerup', release);
         document.addEventListener('pointercancel', release);
