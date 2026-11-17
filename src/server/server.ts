@@ -4360,7 +4360,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
+        const interval = urlObj.searchParams.get('interval') || undefined
+        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality, interval }, username)
         if (!result.exists && urlObj.searchParams.get('includeOpenlist') === '1') {
           const id = fileCache.normalizeSongId({ source, songmid, id: songId })
           const song = { source, songmid, id, name, singer }
@@ -4371,7 +4372,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (hit) { result = { exists: true, url: hit.url, filename: hit.filename, quality: hit.quality, folder, origin: 'openlist' }; break }
           }
         }
-        if (result && result.exists && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
+        if (result && result.exists && result.url && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
           const token = req.headers['x-user-token']
           if (token) {
             result.url += `&token=${encodeURIComponent(token as string)}`
