@@ -282,3 +282,26 @@ test('default probe transport reaches a proxy-only host through the configured a
         await new Promise<void>(resolve => proxy.close(() => resolve()))
     }
 })
+
+test('HEAD probe uses one cancellation deadline across connection and response phases', async () => {
+    let signal: AbortSignal | undefined
+    const request = (async (_m: string, _u: string, _d: unknown, options: any) => {
+        signal = options.signal
+        // Individually short phases can exceed the combined budget.
+        await new Promise(resolve => setTimeout(resolve, 30))
+        await new Promise(resolve => setTimeout(resolve, 30))
+        return { statusCode: 200, headers: {} }
+    }) as any
+    await assert.rejects(requestMusicUrlHead('http://test/song', 40, request, async () => undefined), /timed out/)
+    assert.equal(signal?.aborted, true)
+})
+test('HEAD deadline also bounds a stuck proxy-agent lookup', async () => {
+    let requested = false
+    const result = await Promise.race([
+        requestMusicUrlHead('http://test/song', 20, (async () => { requested = true }) as any, () => new Promise(() => {}))
+            .then(() => 'success', () => 'timeout'),
+        new Promise(resolve => setTimeout(() => resolve('hung'), 100)),
+    ])
+    assert.equal(result, 'timeout')
+    assert.equal(requested, false)
+})

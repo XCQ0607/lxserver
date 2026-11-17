@@ -1060,7 +1060,7 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
     source !== songInfo.source && isSourceSupported(source, username) && musicSdk[source]?.musicSearch?.search
   ))
   const query = `${songInfo.name} ${songInfo.singer}`
-  const promise = Promise.all(searchSources.map(async source => {
+  const search = Promise.all(searchSources.map(async source => {
     try {
       const searchData = await musicSdk[source].musicSearch.search(query, 1, 20)
       const list = Array.isArray(searchData?.list) ? searchData.list : []
@@ -1075,6 +1075,16 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
     .sort((a, b) => b.score - a.score)
     .map(item => item.candidate))
 
+  // SDK searches are not all abortable. Bound the shared cache promise and evict
+  // only this entry on timeout, so one stalled provider cannot poison later calls.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<any[]>(resolve => {
+    timer = setTimeout(() => {
+      if (sourceMatchCache.get(cacheKey)?.promise === promise) sourceMatchCache.delete(cacheKey)
+      resolve([])
+    }, 5000)
+  })
+  const promise = Promise.race([search, timeout]).finally(() => clearTimeout(timer))
   sourceMatchCache.set(cacheKey, { expiresAt: now + SOURCE_MATCH_CACHE_TTL, promise })
   return promise
 }
@@ -1102,15 +1112,34 @@ const resolveServerSong = async (
     : [requestedQuality]
   const errors: string[] = []
   let downgradedFallback: ServerSongResolveResult | null = null
+  // Once the original attempt ends, all alternative search/resolution shares one budget.
+  let alternativeDeadline = 0
+  let alternativeExpired = false
+  const withinBudget = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (!alternativeDeadline) return work()
+    if (alternativeExpired || Date.now() >= alternativeDeadline) throw new Error('Alternative source deadline exceeded')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([work(), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          alternativeExpired = true
+          reject(new Error('Alternative source deadline exceeded'))
+        }, Math.max(0, alternativeDeadline - Date.now()))
+      })])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
   const tryCandidates = async (quality: string, rawCandidates: any[]) => {
     for (const rawCandidate of rawCandidates) {
+      if (alternativeExpired || (alternativeDeadline && Date.now() >= alternativeDeadline)) return null
       const candidate = normalizeSongInfo({ ...rawCandidate })
       const source = candidate?.source
       if (!source || !isSourceSupported(source, username)) continue
 
       try {
-        const result = await callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true)
+        const result = await withinBudget(() => callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true))
         if (!result?.url) throw new Error('audio source returned no URL')
         const resolved = {
           url: result.url,
@@ -1135,7 +1164,13 @@ const resolveServerSong = async (
   const originalResult = await tryCandidates(requestedQuality, [originalSong])
   if (originalResult) return originalResult
 
-  const matches = await findServerSourceMatches(originalSong, username)
+  alternativeDeadline = Date.now() + 8000
+  let matches: any[] = []
+  try {
+    matches = await withinBudget(() => findServerSourceMatches(originalSong, username))
+  } catch (err: any) {
+    errors.push(err?.message || 'Alternative source search failed')
+  }
   const switchedResult = await tryCandidates(requestedQuality, matches)
   if (switchedResult) return switchedResult
 

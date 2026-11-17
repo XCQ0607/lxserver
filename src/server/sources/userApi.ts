@@ -597,30 +597,48 @@ export const requestMusicUrlHead = async (
     agentFor: typeof getProxyAgent = getProxyAgent
 ) => {
     const deadline = Date.now() + timeoutMs
-    for (let redirects = 0; redirects <= 5; redirects++) {
-        const remaining = deadline - Date.now()
-        if (remaining <= 0) throw new Error('Music URL probe timed out')
-        const parsed = new URL(url)
-        if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported redirect protocol')
-        const response = await requestImpl('head', url, null, {
-            follow_max: 0,
-            open_timeout: remaining,
-            response_timeout: remaining,
-            read_timeout: remaining,
-            agent: await agentFor(url, 'music'),
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                Referer: parsed.origin,
-            },
-        })
-        const status = response.statusCode || 0
-        if ([301, 302, 303, 307, 308].includes(status) && response.headers.location) {
-            url = new URL(response.headers.location, url).href
-            continue
+    const controller = new AbortController()
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+            reject(new Error('Music URL probe timed out'))
+            controller.abort()
+        }, timeoutMs)
+    })
+    const probe = async () => {
+        for (let redirects = 0; redirects <= 5; redirects++) {
+            const remaining = deadline - Date.now()
+            if (remaining <= 0) throw new Error('Music URL probe timed out')
+            const parsed = new URL(url)
+            if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported redirect protocol')
+            const agent = await agentFor(url, 'music')
+            if (controller.signal.aborted) throw new Error('Music URL probe timed out')
+            const response = await requestImpl('head', url, null, {
+                follow_max: 0,
+                open_timeout: remaining,
+                response_timeout: remaining,
+                read_timeout: remaining,
+                agent,
+                signal: controller.signal,
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                    Referer: parsed.origin,
+                },
+            })
+            const status = response.statusCode || 0
+            if ([301, 302, 303, 307, 308].includes(status) && response.headers.location) {
+                url = new URL(response.headers.location, url).href
+                continue
+            }
+            return { status, url, headers: { get: (name: string) => String(response.headers[name] || '') } }
         }
-        return { status, url, headers: { get: (name: string) => String(response.headers[name] || '') } }
+        throw new Error('Too many music URL redirects')
     }
-    throw new Error('Too many music URL redirects')
+    try {
+        return await Promise.race([probe(), timeout])
+    } finally {
+        clearTimeout(timer)
+    }
 }
 
 export const probeReturnedMusicUrl = async (
