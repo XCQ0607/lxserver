@@ -11,3 +11,12 @@
 - [ ] Physical device pause/playback qualification (not claimed by these tests).
 
 Full branch validation: 216 TypeScript tests and 286 CJS tests passed before the final timeout regression; the CJS runner also reports one pre-existing OpenList asynchronous teardown failure. Reproduced that failure on the unchanged #531 head (same OpenList test). Final targeted run: 16 recommendation + 15 queue tests passed. No live deployment performed.
+
+
+## 2026-11-17 — follow-up bot review
+
+- [x] Browser recommendation fetch plus JSON body read share an 8-second abort deadline; timeout returns an empty list and clears only the matching cache request so normal queue fallback proceeds.
+- [x] Quality deduplication and start-position lookup use the same platform-qualified identity, preserving distinct songs with equal raw provider IDs and leaving unidentified songs unmerged.
+- Validation: 18/18 focused recommendation/queue tests pass, including stalled fetch/JSON and stale-request cache isolation. Full CJS: 289 passed, one pre-existing OpenList teardown failure; no-emit compilation and diff checks passed.
+
+These PR changes have not been deployed. The separate live marquee-only release is unchanged. The OpenList failure in #528/#530/#531 is the previously reproduced asynchronous teardown error, not a passing full-suite result.

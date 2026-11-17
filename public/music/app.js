@@ -8051,14 +8051,16 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
 
     // [New] Deduplicate by quality if setting enabled
     if (settings.deduplicatePlaylistByQuality && window.QualityManager) {
+        const identity = song => (song?.meta?.songId || song?.songId || song?.songmid || song?.id)
+            ? cleanSongData(song).id : null;
         const targetSong = list[startIndex];
-        const targetId = targetSong ? (targetSong.songmid || targetSong.id) : null;
+        const targetId = identity(targetSong);
 
         const deduplicated = [];
         const seenIds = new Map(); // id -> index in deduplicated
 
         list.forEach((song) => {
-            const id = song.songmid || song.id;
+            const id = identity(song);
             if (!id) {
                 deduplicated.push(song);
                 return;
@@ -8087,7 +8089,7 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
 
         // Find new startIndex based on targetId (identity matching)
         if (targetId) {
-            const newIndex = deduplicated.findIndex(s => (s.songmid || s.id) === targetId);
+            const newIndex = deduplicated.findIndex(s => identity(s) === targetId);
             if (newIndex !== -1) startIndex = newIndex;
         }
 
@@ -8429,7 +8431,15 @@ function loadSearchRadioSongs(seed) {
     // 用户上传的版本歌名常是乱写的，专辑名能帮服务端认出原曲
     const album = seed.albumName || meta.albumName || '';
     if (album) params.set('album', album);
-    const promise = fetch(`${API_BASE}/similar?${params}`, { headers: getUserAuthHeaders() })
+    const controller = new AbortController();
+    let timeout;
+    const deadline = new Promise((_, reject) => {
+        timeout = setTimeout(() => {
+            reject(new Error('Recommendation request timed out'));
+            controller.abort();
+        }, 8000);
+    });
+    const request = (async () => fetch(`${API_BASE}/similar?${params}`, { headers: getUserAuthHeaders(), signal: controller.signal }))()
         .then(res => {
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             return res.json();
@@ -8443,12 +8453,15 @@ function loadSearchRadioSongs(seed) {
             });
             console.log(`[SearchRadio] ${seed.name}: ${list.length} 首 (${data && data.strategy})`);
             return list.filter(item => item.id && item.source);
-        })
+        });
+    // Race the complete operation, including JSON decoding (not just the headers).
+    const promise = Promise.race([request, deadline])
         .catch(e => {
             console.warn('[SearchRadio] 获取相似歌曲失败:', e.message);
             if (searchRadioCache && searchRadioCache.promise === promise) searchRadioCache = null;
             return [];
-        });
+        })
+        .finally(() => clearTimeout(timeout));
     searchRadioCache = { seedId, promise };
     return promise;
 }

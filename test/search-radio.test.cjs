@@ -17,11 +17,11 @@ const code = [
 
 const song = (id, name = `song${id}`) => ({ id, songmid: id, source: 'tx', name, singer: 'singer' });
 
-function setup({ list, index, similar = [], settings = {}, playMode = 'list', armed = true, fetchImpl }) {
+function setup({ list, index, similar = [], settings = {}, playMode = 'list', armed = true, fetchImpl, timer = setTimeout }) {
     const context = vm.createContext({
         console: { log() {}, warn() {} },
         window: {},
-        URLSearchParams,
+        URLSearchParams, AbortController, setTimeout: timer, clearTimeout,
         API_BASE: '/api/music',
         settings, playMode,
         currentPlaylist: list, currentIndex: index, preSelectedNextIndex: null,
@@ -233,4 +233,44 @@ test('explicit play-next identity also survives JSON persistence', async () => {
 test('device-disconnect pause cancels pending radio continuation before pausing', () => {
     const deviceHandler = slice('const handleDeviceChange = async () => {', "navigator.mediaDevices.addEventListener");
     assert.match(deviceHandler, /cancelSearchRadioContinuation\(\);\s*audio.pause\(\)/);
+});
+
+test('recommendation deadline covers both fetch and JSON and lets the original queue continue', async () => {
+    for (const phase of ['fetch', 'json']) {
+        let signal;
+        const c = setup({ list: [song('a'), song('b')], index: 0,
+            timer: fn => setTimeout(fn, 20),
+            fetchImpl: async (_url, options) => { signal = options.signal;
+                return phase === 'fetch' ? new Promise(() => {}) : { ok: true, json: () => new Promise(() => {}) };
+            },
+        });
+        c.playNext();
+        await new Promise(resolve => setTimeout(resolve, 60));
+        assert.equal(c.searchRadioCache, null);
+        assert.equal(signal?.aborted, true);
+        assert.deepEqual(c.played, [1]);
+    }
+});
+test('quality deduplication and starting position preserve same raw IDs across platforms', () => {
+    const c = setup({ list: [], index: 0, settings: { deduplicatePlaylistByQuality: true } });
+    c.window.QualityManager = { QUALITY_PRIORITY: ['flac', '320k', '128k'] };
+    c.document = { getElementById: () => ({ classList: { contains: () => true } }) };
+    c.renderQueue = () => {};
+    vm.runInContext(slice('function updatePlaylist(', '\nfunction ',), c);
+    const first = { ...song('123'), source: 'kw' }, next = { ...song('123'), source: 'wy' };
+    c.updatePlaylist([first, next], 1, 'network');
+    assert.equal(c.currentPlaylist.length, 2);
+    assert.deepEqual(c.played, [1]);
+});
+
+test('a timed-out old recommendation does not evict a newer seed request', async () => {
+    const timers = [];
+    const c = setup({ list: [song('a')], index: 0, timer: fn => { timers.push(fn); return timers.length; },
+        fetchImpl: () => new Promise(() => {}) });
+    const first = c.loadSearchRadioSongs(song('a'));
+    const second = c.loadSearchRadioSongs(song('b'));
+    timers[0](); await first;
+    assert.equal(c.searchRadioCache.promise, second);
+    timers[1](); await second;
+    assert.equal(c.searchRadioCache, null);
 });
