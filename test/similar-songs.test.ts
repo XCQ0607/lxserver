@@ -233,3 +233,23 @@ test('recommendation JSON requests bound body reads without changing stream defa
         assert.match(request, /timeout: 15000/)
     }
 })
+
+
+test('the JSON request wrapper aborts a stalled response body', { timeout: 3000 }, async () => {
+    const { createServer } = await import('node:http')
+    const { httpFetch } = await import('../src/modules/utils/request.js')
+    const server = createServer((_req, res) => {
+        res.writeHead(200, { 'Content-Type': 'application/json' })
+        res.flushHeaders()
+        res.write('{') // Never finish the JSON body.
+    })
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    try {
+        const port = (server.address() as any).port
+        const pending = (httpFetch as any)(`http://127.0.0.1:${port}/`, { timeout: 200, read_timeout: 30 })
+        await assert.rejects(pending.promise)
+    } finally {
+        server.closeAllConnections()
+        await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+})

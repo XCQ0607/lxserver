@@ -1548,6 +1548,7 @@ async function handleLogout() {
     try {
         if (typeof audio !== 'undefined' && audio) {
             shouldAutoRecoverPlayback = false;
+            cancelSearchRadioContinuation();
             audio.pause();
             audio.currentTime = 0;
             audio.src = '';
@@ -12998,6 +12999,7 @@ async function handleSyncLogout(skipConfirm = false) {
         if (typeof audio !== 'undefined' && audio) {
             try {
                 shouldAutoRecoverPlayback = false;
+                cancelSearchRadioContinuation();
                 audio.pause();
                 audio.currentTime = 0;
                 audio.src = '';
