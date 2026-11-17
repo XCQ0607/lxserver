@@ -117,9 +117,12 @@ function getBestQuality(songInfo, userPreference = '320k') {
 
     for (let i = startIndex; i < QUALITY_PRIORITY.length; i++) {
         const quality = QUALITY_PRIORITY[i];
-        if (availableQualities.includes(quality)) {
-            console.log(`[Quality] 选择音质: ${quality} (偏好: ${userPreference})`);
-            return quality;
+        const aliases = ['hires', 'flac24bit'];
+        const actual = availableQualities.includes(quality) ? quality
+            : aliases.includes(quality) ? aliases.find(alias => availableQualities.includes(alias)) : null;
+        if (actual) {
+            console.log(`[Quality] 选择音质: ${actual} (偏好: ${userPreference})`);
+            return actual;
         }
     }
 
