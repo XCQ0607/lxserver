@@ -5796,12 +5796,72 @@ const prefetchManager = {
 };
 prefetchManager.init(); // 立即初始化缓冲器
 
+// 服务器缓存是否可直接播放：本平台的缓存直接可用；别的平台缓存的同名同歌手文件（撞名），
+// 时长一致才当作同一首歌，这样原平台连不上时也能播放已缓存的文件
+function isUsableServerCache(song, cached) {
+    if (!cached || !cached.exists) return false;
+    if (!cached.isCollision) return true;
+    if (!cached.url) return false;
+    const seconds = value => {
+        const parts = String(value || '').split(':').map(Number);
+        return parts.length < 2 || parts.some(Number.isNaN) ? 0 : parts.reduce((total, part) => total * 60 + part, 0);
+    };
+    const wanted = seconds(song.interval), have = seconds(cached.interval);
+    return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
+}
+
+// Local audio must be resolved before provider support/quality filtering. A merged
+// member may have a playable file even when it no longer advertises that quality.
+async function resolveCachedSongUrl(song, quality, isRetry = false) {
+    if (isRetry === 'local_retry' || isRetry === 'download') return null;
+    const directLocal = !isRetry && song.url && (song.isLocal || song.url.startsWith('/api/music/cache/file/'));
+    if (!directLocal && settings.preferServerCache === false) return null;
+
+    const merged = Array.isArray(song._alternates) && song._alternates.length > 0;
+    // Synchronous ordering only: do not start getSupportedPlatforms()/fetchCustomSources().
+    const merger = window.SongMerge;
+    const members = directLocal ? [song] : merged && merger?.order
+        ? merger.order(song, quality, { ownQualities: window.QualityManager?.getOwnQualities })
+        : [song, ...(merged ? song._alternates : [])];
+    // Prefer the requested tier across ALL members, then any completed cached tier.
+    // A recovery retry remains exact; explicit local/download bypasses stay above.
+    for (const exact of merged && !isRetry && !directLocal ? [true, false] : [!!isRetry]) {
+        const hits = await Promise.all(members.map(async member => {
+            const wanted = merged && merger?.requestQuality ? merger.requestQuality(member, quality) : quality;
+            if (directLocal) return { exists: true, url: song.url, quality: song.quality || quality,
+                folder: /folder=music/.test(song.url) ? 'music' : 'cache' };
+            try {
+                return await checkServerCache(cleanSongData(member), wanted, exact, false, AbortSignal.timeout(1500));
+            } catch (_) { return { exists: false }; }
+        }));
+        const usable = members.map((member, i) => ({ member, hit: hits[i] }))
+            .filter(({ member, hit }) => hit?.url && isUsableServerCache(member, hit));
+        if (!exact) {
+            const priority = window.QualityManager?.QUALITY_PRIORITY || [];
+            const rank = q => { const i = priority.indexOf(q === 'flac24bit' ? 'hires' : q); return i < 0 ? priority.length : i; };
+            usable.sort((a, b) => rank(a.hit.quality) - rank(b.hit.quality));
+        }
+        for (const { member, hit } of usable) {
+            const actualQuality = hit.quality || quality;
+            const url = await applyAutoProxy(hit.url, member);
+            checkAndTriggerBackgroundCacheUpgrade(cleanSongData(member), quality, actualQuality);
+            return { url, quality: actualQuality, sourceType: hit.origin === 'openlist' ? 'openlist' : 'server_cache',
+                folder: hit.folder, songInfo: member, switchedSource: member !== song, originalSource: song.source };
+        }
+    }
+    return null;
+}
+
 async function refreshPrefetchedCache(song, result) {
     if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
 
     // 预读解析后，后台下载可能已经完成；播放接管前重新检查文件缓存。
     const playbackSong = result.switchedSource && result.songInfo ? result.songInfo : song;
     try {
+        if (song._alternates?.length) {
+            const cached = await resolveCachedSongUrl(song, result.quality);
+            return cached ? { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false } : result;
+        }
         // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
         const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
         if (!cached.exists || cached.isCollision) return result;
@@ -5832,6 +5892,8 @@ async function refreshPrefetchedCache(song, result) {
  */
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
     try {
+        const cached = await resolveCachedSongUrl(song, quality, isRetry);
+        if (cached) return cached;
         const result = await fetchSongUrl(song, quality, isRetry, isSilent);
         if (result.errorMsg) throw new Error(result.errorMsg);
         return result;
@@ -6224,8 +6286,9 @@ function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCach
     if (!song || !desiredQuality || !currentCachedQuality) return;
     if (!window.QualityManager) return;
     const priority = window.QualityManager.QUALITY_PRIORITY;
-    const desiredIndex = priority.indexOf(desiredQuality);
-    const currentIndex = priority.indexOf(currentCachedQuality);
+    const tier = quality => quality === 'flac24bit' ? 'hires' : quality;
+    const desiredIndex = priority.indexOf(tier(desiredQuality));
+    const currentIndex = priority.indexOf(tier(currentCachedQuality));
     // If desired quality is not higher rank (smaller index) than current cached quality, no upgrade needed
     if (desiredIndex === -1 || currentIndex === -1 || desiredIndex >= currentIndex) return;
 
@@ -6248,7 +6311,7 @@ function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCach
             const res = await resolver(song, desiredQuality, true);
             if (!res || !res.url) return;
             const resolvedQuality = res.quality || res.type || desiredQuality;
-            const resolvedIndex = priority.indexOf(resolvedQuality);
+            const resolvedIndex = priority.indexOf(tier(resolvedQuality));
             if (resolvedIndex === -1 || resolvedIndex >= currentIndex) return;
 
             console.log(`[CacheUpgrade] Upgraded version found for ${song.name}: ${resolvedQuality}. Downloading to server cache...`);
