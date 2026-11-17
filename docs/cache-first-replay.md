@@ -14,3 +14,5 @@ Browser URL caching only remembers a remote URL and cannot substitute for a comp
 - Tests use production-function seams and isolated HTTP/filesystem fixtures. No physical-device playback qualification is claimed.
 
 Cached-media error retries normalize the selected platform quality name even when the optional aggregation module is absent. The same handler seam is covered with and without the merge API.
+
+When a remote prefetch is replaced by completed local audio, its old `triedPlatforms` are discarded. Cache misses retain the original prefetch result unchanged. Both merged and single-member replacement paths have regressions with populated attempted-platform metadata.

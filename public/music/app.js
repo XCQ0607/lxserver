@@ -5870,7 +5870,7 @@ async function refreshPrefetchedCache(song, result) {
     try {
         if (song._alternates?.length) {
             const cached = await resolveCachedSongUrl(song, result.quality);
-            return cached ? { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false } : result;
+            return cached ? { ...result, ...cached, triedPlatforms: undefined, sourceName: undefined, sourceId: undefined, hasMoreSources: false } : result;
         }
         // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
         const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
@@ -5884,6 +5884,7 @@ async function refreshPrefetchedCache(song, result) {
             quality,
             sourceType: cached.origin === 'openlist' ? 'openlist' : 'server_cache',
             folder: cached.folder,
+            triedPlatforms: undefined,
             sourceName: undefined,
             sourceId: undefined,
             hasMoreSources: false
