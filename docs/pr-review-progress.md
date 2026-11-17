@@ -8,3 +8,5 @@
 - [x] Track actual candidate attempts; pass failed platforms to the owning playback recovery only, without altering prefetch/download state.
 - [x] Regression tests: 13 song-merge/resolution tests pass; TypeScript no-emit, JavaScript syntax and diff checks pass.
 - [ ] Physical browser/audio qualification (not claimed by unit tests).
+
+Full branch validation: 203 TypeScript tests and 288 CJS tests passed; CJS runner reports one pre-existing OpenList asynchronous teardown failure, also reproduced on unchanged #531 head. No live deployment performed.
