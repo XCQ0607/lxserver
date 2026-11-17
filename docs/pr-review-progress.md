@@ -26,3 +26,10 @@ These PR changes have not been deployed. The separate live marquee-only release 
 The previously reported asynchronous OpenList teardown failure is now fixed. A pending metadata persistence timer outlived the test runtime; explicit flushing and runtime-root validation now prevent the late undefined-path exception. Both HTTP fixtures restore their previous global runtime. See `docs/openlist-ci-progress.md`.
 
 Final integrated local validation: **276/276 CJS and 217/217 TypeScript tests passed**, and `npm run build --ignore-scripts` passed. No test suppression or added waiting sleeps; no deployment. Node 22/24 GitHub Actions results will be recorded in the PR follow-up.
+
+
+## Additional bot review / cache-first synchronization
+
+- [x] Pending metadata state is independent of the debounce timer. Successful persistence clears it; failed write/rename remains explicitly flushable, including without another observation. Both ENOSPC paths have regressions.
+
+Validation: 276/276 CJS and 219/219 TypeScript tests passed; the production build and diff checks passed. No additional live deployment was made for this review pass.
