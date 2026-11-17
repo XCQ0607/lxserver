@@ -83,6 +83,8 @@ const isNumericId = (value: unknown): boolean => /^\d+$/.test(String(value ?? ''
 const fetchTxSimilarSongs = async (songId: string): Promise<any[]> => {
   const { statusCode, body } = await httpFetchAny('https://u.y.qq.com/cgi-bin/musicu.fcg', {
     method: 'POST',
+    timeout: 15000,
+    read_timeout: 15000,
     body: {
       comm: { cv: 4747474, ct: 24, format: 'json', inCharset: 'utf-8', outCharset: 'utf-8', uin: 0 },
       req: {
@@ -125,9 +127,10 @@ const YTM_SONG_FILTER = 'EgWKAQIIAWoMEA4QChADEAQQCRAF'
 const ytmPost = async (endpoint: string, payload: Record<string, unknown>): Promise<any> => {
   const { statusCode, body } = await httpFetchAny(`https://music.youtube.com/youtubei/v1/${endpoint}?prettyPrint=false`, {
     method: 'POST',
+    timeout: 15000,
+    read_timeout: 15000,
     body: { context: YTM_CONTEXT, ...payload },
     headers: { 'User-Agent': 'Mozilla/5.0', Origin: 'https://music.youtube.com' },
-    timeout: 15000,
   }).promise
   if (statusCode !== 200 || !body || typeof body !== 'object') throw new Error(`YouTube Music ${endpoint} failed: ${statusCode}`)
   return body
@@ -232,9 +235,9 @@ const versionKey = (value: unknown): string => normalizeText(String(value ?? '')
 // 改编 / 衍生版本：DJ、Remix、不插电、Live、伴奏、加速、翻唱、「××版」等。续播只要原版。
 const VARIANT_NOTE = /\b(dj|remix|mix|live|acoustic|unplugged|karaoke|instrumental|inst|sped\s*up|slowed|nightcore|cover|demo|version|ver|edit)\b|伴奏|纯音乐|现场|演唱会|不插电|加速|降调|翻唱|串烧|铃声|片段|版/i
 const VARIANT_TITLE = /\b(dj|remix|nightcore)\b|dj版|伴奏|串烧/i
-// 没有括号也没有破折号、直接跟在歌名后面的版本后缀（「稻香 Live」「七里香 Acoustic」）。
+// 明确的版本后缀；单独的 Live 可能是正式歌名（Long Live），仅在括号或破折号附注中识别。
 // 只认结尾的独立单词，不误伤 Alive 这类本来的歌名
-const VARIANT_SUFFIX = /\S\s+(live|acoustic|unplugged|karaoke|instrumental|demo|cover)\s*$|\S\s*(现场版|伴奏版|纯音乐版|演唱会版)\s*$/i
+const VARIANT_SUFFIX = /\S\s+(acoustic|unplugged|karaoke|instrumental|demo|cover)\s*$|\S\s*(现场版|伴奏版|纯音乐版|演唱会版)\s*$/i
 const isVariant = (value: unknown): boolean => {
   const name = toSimplified(String(value ?? ''))
   // 附注 = 括号里的内容，以及「歌名 - 附注」里破折号之后的部分
@@ -299,6 +302,14 @@ const resolveRadioTracks = async (tracks: RadioTrack[], sources: string[], deps:
 }
 
 // 同一首种子歌的结果缓存一段时间：预读与正式续播、以及重复点播都会再问一次
+export const similarSongsCacheKey = (seed: SimilarSeed, limit: number): string => {
+  const id = [seed.songId, seed.songmid].find(value => value != null && String(value) !== '')
+  const identity = id != null && String(id) !== ''
+    ? ['id', String(id)]
+    : ['text', normalizeText(seed.name), normalizeText(splitSingers(seed.singer)[0]), normalizeText(seed.album)]
+  return JSON.stringify([seed.source, identity, limit])
+}
+
 const CACHE_TTL = 6 * 60 * 60 * 1000
 const CACHE_MAX = 200
 const resultCache = new Map<string, { expires: number, result: SimilarResult }>()
@@ -327,7 +338,7 @@ export const fetchSimilarSongs = async (
 ): Promise<SimilarResult> => {
   const safeLimit = Math.min(Math.max(parseInt(String(limit)) || 30, 1), MAX_LIMIT)
   const cacheKey = deps === defaultDeps
-    ? [seed.source, normalizeText(seed.name), normalizeText(splitSingers(seed.singer)[0]), normalizeText(seed.album), safeLimit].join('|')
+    ? similarSongsCacheKey(seed, safeLimit)
     : ''
   const cached = cacheKey ? resultCache.get(cacheKey) : undefined
   let result = cached && cached.expires > Date.now() ? cached.result : null

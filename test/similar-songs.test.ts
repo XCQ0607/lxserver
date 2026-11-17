@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { creditedArtist, fetchSimilarSongs, findOriginalOfUpload, type SimilarDeps } from '../src/server/utils/similarSongs'
+import { similarSongsCacheKey, creditedArtist, fetchSimilarSongs, findOriginalOfUpload, type SimilarDeps } from '../src/server/utils/similarSongs'
 
 const song = (source: string, id: number, name: string, singer: string) => ({
     source, songId: id, songmid: `mid${id}`, name, singer,
@@ -192,7 +192,7 @@ test('the original artist is picked out of search results by the credits in the 
 test('a version suffix without brackets or a dash is still a variant, a title that merely ends alike is not', async () => {
     const { deps } = fakeDeps({
         txSimilar: async () => [
-            song('tx', 1, '稻香 Live', '周杰伦'),
+            song('tx', 1, '稻香 (Live)', '周杰伦'),
             song('tx', 2, '七里香 Acoustic', '周杰伦'),
             song('tx', 3, '夜曲现场版', '周杰伦'),
             song('tx', 4, 'Alive', 'Sia'),
@@ -204,11 +204,32 @@ test('a version suffix without brackets or a dash is still a variant, a title th
         ],
     })
     const result = await fetchSimilarSongs({ source: 'tx', songId: 97773, name: '晴天', singer: '周杰伦' }, 30, deps)
-    assert.deepEqual(result.list.map(s => s.songId), [4, 5, 7, 8, 9])
+    assert.deepEqual(result.list.map(s => s.songId), [4, 5, 6, 7, 8, 9])
 })
 
 test('an original artist credited inside brackets in the upload title is recognised', () => {
     const seed = { source: 'kw', name: '经典现场（王菲）', singer: '某上传者', album: '红豆' }
     assert.equal(findOriginalOfUpload([{ id: 'x', title: '红豆', artist: '王菲' }], seed), 'x')
     assert.equal(creditedArtist([{ artist: '王菲' }], seed), '王菲')
+})
+
+
+test('cache identities distinguish seed IDs, platforms and limits, falling back only without IDs', () => {
+    const seed = { source: 'tx', name: 'Same title' }
+    assert.notEqual(similarSongsCacheKey({ ...seed, songId: 1 }, 30), similarSongsCacheKey({ ...seed, songId: 2 }, 30))
+    assert.notEqual(similarSongsCacheKey({ ...seed, songmid: 'a' }, 30), similarSongsCacheKey({ ...seed, songmid: 'b' }, 30))
+    assert.notEqual(similarSongsCacheKey({ ...seed, songId: 1 }, 30), similarSongsCacheKey({ ...seed, songId: 1, source: 'kw' }, 30))
+    assert.notEqual(similarSongsCacheKey(seed, 30), similarSongsCacheKey(seed, 10))
+    assert.notEqual(similarSongsCacheKey(seed, 30), similarSongsCacheKey({ ...seed, album: 'Other' }, 30))
+})
+
+
+test('recommendation JSON requests bound body reads without changing stream defaults', async () => {
+    const { readFileSync } = await import('node:fs')
+    const source = readFileSync('src/server/utils/similarSongs.ts', 'utf8')
+    for (const marker of ['const fetchTxSimilarSongs =', 'const ytmPost =']) {
+        const request = source.slice(source.indexOf(marker)).split('}).promise')[0]
+        assert.match(request, /read_timeout: 15000/)
+        assert.match(request, /timeout: 15000/)
+    }
 })
