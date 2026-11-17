@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const source = fs.readFileSync('public/music/app.js', 'utf8');
 const start = source.indexOf('function isUsableServerCache(');
 const code = source.slice(start, source.indexOf('\nasync function refreshPrefetchedCache(', start));
-assert.match(code, /async function cachedMembersFirst\(/);
+assert.match(code, /async function resolveCachedSongUrl\(/);
 const context = vm.createContext({});
 vm.runInContext(code, context);
 const usable = context.isUsableServerCache;
@@ -34,7 +34,8 @@ test('a merged song plays the platform entry that is already cached, whatever th
     const asked = [];
     const ctx = vm.createContext({
         AbortSignal, settings: {},
-        window: { SongMerge: { requestQuality: (member, quality) => (member.source === 'kg' && quality === 'hires' ? 'flac24bit' : quality) } },
+        applyAutoProxy: async url => url, checkAndTriggerBackgroundCacheUpgrade() {},
+        window: { SongMerge: { order: song => [song, ...song._alternates], requestQuality: (member, quality) => (member.source === 'kg' && quality === 'hires' ? 'flac24bit' : quality) } },
         cleanSongData: song => song,
         checkServerCache: async (member, quality, exact) => {
             asked.push(`${member.source}:${quality}:${exact}`);
@@ -45,10 +46,12 @@ test('a merged song plays the platform entry that is already cached, whatever th
     });
     vm.runInContext(code, ctx);
     const members = ['tx', 'wy', 'kg', 'kw'].map(source => ({ source, interval: '04:16' }));
-    const ordered = await ctx.cachedMembersFirst(members, 'hires');
-    assert.deepEqual([...ordered].map(m => m.source), ['kg', 'tx', 'wy', 'kw']);
+    const merged = { ...members[0], _alternates: members.slice(1) };
+    const result = await ctx.resolveCachedSongUrl(merged, 'hires');
+    assert.equal(result.songInfo.source, 'kg');
+    assert.equal(result.url, url);
     assert.deepEqual(asked, ['tx:hires:true', 'wy:hires:true', 'kg:flac24bit:true', 'kw:hires:true']);
 
     ctx.settings.preferServerCache = false;
-    assert.deepEqual([...await ctx.cachedMembersFirst(members, 'hires')].map(m => m.source), ['tx', 'wy', 'kg', 'kw']);
+    assert.equal(await ctx.resolveCachedSongUrl(merged, 'hires'), null);
 });

@@ -5842,16 +5842,56 @@ function isUsableServerCache(song, cached) {
     return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
 }
 
-// 合并歌曲的各平台条目里，已有所选音质缓存文件的排到最前面：
-// 无论这次按速度该先试哪个平台，都先播已缓存的那份，避免同一首歌换个平台又解析、又缓存一遍
-async function cachedMembersFirst(candidates, quality) {
-    if (candidates.length < 2 || settings.preferServerCache === false) return candidates;
-    const cached = await Promise.all(candidates.map(async member => {
-        const wanted = window.SongMerge.requestQuality(member, quality);
-        const hit = await checkServerCache(cleanSongData(member), wanted, true, false, AbortSignal.timeout(1500));
-        return isUsableServerCache(member, hit);
-    }));
-    return [...candidates.filter((_, i) => cached[i]), ...candidates.filter((_, i) => !cached[i])];
+// Resolve platform-specific quality names even without the optional merge module.
+function getPlaybackRequestQuality(song, quality) {
+    if (window.SongMerge?.requestQuality) return window.SongMerge.requestQuality(song, quality);
+    if (!['hires', 'flac24bit'].includes(quality)) return quality;
+    const manager = window.QualityManager;
+    const own = manager?.getOwnQualities ? manager.getOwnQualities(song)
+        : manager?.getAvailableQualities?.({ ...song, _alternates: undefined });
+    return own && !own.includes(quality) ? own.find(q => ['hires', 'flac24bit'].includes(q)) || quality : quality;
+}
+
+// Local audio must be resolved before provider support/quality filtering. A merged
+// member may have a playable file even when it no longer advertises that quality.
+async function resolveCachedSongUrl(song, quality, isRetry = false) {
+    if (isRetry === 'local_retry' || isRetry === 'download') return null;
+    const directLocal = !isRetry && song.url && (song.isLocal || song.url.startsWith('/api/music/cache/file/'));
+    if (!directLocal && settings.preferServerCache === false) return null;
+
+    const merged = Array.isArray(song._alternates) && song._alternates.length > 0;
+    // Synchronous ordering only: do not start getSupportedPlatforms()/fetchCustomSources().
+    const merger = window.SongMerge;
+    const members = directLocal ? [song] : merged && merger?.order
+        ? merger.order(song, quality, { ownQualities: window.QualityManager?.getOwnQualities })
+        : [song, ...(merged ? song._alternates : [])];
+    // Prefer the requested tier across ALL members, then any completed cached tier.
+    // A recovery retry remains exact; explicit local/download bypasses stay above.
+    for (const exact of merged && !isRetry && !directLocal ? [true, false] : [!!isRetry]) {
+        const hits = await Promise.all(members.map(async member => {
+            const wanted = getPlaybackRequestQuality(member, quality);
+            if (directLocal) return { exists: true, url: song.url, quality: song.quality || quality,
+                folder: /folder=music/.test(song.url) ? 'music' : 'cache' };
+            try {
+                return await checkServerCache(cleanSongData(member), wanted, exact, false, AbortSignal.timeout(1500));
+            } catch (_) { return { exists: false }; }
+        }));
+        const usable = members.map((member, i) => ({ member, hit: hits[i] }))
+            .filter(({ member, hit }) => hit?.url && isUsableServerCache(member, hit));
+        if (!exact) {
+            const priority = window.QualityManager?.QUALITY_PRIORITY || [];
+            const rank = q => { const i = priority.indexOf(q === 'flac24bit' ? 'hires' : q); return i < 0 ? priority.length : i; };
+            usable.sort((a, b) => rank(a.hit.quality) - rank(b.hit.quality));
+        }
+        for (const { member, hit } of usable) {
+            const actualQuality = hit.quality || quality;
+            const url = await applyAutoProxy(hit.url, member);
+            checkAndTriggerBackgroundCacheUpgrade(cleanSongData(member), quality, actualQuality);
+            return { url, quality: actualQuality, sourceType: hit.origin === 'openlist' ? 'openlist' : 'server_cache',
+                folder: hit.folder, songInfo: member, switchedSource: member !== song, originalSource: song.source };
+        }
+    }
+    return null;
 }
 
 async function refreshPrefetchedCache(song, result) {
@@ -5860,6 +5900,10 @@ async function refreshPrefetchedCache(song, result) {
     // 预读解析后，后台下载可能已经完成；播放接管前重新检查文件缓存。
     const playbackSong = result.switchedSource && result.songInfo ? result.songInfo : song;
     try {
+        if (song._alternates?.length) {
+            const cached = await resolveCachedSongUrl(song, result.quality);
+            return cached ? { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false } : result;
+        }
         // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
         const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
         if (!cached.exists || cached.isCollision) return result;
@@ -5891,9 +5935,11 @@ async function refreshPrefetchedCache(song, result) {
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
     const triedCandidates = new Set();
     try {
+        const cached = await resolveCachedSongUrl(song, quality, isRetry);
+        if (cached) return cached;
         // 聚合搜索合并出来的歌曲：在各平台的条目里按「有该音质、可解析、历史最快」的顺序逐个尝试
         const candidates = song._alternates?.length
-            ? await cachedMembersFirst(await window.SongMerge.candidates(song, quality), quality)
+            ? await window.SongMerge.candidates(song, quality)
             : [song];
         let lastError = null;
         for (const candidate of candidates) {
@@ -5959,7 +6005,9 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                 }
             } else if (step === 'switch_platform') {
                 // Requested-quality filtering can leave lower-quality alternatives untried.
-                const matches = await findOtherSourceMatches(song, isSilent);
+                const matches = await findOtherSourceMatches(song, isSilent, {
+                    excludePlatforms: [...new Set([...triedCandidates].map(candidate => candidate.source))],
+                });
                 const untried = matches.filter(candidate => !triedCandidates.has(candidate));
                 if (!untried.length) continue;
                 if (!isSilent) {
@@ -6141,9 +6189,11 @@ async function findOtherSourceMatch(song, isSilent = false) {
 }
 
 async function findOtherSourceMatches(song, isSilent = false, options = {}) {
-    // 聚合搜索时已经对上的其他平台条目，直接用，不必再全网搜索一遍
+    const excluded = new Set(options.excludePlatforms || []);
+    // Keep known untried members fast; only search other platforms once exhausted.
     if (Array.isArray(song._alternates) && song._alternates.length) {
-        return [song, ...song._alternates];
+        const remaining = [song, ...song._alternates].filter(member => !excluded.has(member.source));
+        if (remaining.length) return remaining;
     }
     if (!song.name || !song.singer) return [];
 
@@ -6164,7 +6214,7 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
 
         // 2. 切换到和当前不同源，并且根据优先级排列 (网易、QQ、酷我、酷狗、咪咕)
         const baseOrder = ['wy', 'tx', 'kw', 'kg', 'mg'];
-        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source);
+        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source && !excluded.has(s));
 
         // 3. 过滤出自定义源支持解析的平台
         let searchSources = searchSourcesOrdered;
@@ -6328,8 +6378,9 @@ function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCach
     if (!song || !desiredQuality || !currentCachedQuality) return;
     if (!window.QualityManager) return;
     const priority = window.QualityManager.QUALITY_PRIORITY;
-    const desiredIndex = priority.indexOf(desiredQuality);
-    const currentIndex = priority.indexOf(currentCachedQuality);
+    const tier = quality => quality === 'flac24bit' ? 'hires' : quality;
+    const desiredIndex = priority.indexOf(tier(desiredQuality));
+    const currentIndex = priority.indexOf(tier(currentCachedQuality));
     // If desired quality is not higher rank (smaller index) than current cached quality, no upgrade needed
     if (desiredIndex === -1 || currentIndex === -1 || desiredIndex >= currentIndex) return;
 
@@ -6352,7 +6403,7 @@ function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCach
             const res = await resolver(song, desiredQuality, true);
             if (!res || !res.url) return;
             const resolvedQuality = res.quality || res.type || desiredQuality;
-            const resolvedIndex = priority.indexOf(resolvedQuality);
+            const resolvedIndex = priority.indexOf(tier(resolvedQuality));
             if (resolvedIndex === -1 || resolvedIndex >= currentIndex) return;
 
             console.log(`[CacheUpgrade] Upgraded version found for ${song.name}: ${resolvedQuality}. Downloading to server cache...`);
@@ -7478,7 +7529,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         }
     } else if (currentStep === 'switch_platform') {
         RecoveryToast.show(state.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
-        const matches = await findOtherSourceMatches(state.originalSong);
+        const matches = await findOtherSourceMatches(state.originalSong, false, { excludePlatforms: state.triedPlatforms });
 
         if (state !== currentRecoveryState) {
             console.log('[Recovery] Aborted because user played another song during findOtherSourceMatches.');
@@ -7839,7 +7890,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 shouldAutoRecoverPlayback = false;
                 console.warn(`[Player] ${currentSourceType} link failed, retrying online...`);
                 if (currentSourceType === 'cache') localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
-                playSong(playbackSong, index, targetQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
+                const retryQuality = getPlaybackRequestQuality(playbackSong, targetQuality);
+                playSong(playbackSong, index, retryQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
                 return;
             }
 
