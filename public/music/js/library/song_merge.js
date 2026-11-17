@@ -115,9 +115,14 @@
     async function candidates(song, quality) {
         const ownQualities = window.QualityManager && window.QualityManager.getOwnQualities;
         let supported = null;
+        let timeout;
         try {
-            supported = api.getSupportedPlatforms ? await api.getSupportedPlatforms() : null;
+            supported = api.getSupportedPlatforms ? await Promise.race([
+                Promise.resolve().then(() => api.getSupportedPlatforms()),
+                new Promise(resolve => { timeout = setTimeout(() => resolve(null), 3000); }),
+            ]) : null;
         } catch (e) { /* 不知道哪些平台可解析时不按这一项排序 */ }
+        finally { clearTimeout(timeout); }
         const ordered = order(song, quality, { ownQualities, supported });
         if (!ownQualities) return ordered;
         const capable = ordered.filter(member => qualityFor(member, quality, ownQualities) !== null);

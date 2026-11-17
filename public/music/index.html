@@ -4516,7 +4516,7 @@
     <!-- Expand Panel Button (Hidden by default, shown when panel is collapsed) -->
     <!-- 收起播放栏后留下的迷你播放条：封面、歌名、播放 / 暂停；点其余位置展开播放栏 -->
     <div role="button" tabindex="0" aria-label="展开播放器" id="btn-expand-panel" onclick="togglePlayerPanel()"
-        onkeydown="if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); togglePlayerPanel(); }"
+        onkeydown="if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); event.stopPropagation(); togglePlayerPanel(); }"
         class="mini-player fixed z-40 flex items-center t-bg-panel/80 backdrop-blur-md shadow-[0_8px_30px_rgb(0,0,0,0.12)] transform transition-all duration-300 translate-y-20 opacity-0 border t-border-main">
         <img id="mini-player-cover" src="/music/assets/logo.svg" alt=""
             onerror="this.src='/music/assets/logo.svg';">

@@ -16,9 +16,9 @@ test('mini-player keyboard handler leaves child button activation alone', () => 
     const handler = html.slice(html.indexOf('<div role="button"')).match(/onkeydown="([^"]+)"/)[1];
     const parent = {}, child = {};
     for (const target of [parent, child]) {
-        let prevented = 0, expanded = 0;
-        vm.runInNewContext(handler, { event: { key: ' ', target, currentTarget: parent, preventDefault() { prevented++; } }, togglePlayerPanel() { expanded++; } });
-        assert.equal(expanded, target === parent ? 1 : 0); assert.equal(prevented, expanded);
+        let prevented = 0, expanded = 0, stopped = 0;
+        vm.runInNewContext(handler, { event: { key: ' ', target, currentTarget: parent, preventDefault() { prevented++; }, stopPropagation() { stopped++; } }, togglePlayerPanel() { expanded++; } });
+        assert.equal(expanded, target === parent ? 1 : 0); assert.equal(prevented, expanded); assert.equal(stopped, expanded);
     }
 });
 test('three-column search rows stop before the sm singer column appears', () => {

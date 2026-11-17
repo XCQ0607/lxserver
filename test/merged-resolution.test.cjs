@@ -45,3 +45,47 @@ test('formal playback errors carry failed platforms without mutating shared reco
     assert.deepEqual(c.currentRecoveryState.triedPlatforms, ['tx']);
     assert.match(app, /currentRecoveryState.thisRequestId === thisRequestId && !noPlay\) \{\s*for \(const platform of error.triedPlatforms/);
 });
+
+test('media failure after alternate-first resolution can recover the untouched primary', async () => {
+    const alt = { source: 'kw', quality: 'flac' }, song = { source: 'tx', quality: 'flac', _alternates: [alt] };
+    const { c, tried } = setup([alt, song]);
+    const result = await c.resolveSongUrl(song, 'flac', false, false, true);
+    assert.deepEqual([...result.triedPlatforms], ['kw']);
+    vm.runInContext(app.slice(app.indexOf('async function findOtherSourceMatches('), app.indexOf('async function findOtherSourceMatches(') + app.slice(app.indexOf('async function findOtherSourceMatches(')).indexOf('\nasync function ')), c);
+    c.restorePlaybackSession = async () => false;
+    c.RecoveryToast = { show() {}, markStepFailed() {} };
+    c.settings.enableAutoSwitchApiSource = false;
+    c.window.QualityManager.getQualityDisplayName = q => q;
+    c.currentRecoveryState = { originalSong: song, currentSong: alt, currentIndex: 0,
+        currentQuality: 'flac', triedPlatforms: [...result.triedPlatforms],
+        steps: ['switch_platform'], currentStepIndex: 0 };
+    let recovery;
+    c.playSong = member => { recovery = member; };
+    vm.runInContext(app.slice(app.indexOf('async function runRecoveryFlow('), app.indexOf('async function playSong(')), c);
+    await c.runRecoveryFlow(new Error('Media playback failed'), 0);
+    assert.equal(recovery.source, 'tx');
+    assert.equal(recovery._alternates, undefined);
+    await c.resolveSongUrl(recovery, 'flac', false, true, true);
+    assert.deepEqual(tried, [['kw', 'flac'], ['tx', 'flac']]);
+    assert.match(app, /triedPlatforms: \[\]/);
+});
+test('supported platform union excludes per-script disabled platforms but retains other enabled scripts', async () => {
+    const c = vm.createContext({ window: { SongMerge: {} }, Date, Set,
+        fetchCustomSources: async () => [
+            { enabled: true, status: 'success', supportedSources: ['tx', 'kw'], disabledSources: ['tx'] },
+            { enabled: true, status: 'success', supportedSources: ['wy'], disabledSources: [] },
+        ],
+    });
+    const code = app.slice(app.indexOf('let supportedPlatformsCache ='), app.indexOf('async function fetchCustomSources('));
+    vm.runInContext(code, c);
+    assert.deepEqual([...await c.window.SongMerge.getSupportedPlatforms()], ['kw', 'wy']);
+    vm.runInContext('supportedPlatformsCache = null', c);
+    c.fetchCustomSources = async () => [
+        { enabled: true, status: 'success', supportedSources: ['tx'], disabledSources: ['tx'] },
+        { enabled: true, status: 'success', supportedSources: ['tx'], disabledSources: [] },
+    ];
+    assert.deepEqual([...await c.window.SongMerge.getSupportedPlatforms()], ['tx']);
+});
+test('aggregate search reads the current settings object rather than a stale global snapshot', () => {
+    assert.match(app, /merge: source === 'all' && settings.mergeAggregatedSearch !== false/);
+});
