@@ -8,7 +8,9 @@ Browser URL caching only remembers a remote URL and cannot substitute for a comp
 
 ## Validation
 
-- Current-dev baseline failed 8 of 14 new cached-replay regressions; the repaired branch passes all 14.
-- 289 CJS tests and 208 TypeScript tests passed; `npm run build --ignore-scripts` passed.
+- Current-dev baseline failed 9 of 15 new cached-replay regressions; the repaired branch passes all 15.
+- 290 CJS tests and 208 TypeScript tests passed; `npm run build --ignore-scripts` passed.
 - Includes the OpenList fixture teardown prerequisite and retryable metadata flush correction so CI does not retain an asynchronous undefined-path failure or lose a pending save after a write error.
 - Tests use production-function seams and isolated HTTP/filesystem fixtures. No physical-device playback qualification is claimed.
+
+Cached-media error retries normalize the selected platform quality name even when the optional aggregation module is absent. The same handler seam is covered with and without the merge API.

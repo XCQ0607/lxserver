@@ -5810,6 +5810,16 @@ function isUsableServerCache(song, cached) {
     return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
 }
 
+// Resolve platform-specific quality names even without the optional merge module.
+function getPlaybackRequestQuality(song, quality) {
+    if (window.SongMerge?.requestQuality) return window.SongMerge.requestQuality(song, quality);
+    if (!['hires', 'flac24bit'].includes(quality)) return quality;
+    const manager = window.QualityManager;
+    const own = manager?.getOwnQualities ? manager.getOwnQualities(song)
+        : manager?.getAvailableQualities?.({ ...song, _alternates: undefined });
+    return own && !own.includes(quality) ? own.find(q => ['hires', 'flac24bit'].includes(q)) || quality : quality;
+}
+
 // Local audio must be resolved before provider support/quality filtering. A merged
 // member may have a playable file even when it no longer advertises that quality.
 async function resolveCachedSongUrl(song, quality, isRetry = false) {
@@ -5827,7 +5837,7 @@ async function resolveCachedSongUrl(song, quality, isRetry = false) {
     // A recovery retry remains exact; explicit local/download bypasses stay above.
     for (const exact of merged && !isRetry && !directLocal ? [true, false] : [!!isRetry]) {
         const hits = await Promise.all(members.map(async member => {
-            const wanted = merged && merger?.requestQuality ? merger.requestQuality(member, quality) : quality;
+            const wanted = getPlaybackRequestQuality(member, quality);
             if (directLocal) return { exists: true, url: song.url, quality: song.quality || quality,
                 folder: /folder=music/.test(song.url) ? 'music' : 'cache' };
             try {
@@ -7780,7 +7790,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 shouldAutoRecoverPlayback = false;
                 console.warn(`[Player] ${currentSourceType} link failed, retrying online...`);
                 if (currentSourceType === 'cache') localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
-                playSong(playbackSong, index, targetQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
+                const retryQuality = getPlaybackRequestQuality(playbackSong, targetQuality);
+                playSong(playbackSong, index, retryQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
                 return;
             }
 

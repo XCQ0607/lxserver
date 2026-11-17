@@ -182,3 +182,24 @@ test('cached enriched songs remain playable without the optional merge module', 
     assert.equal(result.songInfo.source, 'kw');
     assert.equal(events.some(e => e.kind === 'provider'), false);
 });
+
+test('cached alternate retry maps quality aliases with or without the merge module', async () => {
+    const start = app.indexOf('currentPlaybackErrorHandler = async () => {');
+    const handler = app.slice(start, app.indexOf("audio.addEventListener('error',", start));
+    for (const optional of [true, false]) {
+        const { c } = setup();
+        if (!optional) delete c.window.SongMerge;
+        const retried = [];
+        Object.assign(c, { currentRecoveryState: { thisRequestId: 1 }, thisRequestId: 1,
+            song: song('tx'), playbackSong: song('kw', 'flac24bit'), prefetchQuality: 'hires', prefetchedResult: null,
+            prefetchManager: { invalidate() {} }, currentPlaybackErrorHandler: null,
+            audio: { currentTime: 1 }, lastKnownPlaybackTime: 0, currentQuality: 'flac24bit', targetQuality: 'hires',
+            index: 0, noPlay: false, currentSourceType: 'server_cache', shouldAutoRecoverPlayback: true,
+            checkServerOnline: async () => true, playSong: (...args) => retried.push(args),
+        });
+        vm.runInContext(handler, c);
+        await c.currentPlaybackErrorHandler();
+        assert.equal(retried[0][2], 'flac24bit');
+        assert.equal(retried[0][4], 'local_retry');
+    }
+});
