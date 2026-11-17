@@ -171,6 +171,19 @@ export class AutoLinkQueue {
       const queries = [...(identified ? [{ text: `${identified.singer} ${identified.name}`, tolerance: 3 }] : []), { text: keyword, tolerance: 2 }]
       const errors: string[] = []
       const names: Record<string, string> = { tx: 'QQ 音乐', wy: '网易云音乐', kg: '酷狗音乐', kw: '酷我音乐', mg: '咪咕音乐' }
+      const normalizeText = (s?: string) => String(s || '').replace(/[\s·、/()（）\-『』「」\[\]【】\.]/g, '').toLowerCase()
+      const isSingerMatch = (candidateSinger?: string, targetSinger?: string) => {
+        if (!targetSinger || targetSinger === '未知歌手') return true
+        const cs = normalizeText(candidateSinger)
+        const ts = normalizeText(targetSinger)
+        return cs.includes(ts) || ts.includes(cs)
+      }
+      const isNameMatch = (candidateName?: string, targetName?: string) => {
+        const cn = normalizeText(candidateName)
+        const tn = normalizeText(targetName)
+        if (!cn || !tn) return false
+        return cn === tn || cn.includes(tn) || tn.includes(cn)
+      }
       let match: any
       for (const query of queries) {
         for (const source of task.sources) {
@@ -179,7 +192,12 @@ export class AutoLinkQueue {
           update('searching', `正在搜索 ${names[source]} · ${query.text}`)
           try {
             const results = await this.bounded(this.deps.search(query.text, source))
-            match = results.find(r => seconds(r.interval) > 0 && Math.abs(seconds(r.interval) - duration) <= query.tolerance)
+            match = results.find(r => {
+              if (!(seconds(r.interval) > 0 && Math.abs(seconds(r.interval) - duration) <= query.tolerance)) return false
+              if (!isNameMatch(r.name, item.name)) return false
+              if (!isSingerMatch(r.singer, item.singer)) return false
+              return true
+            })
             if (match) { match = { ...match, source }; break }
           } catch (e: any) { errors.push(`${source}: ${e.message}`) }
         }
