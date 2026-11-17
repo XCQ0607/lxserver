@@ -57,19 +57,72 @@ const eapiRequest = (url, data) => {
 const parseTools = {
   rxps: {
     info: /^{"/,
+    timeMs2: /\[\d+:\d+\.\d{2}]/,
+    timeMs3: /\[\d+:\d+\.\d{3}]/,
     lineTime: /^\[(\d+),\d+\]/,
     wordTime: /\(\d+,\d+,\d+\)/,
     wordTimeAll: /(\(\d+,\d+,\d+\))/g,
   },
-  msFormat(timeMs) {
+  // Legacy implementation retained for reference; inactive.
+  // msFormat(timeMs) {
+  //     if (Number.isNaN(timeMs)) return ''
+  //     let ms = timeMs % 1000
+  //     timeMs /= 1000
+  //     let m = parseInt(timeMs / 60).toString().padStart(2, '0')
+  //     timeMs %= 60
+  //     let s = parseInt(timeMs).toString().padStart(2, '0')
+  //     return `[${m}:${s}.${ms}]`
+  //   }
+  msFormat(timeMs, pad3 = true) {
     if (Number.isNaN(timeMs)) return ''
-    let ms = timeMs % 1000
+    let ms = (timeMs % 1000).toString().padStart(3, '0')
+    if (!pad3) ms = ms.slice(0, 2)
     timeMs /= 1000
     let m = parseInt(timeMs / 60).toString().padStart(2, '0')
     timeMs %= 60
     let s = parseInt(timeMs).toString().padStart(2, '0')
     return `[${m}:${s}.${ms}]`
   },
+  // Legacy implementation retained for reference; inactive.
+  // parseLyric(lines) {
+  //     const lxlrcLines = []
+  //     const lrcLines = []
+  //
+  //     for (let line of lines) {
+  //       line = line.trim()
+  //       let result = this.rxps.lineTime.exec(line)
+  //       if (!result) {
+  //         if (line.startsWith('[offset')) {
+  //           lxlrcLines.push(line)
+  //           lrcLines.push(line)
+  //         }
+  //         continue
+  //       }
+  //
+  //       const startMsTime = parseInt(result[1])
+  //       const startTimeStr = this.msFormat(startMsTime)
+  //       if (!startTimeStr) continue
+  //
+  //       let words = line.replace(this.rxps.lineTime, '')
+  //
+  //       lrcLines.push(`${startTimeStr}${words.replace(this.rxps.wordTimeAll, '')}`)
+  //
+  //       let times = words.match(this.rxps.wordTimeAll)
+  //       if (!times) continue
+  //       times = times.map(time => {
+  //         const result = /\((\d+),(\d+),\d+\)/.exec(time)
+  //         return `<${Math.max(parseInt(result[1]) - startMsTime, 0)},${result[2]}>`
+  //       })
+  //       const wordArr = words.split(this.rxps.wordTime)
+  //       wordArr.shift()
+  //       const newWords = times.map((time, index) => `${time}${wordArr[index]}`).join('')
+  //       lxlrcLines.push(`${startTimeStr}${newWords}`)
+  //     }
+  //     return {
+  //       lyric: lrcLines.join('\n'),
+  //       lxlyric: lxlrcLines.join('\n'),
+  //     }
+  //   }
   parseLyric(lines) {
     const lxlrcLines = []
     const lrcLines = []
@@ -97,7 +150,7 @@ const parseTools = {
       if (!times) continue
       times = times.map(time => {
         const result = /\((\d+),(\d+),\d+\)/.exec(time)
-        return `<${Math.max(parseInt(result[1]) - startMsTime, 0)},${result[2]}>`
+        return `<${Math.trunc(Math.max(parseInt(result[1]) - startMsTime, 0))},${result[2]}>`
       })
       const wordArr = words.split(this.rxps.wordTime)
       wordArr.shift()
@@ -109,16 +162,34 @@ const parseTools = {
       lxlyric: lxlrcLines.join('\n'),
     }
   },
+  // Legacy implementation retained for reference; inactive.
+  // parseHeaderInfo(str) {
+  //     str = str.trim()
+  //     str = str.replace(/\r/g, '')
+  //     if (!str) return null
+  //     const lines = str.split('\n')
+  //     return lines.map(line => {
+  //       if (!this.rxps.info.test(line)) return line
+  //       try {
+  //         const info = JSON.parse(line)
+  //         const timeTag = this.msFormat(info.t)
+  //         return timeTag ? `${timeTag}${info.c.map(t => t.tx).join('')}` : ''
+  //       } catch {
+  //         return ''
+  //       }
+  //     })
+  //   }
   parseHeaderInfo(str) {
     str = str.trim()
     str = str.replace(/\r/g, '')
     if (!str) return null
+    const isPad3 = this.rxps.timeMs3.test(str) || !this.rxps.timeMs2.test(str)
     const lines = str.split('\n')
     return lines.map(line => {
       if (!this.rxps.info.test(line)) return line
       try {
         const info = JSON.parse(line)
-        const timeTag = this.msFormat(info.t)
+        const timeTag = this.msFormat(info.t, isPad3)
         return timeTag ? `${timeTag}${info.c.map(t => t.tx).join('')}` : ''
       } catch {
         return ''

@@ -201,6 +201,8 @@ declare namespace LX {
     /**
      * WebDAV 全量备份远端路径（默认 /lx-sync-backups）
      */
+    'webdav.retentionCount'?: number
+    'webdav.retentionDays'?: number
     'webdav.backupPath'?: string
 
     /**
@@ -237,6 +239,18 @@ declare namespace LX {
      * 本地配置备份目录，留空则使用 <data>/backups；相对路径基于 data 目录，绝对路径直接使用
      */
     'configBackup.dir'?: string
+
+    /**
+     * 本地配置自动备份周期（小时），默认 24；留空或非法值回退为 24
+     */
+    'configBackup.intervalHours'?: number
+
+    /**
+     * 本地配置自动备份锚点时间（HH:MM），默认 00:00（即每天 0 点）。
+     * 若设置，则在该时刻首次触发，之后每 intervalHours 小时循环；
+     * 留空（或清除）则从保存配置/启动时起每 intervalHours 小时触发
+     */
+    'configBackup.scheduleTime'?: string
 
     /**
      * 歌单快照额外备份路径（留空则存于用户数据目录 list/snapshot）。
@@ -353,6 +367,7 @@ declare namespace LX {
      */
     'subsonic.localPlaylist'?: boolean
     'subsonic.customPlaylist'?: boolean
+    'subsonic.cachePlaylist'?: boolean
     'subsonic.publicLeaderboards'?: boolean
 
     /**
@@ -380,12 +395,16 @@ declare namespace LX {
      */
     'subsonic.linkRatingToDislike'?: boolean
 
+
+
     /**
-     * 解耦开关(反向): 不喜欢 -> 评星 是否自动联动 (默认 false)
-     * true 时, 网页端 / Subsonic 给某歌点「不喜欢」会回写该用户 subsonic-meta.json 的 ratings 映射(低星),
-     * 使 Subsonic 客户端能看到这颗星; false 时, 「不喜欢」仅写入原生 dislike 规则, 不回写评星, 与评星解耦。
+     * 是否向 Subsonic 客户端暴露 1~5 星评星歌单 (默认 true)
+     * 虚拟只读歌单(不落盘、不影响 LX 客户端「我的歌单」)：id 为 rating_1 ~ rating_5。
+     * rating_1 承载「我不喜欢」：除 1 星歌曲外并入 dislike 规则命中的歌曲，无真实评分时显示 1 星；
+     * 仅控制显示；自动联动分别受对应开关控制，仅补充缺失数据，
+     * 便于只能用评星操作的 Subsonic 客户端通过 1 星查找并处理不喜欢。
      */
-    'subsonic.linkDislikeToRating'?: boolean
+    'subsonic.ratingPlaylists'?: boolean
 
     /**
      * Subsonic 列表中是否隐藏 dislike 命中的歌曲 (默认 true)
@@ -533,6 +552,7 @@ declare namespace LX {
 
     // ===== OpenList 备份/同步 =====
     /** 是否启用 OpenList 备份/同步 */
+    'openlist.playback.enable'?: boolean
     'openlist.enable'?: boolean
     /** OpenList 地址(如 http://127.0.0.1:5244) */
     'openlist.endpoint'?: string
@@ -544,12 +564,11 @@ declare namespace LX {
     'openlist.token'?: string
     /** OpenList 中 lx-music 备份根目录 */
     'openlist.root'?: string
-    /** 上传 OpenList 后是否保留本地文件 */
-    'openlist.keepLocalAfterUpload'?: boolean
     /** 远端可用性校验周期(分钟) */
     'openlist.verifyInterval'?: number
     /** 双向同步周期(分钟) */
     'openlist.syncInterval'?: number
+    'openlist.historyRetentionDays'?: number
     /** 各用户备份目录配置(JSON 数组) */
     'openlist.userBackups'?: string
     /** 是否同步非音频文件(图片/封面等) */

@@ -212,7 +212,7 @@ docker build -t lxserver:local .
 
 ### Subsonic 客户端
 
-支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 状态](docs/subsonic-status.md)。
+支持使用音流、Feishin、Symfonium 等客户端访问已实现的 Subsonic/OpenSubsonic 接口。各客户端支持的功能不同，接口范围和已知限制见 [Subsonic 协议支持](docs/api/subsonic.md)。
 
 默认连接信息：
 
@@ -238,7 +238,7 @@ docker build -t lxserver:local .
 
 Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓存，并加入该账号已启用的自定义目录。网页中临时切换浏览目录，不会改变 Subsonic 的曲库范围。
 
-默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](docs/subsonic-local-library.md)。
+默认返回只读的“本地歌曲”歌单；自定义目录可以单独显示。纯本地歌单保存在服务端，不进入 LX 官方客户端同步；混合歌单中的在线歌曲和本地成员分别保存。详情见 [Subsonic 本地音乐库](docs/guide/subsonic-local-library.md)。
 
 <p align="center">
   <img src="md/subsonic.png" width="500" alt="Subsonic 客户端连接">
@@ -383,7 +383,7 @@ Subsonic 用户目录中的 `subsonic-local-registry.json` 和 `subsonic-local-s
 
 配置备份默认开启，保留 7 天；默认位置为数据目录的 `backups/`。可以用 `CONFIG_BACKUP_DIR` 和 `SNAPSHOT_BACKUP_PATH` 自定义配置备份、歌单快照的存储位置。
 
-在「系统设置 → 云端备份范围」中，可分别选择 WebDAV 和 OpenList 备份的数据类型。两端默认都选中以下五类，但仍需单独启用对应服务并配置连接信息；同时启用会保存两份副本，不会在两个云端之间同步。
+在「备份管理 → 云端备份 → 备份范围」中，可分别选择 WebDAV 和 OpenList 备份的数据类型。两端默认都选中以下五类，但仍需单独启用对应服务并配置连接信息；同时启用会保存两份副本，不会在两个云端之间同步。
 
 | 类型 | 备份内容 |
 | --- | --- |
@@ -404,9 +404,13 @@ Subsonic 用户目录中的 `subsonic-local-registry.json` 和 `subsonic-local-s
 
 类型数组为空表示该端不备份任何数据类型。普通数据备份始终排除缓存、日志、临时文件、运行数据库和本地备份包；程序根目录的音乐和自定义外部音乐库需要另行备份。OpenList 的「永久播放缓存」单独配置，勾选歌曲文件不会自动开启缓存上传或删除本地歌曲。
 
+新增配置项 `configBackup.intervalHours`（默认 24）、`configBackup.scheduleTime`（默认 `00:00`）、`webdav.retentionCount`（默认 5）和 `webdav.retentionDays`（默认 0，不限天数）通过后台或 `config.js` 设置。OpenList 连接、历史保留和播放来源选项也使用配置键，目前没有 `OPENLIST_*` 等对应环境变量；不要把配置键自动改写成大写变量。完整默认值见 [备份配置参考](docs/guide/configuration.md#备份配置项-后台或-config-js)。
+
 WebDAV 增量文件与 ZIP 备份采用相同范围，默认分别每 60 分钟、24 小时执行；OpenList 数据备份保存在其根目录的 `_data/` 下，默认每 60 分钟检查。普通备份保留本地文件。WebDAV 默认也保留云端已有文件，只有显式开启 `backup.webdav.mirrorDeletes` 才会向增量目录传播本地删除，历史 ZIP 不受影响。
 
-WebDAV 默认不在启动时恢复，需显式开启 `backup.webdav.restoreOnStartup`。手动恢复按该端当前勾选范围下载，覆盖本地同名文件并保留本地独有文件，不会反向上传。恢复不是整个目录的原子替换，完成后应重启服务，使配置、账号、歌单和音乐索引完整重新加载。部署新实例前确认云端目录和备份范围，具体步骤见 [备份与恢复](docs/guide/backup-recovery.md)。
+普通 OpenList 上传只检查响应、存在与大小，不下载正文；需要核对内容时，在「备份管理 → 记录与校验 → OpenList → 内容校验」先查看预计流量再手动启动。上传后删除本地缓存仍需完整内容校验。
+
+WebDAV 默认不在启动时恢复，需显式开启 `backup.webdav.restoreOnStartup`。WebDAV 手动恢复先预览，支持仅补缺失或覆盖同名文件，保留本地独有文件，不反向上传；所有所选文件暂存校验后才写入，写入失败尝试回滚，默认保留恢复前副本。恢复不是整个目录的原子替换，完成后应重启服务，使配置、账号、歌单和音乐索引完整重新加载。部署新实例前确认云端目录和备份范围，具体步骤见 [备份与恢复](docs/guide/backup-recovery.md)。
 
 ### 更新与迁移
 
@@ -424,7 +428,7 @@ docker compose logs --tail=100
 
 系统默认使用 `data/config.js`；`DATA_PATH` 改变数据目录，`CONFIG_PATH` 指定独立配置文件。首次启动时，若目标配置文件不存在，会尝试从程序根目录的旧配置初始化。
 
-普通启动按默认值、配置文件、环境变量的顺序合并配置。显式启用 WebDAV 启动恢复时，恢复过程还会重新加载远端配置和账号数据；手动恢复后需要重启服务。当前生效值和配置路径可在管理后台查看。
+普通启动按默认值、配置文件、环境变量的顺序合并配置。显式开启 WebDAV 启动恢复后，还会重新加载备份中的配置和账号；手动恢复后需要重启服务。当前生效值和配置路径可在管理后台查看。
 
 环境变量在进程启动时读取。修改 Compose 中的环境变量后需要重建容器；后台配置是否即时生效取决于具体选项，监听端口和路径调整后应按提示重新连接或重启。
 

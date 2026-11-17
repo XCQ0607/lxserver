@@ -35,7 +35,7 @@ for (const initiallyVisible of [false, true]) {
             lastSearchType: null, lastSearchResultList: [], artistMiniBarHideTimeout: null,
             handleArtistScrollEvent() {},
             fetch: async url => ({ ok: true, json: async () => url.includes('artistDetail') ? artist : { list: [] } }),
-            hideAlbumDetailHeader() {}, renderAlbumDetailHeader() {}, renderResults() {}, getImgUrl: () => '',
+            hideAlbumDetailHeader() {}, renderAlbumDetailHeader() {}, renderResults() {}, renderNetworkSearchFooter() {}, getImgUrl: () => '',
             isAlbumFavorited: () => false, isArtistFavorited: () => false, isArtistDisliked: () => false,
             renderArtistMiniBar() {}, initArtistScrollListener() {},
             loadArtistSongs: async () => { songsLoaded = true; },

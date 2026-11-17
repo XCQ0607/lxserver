@@ -50,20 +50,23 @@ export default defineConfig({
             text: '核心功能',
             items: [
               { text: '同步服务器设置', link: '/guide/sync-server' },
-              { text: 'Web 播放器指南', link: '/guide/web-player' }
+              { text: 'Subsonic 本地音乐库', link: '/guide/subsonic-local-library' },
+              { text: '播放器、歌词与解析顺序', link: '/guide/web-player' }
             ]
           },
           {
             text: '配置指南',
             items: [
               { text: '配置文件及环境变量', link: '/guide/configuration' },
-              { text: '云端备份与恢复', link: '/guide/backup-recovery' }
+              { text: '备份与恢复', link: '/guide/backup-recovery' }
             ]
           },
           {
             text: 'API 文档',
             items: [
-              { text: '服务端 API 参考', link: '/api/reference' }
+              { text: '服务端 API 参考', link: '/api/reference' },
+              { text: 'HTTP 路由索引', link: '/api/routes' },
+              { text: 'Subsonic 协议支持', link: '/api/subsonic' }
             ]
           }
         ],
@@ -123,20 +126,23 @@ export default defineConfig({
             text: 'Core Features',
             items: [
               { text: 'Sync Server Settings', link: '/en/guide/sync-server' },
-              { text: 'Web Player Guide', link: '/en/guide/web-player' }
+              { text: 'Subsonic Local Library', link: '/en/guide/subsonic-local-library' },
+              { text: 'Playback, Lyrics & Sources', link: '/en/guide/web-player' }
             ]
           },
           {
             text: 'Config Guide',
             items: [
               { text: 'Config & Env Vars', link: '/en/guide/configuration' },
-              { text: 'Cloud Backup & Recovery', link: '/en/guide/backup-recovery' }
+              { text: 'Backup & Recovery', link: '/en/guide/backup-recovery' }
             ]
           },
           {
             text: 'API Docs',
             items: [
-              { text: 'Server API Ref', link: '/en/api/reference' }
+              { text: 'Server API Ref', link: '/en/api/reference' },
+              { text: 'HTTP Route Index', link: '/en/api/routes' },
+              { text: 'Subsonic Protocol Support', link: '/en/api/subsonic' }
             ]
           }
         ],

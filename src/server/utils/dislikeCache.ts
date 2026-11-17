@@ -1,5 +1,5 @@
 import type { DislikeRuleSet } from '@/modules/dislike/match'
-import { parseDislikeRules } from '@/modules/dislike/match'
+import { scopeDislikeRules, parseDislikeRules } from '@/modules/dislike/match'
 
 /**
  * dislike 规则集解析缓存。
@@ -52,12 +52,13 @@ export async function getCachedDislikeRuleSet(
         if (Array.isArray(albumsArr)) {
           const { normalizeText, splitSingers } = require('@/modules/dislike/match')
           for (const x of albumsArr) {
+            const scoped = scopeDislikeRules(set, x.source)
             const albumName = normalizeText(String(x.name || ''))
             if (!albumName) continue
-            let sSet = set.albums.get(albumName)
+            let sSet = scoped.albums.get(albumName)
             if (!sSet) {
               sSet = new Set<string>()
-              set.albums.set(albumName, sSet)
+              scoped.albums.set(albumName, sSet)
             }
             const singers = splitSingers(x.artistName)
             for (const s of singers) sSet.add(s)
@@ -70,8 +71,9 @@ export async function getCachedDislikeRuleSet(
         if (Array.isArray(artistsArr)) {
           const { normalizeText } = require('@/modules/dislike/match')
           for (const x of artistsArr) {
+            const scoped = scopeDislikeRules(set, x.source)
             const singerName = normalizeText(String(x.name || ''))
-            if (singerName) set.singerNames.add(singerName)
+            if (singerName) scoped.singerNames.add(singerName)
           }
         }
       }

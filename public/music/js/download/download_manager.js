@@ -429,15 +429,18 @@ class DownloadManager {
 
             const batchResults = await Promise.all(batches.map(async (batch) => {
                 try {
-                    const resp = await fetch(`/api/music/cache/progress?ids=${encodeURIComponent(batch.join(','))}`);
+                    const resp = await fetch(`/api/music/cache/progress?ids=${encodeURIComponent(batch.join(','))}`, { headers: this.getServerQueueHeaders() });
+                    if (!resp.ok) return null;
                     const result = await resp.json();
-                    return result.success ? (result.data || {}) : {};
+                    return result.success ? (result.data || {}) : null;
                 } catch (e) {
                     console.warn('[DownloadManager] Batch progress poll failed:', e);
-                    return {};
+                    return null;
                 }
             }));
-            const data = Object.assign({}, ...batchResults);
+            // Failed queries are not evidence that a download has no progress.
+            const queriedIds = new Set(batches.flatMap((batch, index) => batchResults[index] === null ? [] : batch));
+            const data = Object.assign({}, ...batchResults.filter(Boolean));
 
                 // 处理有进度数据的任务
                 Object.keys(data).forEach(rawId => {
@@ -501,7 +504,7 @@ class DownloadManager {
                 // [Fix] 处理没有进度数据的任务：key 已被删除 = 下载完成或从未开始
                 tasksToPoll.forEach(task => {
                     const rawId = task.isServer ? this.getTaskServerSongKey(task) : task.id;
-                    if (data[rawId] === undefined && (task.status === 'downloading' || task.status === 'tagging')) {
+                    if (queriedIds.has(rawId) && data[rawId] === undefined && (task.status === 'downloading' || task.status === 'tagging')) {
                         // 没有进度条目 + 状态是 downloading/tagging
                         // → 如果之前进度很高或在嵌入中，说明已从内存队列移除，逻辑上视为已完成
                         console.log(`[DownloadManager] Missing progress info for ${task.id}, status: ${task.status}, prog: ${task.progress}`);
@@ -515,9 +518,9 @@ class DownloadManager {
                         } else if (task.nativeDownloadDispatched) {
                             task.missingProgressCount = (task.missingProgressCount || 0) + 1;
                             if (task.missingProgressCount >= 6) {
-                                task.status = 'error';
+                                task.status = 'handedoff';
                                 task.speed = 0;
-                                task.errorMsg = '浏览器未启动下载';
+                                task.errorMsg = '';
                                 this.renderTask(task);
                                 this.saveTasks();
                                 this.processQueue();
@@ -659,6 +662,8 @@ class DownloadManager {
         const normalizedCover = cover && cover !== '/music/assets/logo.svg' ? cover : '';
         return {
             ...song,
+            source: song.source || song.meta?.source || '',
+            songmid: song.songmid || song.songId || song.meta?.songmid || song.meta?.songId || song.id || '',
             img: song.img || normalizedCover,
             meta: {
                 ...(song.meta || {}),
@@ -684,6 +689,10 @@ class DownloadManager {
             types: song.types,
             _types: song._types,
             strMediaMid: song.strMediaMid,
+            copyrightId: song.copyrightId || song.meta?.copyrightId,
+            lrcUrl: song.lrcUrl || song.meta?.lrcUrl,
+            mrcUrl: song.mrcUrl || song.meta?.mrcUrl,
+            trcUrl: song.trcUrl || song.meta?.trcUrl,
             hash: song.hash,
             meta: song.meta ? {
                 songmid: song.meta.songmid,
@@ -886,6 +895,7 @@ class DownloadManager {
 
     // Start a specific download task
     async startDownload(task) {
+        task.song = this.getSongInfoForServer(task.song);
 
         task.status = 'downloading';
         task.errorMsg = '';
@@ -912,12 +922,12 @@ class DownloadManager {
             } else {
                 const downloadResolver = await this.waitForDownloadResolver();
                 const resolveData = await downloadResolver(task.song, quality, true);
-                if (!resolveData || !resolveData.url) throw new Error('No download URL found');
+                if (!resolveData || !resolveData.url) throw new Error('未获取到下载地址');
 
                 const resolvedSong = resolveData.songInfo || task.song;
                 const resolvedQuality = resolveData.quality || resolveData.type || quality;
                 if (resolvedSong !== task.song) {
-                    task.song = resolvedSong;
+                    task.song = this.getSongInfoForServer(resolvedSong);
                 }
                 task.quality = resolvedQuality;
                 this.renderTask(task);
@@ -972,6 +982,10 @@ class DownloadManager {
                     (task.song.songmid || task.song.id) ? `songmid=${encodeURIComponent(task.song.songmid || task.song.id)}` : '',
                     task.song.hash ? `hash=${encodeURIComponent(task.song.hash)}` : '',
                     task.song.interval ? `interval=${encodeURIComponent(task.song.interval)}` : '',
+                    ...['copyrightId', 'albumId', 'lrcUrl', 'mrcUrl', 'trcUrl'].map(key => {
+                        const value = task.song[key] || task.song.meta?.[key];
+                        return value ? `${key}=${encodeURIComponent(value)}` : '';
+                    }),
                     (window.settings?.embedLyricToFile !== false) ? 'lyric=1' : ''
                 ].filter(Boolean).join('&');
 
@@ -982,23 +996,40 @@ class DownloadManager {
             }
 
             if (window.authorizeMediaUrl) finalUrl = window.authorizeMediaUrl(finalUrl);
+            const ownMediaUrl = finalUrl.startsWith('/api/music/') || (() => {
+                try {
+                    const parsed = new URL(finalUrl, window.location.href);
+                    return parsed.origin === window.location.origin && parsed.pathname.startsWith('/api/music/');
+                } catch { return false; }
+            })();
 
             if (task.useNativeDownload) {
+                if (ownMediaUrl) {
+                    if (typeof window.ensureDownloadSession !== 'function') throw new Error('下载认证组件未就绪，请刷新页面');
+                    await window.ensureDownloadSession();
+                }
                 if (task.controller.signal.aborted) throw new DOMException('Download paused', 'AbortError');
                 this.triggerNativeDownload(finalUrl, filename);
                 task.nativeDownloadDispatched = true;
-                task.status = 'downloading';
+                // Cached files have no proxy progress entry. Do not wait for one.
+                task.status = isLocalCache ? 'handedoff' : 'downloading';
                 task.progress = 0;
                 task.speed = 0;
                 task.controller = null;
                 this.renderTask(task);
                 this.saveTasks();
+                this.processQueue();
                 return;
             }
 
             // 2. Fetch the actual file using Streams to track progress
-            const response = await fetch(finalUrl, { signal: task.controller.signal });
-            if (!response.ok) throw new Error(`HTTP ${response.status} when fetching file`);
+            const response = await fetch(finalUrl, {
+                signal: task.controller.signal,
+                ...(ownMediaUrl ? { headers: window.getUserAuthHeaders?.() || {} } : {})
+            });
+            if (!response.ok) throw Object.assign(new Error(response.status === 401
+                ? '登录已失效，请重新登录后重试下载'
+                : `下载请求失败（HTTP ${response.status}）`), { status: response.status });
 
             const contentLength = response.headers.get('content-length');
             if (contentLength) {
@@ -1082,10 +1113,11 @@ class DownloadManager {
                 task.errorMsg = '已暂停';
             } else {
                 console.error(`Download error for ${task.song.name}:`, error);
-                task.errorMsg = error.message;
+                task.errorMsg = error.message === 'Failed to fetch' ? '下载请求失败，请检查网络或服务端日志' : (error.message || '下载失败');
+                task.speed = 0;
 
                 // Retry logic
-                if (task.retryCount < task.maxRetries) {
+                if (![401, 403, 409].includes(error.status) && task.retryCount < task.maxRetries) {
                     task.retryCount++;
                     task.status = 'error'; // Show error momentarily
                     this.renderTask(task);
@@ -1476,7 +1508,7 @@ class DownloadManager {
 
         if (this.progressTextEl) {
             const overallProgress = pctCount > 0 ? Math.round(pctTotal / pctCount) : 0;
-            this.progressTextEl.innerText = `${overallProgress}%`;
+            this.progressTextEl.innerText = pctCount ? `${overallProgress}%` : (this.tasks.some(t => t.status === 'handedoff') ? '请查看浏览器下载记录' : '0%');
         }
     }
 
@@ -1519,7 +1551,7 @@ class DownloadManager {
             const hasRealProgress = isServerTask && (task.totalBytes > 0 || task.progress > 0);
             statusText = isServerTask
                 ? (hasRealProgress ? `云端 ${progressWidth}%` : '云端下载中')
-                : (task.nativeDownloadDispatched ? `浏览器 ${progressWidth}%` : `${progressWidth}%`);
+                : (task.nativeDownloadDispatched ? (task.totalBytes > 0 || task.progress > 0 ? `服务端 ${progressWidth}%` : '等待下载进度') : `${progressWidth}%`);
             speedText = `${this.formatSize(Math.max(0, task.speed || 0))}/s`;
 
             if (!isServerTask && !task.nativeDownloadDispatched) {
@@ -1549,9 +1581,12 @@ class DownloadManager {
                     <i class="fas fa-redo text-xs"></i>
                 </button>
             `;
+        } else if (task.status === 'handedoff') {
+            statusBg = 'bg-blue-100 dark:bg-blue-500/15 text-blue-600 dark:text-blue-400';
+            statusText = '已交给浏览器，请查看下载记录';
         } else if (task.status === 'finished' || task.status === 'exists') {
             statusBg = 'bg-emerald-100 dark:bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
-            statusText = task.status === 'exists' ? '已存在' : (isServerTask ? '已存云端' : '已完成');
+            statusText = task.status === 'exists' ? '已存在' : (isServerTask ? '已存云端' : '已交给浏览器保存');
             progressWidth = 100;
         } else if (task.status === 'waiting') {
             statusText = isServerTask ? '云端排队' : '等待中';
@@ -1582,7 +1617,7 @@ class DownloadManager {
         return `
             <div id="dl-task-${task.id}" data-status="${task.status}" data-native="${task.nativeDownloadDispatched ? '1' : '0'}" data-quality="${this.escapeHtml(qualityLabel)}" class="relative p-3 rounded-xl t-bg-panel hover:bg-gray-50/50 dark:hover:bg-gray-800/50 transition-colors border border-transparent hover:t-border-main group flex gap-3 overflow-hidden shadow-sm mb-2">
                 <!-- Progress Bar Background -->
-                ${task.status !== 'waiting' && task.status !== 'error' ? `
+                ${task.status !== 'waiting' && task.status !== 'error' && task.status !== 'handedoff' ? `
                 <div data-role="progress-bar" class="absolute bottom-0 left-0 h-1.5 ${isServerTask ? 'bg-orange-400' : 'bg-emerald-400'} transition-all duration-300 opacity-60" style="width: ${progressWidth}%"></div>
                 ` : ''}
 
@@ -1741,7 +1776,7 @@ class DownloadManager {
                     const hasRealProgress = isServerTask && (task.totalBytes > 0 || task.progress > 0);
                     statusBadge.textContent = isServerTask
                         ? (hasRealProgress ? `云端 ${progressWidth}%` : '云端下载中')
-                        : (task.nativeDownloadDispatched ? `浏览器 ${progressWidth}%` : `${progressWidth}%`);
+                        : (task.nativeDownloadDispatched ? (task.totalBytes > 0 || task.progress > 0 ? `服务端 ${progressWidth}%` : '等待下载进度') : `${progressWidth}%`);
                 }
             }
 

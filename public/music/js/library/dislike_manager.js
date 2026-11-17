@@ -15,6 +15,7 @@ window.DislikeManager = (function () {
     const API_BASE = '/api/music/dislike';
 
     const state = {
+        scoped: {},
         initialized: false,
         loading: false,
         exact: new Set(),
@@ -30,7 +31,7 @@ window.DislikeManager = (function () {
     };
 
     /** 归一化：与服务端一致（@ → #、去空格、小写） */
-    const normalize = (v) => String(v ?? '').replaceAll('@', '#').trim().toLowerCase();
+    const normalize = (v) => String(v ?? '').replaceAll('@', '#').trim().toLowerCase().normalize('NFKC').replace(/\s*([()])\s*/g, '$1');
 
     /** 拆分歌手：「A、B」「A,B」「A/B」「A feat.B」「A & B」 */
     const splitSingers = (singer) =>
@@ -84,6 +85,7 @@ window.DislikeManager = (function () {
     }
 
     function applyData(data, options) {
+        state.scoped = data?.scoped || {};
         state.exact = new Set(data?.exact || []);
         state.musicNames = new Set(data?.musicNames || []);
         state.singerNames = new Set(data?.singerNames || []);
@@ -105,7 +107,7 @@ window.DislikeManager = (function () {
         state.loading = true;
         try {
             const r = await request(API_BASE);
-            if (r && r.success) applyData(r.data, r.options);
+            if (r && r.success) { applyData(r.data, r.options); if (r.warning) window.showInfo?.(r.warning); window.dispatchEvent(new Event('ratingdatachange')); }
         } catch (e) {
             console.error('[Dislike] load failed:', e);
         } finally {
@@ -115,15 +117,19 @@ window.DislikeManager = (function () {
     }
 
     /** 判定一首歌是否命中不喜欢规则 */
-    function isDisliked(song) {
+    function isDisliked(song, selected) {
         if (!song) return false;
+        const active = selected || state;
+        for (const [source, rules] of Object.entries(active.scoped || {})) {
+            if ((active.crossSource || song.source === source) && isDisliked(song, { ...active, scoped: {}, exact: new Set(rules.exact), musicNames: new Set(rules.musicNames), singerNames: new Set(rules.singerNames), albums: rules.albums })) return true;
+        }
         const name = normalize(song.name);
         const allSingers = splitSingers(song.singer);
         // primary 模式只看主唱（第一位歌手）
-        const singers = state.duetMode === 'primary' ? allSingers.slice(0, 1) : allSingers;
+        const singers = active.duetMode === 'primary' ? allSingers.slice(0, 1) : allSingers;
         // 候选歌名：原名 + 去后缀名（去重），提升 Live / Remix 版本召回
         const candidateNames = Array.from(
-            new Set([name, state.normalizeName ? normalizeSongName(song.name) : ''].filter(Boolean))
+            new Set([name, active.normalizeName ? normalizeSongName(song.name) : ''].filter(Boolean))
         );
 
         // 1. 专辑维度（专辑名 + 歌手 双重校验）
@@ -131,15 +137,15 @@ window.DislikeManager = (function () {
         const albumName = getAlbumName(song);
         if (albumName) {
             const an = normalize(albumName);
-            for (const alb of state.albums) {
+            for (const alb of active.albums) {
                 if (normalize(alb.albumName ?? '') !== an) continue;
                 if (alb.singers && alb.singers.length) {
                     if (!singers.length) {
                         // 歌曲没有歌手信息：requireSinger 时无法确认，保守放过
-                        if (state.requireSinger) continue;
+                        if (active.requireSinger) continue;
                     } else {
                         const albumSingers = alb.singers.map((s) =>
-                            state.normalizeName ? normalizeSongName(s) : normalize(s)
+                            active.normalizeName ? normalizeSongName(s) : normalize(s)
                         );
                         const hit = singers.some((x) =>
                             albumSingers.some((a) => x === a || x.includes(a) || a.includes(x))
@@ -153,12 +159,12 @@ window.DislikeManager = (function () {
 
         // 2. 歌手维度
         if (singers.length) {
-            if (state.duetMode === 'all') {
+            if (active.duetMode === 'all') {
                 // all：所有歌手都被屏蔽才算命中，避免牵连合作者
-                if (singers.every((s) => state.singerNames.has(s))) return true;
+                if (singers.every((s) => active.singerNames.has(s))) return true;
             } else {
                 for (const s of singers) {
-                    if (state.singerNames.has(s)) return true;
+                    if (active.singerNames.has(s)) return true;
                 }
             }
         }
@@ -167,13 +173,13 @@ window.DislikeManager = (function () {
         for (const n of candidateNames) {
             if (!n) continue;
             // 纯歌名规则：requireSinger 时不单独命中，避免同名歌被误杀
-            if (state.musicNames.has(n) && !state.requireSinger) return true;
+            if (active.musicNames.has(n) && !active.requireSinger) return true;
             if (singers.length) {
-                if (state.duetMode === 'all') {
-                    if (singers.every((s) => state.exact.has(`${n}@${s}`))) return true;
+                if (active.duetMode === 'all') {
+                    if (singers.every((s) => active.exact.has(`${n}@${s}`))) return true;
                 } else {
                     for (const s of singers) {
-                        if (state.exact.has(`${n}@${s}`)) return true;
+                        if (active.exact.has(`${n}@${s}`)) return true;
                     }
                 }
             }
@@ -184,7 +190,7 @@ window.DislikeManager = (function () {
 
     async function mutate(action, payload) {
         const r = await request(`${API_BASE}/${action}`, payload);
-        if (r && r.success) applyData(r.data, r.options);
+        if (r && r.success) { applyData(r.data, r.options); if (r.warning) window.showInfo?.(r.warning); window.dispatchEvent(new Event('ratingdatachange')); }
         return !!(r && r.success);
     }
 

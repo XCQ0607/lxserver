@@ -215,6 +215,7 @@ export default {
 
   // 获取标签
   getTag(tryNum = 0) {
+    if (tryNum > 2) return Promise.reject(new Error('try max num'))
     if (this._requestObj_tags) this._requestObj_tags.cancelHttp()
     this._requestObj_tags = httpFetch('https://music.163.com/weapi/playlist/catalogue', {
       method: 'post',

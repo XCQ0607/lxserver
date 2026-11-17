@@ -1,5 +1,5 @@
 import { SPLIT_CHAR } from '@/constants'
-import { parseAlbumRule } from './utils'
+import { canonicalDislikeRule, parseAlbumRule } from './utils'
 import { normalizeText, normalizeSongName } from '@/server/utils/songVersion'
 
 /**
@@ -20,6 +20,7 @@ export const splitSingers = (singer: unknown): string[] =>
 
 export interface DislikeRuleSet {
   /** 精确规则：歌名@歌手 */
+  scoped?: Map<string, DislikeRuleSet>
   exact: Set<string>
   /** 纯歌名规则 */
   musicNames: Set<string>
@@ -43,7 +44,23 @@ export function parseDislikeRules(rules: string): DislikeRuleSet {
   }
 
   for (const raw of String(rules || '').split('\n')) {
-    const line = raw.trim()
+    let line = raw.trim()
+    const scope = line.indexOf('::')
+    if (scope >= 0) {
+      const source = line.slice(0, scope)
+      const body = line.slice(scope + 2)
+      if (source !== '*') {
+        set.scoped ||= new Map()
+        const prior = set.scoped.get(source)
+        const parsed = parseDislikeRules(body)
+        if (prior) {
+          for (const key of ['exact', 'musicNames', 'singerNames'] as const) for (const value of parsed[key]) prior[key].add(value)
+          for (const [name, singers] of parsed.albums) { const target = prior.albums.get(name) || new Set<string>(); for (const singer of singers) target.add(singer); prior.albums.set(name, target) }
+        } else set.scoped.set(source, parsed)
+        continue
+      }
+      line = body
+    }
     if (!line) continue
 
     // 专辑维度（!<专辑名>@<歌手>，按歌手多条，聚合到专辑名 -> 歌手集合）
@@ -60,7 +77,7 @@ export function parseDislikeRules(rules: string): DislikeRuleSet {
 
     // 歌曲 / 歌手维度
     const [name, singer] = line.split(SPLIT_CHAR.DISLIKE_NAME)
-    const n = normalizeText(name)
+    const n = canonicalDislikeRule(normalizeText(name))
     const s = normalizeText(singer)
     // 额外登记「去后缀」版本，让「晴天 (Live)」也能命中「晴天」规则（反之亦然）。
     // 开关关闭时匹配端不会用归一化名，这些额外 key 自然不会被命中。
@@ -145,19 +162,24 @@ export function isDisliked(
   set: DislikeRuleSet,
   options: DislikeMatchOptions = {},
 ): boolean {
+  if (set.scoped) {
+    for (const [source, rules] of set.scoped) {
+      if ((options.crossSource || source === input.source) && isDisliked(input, rules, options)) return true
+    }
+  }
   const crossSource = options.crossSource === true
   const duetMode = options.duetMode || 'any'
   const normalizeName = options.normalizeName !== false
   const requireSinger = options.requireSinger !== false
 
-  const name = normalizeText(input.name)
+  const name = canonicalDislikeRule(normalizeText(input.name))
   const allSingers = splitSingers(input.singer)
   // primary 模式只看主唱（第一位歌手）
   const singers = duetMode === 'primary' ? allSingers.slice(0, 1) : allSingers
   const source = normalizeText(input.source)
   // 候选歌名：原名 + 去后缀名（去重），提升对 Live / Remix 等版本的召回
   const candidateNames = Array.from(new Set(
-    [name, normalizeName ? normalizeSongName(input.name) : ''].filter(Boolean)
+    [name, normalizeName ? canonicalDislikeRule(normalizeSongName(input.name)) : ''].filter(Boolean)
   ))
 
   // 1. 专辑维度（专辑名 + 歌手集合，复用 duetMode 决定多歌手判定方式）
@@ -220,4 +242,12 @@ export function filterDisliked<T>(
 ): T[] {
   if (!items || items.length === 0) return items
   return items.filter(item => !isDisliked(toInput(item), set, options))
+}
+
+export function scopeDislikeRules(set: DislikeRuleSet, source?: string): DislikeRuleSet {
+  if (!source) return set
+  set.scoped ||= new Map()
+  let rules = set.scoped.get(source)
+  if (!rules) { rules = parseDislikeRules(''); set.scoped.set(source, rules) }
+  return rules
 }

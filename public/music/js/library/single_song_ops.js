@@ -109,6 +109,9 @@ async function fetchRemoteQualitySize(song, quality) {
         if (!res.ok) throw new Error(await res.text());
 
         const data = await res.json();
+        if (data?.success !== true || data.type !== quality || !Number.isSafeInteger(Number(data.bytes)) || Number(data.bytes) < 1024) {
+            throw new Error('该音质未通过可用性验证');
+        }
         const probe = {
             size: data?.size || null,
             bytes: Number(data?.bytes) || 0,
@@ -160,19 +163,28 @@ async function getServerFolders(song, qualities) {
 
 // 给音质选项加上"服务器已缓存/已下载"标注
 async function buildQualityOptions(song, qualities, forServer) {
-    const labels = await buildQualityOptionLabels(song, qualities);
     const folders = await getServerFolders(song, qualities);
-
-    return labels.map((label, idx) => {
-        const folder = (folders || {})[qualities[idx]];
-        if (!folder) return { label, disabled: false };
+    window.showLoading?.('正在确认可用音质...');
+    let probes;
+    try {
+        probes = await Promise.all(qualities.map(q => folders?.[q] ? null : fetchRemoteQualitySize(song, q)));
+    } finally {
+        window.hideLoading?.();
+    }
+    return qualities.flatMap((quality, idx) => {
+        const folder = (folders || {})[quality];
+        const probe = probes[idx];
+        if (!folder && (!probe || probe.resolvedQuality !== quality || probe.bytes < 1024)) return [];
+        const label = getQualityOptionLabel(song, quality);
+        if (!folder) return [{ label, quality, disabled: false }];
         const stateText = window.ServerFileState.stateText(folder);
         const isDownloaded = forServer && folder === 'music';
-        return {
+        return [{
             label: `${label} · ${stateText}`,
+            quality,
             disabled: false,
             hint: isDownloaded ? '该音质已在服务器下载目录，再次下载将覆盖更新' : stateText
-        };
+        }];
     });
 }
 
@@ -447,10 +459,14 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
         if (window.SystemDownloadManager) {
             const availableQualities = getSelectableQualityOrder(song);
             const qualityOptions = await buildQualityOptions(song, availableQualities, false);
+            if (!qualityOptions.length) {
+                showInfo('暂未确认到可用音质，请稍后重试');
+                return false;
+            }
             const selectedQualityDisplay = await showOptions('选择下载音质', `请选择对 [${song.name}] 的下载音质：`, qualityOptions);
             if (!selectedQualityDisplay) return false;
 
-            const targetQuality = availableQualities[qualityIndexOfLabel(qualityOptions, selectedQualityDisplay)];
+            const targetQuality = qualityOptions[qualityIndexOfLabel(qualityOptions, selectedQualityDisplay)]?.quality;
             if (!targetQuality) return false;
 
             window.SystemDownloadManager.addTasks([{
@@ -481,8 +497,8 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
         if (!targetQuality) {
             const availableQualities = getSelectableQualityOrder(song);
             const qualityOptions = await buildQualityOptions(song, availableQualities, true);
-            if (qualityOptions.every(o => o.disabled)) {
-                showInfo(`[${song.name}] 可选音质都已在服务器下载目录`);
+            if (!qualityOptions.length) {
+                showInfo('暂未确认到可用音质，请稍后重试');
                 return false;
             }
             const selectedQualityDisplay = await showOptions('选择缓存音质', `请选择对 [${song.name}] 的缓存音质：`, qualityOptions);
@@ -490,7 +506,7 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
 
             const picked = qualityIndexOfLabel(qualityOptions, selectedQualityDisplay);
             if (picked === -1) return false;
-            targetQuality = availableQualities[picked];
+            targetQuality = qualityOptions[picked].quality;
         }
 
         // 该音质已在服务器缓存目录：直接移动过去，不联网解析音源

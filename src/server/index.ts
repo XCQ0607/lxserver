@@ -1,5 +1,6 @@
 import {
   startServer,
+  reloadServerData,
   // stopServer,
   getStatus,
   // generateCode,
@@ -8,6 +9,7 @@ import {
 
 export {
   startServer,
+  reloadServerData,
   // stopServer,
   getStatus,
   // generateCode,

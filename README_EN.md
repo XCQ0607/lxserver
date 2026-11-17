@@ -206,7 +206,7 @@ Do not use `/admin`, `/rest` or the player access password for LX sync. Review m
 
 ### Subsonic clients
 
-Compatible clients include Yinliu, Feishin and Symfonium. The server implements Subsonic/OpenSubsonic endpoints for library browsing, search, playback and related features; the UI and available features vary by client.
+Compatible clients include Yinliu, Feishin and Symfonium. The server implements Subsonic/OpenSubsonic endpoints for library browsing, search, playback and related features; the UI and available features vary by client. See [Subsonic protocol support](docs/en/api/subsonic.md) for coverage and limits.
 
 | Field | Value |
 | --- | --- |
@@ -220,7 +220,7 @@ By default Subsonic shares the main port. Separate listening requires `subsonic.
 
 Online search uses `subsonic.onlineSearch` and `subsonic.onlineSearchMode`: `fallback` supplements insufficient local results; `merge` combines local and online results; `local_only` stays local. Query prefixes include `wy:`, `tx:`, `kw:`, `kg:`, `mg:`, `online:` and `local:`. Online playback still needs a working custom source.
 
-Local library selection follows the account's saved storage location plus its enabled custom directory. A temporary browsing switch in the web UI does not change that library. Read-only local/custom playlists can be exposed separately. Pure local playlists stay on the server; only the online portion of mixed playlists enters LX native sync.
+Local library selection follows the account's saved storage location plus its enabled custom directory. A temporary browsing switch in the web UI does not change that library. Read-only local/custom playlists can be exposed separately. Pure local playlists stay on the server; only the online portion of mixed playlists enters LX native sync. See [Subsonic local music library](docs/en/guide/subsonic-local-library.md).
 
 <p align="center">
   <img src="md/subsonic.png" width="500" alt="Subsonic connection">
@@ -340,7 +340,7 @@ Keep `subsonic-local-registry.json` and `subsonic-local-state.json` with user da
 
 Playlist snapshots restore playlists; configuration backups restore configuration. Neither substitutes for audio backups. Configuration backups default to a seven-day retention period under the data directory's `backups/` folder.
 
-In **System settings → Cloud backup scope**, select data types independently for WebDAV and OpenList. Both default to all five types below, but each provider must also be enabled and configured. Enabling both creates two copies; it does not synchronize the providers with each other.
+In **Backup management → Cloud backup → Backup scope**, select data types independently for WebDAV and OpenList. Both default to all five types below, but each provider must also be enabled and configured. Enabling both creates two copies; it does not synchronize the providers with each other.
 
 | Type | Contents |
 | --- | --- |
@@ -361,9 +361,13 @@ These system settings are saved in the active `config.js` and have no correspond
 
 An empty type array selects no data for that provider. Ordinary data backups always exclude caches, logs, temporary files, runtime databases and local backup archives. Back up root-directory music and custom external libraries separately. OpenList's **permanent playback cache** is configured separately; selecting music files does not enable cache uploads or local song deletion.
 
+Set `configBackup.intervalHours` (default 24), `configBackup.scheduleTime` (default `00:00`), `webdav.retentionCount` (default 5) and `webdav.retentionDays` (default 0, no age limit) in the admin UI or `config.js`. OpenList connection/history/playback settings also use configuration keys; there are currently no corresponding `OPENLIST_*` environment mappings. See the [configuration reference](docs/en/guide/configuration.md#backup-configuration-keys-admin-ui-or-config-js) for defaults.
+
 WebDAV incremental files and ZIP backups use the same scope, running every 60 minutes and 24 hours by default. OpenList stores data backups under `_data/` within its root and checks every 60 minutes by default. Ordinary backups retain local files. WebDAV also retains existing cloud files by default; explicitly enabling `backup.webdav.mirrorDeletes` propagates local deletions to the incremental directory, without changing historical ZIPs.
 
-WebDAV startup restore is disabled by default and requires `backup.webdav.restoreOnStartup`. Manual restore downloads the provider's currently selected types, overwrites matching local files and preserves local-only files, without uploading local data. Restore is not an atomic replacement of the entire directory. Restart the service afterward to fully reload configuration, accounts, playlists and music indexes. Confirm the cloud namespace and selected scope before connecting a new installation. See [Backup and recovery](docs/en/guide/backup-recovery.md) for procedures.
+Ordinary OpenList uploads check existence and size without downloading the body. Use **Backup management → Records and verification → OpenList → Content verification** for manual SHA-256 checks and preview the maximum body-read estimate before starting. Upload-and-delete cache mode still requires full verification.
+
+WebDAV startup restore is disabled by default and requires `backup.webdav.restoreOnStartup`. WebDAV manual restore previews the selected scope, supports missing-only or overwrite, and preserves local-only files without uploads. Required files are staged and checked before replacement; commit failure attempts rollback, with pre-restore copies kept by default. Restore is not an atomic replacement of the entire directory. Restart the service afterward to fully reload configuration, accounts, playlists and music indexes. Confirm the cloud namespace and selected scope before connecting a new installation. See [Backup and recovery](docs/en/guide/backup-recovery.md) for procedures.
 
 For container updates:
 
@@ -427,7 +431,7 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 | `ENABLE_LOGIN_USER_CACHE_RESTRICTION` | `user.enableLoginCacheRestriction` | Enable cache settings restriction for logged-in non-admin users | `false` |
 | `ENABLE_CACHE_SIZE_LIMIT` | `user.enableCacheSizeLimit` | Enable cache size limit (auto-cleanup via LRU) | `false` |
 | `CACHE_SIZE_LIMIT` | `user.cacheSizeLimit` | Cache size limit in MB | `2000` |
-| `CONFIG_BACKUP_ENABLE` | `configBackup.enable` | Enable automatic config.js backup (creates daily backup copy) | `true` |
+| `CONFIG_BACKUP_ENABLE` | `configBackup.enable` | Enable automatic config.js backup (default: every 24 hours) | `true` |
 | `CONFIG_BACKUP_RETENTION_DAYS` | `configBackup.retentionDays` | Config backup retention period in days (auto cleans up expired backups) | `7` |
 | `CONFIG_BACKUP_DIR` | `configBackup.dir` | Backup directory, relative to data; empty uses data/backups | `empty` |
 | `SNAPSHOT_BACKUP_PATH` | `snapshot.backupPath` | Custom storage path for playlist snapshots (absolute or relative to `./data`) | - |

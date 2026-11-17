@@ -31,12 +31,21 @@
             };
         },
     };
-    window.setSearchStatus = function (message = '', loading = false) {
+    let searchStatus = { message: '', loading: false };
+    window.refreshSearchStatusVisibility = function () {
+        const { message, loading } = searchStatus;
+        const searchView = document.getElementById('view-search');
+        const visible = window.currentSearchScope === 'network' &&
+            !!searchView && !searchView.classList.contains('hidden');
+        if (!visible) {
+            document.getElementById('network-search-more')?.classList.add('hidden');
+            window.SearchSuggestions?.hide();
+        }
         const status = document.getElementById('search-status');
         const wave = document.getElementById('search-progress-wave');
-        if (wave) wave.classList.toggle('is-active', !!loading);
+        if (wave) wave.classList.toggle('is-active', visible && !!loading);
         if (!status) return;
-        status.classList.toggle('hidden', !message);
+        status.classList.toggle('hidden', !visible || !message);
         const textEl = document.getElementById('search-status-text');
         if (textEl) textEl.textContent = message;
         const cancelBtn = document.getElementById('search-cancel');
@@ -45,6 +54,10 @@
         if (homeBtn) homeBtn.hidden = !message;
         const spinner = document.getElementById('search-status-spinner');
         if (spinner) spinner.style.display = loading ? 'inline-flex' : 'none';
+    };
+    window.setSearchStatus = function (message = '', loading = false) {
+        searchStatus = { message, loading };
+        window.refreshSearchStatusVisibility();
     };
     window.cancelMusicSearch = function () {
         cancel();

@@ -212,11 +212,21 @@ function sortSearchResults(list, keyword, isSong = true) {
     // 1. 去重 (歌曲基于 id / songmid / hash；歌单基于 id / playListId)
     const seen = new Set();
     const uniqueList = list.filter(item => {
-        const key = item.id || item.songmid || item.hash || item.playListId || `${item.name}_${item.singer || item.author || ''}`;
+        const key = `${item.source || ''}:${item.id || item.songmid || item.hash || item.playListId || `${item.name}_${item.singer || item.author || ''}`}`;
         if (seen.has(key)) return false;
         seen.add(key);
         return true;
     });
+
+    if (isSong && window.PagedMusicSearch) {
+        const groups = new Map();
+        uniqueList.forEach(item => {
+            const source = item.source || '';
+            if (!groups.has(source)) groups.set(source, []);
+            groups.get(source).push(item);
+        });
+        return window.PagedMusicSearch.rankBatch([...groups.values()], keyword);
+    }
 
     // 2. 计算匹配相似度并排序
     const kw = keyword.trim().toLowerCase();
