@@ -2511,7 +2511,7 @@ function renderNetworkSearchFooter(visible) {
 async function searchNetworkSongs(keyword, source, headers, request, append = false) {
     const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
         keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
-        merge: source === 'all' && (window.settings || {}).mergeAggregatedSearch !== false,
+        merge: source === 'all' && settings.mergeAggregatedSearch !== false,
     });
     if (!append) window.networkSongSearch = search;
     const current = () => request.current() && window.networkSongSearch === search &&
@@ -5892,7 +5892,8 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                 if (result.errorMsg) throw new Error(result.errorMsg);
                 // 只统计真正的在线解析，命中缓存的耗时不代表平台快慢
                 if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
-                return candidate === song ? result : { ...result, songInfo: candidate, switchedSource: true, originalSource: song.source };
+                const triedPlatforms = [...new Set([...triedCandidates].map(member => member.source).filter(Boolean))];
+                return candidate === song ? { ...result, triedPlatforms } : { ...result, triedPlatforms, songInfo: candidate, switchedSource: true, originalSource: song.source };
             } catch (candidateError) {
                 // 没有可用解析源时，单个条目直接报错；合并歌曲还要看其余平台的条目有没有缓存可用
                 if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE' && candidates.length < 2) throw candidateError;
@@ -6127,7 +6128,9 @@ async function findOtherSourceMatch(song, isSilent = false) {
 
 async function findOtherSourceMatches(song, isSilent = false, options = {}) {
     // 聚合搜索时已经对上的其他平台条目，直接用，不必再全网搜索一遍
-    if (Array.isArray(song._alternates) && song._alternates.length) return song._alternates;
+    if (Array.isArray(song._alternates) && song._alternates.length) {
+        return [song, ...song._alternates];
+    }
     if (!song.name || !song.singer) return [];
 
     try {
@@ -6139,7 +6142,7 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
             list.forEach(src => {
                 if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
                     src.supportedSources.forEach(platform => {
-                        supportedPlatforms.add(platform);
+                        if (!(src.disabledSources || []).includes(platform)) supportedPlatforms.add(platform);
                     });
                 }
             });
@@ -7460,8 +7463,11 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
             return;
         }
 
-        const matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
+        let matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
         if (matchedSong) {
+            // Retry only this member, not the entire group (which could select a failed alternate again).
+            matchedSong = { ...matchedSong };
+            delete matchedSong._alternates;
             state.currentSong = matchedSong;
             state.triedPlatforms.push(matchedSong.source);
             if (!state.triedApiSourcesByPlatform[matchedSong.source]) {
@@ -7566,7 +7572,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             originalQuality: startQuality,
             currentQuality: startQuality,
             triedQualities: [startQuality],
-            triedPlatforms: [song.source],
+            triedPlatforms: [],
             triedApiSourcesByPlatform: { [song.source]: [] },
             currentApiSourceName: '',
             samePlatformExhausted: false,
@@ -7746,6 +7752,11 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         currentSourceType = urlResult.sourceType;
         currentCacheFolder = urlResult.folder || 'cache';
         const playbackSong = (urlResult.switchedSource && urlResult.songInfo) ? urlResult.songInfo : song;
+        if (currentRecoveryState?.thisRequestId === thisRequestId && !noPlay) {
+            for (const platform of [...(urlResult.triedPlatforms || []), playbackSong.source]) {
+                if (platform && !currentRecoveryState.triedPlatforms.includes(platform)) currentRecoveryState.triedPlatforms.push(platform);
+            }
+        }
         if (playbackSong !== song) {
             currentPlayingSong = playbackSong;
             window.currentPlayingSong = playbackSong;
@@ -15174,7 +15185,7 @@ if (window.SongMerge) {
             value = new Set();
             list.forEach(src => {
                 if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
-                    src.supportedSources.forEach(platform => value.add(platform));
+                    src.supportedSources.filter(platform => !(src.disabledSources || []).includes(platform)).forEach(platform => value.add(platform));
                 }
             });
         }

@@ -6,7 +6,7 @@ const vm = require('node:vm');
 function load(stats = {}) {
     const store = { lx_source_stats: JSON.stringify(stats) };
     const context = vm.createContext({
-        console,
+        console, setTimeout: fn => setTimeout(fn, 20), clearTimeout,
         localStorage: { getItem: key => store[key] ?? null, setItem: (key, value) => { store[key] = value; } },
     });
     context.window = context;
@@ -146,4 +146,12 @@ test('artist sets are order-independent but solo, duet and substring names stay 
     assert.equal(merge.sameSong(a, song('kw', 2, 'Song', '张靓颖 / 张杰', '04:00')), true);
     assert.equal(merge.sameSong(a, song('kw', 3, 'Song', '张杰', '04:00')), false);
     assert.equal(merge.sameSong(a, song('kw', 4, 'Song', '张杰伦、张靓颖', '04:00')), false);
+});
+
+test('stalled supported-platform query falls back to unknown support', async () => {
+    const { merge } = load();
+    merge.getSupportedPlatforms = () => new Promise(() => {});
+    const original = song('tx', 1, 'Song', 'Singer', '03:00');
+    const result = await Promise.race([merge.candidates(original, '320k'), new Promise(resolve => setTimeout(() => resolve(null), 100))]);
+    assert.equal(result?.[0], original);
 });

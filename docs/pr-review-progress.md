@@ -10,3 +10,14 @@
 - [ ] Physical browser/audio qualification (not claimed by unit tests).
 
 Full branch validation: 203 TypeScript tests and 288 CJS tests passed; CJS runner reports one pre-existing OpenList asynchronous teardown failure, also reproduced on unchanged #531 head. No live deployment performed.
+
+
+## 2026-11-17 — follow-up bot review
+
+- [x] Media recovery retains all merged members, including an untouched primary. Only actual resolution attempts are recorded; recovery retries a single member without re-entering its failed merged group.
+- [x] Aggregate search reads the current lexical settings object, not the stale window snapshot; tested with disagreeing restored/global settings.
+- [x] Supported-platform unions exclude per-script disabledSources while retaining support from other enabled scripts.
+- [x] Merged candidate support lookup waits at most 3 seconds, then sorts with unknown support so cached playback/download can continue.
+- Validation: 6/6 resolution/recovery tests and the merge/paged-search suites pass. Full CJS: 292 passed, one pre-existing OpenList teardown failure; no-emit compilation and diff checks passed.
+
+These PR changes have not been deployed. The separate live marquee-only release is unchanged. The OpenList failure in #528/#530/#531 is the previously reproduced asynchronous teardown error, not a passing full-suite result.
