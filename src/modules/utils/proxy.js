@@ -44,13 +44,16 @@ export function resolveProxyAddress(category) {
     return allEnabled ? allAddress : ''
 }
 
-async function buildAgent(url, address) {
+async function buildAgent(url, address, signal) {
     if (!address) return undefined
     try {
         const proxyUrl = new URL(address)
         if (proxyUrl.protocol === 'http:' || proxyUrl.protocol === 'https:') {
             const tunnelOptions = {
                 proxy: {
+                    // tunnel creates CONNECT as a separate ClientRequest before
+                    // the outer request has a socket. Cancel that handshake too.
+                    signal,
                     host: proxyUrl.hostname,
                     port: proxyUrl.port,
                     proxyAuth: proxyUrl.username ? `${proxyUrl.username}:${proxyUrl.password}` : undefined,
@@ -73,13 +76,13 @@ async function buildAgent(url, address) {
  * @param {string} url 目标地址（决定 http/https 隧道方式）
  * @param {'music'|'customSource'|'app'} category
  */
-export async function getProxyAgent(url, category) {
+export async function getProxyAgent(url, category, signal = undefined) {
     const address = resolveProxyAddress(category)
-    if (address) return buildAgent(url, address)
+    if (address) return buildAgent(url, address, signal)
 
     // 环境变量兜底（容器部署常用）
     const envProxy = process.env.HTTPS_PROXY || process.env.https_proxy
-    if (envProxy) return buildAgent(url, envProxy)
+    if (envProxy) return buildAgent(url, envProxy, signal)
 
     return undefined
 }

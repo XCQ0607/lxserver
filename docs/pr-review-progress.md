@@ -41,3 +41,11 @@ Validation: 289/289 CJS and 224/224 TypeScript tests passed; the production buil
 - [x] Bound provider lookups and reserve time for alternate catalogs. Retry deadline-truncated pools sooner, without throwing away an already prepared handoff for the current play.
 - [x] Only mark a recommendation prepared after the media URL passes the check and the requested quality is still current. Keep manual queue choices and logout/disconnect cancellation intact.
 - [x] On Node 22, all 306 JavaScript tests and 247 TypeScript tests passed and the production build succeeded. These checks cover provider, player and queue behavior, not listeners' subjective ratings of musical similarity.
+
+## Follow-up: radio playback, matching and review regressions
+
+- [x] Isolate lookup results by the full recording query. Keep a preloaded handoff only while its first eligible track, quality and cached URL still match.
+- [x] Preserve explicit play-next choices and a consistent queue snapshot. Returning to the default list or automatically skipping a failed track no longer starts a new radio batch.
+- [x] Reconcile ambiguous artist credits, reject the seed's provider recording ID, use available album evidence across catalogs, and share an in-flight lookup for the same recording.
+- [x] Cancel the proxy handshake as well as the outer request. Check both direct cancellation and a successful single tunnel using local network fixtures. Verify the offline player bundle includes its local styles and scripts.
+- [x] Full Node 22 verification: 333 JavaScript and 256 TypeScript tests passed with no skips or cancellations. Production build passed.

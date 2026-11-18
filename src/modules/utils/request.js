@@ -11,7 +11,7 @@ import { sourceRequestSignal } from '../../server/sources/requestScope'
 const httpsRxp = /^https:/
 
 // 内置音乐平台 SDK 的请求一律归到 music 分类（细分开关见 ./proxy.js）
-const getRequestAgent = async url => getProxyAgent(url, 'music')
+const getRequestAgent = (url, signal) => getProxyAgent(url, 'music', signal)
 
 
 const request = (url, options, callback) => {
@@ -239,7 +239,7 @@ const fetchData = async (url, method, {
         headers[s] = !s || `${(await handleDeflateRaw(Buffer.from(JSON.stringify(`${path}${v}`.match(regx), null, 1).concat(v)).toString('base64'))).toString('hex')}&${parseInt(v)}${v2}`
         delete headers[bHh]
     }
-    const agent = await getRequestAgent(url)
+    const agent = await getRequestAgent(url, signal)
     signal?.throwIfAborted()
     return request(url, {
         ...options,
@@ -247,6 +247,9 @@ const fetchData = async (url, method, {
         headers: Object.assign({}, defaultHeaders, headers),
         timeout,
         agent,
+        // The agent already routes via the chosen proxy. Don't make Needle
+        // target the proxy again as if it were the origin.
+        ...(agent && { use_proxy_from_env_var: false }),
         json: format === 'json',
         rejectUnauthorized: false,
     }, (err, resp, body) => {

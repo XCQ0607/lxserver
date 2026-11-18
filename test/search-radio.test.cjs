@@ -18,12 +18,23 @@ const code = [
 const song = (id, name = `song${id}`) => ({ id, songmid: id, source: 'tx', name, singer: 'singer' });
 
 function setup({ list, index, similar = [], settings = {}, playMode = 'list', armed = true, fetchImpl, timer = setTimeout }) {
+    const mediaCache = new Map();
     const context = vm.createContext({
         console: { log() {}, warn() {} },
-        window: {},
+        window: { QualityManager: { getBestQuality: (_song, requested) => requested } },
         URLSearchParams, AbortController, setTimeout: timer, clearTimeout, performance,
-        prefetchManager: { generation: 0, stop() { this.generation++; } },
-        prefetchNextSong() {}, prefetchSongUrl: async () => true,
+        prefetchManager: {
+            generation: 0, stop() { this.generation++; },
+            get(track, quality) { return mediaCache.get(JSON.stringify([track.id, quality])); },
+            set(track, quality, media) { mediaCache.set(JSON.stringify([track.id, quality]), media); },
+        },
+        prefetchNextSong() {},
+        prefetchSongUrl(track) {
+            const quality = settings.preferredQuality || 'flac';
+            const media = { url: '/cached/' + track.id, requestedQuality: quality };
+            context.prefetchManager.set(track, quality, media);
+            return media;
+        },
         API_BASE: '/api/music',
         settings, playMode,
         currentPlaylist: list, currentIndex: index, preSelectedNextIndex: null,
@@ -310,7 +321,8 @@ test('a prepared track-related pool survives expiry during the same playback wit
             return { ok: status === 200, status, json: async () => ({ strategy: 'artist', list: [song('catalog')] }) };
         } });
         c.performance = { now: () => now };
-        c.prefetchSongUrl = track => { preloaded = track.id; return true; };
+        const preload = c.prefetchSongUrl;
+        c.prefetchSongUrl = track => { preloaded = track.id; return preload(track); };
         await c.prefetchUpcomingSong();
         now += 180000;
         await c.continueWithSimilarSongs();
@@ -365,9 +377,10 @@ test('insertion preserves distinct provider IDs, deduplicates same-source qualit
     assert.equal(selected[0], other);
     assert.deepEqual(Array.from(c.currentPlaylist), [seed, other]);
     const better = {...other,quality:'flac'};
-    c.updatePlaylist([seed,other,better],1,'network');
+    c.updatePlaylist([seed,other,better],2,'network');
     assert.deepEqual(Array.from(c.currentPlaylist), [seed,better]);
     assert.equal(selected[1], better);
+    assert.equal(c.currentIndex, 1);
 });
 
 
@@ -395,8 +408,10 @@ test('radio pins only confirmed media for this play, including on a retry or qua
             });
             c.performance = { now: () => now };
             c.window.QualityManager = { getBestQuality: (_track, quality) => quality };
-            c.prefetchManager.get = () => scenario === 'cached URL works' ? { url: 'cached' } : null;
-            c.prefetchManager.set = (_track, _quality, media) => writes.push(media.url);
+            const { get, set } = c.prefetchManager;
+            c.prefetchManager.get = (track, quality) => get(track, quality) ||
+                (scenario === 'cached URL works' ? { url: 'cached' } : null);
+            c.prefetchManager.set = (track, quality, media) => { set(track, quality, media); writes.push(media.url); };
             c.localStorage.removeItem = () => {};
             c.getSourceTypeText = () => '';
             c.resolveSongUrl = async () => {
@@ -494,4 +509,98 @@ test('a timed-out old recommendation does not evict a newer seed request', async
     assert.equal(c.searchRadioCache.promise, second);
     timers[1](); await second;
     assert.equal(c.searchRadioCache, null);
+});
+
+test('prefetch and continuation share the complete recommendation seed, not just a queue ID', async t => {
+    const anonymous = { source: 'kw', name: 'River', singer: 'First', albumName: 'Studio' };
+    const qq = { source: 'tx', name: 'River', singer: 'First', songmid: 'common', meta: { id: 'IdX' } };
+    for (const [label, firstSeed, secondSeed, same] of [
+        ['ID-less title', anonymous, { ...anonymous, name: 'Glass' }, false],
+        ['ID-less singer', anonymous, { ...anonymous, singer: 'Guest' }, false],
+        ['edition', anonymous, { ...anonymous, albumName: 'Live' }, false],
+        ['opaque QQ provider ID', qq, { ...qq, meta: { id: 'idx' } }, false],
+        ['unchanged request on a new queue object', qq, { ...qq, meta: { ...qq.meta }, quality: '320k' }, true],
+    ]) {
+        for (const pending of [false, true]) await t.test(label + (pending ? ' (pending)' : ' (completed)'), async () => {
+            const calls = [];
+            let finishFirst;
+            const c = setup({ list: [firstSeed], index: 0, fetchImpl: async url => {
+                const key = calls.length === 0 ? 'first-rec' : 'second-rec';
+                calls.push(url);
+                if (pending && calls.length === 1) await new Promise(resolve => { finishFirst = resolve; });
+                return { ok: true, json: async () => ({ strategy: 'radio', list: [song(key)] }) };
+            } });
+            const prefetch = c.loadSearchRadioSongs(firstSeed, { prefetch: true });
+            if (!pending) await prefetch;
+            c.currentPlaylist = [secondSeed];
+            c.loadingRequestCounter++;
+            const next = c.continueWithSimilarSongs();
+            if (pending) finishFirst();
+            await Promise.all([prefetch, next]);
+            assert.equal(calls.length, same ? 1 : 2);
+            assert.equal(c.updated?.ids[1], same ? 'first-rec' : 'second-rec');
+            if (!same) assert.notEqual(calls[0], calls[1]);
+        });
+    }
+});
+
+test('a different seed with the same queue ID cannot claim a prefetch retry', async () => {
+    const first = { source: 'kw', name: 'River', singer: 'First' };
+    let finishFirst, calls = 0;
+    const c = setup({ list: [first], index: 0, fetchImpl: async () => {
+        if (++calls === 1) await new Promise(resolve => { finishFirst = resolve; });
+        return { ok: true, json: async () => ({ list: [] }) };
+    } });
+    const old = c.loadSearchRadioSongs(first, { prefetch: true });
+    c.currentPlaylist = [{ ...first, name: 'Glass' }, song('ordinary')];
+    const next = c.continueWithSimilarSongs();
+    // Its own foreground miss shouldn't wait on, or retry because of, the other seed.
+    try {
+        assert.equal(calls, 2);
+        await next;
+        assert.equal(calls, 2);
+        assert.deepEqual(c.played, [1]);
+    } finally { finishFirst(); await Promise.all([old, next]); }
+});
+
+test('an expired pool bypasses refresh only for the exact first eligible song and its verified media', async t => {
+    for (const change of ['dislike first', 'quality', 'cache evicted', 'URL replaced', 'seed metadata']) {
+        await t.test(change, async () => {
+            let now = 0, calls = 0;
+            const seed = song('seed');
+            const c = setup({ list: [seed], index: 0, fetchImpl: async () => ({
+                ok: true, json: async () => ({ strategy: 'radio',
+                    list: ++calls === 1 ? [song('A'), song('B')] : [song('C')] }),
+            }) });
+            c.performance = { now: () => now };
+            await c.prefetchUpcomingSong();
+            now += 180000;
+            if (change === 'dislike first') c.window.DislikeManager = { isDisliked: s => s.id === 'A' };
+            if (change === 'quality') c.settings.preferredQuality = '128k';
+            if (change === 'cache evicted') c.prefetchManager.get = () => null;
+            if (change === 'URL replaced') c.prefetchManager.get = () => ({ url: '/unverified' });
+            if (change === 'seed metadata') seed.albumName = 'Live edition';
+            await c.continueWithSimilarSongs();
+            assert.equal(calls, 2);
+            assert.deepEqual(c.updated?.ids, ['seed', 'C']);
+        });
+    }
+});
+
+test('an obsolete artist fallback is dropped if its verified media is evicted during refresh', async () => {
+    let now = 0, finish, calls = 0;
+    const c = setup({ list: [song('seed'), song('ordinary')], index: 0, fetchImpl: async () => {
+        if (++calls === 1) return { ok: true, json: async () => ({ strategy: 'artist', list: [song('A'), song('B')] }) };
+        return { ok: true, json: () => new Promise(resolve => { finish = resolve; }) };
+    } });
+    c.performance = { now: () => now };
+    await c.prefetchUpcomingSong();
+    now += 180000;
+    const next = c.continueWithSimilarSongs();
+    await new Promise(setImmediate);
+    c.prefetchManager.get = () => null;
+    finish({ list: [] });
+    await next;
+    assert.equal(c.updated, null);
+    assert.deepEqual(c.played, [1]);
 });

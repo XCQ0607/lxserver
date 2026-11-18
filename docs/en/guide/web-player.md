@@ -5,9 +5,9 @@ The player defaults to `/`, configurable with `PLAYER_PATH`. Player access authe
 
 ## Similar songs after Search
 
-With **Continue with similar songs after searched songs finish** enabled, start a song from the song search results in sequential or list-loop mode. Radio inserts its picks ahead of the remaining search results; a song you explicitly set to play next keeps its place.
+Start a song from Search with **Continue with similar songs** enabled, in sequential or list-loop mode. If the search queue stays active, finishing the song or pressing the player’s **Next** button can insert recommendations ahead of the remaining search results. **Play next** on a specific track gives that track priority. If your settings switch playback back to the default list, it continues normally instead.
 
-The player prioritizes tracks recommended for the selected recording, with some variety among nearby ranks. If no track-level matches are available, the player may offer up to three songs by the same artist. These are labelled separately and never mixed into a track-based recommendation list. An empty prefetch can be retried at track end. If nothing usable arrives in time, the player follows the normal queue.
+The player prefers track-level recommendations. Matching a recording across catalogs uses title, artist credits and available album information, but cannot guarantee the exact edition. Only when there are no track-level matches does the player offer up to three songs by the same artist, labelled separately. An empty prefetch can be retried at track end; if nothing usable arrives in time, the normal queue continues.
 
 
 ## Playback sources and resolution order

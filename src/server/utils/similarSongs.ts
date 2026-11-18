@@ -57,8 +57,9 @@ const normalizeText = (value: unknown): string => toSimplified(String(value ?? '
 
 // Catalogs usually use 、 between performers. An unspaced slash or ampersand
 // can belong to a single artist (AC/DC, B&O); don't take the first fragment.
+const creditSeparator = /[,，|;；]+|\s+(?:[&/／]|和|feat\.?|ft\.?)\s+/i
 const splitSingers = (value: unknown): string[] => String(value ?? '')
-  .split(/[、,，|;；]+|\s+(?:[&/／]|和|feat\.?|ft\.?)\s+/i)
+  .split(creditSeparator).flatMap(part => part.split('、'))
   .map(part => part.trim()).filter(Boolean)
 
 const artistKey = (value: string): string => toSimplified(value.normalize('NFKC')).toLowerCase()
@@ -100,16 +101,28 @@ const recordingCredits = (title: unknown, singer: unknown): string => {
   return names.join('、')
 }
 
+// Kuwo renders every ampersand as 、, including one inside e.g. "C&K".
+// Only if the other side supplies that literal band spelling, compare the
+// entire ordered sequence after applying the same lossy SDK transformation.
+const kwBand = (kw: string, canonical: string) => /\S&\S/.test(canonical) &&
+  splitSingers(kw).map(artistKey).join('|') === splitSingers(canonical.replace(/(\S)&(?=\S)/g, '$1、')).map(artistKey).join('|')
+
+// A Kuwo "、" may mark credits OR belong to a single band's catalog spelling.
+// Keep the whole ambiguous group rather than recommending a solo namesake.
+const fallbackLead = (row: { source?: string | null, singer?: string | null }): string =>
+  row.source === 'kw' ? (row.singer || '').split(creditSeparator).map(s => s.trim()).find(Boolean) || '' : splitSingers(row.singer)[0] || ''
+
+const fallbackArtistMatches = (song: any, artist: string, seedSource: string | null | undefined): boolean => {
+  const exact = (left: string) => (isSingerMatch(left, artist) && isSingerMatch(artist, left)) ||
+    (song.source === 'kw' && kwBand(left, artist)) || (seedSource === 'kw' && kwBand(artist, left))
+  return exact(fallbackLead(song)) || exact(String(song.singer || ''))
+}
+
 const recordingMatches = (a: {name?: string | null, singer?: string | null, source?: string | null},
   b: {name?: string | null, singer?: string | null, source?: string | null}): boolean => {
   if (!titlesMatch(a.name, b.name)) return false
   const left = recordingCredits(a.name, a.singer), right = recordingCredits(b.name, b.singer)
   if (isSingerMatch(left, right)) return true
-  // Kuwo renders every ampersand as 、, including one inside e.g. "C&K".
-  // Only if the other side supplies that literal band spelling, compare the
-  // entire ordered sequence after applying the same lossy SDK transformation.
-  const kwBand = (kw: string, canonical: string) => /\S&\S/.test(canonical) &&
-    splitSingers(kw).map(artistKey).join('|') === splitSingers(canonical.replace(/(\S)&(?=\S)/g, '$1、')).map(artistKey).join('|')
   return (a.source === 'kw' && kwBand(left, right)) || (b.source === 'kw' && kwBand(right, left))
 }
 
@@ -271,7 +284,7 @@ export const fetchYtmRadio = async (seed: SimilarSeed, post = ytmPost): Promise<
   // Multiple distinct recordings, with explicit conflicting album metadata:
   // prefer the exact requested album; otherwise avoid launching the wrong radio.
   if (!albumMatch && seedAlbum && new Set(matches.map(r => r.id)).size > 1 &&
-      new Set(matches.map(r => versionKey(r.album)).filter(Boolean)).size > 1) return []
+      matches.some(r => !!versionKey(r.album))) return []
   let videoId = (albumMatch || matches[0])?.id || ''
   // 用户上传的版本常把歌名写成别的（如「theweeknd神级现场」），真正的歌名在专辑名里：
   // 用「专辑名 + 歌名」再找一次，标题要等于专辑名，且原歌手名出现在上传的歌名 / 歌手里才算数
@@ -356,13 +369,23 @@ const RESOLVE_SOURCES = 2
 
 // Do not count placeholders as ready tracks: unusable rows would otherwise
 // suppress QQ fallback and then be discarded by the player.
+const validId = (value: unknown): string | undefined => {
+  if (typeof value !== 'string' && typeof value !== 'number') return undefined
+  const id = String(value).trim()
+  return id && id !== 'undefined' && id !== 'null' && id !== '0' ? id : undefined
+}
 const playableId = (song: any): string | undefined => song?.source &&
-  [song.songmid, song.songId, song.id, song.hash, song.copyrightId]
-    .filter(id => typeof id === 'string' || typeof id === 'number')
-    .map(id => String(id).trim()).find(id => id && id !== 'undefined' && id !== 'null' && id !== '0')
+  [song.songmid, song.songId, song.id, song.hash, song.copyrightId].map(validId).find(Boolean)
+
+// The numeric ID and the opaque MID are separate namespaces, even on QQ.
+const hasSeedId = (song: any, seed: SimilarSeed): boolean => !!seed.source && song?.source === seed.source &&
+  (['songId', 'songmid'] as const).some(key => {
+    const id = validId(seed[key])
+    return !!id && id === validId(song[key])
+  })
 
 // 把电台推荐的一首歌对到某个平台上可播放的条目：歌名一致、歌手对得上，多个版本时取时长最接近的
-const resolveRadioTrack = async (track: RadioTrack, sources: string[], deps: SimilarDeps): Promise<any | null> => {
+const resolveRadioTrack = async (track: RadioTrack, seed: SimilarSeed, sources: string[], deps: SimilarDeps): Promise<any | null> => {
   // 搜索词去掉括号里的附注（如「五月天 (Mayday)」「… - 电影主题曲」之类），否则容易搜不到
   const plain = (text: string) => text.replace(/[（(\[【].*?[）)\]】]/g, ' ').replace(/\s+/g, ' ').trim() || text
   const keyword = toSimplified([plain(track.name), plain(splitSingers(track.singer)[0] || '')].filter(Boolean).join(' '))
@@ -373,7 +396,7 @@ const resolveRadioTrack = async (track: RadioTrack, sources: string[], deps: Sim
     } catch {
       continue
     }
-    const usable = candidates.filter(item => playableId(item) && typeof item?.name === 'string' && !isVariant(item.name) &&
+    const usable = candidates.filter(item => playableId(item) && !hasSeedId(item, seed) && typeof item?.name === 'string' && !isVariant(item.name) &&
       recordingMatches(item, track) &&
       (!track.duration || !parseSeconds(item.interval) || Math.abs(parseSeconds(item.interval) - track.duration) <= 8))
     if (!usable.length) continue
@@ -420,7 +443,7 @@ async function searchRadioCatalog<T>(parent: AbortSignal, deadline: number, run:
   })
 }
 
-const resolveRadioTracks = async (tracks: RadioTrack[], sources: string[], deps: SimilarDeps,
+const resolveRadioTracks = async (tracks: RadioTrack[], seed: SimilarSeed, sources: string[], deps: SimilarDeps,
   control: AbortController, deadline: number, limit: number) => {
   const resolved: any[] = new Array(tracks.length).fill(null)
   const settled = new Set<number>()
@@ -449,7 +472,7 @@ const resolveRadioTracks = async (tracks: RadioTrack[], sources: string[], deps:
         try { return await searchRadioCatalog(control.signal, end, () => deps.search(...args)) }
         catch (err) { failedSearch = true; throw err }
       } }
-      const song = await resolveRadioTrack(tracks[index], sources, scoped)
+      const song = await resolveRadioTrack(tracks[index], seed, sources, scoped)
       if (control.signal.aborted) { incomplete = true; break }
       settled.add(index)
       const key = song && normalizeText(song.name)
@@ -503,10 +526,15 @@ const resolveTxSongId = async (seed: SimilarSeed, deps: SimilarDeps): Promise<st
   const keyword = [seed.name, splitSingers(seed.singer)[0]].filter(Boolean).join(' ')
   const candidates = await deps.search('tx', keyword, 10)
   const seedMid = seed.source === 'tx' && seed.songmid ? String(seed.songmid) : ''
-  const match = (seedMid && candidates.find(item => String(item.songmid) === seedMid)) ||
-    candidates.find(item => isSameSong(item, seed))
-  const id = match?.songId ?? match?.id
-  return isNumericId(id) ? String(id) : null
+  const txId = (item: any) => item?.songId ?? item?.id
+  const exact = seedMid && candidates.find(item => String(item.songmid) === seedMid && isNumericId(txId(item)))
+  if (exact) return String(txId(exact))
+  const matches = candidates.filter(item => isNumericId(txId(item)) && isSameSong(item, seed))
+  const album = versionKey(seed.album)
+  const byAlbum = album ? matches.filter(item => versionKey(item.albumName || item.album) === album) : []
+  // Without a provider ID, a shared title and artist can still be two recordings.
+  const ids = new Set((byAlbum.length ? byAlbum : matches).map(item => String(txId(item))))
+  return ids.size === 1 ? [...ids][0] : null
 }
 
 /**
@@ -516,19 +544,28 @@ const resolveTxSongId = async (seed: SimilarSeed, deps: SimilarDeps): Promise<st
  */
 export const createSimilarSongResolver = (defaults: SimilarDeps) => {
   const resultCache = new Map<string, { expires: number, result: SimilarPool }>()
+  const building = new Map<string, Promise<SimilarPool>>()
   return async (seed: SimilarSeed, limit = 30, deps: SimilarDeps = defaults): Promise<SimilarResult> => {
     const safeLimit = Math.min(Math.max(parseInt(String(limit)) || 30, 1), MAX_LIMIT)
     const cacheKey = deps === defaults ? similarSongsCacheKey(seed, safeLimit) : ''
     const cached = cacheKey ? resultCache.get(cacheKey) : undefined
     let result = cached && cached.expires > Date.now() ? cached.result : null
     if (!result) {
-      result = await buildSimilarSongs(seed, safeLimit, deps)
-      if (cacheKey && result.list.length) {
-        if (resultCache.size >= CACHE_MAX) resultCache.delete(resultCache.keys().next().value as string)
-        // A brief provider outage should not turn a catalog-only or thin answer
-        // into this recording's recommendations for the rest of the day.
-        const ttl = !result.incomplete && result.similarEnd >= Math.min(MIN_SIMILAR, safeLimit) ? CACHE_TTL : 60_000
-        resultCache.set(cacheKey, { expires: Date.now() + ttl, result })
+      const pending = cacheKey && building.get(cacheKey)
+      if (pending) return orderSimilarPool(await pending, deps.shuffle)
+      const build = buildSimilarSongs(seed, safeLimit, deps)
+      if (cacheKey) building.set(cacheKey, build)
+      try {
+        result = await build
+        if (cacheKey && result.list.length) {
+          if (resultCache.size >= CACHE_MAX) resultCache.delete(resultCache.keys().next().value as string)
+          // A brief provider outage should not turn a catalog-only or thin answer
+          // into this recording's recommendations for the rest of the day.
+          const ttl = !result.incomplete && result.similarEnd >= Math.min(MIN_SIMILAR, safeLimit) ? CACHE_TTL : 60_000
+          resultCache.set(cacheKey, { expires: Date.now() + ttl, result })
+        }
+      } finally {
+        if (cacheKey) building.delete(cacheKey)
       }
     }
     return orderSimilarPool(result, deps.shuffle)
@@ -544,7 +581,7 @@ const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: Sim
   const seenIds = new Set<string>()
   const seenNames = new Set<string>()
   const add = (song: any): boolean => {
-    if (!song?.name || isSameSong(song, seed)) return false
+    if (!song?.name || hasSeedId(song, seed) || isSameSong(song, seed)) return false
     // 不推荐种子歌曲自己的其他版本（翻唱、DJ 版等），也不推荐任何衍生版本
     const baseName = normalizeText(song.name)
     if (!baseName || baseName === normalizeText(seed.name) || isVariant(song.name)) return false
@@ -570,7 +607,7 @@ const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: Sim
       const tracks = (await withSourceRequestSignal(control.signal, () => deps.radio(seed)))
         .filter(track => normalizeText(track.name) !== normalizeText(seed.name) && !isVariant(track.name))
         .slice(0, Math.min(MAX_LIMIT, safeLimit + RESOLVE_CONCURRENCY))
-      return resolveRadioTracks(tracks, sources, deps, control, radioDeadline, safeLimit)
+      return resolveRadioTracks(tracks, seed, sources, deps, control, radioDeadline, safeLimit)
     })
     incomplete = radio.incomplete
     for (const song of radio.songs) add(song)
@@ -599,7 +636,7 @@ const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: Sim
   }
 
   const similarEnd = list.length
-  const singer = splitSingers(seed.singer)[0]
+  const singer = fallbackLead(seed)
   // An artist's catalog is not evidence of a song-to-song relationship.
   // Keep it as an explicitly labelled last resort, not padding for a short radio.
   const artistCap = Math.min(3, safeLimit)
@@ -612,7 +649,7 @@ const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: Sim
         const songs = await inWindow(deadlineAfter(ARTIST_SOURCE_MS, deadline), control =>
           withSourceRequestSignal(control.signal, () => deps.search(source, singer, 30)))
         for (const song of songs) {
-          if (isSingerMatch(song.singer, singer)) add(song)
+          if (fallbackArtistMatches(song, singer, seed.source)) add(song)
           if (list.length >= artistCap) break
         }
       } catch (err: any) {

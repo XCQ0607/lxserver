@@ -99,7 +99,19 @@ test('radio, QQ seed lookup and artist fallback share an overall deadline', asyn
   assert.equal(qqLaunched, false)
 })
 
+// Proxy settings are process-wide. Limit changes to this serial test and
+// restore both spellings even when a test fails.
+function musicProxyFixture(t: TestContext, address?: string) {
+  for (const key of ['HTTP_PROXY', 'http_proxy', 'HTTPS_PROXY', 'https_proxy']) {
+    const previous = process.env[key]
+    if (address && key === 'HTTPS_PROXY') process.env[key] = address
+    else delete process.env[key]
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous })
+  }
+}
+
 test('returning a radio batch closes the stalled SDK transport, not just its waiter', { timeout: 5000 }, async t => {
+  musicProxyFixture(t)
   const { httpFetch } = await import('../src/modules/utils/request.js')
   let started!: () => void, closed!: () => void
   const requested = new Promise<void>(resolve => { started = resolve })
@@ -224,4 +236,34 @@ test('limit=1 keeps looking for a playable related track instead of returning un
   calls.clear()
   assert.deepEqual((await run(-1)).list, [])
   assert.equal(calls.size, 6, 'bounded one extra wave')
+})
+
+test('cancelling radio transport closes a pending proxy CONNECT before a socket is assigned', { timeout: 5000 }, async t => {
+  const { httpFetch } = await import('../src/modules/utils/request.js')
+  const { withSourceRequestSignal } = await import('../src/server/sources/requestScope')
+  const proxy = http.createServer()
+  proxy.listen(0, '127.0.0.1')
+  await once(proxy, 'listening')
+  const address = proxy.address()
+  if (!address || typeof address === 'string') assert.fail('expected local proxy address')
+  musicProxyFixture(t, 'http://127.0.0.1:' + address.port)
+  const sockets = new Set<import('node:stream').Duplex>()
+  t.after(async () => {
+    for (const socket of sockets) socket.destroy()
+    await new Promise<void>(resolve => proxy.close(() => resolve()))
+  })
+  const handshake = once(proxy, 'connect', { signal: AbortSignal.timeout(2500) })
+  const control = new AbortController()
+  const pending = withSourceRequestSignal(control.signal, () => httpFetch('https://example.invalid/music').promise)
+  const rejected = assert.rejects(pending)
+  const [req, socket] = await handshake
+  sockets.add(socket)
+  assert.equal(req.url, 'example.invalid:443')
+  // Upgraded sockets may be half-open. Close the proxy's write side only
+  // after the client has actually closed its side of the handshake.
+  socket.once('end', () => socket.end())
+  socket.resume()
+  const closed = once(socket, 'close', { signal: AbortSignal.timeout(1500) })
+  control.abort()
+  await Promise.all([closed, rejected])
 })
