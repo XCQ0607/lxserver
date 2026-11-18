@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { similarSongsCacheKey, creditedArtist, fetchSimilarSongs, findOriginalOfUpload, type SimilarDeps } from '../src/server/utils/similarSongs'
+import { creditedArtist, fetchSimilarSongs, findOriginalOfUpload, similarSongsCacheKey, type SimilarDeps } from '../src/server/utils/similarSongs'
 
 const song = (source: string, id: number, name: string, singer: string) => ({
     source, songId: id, songmid: `mid${id}`, name, singer,
@@ -44,7 +44,7 @@ test('a QQ seed with a numeric id is looked up directly and the seed and duplica
     assert.deepEqual(calls, ['radio:晴天', 'similar:97773'])
 })
 
-test('a seed from another platform is matched to QQ by name and singer, then topped up with same-artist songs', async () => {
+test('a seed from another platform is matched to QQ by name and singer without padding track relations with catalog songs', async () => {
     const { deps, calls } = fakeDeps({
         search: async (source, keyword) => {
             if (source === 'tx' && keyword === '晴天 周杰伦') {
@@ -59,8 +59,8 @@ test('a seed from another platform is matched to QQ by name and singer, then top
     })
     const result = await fetchSimilarSongs({ source: 'wy', songId: '186016', name: '晴天', singer: '周杰伦' }, 30, deps)
     assert.equal(result.strategy, 'similar')
-    assert.deepEqual(result.list.map(s => `${s.source}_${s.songId}`), ['tx_2', 'tx_4', 'wy_22'])
-    assert.deepEqual(calls, ['radio:晴天', 'search:tx:晴天 周杰伦', 'similar:97773', 'search:wy:周杰伦'])
+    assert.deepEqual(result.list.map(s => `${s.source}_${s.songId}`), ['tx_2', 'tx_4'])
+    assert.deepEqual(calls, ['radio:晴天', 'search:tx:晴天 周杰伦', 'similar:97773'])
 })
 
 test('a failed similar lookup falls back to same-artist songs from the next source that has any', async () => {
@@ -137,13 +137,13 @@ test('a failed radio lookup falls back to QQ similar songs', async () => {
     assert.equal(result.list.length, 6)
 })
 
-test('the returned order is shuffled per request', async () => {
+test('track recommendations vary within rank bands rather than putting the provider tail first', async () => {
     const { deps } = fakeDeps({
         txSimilar: async () => Array.from({ length: 6 }, (_, i) => song('tx', 300 + i, `歌曲${i}`, `歌手${i}`)),
         shuffle: list => [...list].reverse(),
     })
     const result = await fetchSimilarSongs({ source: 'tx', songId: 97773, name: '晴天', singer: '周杰伦' }, 30, deps)
-    assert.deepEqual(result.list.map(s => s.songId), [305, 304, 303, 302, 301, 300])
+    assert.deepEqual(result.list.map(s => s.songId), [302, 301, 300, 305, 304, 303])
 })
 
 test('other versions of the seed and derivative versions are never recommended', async () => {
@@ -213,6 +213,51 @@ test('an original artist credited inside brackets in the upload title is recogni
     assert.equal(creditedArtist([{ artist: '王菲' }], seed), '王菲')
 })
 
+test('artist catalog search never displaces recommendations tied to the seed recording', async () => {
+    const { deps } = fakeDeps({
+        radio: async () => [{ name: 'Radio pick', singer: 'Other Artist', duration: 0 }],
+        txSimilar: async () => [song('tx', 10, 'Related pick', 'Another Artist')],
+        search: async (source, keyword) => {
+            if (keyword === 'Radio pick Other Artist') return [song(source, 20, 'Radio pick', 'Other Artist')]
+            return Array.from({ length: 20 }, (_, i) => song(source, 100 + i, `Artist catalog ${i}`, 'Seed Artist'))
+        },
+        shuffle: list => [...list].reverse(),
+    })
+    const result = await fetchSimilarSongs({source: 'tx', songId: 42, name: 'Seed', singer: 'Seed Artist'}, 30, deps)
+    assert.equal(result.strategy, 'radio')
+    assert.deepEqual(result.list.slice(0, 2).map(item => item.name), ['Radio pick', 'Related pick'])
+    assert.equal(result.list.length, 2)
+    assert.deepEqual(Object.keys(result).sort(), ['list', 'strategy'])
+})
+
+test('an artist-only fallback is labelled and does not queue an entire discography', async () => {
+    const { deps } = fakeDeps({
+        search: async (source, keyword) => keyword === 'CoComelon'
+            ? Array.from({length: 25}, (_, i) => song(source, 100 + i, `Back catalog ${i}`, 'CoComelon')) : [],
+    })
+    const result = await fetchSimilarSongs({source:'tx', songId:42, name:'Wheels on the Bus', singer:'CoComelon'}, 30, deps)
+    assert.equal(result.strategy, 'artist')
+    assert.equal(result.list.length, 3)
+})
+
+test('cache entries distinguish recordings, editions and featured artists', () => {
+    const base = {source: 'tx', songId: 101, songmid: 'abc', name: 'Home', singer: 'A / B', album:'Collection'}
+    for (const edit of [{songId:102}, {songmid:'def'}, {name:'Home (Live)'}, {singer:'A / C'}, {album:'Collection (Live)'}]) {
+        assert.notEqual(similarSongsCacheKey(base, 10), similarSongsCacheKey({...base, ...edit}, 10))
+    }
+    assert.equal(similarSongsCacheKey(base, 10), similarSongsCacheKey({...base, songId:'101'}, 10))
+})
+
+test('unplayable provider rows do not count as recommendations or mask usable fallbacks', async () => {
+    const { deps } = fakeDeps({
+        radio: async () => [{name:'Candidate',singer:'Other Artist',duration:0}],
+        search: async source => [{source, songmid:'undefined', name:'Candidate', singer:'Other Artist'}],
+        txSimilar: async () => [{source:'tx',name:'Missing ID',singer:'Someone'}, song('tx', 9, 'Usable', 'Another Artist')],
+    })
+    const result = await fetchSimilarSongs({source:'tx',songId:42,name:'Seed',singer:'Seed Artist'},30,deps)
+    assert.equal(result.strategy,'similar')
+    assert.deepEqual(result.list.map(x => x.name),['Usable'])
+})
 
 test('cache identities distinguish seed IDs, platforms and limits, falling back only without IDs', () => {
     const seed = { source: 'tx', name: 'Same title' }

@@ -6526,7 +6526,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
 }
 
 // 解析并缓存一首歌的播放链接，失败时抛出；isCurrent 失效后不再写入缓存
-async function prefetchSongUrl(nextSong, isCurrent) {
+async function prefetchSongUrl(nextSong, isCurrent, { verifyRetry = false } = {}) {
     const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
     const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
 
@@ -6534,30 +6534,34 @@ async function prefetchSongUrl(nextSong, isCurrent) {
     let result = prefetchManager.get(nextSong, targetQual);
     if (result) {
         const alive = await probeUrl(result.url);
-        if (!canCommit()) return;
+        if (!canCommit()) return false;
         if (alive) {
             prefetchManager.set(nextSong, targetQual, result);
-            return;
+            return true;
         }
         prefetchManager.invalidate(nextSong, targetQual, result);
     }
 
     // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
     result = await resolveSongUrl(nextSong, targetQual, true);
-    if (!canCommit()) return;
+    if (!canCommit()) return false;
 
     // 3. 探活获取到的链接
     const alive = await probeUrl(result.url);
-    if (!canCommit()) return;
+    if (!canCommit()) return false;
     if (!alive) {
         localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
         result = await resolveSongUrl(nextSong, targetQual, true, true);
-        if (!canCommit()) return;
+        if (!canCommit()) return false;
+        // A retry can return the same unreachable URL. Verify it before pinning
+        // a radio handoff; leave ordinary next-song prefetch latency unchanged.
+        if (verifyRetry && (!await probeUrl(result.url) || !canCommit())) return false;
     }
 
     prefetchManager.set(nextSong, targetQual, result);
     const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
     console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
+    return true;
 }
 
 // --- Server Cache Helpers ---
@@ -8416,9 +8420,18 @@ function isSongSearchView() {
     });
 }
 
-function loadSearchRadioSongs(seed) {
+// 服务端有 7.5 秒的总预算，额外留出传输时间；响应正文也在时限内。
+const SEARCH_RADIO_TIMEOUT_MS = 9000;
+
+// A metadata TTL covers future lookups, not the handoff already prepared for
+// this particular play. Never persist the prepared pool across play requests.
+let preparedSearchRadio = null;
+
+function loadSearchRadioSongs(seed, { prefetch = false, timeoutMs = SEARCH_RADIO_TIMEOUT_MS } = {}) {
     const seedId = cleanSongData(seed).id;
-    if (searchRadioCache && searchRadioCache.seedId === seedId) return searchRadioCache.promise;
+    if (searchRadioCache?.seedId === seedId && (searchRadioCache.pending || performance.now() < searchRadioCache.expires)) {
+        return searchRadioCache.promise;
+    }
     const meta = seed.meta || {};
     const params = new URLSearchParams({
         source: seed.source || '',
@@ -8432,38 +8445,45 @@ function loadSearchRadioSongs(seed) {
     const album = seed.albumName || meta.albumName || '';
     if (album) params.set('album', album);
     const controller = new AbortController();
-    let timeout;
-    const deadline = new Promise((_, reject) => {
-        timeout = setTimeout(() => {
-            reject(new Error('Recommendation request timed out'));
+    let timer;
+    const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
             controller.abort();
-        }, 8000);
+            reject(new Error('相似歌曲请求超时'));
+        }, timeoutMs);
     });
-    const request = (async () => fetch(`${API_BASE}/similar?${params}`, { headers: getUserAuthHeaders(), signal: controller.signal }))()
-        .then(res => {
-            if (!res.ok) throw new Error(`HTTP ${res.status}`);
-            return res.json();
-        })
-        .then(data => {
-            const list = Array.isArray(data && data.list) ? data.list : [];
-            list.forEach(item => {
-                if (!item.id || item.id === 'undefined') {
-                    item.id = item.songmid || item.songId || item.hash || item.copyrightId;
-                }
-            });
-            console.log(`[SearchRadio] ${seed.name}: ${list.length} 首 (${data && data.strategy})`);
-            return list.filter(item => item.id && item.source);
+    const request = (async () => {
+        const res = await fetch(`${API_BASE}/similar?${params}`, { headers: getUserAuthHeaders(), signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const list = (Array.isArray(data?.list) ? data.list : []).filter(item => {
+            if (!item?.source) return false;
+            if (!item.id || item.id === 'undefined') item.id = item.songmid || item.songId || item.hash || item.copyrightId;
+            return item.id;
         });
-    // Race the complete operation, including JSON decoding (not just the headers).
-    const promise = Promise.race([request, deadline])
+        return { list, strategy: data?.strategy, incomplete: data?.incomplete === true };
+    })();
+    const entry = { seedId, prefetch, pending: true, expires: 0 };
+    entry.promise = Promise.race([request, timeout])
         .catch(e => {
             console.warn('[SearchRadio] 获取相似歌曲失败:', e.message);
-            if (searchRadioCache && searchRadioCache.promise === promise) searchRadioCache = null;
-            return [];
+            return { list: [], strategy: 'none' };
         })
-        .finally(() => clearTimeout(timeout));
-    searchRadioCache = { seedId, promise };
-    return promise;
+        .then(result => {
+            // 空预读（包括没有可用标识的响应）不能一直遮住播放结束时的重试。
+            entry.pending = false;
+            if (!result.list.length) {
+                if (searchRadioCache === entry) searchRadioCache = null;
+            } else {
+                // 与服务端默认 limit 的候选池期限对齐，不把临时降级的结果当作长期的电台。
+                const degraded = result.incomplete || result.strategy === 'artist' || result.list.length < 5;
+                entry.expires = performance.now() + (degraded ? 60000 : 6 * 60 * 60 * 1000);
+            }
+            return result;
+        })
+        .finally(() => clearTimeout(timer));
+    searchRadioCache = entry;
+    return entry.promise;
 }
 
 // 去掉已在队列里的和标记为不喜欢的歌曲
@@ -8484,13 +8504,16 @@ async function prefetchUpcomingSong() {
     const seed = currentPlaylist[currentIndex];
     prefetchManager.stop();
     const generation = prefetchManager.generation;
-    const isCurrent = () => settings.enablePreloader !== false &&
+    const requestId = loadingRequestCounter;
+    const isCurrent = () => settings.enablePreloader !== false && requestId === loadingRequestCounter &&
         generation === prefetchManager.generation && currentPlaylist[currentIndex] === seed;
-    const radioSong = pickSearchRadioSongs(await loadSearchRadioSongs(seed))[0];
+    const result = await loadSearchRadioSongs(seed, { prefetch: true });
     if (!isCurrent()) return;
+    const radioSong = pickSearchRadioSongs(result.list)[0];
     if (!radioSong) return prefetchNextSong();
     try {
-        await prefetchSongUrl(radioSong, isCurrent);
+        const ready = await prefetchSongUrl(radioSong, isCurrent, { verifyRetry: true });
+        if (ready && isCurrent()) preparedSearchRadio = { seed, requestId, result };
     } catch (e) {
         console.warn(`[Prefetch] Could not preload [${radioSong.name}]:`, e.message);
     }
@@ -8498,17 +8521,34 @@ async function prefetchUpcomingSong() {
 
 async function continueWithSimilarSongs() {
     const seed = currentPlaylist[currentIndex];
-    const epoch = searchRadioEpoch;
+    const epoch = ++searchRadioEpoch; // 重复的 Next/ended 通知只由最新的一次提交队列。
     const requestId = loadingRequestCounter;
-    const songs = await loadSearchRadioSongs(seed);
-    // 等待期间用户已切歌、暂停，或又发起过播放（比如切走再切回同一首）：不再干预
-    if (currentPlaylist[currentIndex] !== seed || epoch !== searchRadioEpoch || loadingRequestCounter !== requestId) return;
-    const fresh = isSearchRadioDue() ? pickSearchRadioSongs(songs) : [];
+    const isCurrent = () => currentPlaylist[currentIndex] === seed && epoch === searchRadioEpoch && loadingRequestCounter === requestId;
+    const joinedPrefetch = searchRadioCache?.pending && searchRadioCache.prefetch && searchRadioCache.seedId === cleanSongData(seed).id;
+    const deadline = performance.now() + SEARCH_RADIO_TIMEOUT_MS;
+    const prepared = preparedSearchRadio?.seed === seed && preparedSearchRadio.requestId === requestId
+        ? preparedSearchRadio.result : null;
+    // Don't throw away a usable, track-related pick just because the seed was
+    // longer than the metadata TTL. An artist-only pick can still be upgraded.
+    const usePrepared = prepared && prepared.strategy !== 'artist' && pickSearchRadioSongs(prepared.list).length;
+    let result = await (usePrepared ? prepared : loadSearchRadioSongs(seed));
+    if (!isCurrent()) return;
+    if (joinedPrefetch && !result.list.length && isSearchRadioDue()) {
+        // 若切歌时预读还在进行，可在本次剩余预算内重试一次，不能重新开始计时。
+        const remaining = Math.floor(deadline - performance.now());
+        if (remaining > 0) result = await loadSearchRadioSongs(seed, { timeoutMs: remaining });
+        if (!isCurrent()) return;
+    }
+    let fresh = isSearchRadioDue() ? pickSearchRadioSongs(result.list) : [];
+    if (!fresh.length && prepared && prepared !== result && isSearchRadioDue()) {
+        result = prepared;
+        fresh = pickSearchRadioSongs(prepared.list);
+    }
     if (!fresh.length) {
         playNextInQueue();
         return;
     }
-    showInfo(`已续播 ${fresh.length} 首相似歌曲`);
+    showInfo(`已续播 ${fresh.length} 首${result.strategy === 'artist' ? '同歌手歌曲' : '相似歌曲'}`);
     // 标记写在歌曲对象上，随播放队列一起保存，刷新页面后仍认得出这些是续播插入的
     fresh.forEach(item => { item._searchRadio = true; });
     // 相似歌曲插在当前歌曲之后，未播放的搜索结果留在其后。

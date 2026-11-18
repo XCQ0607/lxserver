@@ -5,6 +5,7 @@ import { bHh } from './musicSdk/options'
 import { deflateRaw } from 'zlib'
 import * as tunnel from 'tunnel'
 import { getProxyAgent } from './proxy.js'
+import { sourceRequestSignal } from '../../server/sources/requestScope'
 
 
 const httpsRxp = /^https:/
@@ -50,7 +51,7 @@ const defaultHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
 }
 
-const buildHttpPromose = (url, options) => {
+const buildHttpPromose = (url, options, signal) => {
     let obj = {
         isCancelled: false,
         cancelHttp: () => {
@@ -72,16 +73,23 @@ const buildHttpPromose = (url, options) => {
             obj.cancelFn = null
             if (err) return reject(err)
             resolve(resp)
-        }).then(ro => {
+        }, signal).then(ro => {
             obj.requestObj = ro
             if (obj.isCancelled) obj.cancelHttp()
-        })
+        }, reject)
     })
     return obj
 }
 
 export const httpFetch = (url, options = { method: 'get' }) => {
-    const requestObj = buildHttpPromose(url, options)
+    const signal = sourceRequestSignal()
+    const requestObj = buildHttpPromose(url, options, signal)
+    if (signal) {
+        const abort = () => requestObj.cancelHttp?.()
+        if (signal.aborted) abort()
+        else signal.addEventListener('abort', abort, { once: true })
+        requestObj.promise = requestObj.promise.finally(() => signal.removeEventListener('abort', abort))
+    }
     requestObj.promise = requestObj.promise.catch(err => {
         if (err.message === 'socket hang up') {
             return Promise.reject(new Error(requestMsg.unachievable))
@@ -211,7 +219,8 @@ const fetchData = async (url, method, {
     format = 'json',
     timeout = 15000,
     ...options
-}, callback) => {
+}, callback, signal) => {
+    signal?.throwIfAborted()
     // console.log('---start---', url)
     headers = Object.assign({}, headers)
     if (headers[bHh]) {
@@ -230,12 +239,14 @@ const fetchData = async (url, method, {
         headers[s] = !s || `${(await handleDeflateRaw(Buffer.from(JSON.stringify(`${path}${v}`.match(regx), null, 1).concat(v)).toString('base64'))).toString('hex')}&${parseInt(v)}${v2}`
         delete headers[bHh]
     }
+    const agent = await getRequestAgent(url)
+    signal?.throwIfAborted()
     return request(url, {
         ...options,
         method,
         headers: Object.assign({}, defaultHeaders, headers),
         timeout,
-        agent: await getRequestAgent(url),
+        agent,
         json: format === 'json',
         rejectUnauthorized: false,
     }, (err, resp, body) => {

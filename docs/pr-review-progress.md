@@ -34,3 +34,10 @@ Final integrated local validation: **289/289 CJS and 222/222 TypeScript tests pa
 - [x] Pending metadata state is independent of the debounce timer. Successful persistence clears it; failed write/rename remains explicitly flushable, including without another observation. Both ENOSPC paths have regressions.
 
 Validation: 289/289 CJS and 224/224 TypeScript tests passed; the production build and diff checks passed. No additional live deployment was made for this review pass.
+
+## Search radio: recording identity and handoff
+
+- [x] Prefer track-level relations; label the bounded same-artist fallback separately. Use lead and featured credits, edition, album and duration to disambiguate recordings.
+- [x] Bound provider lookups and reserve time for alternate catalogs. Retry deadline-truncated pools sooner, without throwing away an already prepared handoff for the current play.
+- [x] Only mark a recommendation prepared after the media URL passes the check and the requested quality is still current. Keep manual queue choices and logout/disconnect cancellation intact.
+- [x] On Node 22, all 306 JavaScript tests and 247 TypeScript tests passed and the production build succeeded. These checks cover provider, player and queue behavior, not listeners' subjective ratings of musical similarity.

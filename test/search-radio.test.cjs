@@ -21,7 +21,9 @@ function setup({ list, index, similar = [], settings = {}, playMode = 'list', ar
     const context = vm.createContext({
         console: { log() {}, warn() {} },
         window: {},
-        URLSearchParams, AbortController, setTimeout: timer, clearTimeout,
+        URLSearchParams, AbortController, setTimeout: timer, clearTimeout, performance,
+        prefetchManager: { generation: 0, stop() { this.generation++; } },
+        prefetchNextSong() {}, prefetchSongUrl: async () => true,
         API_BASE: '/api/music',
         settings, playMode,
         currentPlaylist: list, currentIndex: index, preSelectedNextIndex: null,
@@ -201,6 +203,225 @@ test('playing something else and coming back to the same song cancels the pendin
     assert.deepEqual(c.played, []);
 });
 
+
+test('a successful but empty prefetch is retried when the song ends', async () => {
+    let calls = 0;
+    const c = setup({ list: [song('a'), song('b')], index: 0, fetchImpl: async () => ({
+        ok: true, json: async () => ({ list: ++calls === 1 ? [] : [song('x')], strategy: 'radio' }),
+    }) });
+    await c.prefetchUpcomingSong();
+    await c.continueWithSimilarSongs();
+    assert.equal(calls, 2);
+    assert.deepEqual(c.updated?.ids, ['a', 'x', 'b']);
+    assert.deepEqual(c.played, []);
+});
+
+test('Next while prefetch is in flight gets at most one retry inside its remaining budget', async () => {
+    let now = 0, firstReply, calls = 0;
+    const timers = [];
+    const c = setup({ list: [song('a'), song('b')], index: 0, fetchImpl: () => {
+        if (++calls === 1) return new Promise(resolve => { firstReply = resolve; });
+        return Promise.resolve({ ok: true, json: async () => ({ list: [] }) });
+    } });
+    c.performance = { now: () => now };
+    c.setTimeout = (_, ms) => { timers.push(ms); return timers.length; };
+    c.clearTimeout = () => {};
+    const prefetch = c.prefetchUpcomingSong();
+    const firstNext = c.continueWithSimilarSongs(), duplicateNext = c.continueWithSimilarSongs();
+    now += 1000;
+    firstReply({ ok: true, json: async () => ({ list: [] }) });
+    await Promise.all([prefetch, firstNext, duplicateNext]);
+    assert.equal(calls, 2);
+    assert.equal(timers[1], timers[0] - 1000);
+    assert.deepEqual(c.played, [1], 'only the latest transition may advance');
+});
+
+test('a stuck response body times out, aborts transport, and cannot insert tracks after fallback', async () => {
+    let finishBody, signal, expire, budget;
+    const c = setup({ list: [song('a'), song('b')], index: 0, fetchImpl: async (_, options) => {
+        signal = options.signal;
+        return { ok: true, json: () => new Promise(resolve => { finishBody = resolve; }) };
+    } });
+    c.setTimeout = (callback, ms) => { expire = callback; budget = ms; return 1; };
+    c.clearTimeout = () => {};
+    const next = c.continueWithSimilarSongs();
+    await settle();
+    assert.ok(expire && budget > 0 && budget <= 9000, 'bounded whole-request timeout');
+    expire();
+    await next;
+    assert.equal(signal.aborted, true);
+    assert.deepEqual(c.played, [1]);
+    finishBody({ list: [song('too-late')] });
+    await settle();
+    assert.equal(c.updated, null);
+    assert.equal(c.searchRadioCache, null);
+});
+
+test('same-artist fallback is labelled as such instead of as similar songs', async () => {
+    let message;
+    const c = setup({ list: [song('a')], index: 0, fetchImpl: async () => ({
+        ok: true, json: async () => ({ list: [song('b')], strategy: 'artist' }),
+    }) });
+    c.showInfo = text => { message = text; };
+    await c.continueWithSimilarSongs();
+    assert.match(message, /同歌手/);
+    assert.doesNotMatch(message, /相似歌曲/);
+});
+
+test('completed healthy pools last six hours, while thin and artist-only pools expire after one minute', async () => {
+    for (const [strategy, count, ttl] of [['artist', 6, 60000], ['radio', 4, 60000], ['similar', 5, 21600000]]) {
+        const seed = song('a');
+        let now = 200, calls = 0;
+        const c = setup({ list: [seed], index: 0, fetchImpl: async () => {
+            calls++;
+            return { ok: true, json: async () => ({ list: Array.from({ length: count }, (_, i) => song(i + 1)), strategy }) };
+        } });
+        c.performance = { now: () => now };
+        await c.loadSearchRadioSongs(seed, { prefetch: true });
+        now += ttl - 1;
+        await c.loadSearchRadioSongs(seed);
+        assert.equal(calls, 1, strategy);
+        now++;
+        await c.loadSearchRadioSongs(seed);
+        assert.equal(calls, 2, strategy);
+    }
+});
+
+test('an expired artist prefetch is retained for this play if a track-level refresh still misses', async () => {
+    let now = 0, calls = 0;
+    const c = setup({ list: [song('a'), song('b')], index: 0, fetchImpl: async () => ({
+        ok: true, json: async () => ({ list: ++calls === 1 ? [song('x')] : [], strategy: 'artist' }),
+    }) });
+    c.performance = { now: () => now };
+    await c.prefetchUpcomingSong();
+    now += 60000;
+    await c.continueWithSimilarSongs();
+    assert.equal(calls, 2);
+    assert.deepEqual(c.played, []);
+    assert.deepEqual(c.updated.ids, ['a', 'x', 'b']);
+});
+
+
+test('a prepared track-related pool survives expiry during the same playback without waiting on failed or weaker providers', async () => {
+    for (const status of [503, 200]) {
+        let now = 0, calls = 0, preloaded;
+        const c = setup({ list: [song('seed'), song('ordinary')], index: 0, fetchImpl: async () => {
+            if (++calls === 1) return { ok: true, json: async () => ({ strategy: 'radio', list: [song('related')] }) };
+            return { ok: status === 200, status, json: async () => ({ strategy: 'artist', list: [song('catalog')] }) };
+        } });
+        c.performance = { now: () => now };
+        c.prefetchSongUrl = track => { preloaded = track.id; return true; };
+        await c.prefetchUpcomingSong();
+        now += 180000;
+        await c.continueWithSimilarSongs();
+        assert.equal(preloaded, 'related');
+        assert.equal(calls, 1);
+        assert.deepEqual(c.updated?.ids, ['seed', 'related', 'ordinary']);
+    }
+});
+
+test('an expired playback-specific pick cannot cross a replay, dislike change, or manual next', async () => {
+    for (const action of ['replay', 'dislike', 'manual-next', 'pause']) {
+        let now = 0, calls = 0;
+        const c = setup({ list: [song('seed'), song('ordinary')], index: 0, fetchImpl: async () => ({
+            ok: true, json: async () => ({ strategy: 'radio', list: ++calls === 1 ? [song('related')] : [] }),
+        }) });
+        c.performance = { now: () => now };
+        await c.prefetchUpcomingSong();
+        now += 180000;
+        if (action === 'replay') c.loadingRequestCounter++;
+        if (action === 'dislike') c.window = { DislikeManager: { isDisliked: track => track.id === 'related' } };
+        if (action === 'manual-next') c.keepAsNextSong(c.currentPlaylist[1]);
+        c.playNext();
+        if (action === 'pause') c.cancelSearchRadioContinuation();
+        await settle();
+        assert.equal(c.updated, null, action);
+        assert.deepEqual(c.played, action === 'pause' ? [] : [1], action);
+    }
+});
+
+test('pool truncated by provider deadline expires after a minute even if it has many matches', async () => {
+    const seed = song('seed');
+    let now = 0, calls = 0;
+    const c = setup({ list: [seed], index: 0, fetchImpl: async () => {
+        calls++;
+        return {ok:true, json:async()=>({strategy:'radio', incomplete:true, list:Array.from({length:8},(_,i)=>song(i+1))})};
+    } });
+    c.performance = { now: () => now };
+    await c.loadSearchRadioSongs(seed); now += 60000; await c.loadSearchRadioSongs(seed);
+    assert.equal(calls, 2);
+});
+
+test('insertion preserves distinct provider IDs, deduplicates same-source quality and reselects the intended recording', async () => {
+    const seed = {...song(1000), source:'wy', name:'Seed'};
+    const other = {...song(1000), source:'kg', name:'Related'};
+    const c = setup({list:[seed], index:0, similar:[other], settings:{deduplicatePlaylistByQuality:true}});
+    c.window.QualityManager = {QUALITY_PRIORITY:['flac','128k']};
+    c.document = { getElementById: () => ({ classList: { contains: () => true } }) };
+    const selected = [];
+    c.playSong = (track, index) => { selected.push(track); c.currentIndex = index; };
+    vm.runInContext(slice('function updatePlaylist(list,', '\nwindow.updatePlaylist ='), c);
+    await c.continueWithSimilarSongs();
+    assert.equal(selected[0], other);
+    assert.deepEqual(Array.from(c.currentPlaylist), [seed, other]);
+    const better = {...other,quality:'flac'};
+    c.updatePlaylist([seed,other,better],1,'network');
+    assert.deepEqual(Array.from(c.currentPlaylist), [seed,better]);
+    assert.equal(selected[1], better);
+});
+
+
+test('a failed media prefetch cannot pin an expired pick ahead of fresh recommendations', async () => {
+    let now = 0, calls = 0;
+    const c = setup({list:[song('seed')], index:0, fetchImpl: async () => ({ ok:true,
+        json:async()=>({strategy:'radio', list:[song(++calls === 1 ? 'not-ready' : 'fresh-related')]}) })});
+    c.performance = {now:()=>now};
+    c.prefetchSongUrl = async () => { throw new Error('no usable audio'); };
+    await c.prefetchUpcomingSong();
+    now += 180000;
+    await c.continueWithSimilarSongs();
+    assert.deepEqual(c.updated?.ids, ['seed','fresh-related']);
+});
+
+test('radio pins only confirmed media for this play, including on a retry or quality change', async t => {
+    for (const scenario of ['quality changed', 'both URLs dead', 'retry works', 'first URL works', 'cached URL works']) {
+        await t.test(scenario, async () => {
+            let now = 0, calls = 0, resolves = 0;
+            const probes = [], writes = [];
+            const c = setup({ list: [song('seed')], index: 0, settings: { preferredQuality: 'flac' },
+                fetchImpl: async () => ({ ok: true, json: async () => ({
+                    strategy: 'radio', list: [song(++calls === 1 ? 'first' : 'refreshed')],
+                }) }),
+            });
+            c.performance = { now: () => now };
+            c.window.QualityManager = { getBestQuality: (_track, quality) => quality };
+            c.prefetchManager.get = () => scenario === 'cached URL works' ? { url: 'cached' } : null;
+            c.prefetchManager.set = (_track, _quality, media) => writes.push(media.url);
+            c.localStorage.removeItem = () => {};
+            c.getSourceTypeText = () => '';
+            c.resolveSongUrl = async () => {
+                if (scenario === 'quality changed') c.settings.preferredQuality = '128k';
+                return { url: ++resolves === 1 ? 'original' : 'replacement' };
+            };
+            c.probeUrl = async url => {
+                probes.push(url);
+                return scenario === 'first URL works' || scenario === 'cached URL works' ||
+                    (scenario === 'retry works' && url === 'replacement');
+            };
+            vm.runInContext(slice('async function prefetchSongUrl(', '\n// --- Server Cache Helpers'), c);
+            await c.prefetchUpcomingSong();
+            now += 180000; // the single-item pool has expired
+            await c.continueWithSimilarSongs();
+            const ready = ['first URL works', 'retry works', 'cached URL works'].includes(scenario);
+            assert.equal(calls, ready ? 1 : 2);
+            assert.deepEqual(c.updated?.ids, ['seed', ready ? 'first' : 'refreshed']);
+            assert.deepEqual(writes, !ready ? [] : [scenario === 'retry works' ? 'replacement' :
+                scenario === 'cached URL works' ? 'cached' : 'original']);
+            assert.deepEqual(probes, scenario === 'quality changed' ? [] : scenario === 'first URL works' ?
+                ['original'] : scenario === 'cached URL works' ? ['cached'] : ['original', 'replacement']);
+        });
+    }
+});
 
 test('saving and restoring a recommendation queue preserves the next-song identity', async () => {
     const c = setup({ list: [song('a'), song('b')], index: 0, similar: [song('x'), song('y')] });
