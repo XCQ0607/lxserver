@@ -109,3 +109,28 @@ test('Web cache routing tries authenticated local files before OpenList and does
     if (!local) assert.equal(response.origin, 'openlist')
   }
 })
+
+test('OpenList-only lookup after the batch cache decision does not scan local files again', async () => {
+  const source = fs.readFileSync(path.join(__dirname, '../src/server/server.ts'), 'utf8')
+  const start = source.indexOf("      if (pathname === '/api/music/cache/check'")
+  const route = source.slice(start, source.indexOf('// Persistent server download queue', start))
+  let response
+  const context = {
+    AbortSignal, pathname: '/api/music/cache/check',
+    req: { method: 'GET', headers: { 'x-user-name': 'alice', 'x-user-token': 'private-token' } },
+    urlObj: new URL('http://localhost/api/music/cache/check?name=Song&singer=Singer&source=tx&songmid=123&quality=320k&includeOpenlist=1&openlistOnly=1'),
+    verifyUserAuth: () => 'alice',
+    fileCache: {
+      normalizeSongId: () => 'tx_123', getFileName: () => 'song',
+      checkCache: () => assert.fail('local lookup already done'),
+    },
+    resolveOpenlistCacheEntry: async user => {
+      assert.equal(user, 'alice')
+      return { url: 'https://cloud.example/song?sign=abc', filename: 'song.mp3', quality: '320k' }
+    },
+    res: { writeHead: code => assert.equal(code, 200), end: body => { response = JSON.parse(body) } },
+  }
+  await vm.runInNewContext(transformSync('(async () => {' + route + '})()', { loader: 'ts' }).code, context)
+  assert.equal(response.origin, 'openlist')
+  assert.equal(response.url, 'https://cloud.example/song?sign=abc')
+})

@@ -192,6 +192,7 @@ Success is an **object**, not an array. Read `data.list`:
 - **`POST /api/music/cache/sync`**: Rebuild and synchronize local cache index.
 - **`GET /api/music/cache/stats`**: Get user's cache statistics (total count, disk bytes).
 - **`GET /api/music/cache/list`**: Get detailed list of all cached audio files.
+- **`POST /api/music/cache/select`**: Select an authorized local playback file, without provider or OpenList calls. The JSON body is limited to 24 KiB and 1–8 song identities (`id`, `source`, `name`, `singer`, `interval`). A hit returns `url`, `filename`, `quality`, `folder`, and zero-based `memberIndex`; a miss returns `{"exists":false}`. Scope comes from request authentication, never the body.
 - **`GET /api/music/cache/check`**: Check if a song is already cached on the server.
 - **`GET /api/music/cache/cover`**: Get embedded artwork image stream (`?filename=...`).
 - **`GET /api/music/cache/file/<user>/<filename>`**: Stream cached audio files (supports HTTP Range).

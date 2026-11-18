@@ -18,12 +18,14 @@ The persistent per-user serverCacheLocation selects the base. A temporary local-
 
 Local-library entries directly use their file URL for music, cache or custom directories. Online songs resolve in this order:
 
-1. With prefer-existing-server-audio enabled, probe the user's music/cache. Exact-quality downloads precede cache; other qualities may be fallback candidates.
+1. With prefer-existing-server-audio enabled, one local selection checks the user's completed music/cache files before fetching an online audio URL. Exact-quality downloads precede cache; lower eligible tiers may be reused when automatic quality fallback is allowed. A local hit does not trigger an automatic quality upgrade.
 2. On a local miss, use registered OpenList user cache/download files if the backend playback-source master switch permits it.
 3. Reuse a browser-cached URL when enabled. URLs can expire and are not offline audio copies.
 4. Resolve an online source-script URL and deliver directly or through the configured proxy.
 
 Cache-song-files controls background writes; prefer-existing-server-audio controls existing-file reads. Disabling writes does not disable reads. Background writes pass the only-download-mode setting: enabled writes to music, otherwise cache, under the selected base. Foreground playback does not wait for the full background download.
+
+**Optional relay cache pilot:** Set `LX_READ_THROUGH_CACHE=1` on the server to reuse bytes from eligible signed-in browser plays through the built-in inline proxy. The pilot is off by default. It only saves a complete sequential MP3 response of known size (up to 32 MiB); short probes, seeks, other formats, direct playback, and Cast do not qualify. Storage limits or restore mode can also prevent saving. Playback does not wait for saving, and if a ticketed capture declines or fails, it does not start another full download just for the cache. There is no change to manual downloads or downloaded files.
 
 ### Web lyrics
 

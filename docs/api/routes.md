@@ -218,7 +218,8 @@
 | POST | `/api/music/cache/subdirs/rename` | — |
 | POST | `/api/music/cache/subdirs/delete` | — |
 | POST | `/api/music/cache/rename` | — |
-| GET | `/api/music/cache/check` | `name`, `singer`, `source`, `songmid`, `songId`, `quality`, `exactQuality` |
+| GET | `/api/music/cache/check` | `name`, `singer`, `source`, `songmid`, `songId`, `quality`, `exactQuality`, `includeOpenlist`, `openlistOnly` |
+| POST | `/api/music/cache/select` | `songs`（1–8 个歌曲标识）、`quality`、`exactQuality`、`allowCrossSource`、`excludeFiles`（最多 8 个）；只查已完成的本地文件 |
 | GET | `/api/music/cache/queue` | — |
 | POST | `/api/music/cache/queue` | — |
 | POST | `/api/music/cache/queue/concurrency` | — |
@@ -367,7 +368,7 @@
 
 | 方法 | 路径 | 直接读取字段（部分） |
 | --- | --- | --- |
-| POST | `/api/music/url` | — |
+| POST | `/api/music/url` | `songInfo`, `quality`, `requestReadThrough` |
 
 ## music/quality
 

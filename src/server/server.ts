@@ -6,6 +6,9 @@ import { lookupLocalLyrics } from './music/localLyrics'
 import { resolveDownloadLyrics, resolveSongLyricData } from './music/downloadLyrics'
 import { getVerifiedAudioSize } from './music/audioProbe'
 import { downloadInRanges } from './music/parallelDownload'
+import { selectPlaybackCache } from './music/playbackCacheSelection'
+import { attachReadThroughCapture, canCaptureReadThrough } from './music/readThroughCapture'
+import { publishReadThrough } from './music/publishReadThrough'
 import { buildLyrics } from '../utils/lrcTool'
 import { resolveOpenlistCacheEntry } from './openlist/openlistBackup'
 import http, { type IncomingMessage } from 'node:http'
@@ -935,14 +938,70 @@ const checkAndCreateDir = (p: string) => {
   }
 }
 
-const readBody = async (req: IncomingMessage) => await new Promise<string>((resolve, reject) => {
+const readBody = async (req: IncomingMessage, maxBytes = Infinity) => await new Promise<string>((resolve, reject) => {
   const chunks: any[] = []
-  req.on('data', chunk => { chunks.push(chunk) })
+  let bytes = 0
+  req.on('data', chunk => {
+    bytes += Buffer.byteLength(chunk)
+    if (bytes <= maxBytes) chunks.push(chunk)
+    else if (chunks.length || bytes - Buffer.byteLength(chunk) <= maxBytes) {
+      chunks.length = 0
+      reject(Object.assign(new Error('Request body too large'), { status: 413 }))
+    }
+  })
   req.on('end', () => {
     resolve(Buffer.concat(chunks).toString('utf-8'))
   })
   req.on('error', reject)
 })
+
+// Opaque, short-lived capture intent, not a media authorization credential.
+// Only a resolved named-account URL can request writes; allowlists and media
+// auth are unchanged. Keep it in memory and never persist provider URLs.
+type ReadThroughOffer = {
+  owner: string; url: string; song: any; expires: number; cacheDir?: string; stagingDir?: string
+}
+const readThroughOffers = new Map<string, ReadThroughOffer>()
+const issueReadThroughOffer = (owner: string, audioUrl: string, song: any) => {
+  if (process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
+    !owner || ['.', '..', 'open', '_open', 'default'].includes(owner) || /[\\/:\0]/.test(owner) ||
+    !global.lx.config.users.some(user => user.name === owner && !user.disabled) || !song.name || !song.singer || !song.interval || !/^https?:\/\//i.test(audioUrl) || audioUrl.length > 4096 ||
+    !['tx', 'wy', 'kw', 'kg', 'mg'].includes(song.source)) return undefined
+  const metadata = fileCache.extractSongMetadata(song)
+  if (!metadata.id || metadata.id.length > 200 || [metadata.name, metadata.singer, metadata.album, metadata.interval]
+    .some(value => typeof value !== 'string' || value.length > 512)) return undefined
+  const now = Date.now()
+  for (const [key, entry] of readThroughOffers) if (entry.expires <= now) readThroughOffers.delete(key)
+  if (readThroughOffers.size >= 128) return undefined
+  const key = crypto.randomBytes(16).toString('hex')
+  const offer: ReadThroughOffer = {
+    owner, url: audioUrl, expires: now + 2 * 60_000,
+    song: { id: metadata.id, source: metadata.source, name: metadata.name, singer: metadata.singer,
+      albumName: metadata.album, interval: metadata.interval },
+  }
+  readThroughOffers.set(key, offer)
+  // Missing or slow staging must not delay receiving the playable URL.
+  setImmediate(async () => {
+    try {
+      const cacheDir = fileCache.getCacheDir(owner, false, undefined, false)
+      await fs.promises.mkdir(cacheDir, { recursive: true })
+      if (!(await fs.promises.lstat(cacheDir)).isDirectory()) return
+      const stagingDir = path.join(cacheDir, fileCache.READ_THROUGH_STAGING_DIR)
+      try { await fs.promises.mkdir(stagingDir, { mode: 0o700 }) }
+      catch (error: any) { if (error.code !== 'EEXIST') return }
+      const stage = await fs.promises.lstat(stagingDir)
+      if (!stage.isDirectory() || (stage.mode & 0o077) !== 0) return
+      // Crash leftovers never accumulate: fail closed for this owner until the
+      // private spool is empty. Do not delete user files from the playback path.
+      const handle = await fs.promises.opendir(stagingDir)
+      try { if (await handle.read()) return }
+      finally { await handle.close() }
+      offer.cacheDir = cacheDir
+      offer.stagingDir = stagingDir
+    } catch { /* Read-through remains opportunistic. */ }
+  })
+  return key
+}
 
 const formatBytes = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''
@@ -4330,6 +4389,40 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      // One authenticated, local-only decision for a bounded set of recording IDs.
+      if (pathname === '/api/music/cache/select' && req.method === 'POST') {
+        const requestedOwner = req.headers['x-user-name']
+        const verified = verifyUserAuth(req)
+        const named = requestedOwner && !['open', '_open', 'default'].includes(String(requestedOwner))
+        if (((req.headers['x-user-token'] || named) && !verified) || (named && requestedOwner !== verified) ||
+          (verified && (verified === '.' || verified === '..' || /[\\/:\0]/.test(verified) ||
+            !global.lx.config.users.some(user => user.name === verified && !user.disabled))) ||
+          (!verified && !checkPlayerAuth(req))) {
+          res.writeHead(401, { 'Cache-Control': 'no-store' }); res.end(); return
+        }
+        const owner = verified || '_open'
+        if (!verified && global.lx.config['user.enablePublicRestriction'] &&
+          !global.lx.config['user.enablePublicNonAdminLocalMusic'] &&
+          !(req.headers['x-frontend-auth'] && req.headers['x-frontend-auth'] === global.lx.config['admin.password'])) {
+          // This visitor may still play public streams. Do not expose indexed files.
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' })
+          res.end(JSON.stringify({ exists: false })); return
+        }
+        try {
+          const body = await readBody(req, 24 * 1024)
+          if (res.destroyed || res.writableEnded) return
+          const result = selectPlaybackCache(JSON.parse(body), owner)
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' })
+          res.end(JSON.stringify(result))
+        } catch (error: any) {
+          if (!res.destroyed && !res.writableEnded) {
+            const status = error.status === 413 ? 413 : error instanceof TypeError || error instanceof SyntaxError ? 400 : 500
+            res.writeHead(status, { 'Cache-Control': 'no-store' }); res.end()
+          }
+        }
+        return
+      }
+
       // 2. Check Cache
       if (pathname === '/api/music/cache/check' && req.method === 'GET') {
         const name = urlObj.searchParams.get('name')
@@ -4360,8 +4453,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
-        if (!result.exists && urlObj.searchParams.get('includeOpenlist') === '1') {
+        const includeOpenlist = urlObj.searchParams.get('includeOpenlist') === '1'
+        const openlistOnly = includeOpenlist && urlObj.searchParams.get('openlistOnly') === '1'
+        let result: any = openlistOnly ? { exists: false } :
+          fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
+        if (!result.exists && includeOpenlist) {
           const id = fileCache.normalizeSongId({ source, songmid, id: songId })
           const song = { source, songmid, id, name, singer }
           const q = quality || '128k'
@@ -6073,6 +6169,36 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 if (!res.headersSent) {
                   res.writeHead(proxyRes.statusCode || 200, headers)
+                  const offerId = urlObj.searchParams.get('capture')
+                  const captureRange = req.headers.range
+                  if (process.env.LX_READ_THROUGH_CACHE === '1' && isInline && !isTaggingMode && !taskId &&
+                    req.method === 'GET' && req.headers['sec-fetch-dest'] === 'audio' &&
+                    (!captureRange || captureRange === 'bytes=0-') &&
+                    offerId && /^[a-f0-9]{32}$/.test(offerId) && canCaptureReadThrough(proxyRes)) {
+                    const offer = readThroughOffers.get(offerId)
+                    if (offer?.cacheDir && offer.stagingDir && offer.owner === proxyUser && offer.url === urlStr &&
+                      offer.expires > Date.now() && !global.lx.config['user.enableCacheSizeLimit']) {
+                      const controller = new AbortController()
+                      const cancel = () => { if (!res.writableFinished) controller.abort() }
+                      const detach = () => res.removeListener('close', cancel)
+                      res.once('close', cancel)
+                      const cacheDir = offer.cacheDir
+                      const capturing = attachReadThroughCapture(proxyRes, {
+                        stagingDir: offer.stagingDir,
+                        signal: controller.signal,
+                        async publish({ tempPath, bytes, signal }) {
+                          try {
+                            if (process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
+                              !global.lx.config.users.some(user => user.name === offer.owner && !user.disabled) ||
+                              cacheDir !== fileCache.getCacheDir(offer.owner, false)) return
+                            await publishReadThrough(tempPath, bytes, offer.song, offer.owner, cacheDir, signal)
+                          } finally { detach() }
+                        },
+                      })
+                      if (capturing) readThroughOffers.delete(offerId)
+                      else detach()
+                    }
+                  }
                   proxyRes.pipe(res)
                 }
               }
@@ -6779,7 +6905,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           }
 
           try {
-            let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources } = JSON.parse(body)
+            let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources, requestReadThrough } = JSON.parse(body)
             songInfo = normalizeSongInfo(songInfo)
             // console.log('[歌曲播放] 歌曲信息:', JSON.stringify(songInfo, null, 2))
             if (!songInfo || !songInfo.source) {
@@ -6891,9 +7017,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               result.requestedSource = songInfo.source
               result.downloadSource = fileCache.detectDownloadSource(result.url, songInfo.source)
+              if (requestReadThrough === true) result.readThrough = issueReadThroughOffer(verifiedUsername, result.url, songInfo)
             }
 
-            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.writeHead(200, { 'Content-Type': 'application/json', ...(result.readThrough ? { 'Cache-Control': 'private, no-store' } : {}) })
             res.end(JSON.stringify(result))
           } catch (err: any) {
             console.error('[歌曲播放] 音频地址解析失败:', err.message)

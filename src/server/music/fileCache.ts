@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { collectCacheMediaAsync, cleanupCacheDirectory, CacheUsageGuard } from './cacheCleanup'
 import { withRatingIdentityLock } from '../rating/ratingIdentityLock'
-import { beginCloudBackup } from '@/utils/backupPolicy'
+import { beginCloudBackup, isCloudRestoreRunning } from '@/utils/backupPolicy'
 import { resolveContainedPath } from '../auth/security'
 import { serveFile } from '../http/serveFile'
 import { getCacheBrowseLocation } from './cacheBrowseLocation'
@@ -32,7 +32,7 @@ export function unregisterOpenListCacheFile(username: string, songId: string, fo
 }
 import { buildLyrics, parseLyrics } from '../../utils/lrcTool'
 import { formatPlayTime } from '../../utils/common'
-import { getUserSpace } from '../../user'
+import { getUserDirname, getUserSpace } from '../../user'
 
 // --- Cache Naming Patterns ---
 export const CACHE_NAMING_PATTERNS = {
@@ -116,8 +116,7 @@ export const getUserCacheLocation = (username?: string): string => {
         return userCacheLocationMap.get(normalizedUsername)!
     }
     try {
-        const userSpace = getUserSpace(normalizedUsername)
-        const settingsPath = path.join(userSpace.dataManage.userDir, 'settings.json')
+        const settingsPath = path.join(global.lx.userPath, getUserDirname(normalizedUsername), 'settings.json')
         if (fs.existsSync(settingsPath)) {
             const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
             if (settings && (settings.serverCacheLocation === CACHE_ROOTS.DATA || settings.serverCacheLocation === CACHE_ROOTS.ROOT)) {
@@ -179,7 +178,7 @@ type LyricFetcher = (songInfo: any, username?: string) => Promise<string | null>
 let _lyricFetcher: LyricFetcher | null = null
 export const setLyricFetcher = (fn: LyricFetcher) => { _lyricFetcher = fn }
 
-export const getCacheDir = (username?: string, isOnlyDownload?: boolean, location?: string) => {
+export const getCacheDir = (username?: string, isOnlyDownload?: boolean, location?: string, createDirectory = true) => {
     if (isRemasterStage(username)) return remasterStaging.directory(username!, isOnlyDownload ? 'music' : 'cache')
     const userDirName = (username && username !== '_open' && username !== 'default') ? username : '_open'
 
@@ -193,7 +192,7 @@ export const getCacheDir = (username?: string, isOnlyDownload?: boolean, locatio
     }
 
     const fullPath = path.join(baseDir, userDirName)
-    if (!fs.existsSync(fullPath)) {
+    if (createDirectory && !fs.existsSync(fullPath)) {
         fs.mkdirSync(fullPath, { recursive: true })
     }
     return fullPath
@@ -247,12 +246,18 @@ export interface CacheItem {
     bitrate?: number
     sampleRate?: number
     bitDepth?: number
+    // Capture identity is bound to the resolved provider ID. Its names and
+    // duration are not independently verified cross-provider metadata.
+    readThrough?: true
     // 各平台原生标识（tx 的 mid/strMediaMid、kg 的 hash、wy 的 songId 等），
     // 规范化 ID 无法反推它们，缺了就没法从缓存条目还原出可解析的歌曲对象
     nativeIds?: Record<string, string>
 }
 
 export type CacheFolder = 'cache' | 'music'
+
+export const READ_THROUGH_CACHE_FILENAME = /^lx-readthrough-[a-f0-9]{32}\.mp3$/
+export const READ_THROUGH_STAGING_DIR = '.lx-read-through'
 
 export interface RemoveCacheFileResult {
     deleted: boolean
@@ -267,9 +272,10 @@ export interface DownloadProvenance {
 
 class CacheIndexManager {
     private indexes: Map<string, Map<string, CacheItem>> = new Map() // "location:username:folder" -> (songId -> CacheItem)
+    private playbackRevisions = new WeakMap<ReadonlyMap<string, CacheItem>, number>()
 
-    private getIndexFile(username: string, folder: 'cache' | 'music', location?: string) {
-        const userDir = getCacheDir(username, folder === 'music', location)
+    private getIndexFile(username: string, folder: 'cache' | 'music', location?: string, createDirectory = true) {
+        const userDir = getCacheDir(username, folder === 'music', location, createDirectory)
         const fileName = folder === 'music' ? 'music_index.json' : 'cache_index.json'
         return path.join(userDir, fileName)
     }
@@ -279,7 +285,7 @@ class CacheIndexManager {
         return `${loc}:${username}:${folder}`
     }
 
-    load(username: string, folder: 'cache' | 'music', location?: string) {
+    load(username: string, folder: 'cache' | 'music', location?: string, createDirectory = true) {
         const loc = location || getUserCacheLocation(username)
         const key = this.getKey(username, folder, loc)
         const cached = this.indexes.get(key)
@@ -289,7 +295,7 @@ class CacheIndexManager {
             this.indexes.set(key, index)
             return index
         }
-        const file = this.getIndexFile(username, folder, loc)
+        const file = this.getIndexFile(username, folder, loc, createDirectory)
         if (fs.existsSync(file)) {
             try {
                 const data = JSON.parse(fs.readFileSync(file, 'utf-8'))
@@ -304,11 +310,13 @@ class CacheIndexManager {
     }
 
     save(username: string, folder: 'cache' | 'music', location?: string) {
-        if (global.lx?.restoreMaintenance) return
         const loc = location || getUserCacheLocation(username)
         const key = this.getKey(username, folder, loc)
         const index = this.indexes.get(key)
         if (!index) return
+
+        this.playbackRevisions.set(index, (this.playbackRevisions.get(index) || 0) + 1)
+        if (global.lx?.restoreMaintenance) return
 
         if (isRemasterStage(username)) {
             remasterStaging.writeIndex(username, folder, Object.fromEntries(index))
@@ -339,6 +347,54 @@ class CacheIndexManager {
             if (k === songId || k.startsWith(prefix)) return item
         }
         return undefined
+    }
+
+    // Keep the read-through path distinct from ordinary downloads: a completed
+    // capture may add a variant, but must never replace an existing entry.
+    publishNew(username: string, item: CacheItem, folder: CacheFolder, location?: string): boolean {
+        if (isRemasterStage(username) || isCloudRestoreRunning()) return false
+        const loc = location || getUserCacheLocation(username)
+        const index = this.load(username, folder, loc, false)
+        const itemKey = `${item.id}_${item.quality}`
+        if (index.has(itemKey)) return false
+
+        const file = this.getIndexFile(username, folder, loc, false)
+        let temp: string | undefined
+        try {
+            let stat: Stats | undefined
+            try { stat = fs.lstatSync(file) } catch (error: any) {
+                if (error.code !== 'ENOENT') throw error
+            }
+            if (stat) {
+                // load() accepts an empty map on corruption. Do not silently
+                // persist that fallback over the old on-disk index.
+                if (!stat.isFile()) return false
+                const disk = JSON.parse(fs.readFileSync(file, 'utf8'))
+                if (!disk || typeof disk !== 'object' || Array.isArray(disk) ||
+                    Object.keys(disk).some(key => !index.has(key) || !disk[key] || typeof disk[key] !== 'object' || Array.isArray(disk[key]))) return false
+            }
+
+            const snapshot = Object.fromEntries(index)
+            snapshot[itemKey] = item
+            const name = `${file}.${crypto.randomBytes(16).toString('hex')}.tmp`
+            const fd = fs.openSync(name, 'wx', stat ? stat.mode & 0o777 : 0o600)
+            temp = name
+            try {
+                fs.writeFileSync(fd, JSON.stringify(snapshot, null, 2))
+                fs.fsyncSync(fd)
+            } finally {
+                fs.closeSync(fd)
+            }
+            fs.renameSync(temp, file)
+            temp = undefined
+            index.set(itemKey, item)
+            this.playbackRevisions.set(index, (this.playbackRevisions.get(index) || 0) + 1)
+            return true
+        } catch {
+            return false
+        } finally {
+            if (temp) try { fs.unlinkSync(temp) } catch { /* only clean our own temp file */ }
+        }
     }
 
     update(username: string, item: CacheItem, folder: 'cache' | 'music', location?: string) {
@@ -374,6 +430,12 @@ class CacheIndexManager {
 
     getAll(username: string, folder: 'cache' | 'music', location?: string) {
         return Array.from((this.indexes.get(this.getKey(username, folder, location)) || this.load(username, folder, location)).values())
+    }
+
+    getPlaybackIndex(username: string, folder: CacheFolder) {
+        const location = getUserCacheLocation(username)
+        const index: ReadonlyMap<string, CacheItem> = this.load(username, folder, location, false)
+        return { index, revision: this.playbackRevisions.get(index) || 0, directory: getCacheDir(username, folder === 'music', location, false) }
     }
 
     discard(username: string, folder: 'cache' | 'music', location?: string) {
@@ -854,6 +916,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                 for (const entry of entries) {
                     const fullPath = path.join(dirPath, entry.name)
                     if (entry.isDirectory()) {
+                        if (folder === 'cache' && dirPath === base && entry.name === READ_THROUGH_STAGING_DIR) continue
                         const subFiles = await getAllFilesAsync(fullPath, base)
                         acc.push(...subFiles)
                     } else {
@@ -871,6 +934,9 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
             if (file === 'cache_index.json' || file === 'music_index.json') continue
             const ext = path.extname(file).toLowerCase()
             if (!extensions.includes(ext)) continue
+            // A crash between link and index publication can leave a reserved
+            // orphan. Do not import it as an unrelated local recording.
+            if (folder === 'cache' && READ_THROUGH_CACHE_FILENAME.test(file) && !filenameToItemMap.has(file)) continue
 
             const filePath = path.join(dir, file)
             let stats: Stats
@@ -1736,7 +1802,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
         ]
         for (const { folder, anyQuality } of lookupOrder) {
             const cached = indexManager.get(normalizedUsername, id, folder, quality, !anyQuality || useExact)
-            if (cached) {
+            if (cached && (!cached.readThrough || cached.source === songInfo.source)) {
                 // 二次校验：exactQuality 模式下确保音质匹配
                 if (useExact && quality && cached.quality !== quality) continue
                 const dir = getCacheDir(normalizedUsername, folder === 'music')
@@ -1781,6 +1847,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
 
         const collision = allItems.find(item =>
             item.id !== id && // 排除当前正在查询的 ID 本身
+            !item.readThrough && // 播放回填只证明当前平台 ID，不证明跨平台录音一致
             item.name.toLowerCase() === String(songInfo.name || '').toLowerCase() &&
             item.singer.toLowerCase() === String(songInfo.singer || '').toLowerCase() &&
             item.quality === quality &&
@@ -1805,7 +1872,7 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
             const folderTypes: Array<'cache' | 'music'> = ['cache', 'music']
             for (const folder of folderTypes) {
                 const cachedAny = indexManager.get(normalizedUsername, id, folder)
-                if (cachedAny) {
+                if (cachedAny && (!cachedAny.readThrough || cachedAny.source === songInfo.source)) {
                     const dir = getCacheDir(normalizedUsername, folder === 'music')
                     const fileName = cachedAny.filename
                     const filePath = path.join(dir, fileName)
