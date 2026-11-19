@@ -1,6 +1,6 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveContainedPath } from '../auth/security'
+import { resolveContainedPathAsync } from '../auth/security'
 import { DOWNLOAD_QUALITY_PRIORITY } from './downloadQuality'
 import { indexManager, normalizeSongId, type CacheFolder, type CacheItem } from './fileCache'
 
@@ -142,7 +142,7 @@ const getView = (index: ReadonlyMap<string, CacheItem>, revision: number) => {
 
 type Candidate = { item: CacheItem; directory: string; folder: CacheFolder; memberIndex: number; crossId: boolean; order: number }
 
-export function selectPlaybackCache(input: unknown, username: string): PlaybackSelection {
+export async function selectPlaybackCache(input: unknown, username: string): Promise<PlaybackSelection> {
   const { songs, quality, exact, allowCrossSource, excluded } = readRequest(input)
   const [primary] = songs
   const scope = username === 'default' || !username ? '_open' : username
@@ -165,9 +165,9 @@ export function selectPlaybackCache(input: unknown, username: string): PlaybackS
     return { item, directory, folder, memberIndex, crossId, order: actualRank }
   }
 
-  const verifyFile = ({ item, directory, folder, memberIndex, crossId }: Candidate): PlaybackHit | undefined => {
+  const verifyFile = async ({ item, directory, folder, memberIndex, crossId }: Candidate): Promise<PlaybackHit | undefined> => {
     try {
-      const stat = fs.statSync(resolveContainedPath(directory, item.filename))
+      const stat = await fs.promises.stat(await resolveContainedPathAsync(directory, item.filename))
       if (!stat.isFile() || stat.size <= 0 || (item.size > 0 && stat.size < item.size)) return
       const url = `/api/music/cache/file/${encodeURIComponent(scope)}/${encodeURIComponent(item.filename)}?folder=${folder}`
       return { exists: true, url, filename: item.filename, quality: item.quality, folder, memberIndex,
@@ -188,7 +188,7 @@ export function selectPlaybackCache(input: unknown, username: string): PlaybackS
       for (const item of [local.index.get(`${primary.id}_${name}`), legacy]) {
         if (item?.source !== primary.source || item.id !== primary.id || item.quality !== name) continue
         const ready = candidate(item, local.directory, folder, 0, false)
-        const hit = ready && verifyFile(ready)
+        const hit = ready && await verifyFile(ready)
         if (hit) return hit
       }
     }
@@ -243,7 +243,7 @@ export function selectPlaybackCache(input: unknown, username: string): PlaybackS
     Number(a.folder === 'cache') - Number(b.folder === 'cache') || a.memberIndex - b.memberIndex ||
     Number(a.item.quality !== quality) - Number(b.item.quality !== quality))
   for (const eligible of candidates) {
-    const hit = verifyFile(eligible)
+    const hit = await verifyFile(eligible)
     if (hit) return hit
   }
   return { exists: false }

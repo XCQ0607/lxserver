@@ -191,3 +191,24 @@ test('after a cached media miss, refreshes the same track once before normal rec
         assert.equal(calls.at(-1).type, 'normal recovery');
     }
 });
+
+test('cache renewal exceeding its lookup budget is a miss, not a false authentication rejection', async () => {
+    let finishRenewal;
+    const fixture = setup({ status: 401, refresh: () => new Promise(resolve => { finishRenewal = resolve; }) });
+    const controller = new AbortController();
+    const pending = fixture.context.checkPlaybackCache([track], 'flac', false, controller.signal);
+    await new Promise(resolve => setImmediate(resolve));
+    controller.abort();
+    assert.equal(await pending, null);
+    finishRenewal(true);
+    assert.equal(fixture.calls.length, 1);
+});
+
+test('final non-aborted cache auth rejections remain terminal, including forbidden responses', async () => {
+    for (const status of [401, 403]) {
+        const fixture = setup({ status });
+        const controller = new AbortController();
+        await assert.rejects(fixture.context.checkPlaybackCache([track], 'flac', false, controller.signal), error => error.status === status);
+        assert.equal(fixture.calls.length, 1);
+    }
+});

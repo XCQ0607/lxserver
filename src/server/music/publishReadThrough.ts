@@ -135,7 +135,11 @@ export async function publishReadThrough(
     const metadata = extractSongMetadata(song)
     if (!platformSources.has(metadata.source) || !metadata.id || metadata.id.length > 200 ||
         /[\x00-\x1f]/.test(metadata.id) ||
-        [metadata.name, metadata.singer, metadata.album, metadata.interval].some(value => typeof value !== 'string' || value.length > 512)) return false
+        [metadata.name, metadata.singer, metadata.album, metadata.interval].some(value => typeof value !== 'string' || value.length > 512) ||
+        typeof metadata.img !== 'string' || metadata.img.length > 2048) return false
+    // Reject the offer as a unit rather than publishing incomplete provider identity.
+    const nativeIds = extractNativeIds(song)
+    if (nativeIds && Object.values(nativeIds).some(value => value.length > 512)) return false
     const seconds = parseDurationSeconds(metadata.interval)
     if (!Number.isFinite(seconds) || seconds < 1) return false
     const location = getUserCacheLocation(username)
@@ -182,7 +186,7 @@ export async function publishReadThrough(
       ...metadata, songmid: metadata.id, origin: 'platform', folder: 'cache', readThrough: true,
       filename, mtime: captured.mtimeMs, size: bytes, interval: `${minute}:${String(second).padStart(2, '0')}`,
       ext: 'mp3', audioContainer: 'mp3', quality: audio.quality, bitrate: audio.bitrate, sampleRate: audio.sampleRate,
-      hasLyric: false, nativeIds: extractNativeIds(song),
+      hasLyric: false, nativeIds,
     }
     if (!indexManager.publishNew(username, item, 'cache', location)) return false
     newLink = undefined

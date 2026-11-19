@@ -5855,6 +5855,8 @@ async function checkPlaybackCache(members, quality, exactQuality, signal, exclud
                 }
             } finally { signal.removeEventListener('abort', onAbort); }
         }
+        // A renewal outliving this cache budget is a miss, not a final auth denial.
+        if (res.status === 401 && signal.aborted) return null;
         if (res.status === 401 || res.status === 403) {
             throw Object.assign(new Error('登录已失效，请重新登录'), { status: res.status });
         }
@@ -7410,6 +7412,15 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
             if (refreshCachedTrack) state.samePlatformExhausted = true;
         } catch (candidateErr) {
             if (!isCurrent() || candidateErr?.name === 'AbortError') return;
+            if (candidateErr?.errorCode === 'NO_AVAILABLE_SOURCE') {
+                if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
+                window._autoSkipTimer = null;
+                shouldAutoRecoverPlayback = false;
+                setPlayerStatus('暂无可用音源，请在设置中添加或启用');
+                RecoveryToast.error(candidateErr.message);
+                updatePlayButton(false);
+                return;
+            }
             if (candidateErr?.status === 401 || candidateErr?.status === 403) {
                 setPlayerStatus('请重新登录');
                 RecoveryToast.error(candidateErr.message);

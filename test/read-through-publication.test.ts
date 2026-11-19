@@ -158,3 +158,23 @@ test('respects the pilot byte cap including disk orphans without adopting or evi
   assert.equal(indexManager.getAll(username, 'cache').length, 0)
   assert.equal(fs.statSync(file).size, 256 * 1024 * 1024)
 })
+
+test('rejects malformed artwork and oversized native IDs before touching the index or publishing media', async t => {
+  const { stageMusic, publish, finalNames, indexPath } = fixture(t)
+  const audio = stageMusic()
+  for (const fields of [
+    { img: { url: 'not a string' } }, { img: 'a'.repeat(2049) },
+    { meta: { picUrl: ['invalid'] } }, { songId: '1'.repeat(513) },
+    { meta: { albumMid: 'm'.repeat(513) } },
+  ]) {
+    assert.equal(await publish(audio.length, fields), false)
+    assert.deepEqual(finalNames(), [])
+    assert.equal(fs.existsSync(indexPath), false)
+  }
+  const img = 'https://image.example/' + 'a'.repeat(2026)
+  assert.equal(img.length, 2048)
+  assert.equal(await publish(audio.length, { img, albumMid: 'm'.repeat(512) }), true)
+  const saved = JSON.parse(fs.readFileSync(indexPath, 'utf8')).tx_1_128k
+  assert.equal(saved.img, img)
+  assert.equal(saved.nativeIds.albumMid.length, 512)
+})

@@ -4411,7 +4411,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         try {
           const body = await readBody(req, 24 * 1024)
           if (res.destroyed || res.writableEnded) return
-          const result = selectPlaybackCache(JSON.parse(body), owner)
+          const result = await selectPlaybackCache(JSON.parse(body), owner)
+          if (res.destroyed || res.writableEnded) return
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' })
           res.end(JSON.stringify(result))
         } catch (error: any) {
