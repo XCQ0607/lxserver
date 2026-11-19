@@ -1093,6 +1093,13 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
 .queue-actions-menu[popover] { position: fixed; inset: auto; margin: 0; width: 11rem; color: var(--text-main); }
 .queue-actions-menu button { display: block; width: 100%; min-height: 44px; text-align: left; padding: .5rem 1rem; }
 .song-row-actions:focus-within { opacity: 1; }
+/* Search/ranking share one discoverable Add chooser on desktop and mobile.
+   Hover-only hiding concealed the existing queue command. Other lists retain
+   their existing row-action behavior and the same queue insertion semantics. */
+#search-results .network-search-song-row > .song-row-actions,
+#lb-songs-list .song-row-actions { opacity: 1; }
+.song-add-menu > summary { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 32px; padding: 6px; color: var(--c-600); border-radius: .5rem; }
+.song-add-menu > summary:hover { background: var(--c-50); }
 button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--c-500); outline-offset: 3px; }
 
 @media (max-width: 1024px) {
@@ -2597,7 +2604,8 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 
 /* Phones, search result rows: the title takes whatever the index and the action buttons leave.
    The 12-column grid gave the title a fixed 7/12 and left ~20px unused beside the buttons, so titles scrolled
-   although there was room. Platform badges sit right against the buttons. */
+   although there was room. Platform badges sit right against the buttons.
+   Stop below sm: at 640px the artist becomes a fourth cell, needing the 12-column grid. */
 @media (max-width: 639px) {
     #search-results > .grid.grid-cols-12:has([data-rating-badges]) {
         grid-template-columns: 18px minmax(0, 1fr) auto;
@@ -2697,4 +2705,137 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     body.player-collapsed #songlist-detail-view {
         --player-footer-inset: calc(68px + env(safe-area-inset-bottom, 0px));
     }
+}
+
+/* One mobile-style, vertically stacked source card in settings and management. */
+.source-list-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+}
+.source-list-stack > .source-item {
+    box-sizing: border-box;
+    flex: none;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin: 0;
+    padding: 12px;
+    gap: 8px;
+}
+.source-item .source-card-content {
+    display: flex;
+    flex: 1 1 0%;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+}
+.source-item .source-card-info {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+.source-item .source-card-heading,
+.source-item .source-card-meta,
+.source-item .source-card-platforms {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin: 0;
+}
+.source-item .source-card-name {
+    flex: 1 1 10rem;
+    min-width: 0;
+    font-size: 14px;
+    line-height: 1.5;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.source-item .source-card-meta {
+    gap: 6px 12px;
+    font-size: 11px;
+    line-height: 1.5;
+}
+.source-item .source-card-meta > span {
+    max-width: 100%;
+    font-size: 11px;
+}
+.source-item .source-card-author {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 5px;
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.source-item .source-card-author > span {
+    min-width: 0;
+}
+.source-item .source-card-platforms > span {
+    padding: 3px 7px;
+    font-size: 11px;
+}
+.source-item .source-card-notice {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px;
+    font-size: 11px;
+    line-height: 1.6;
+}
+.source-item .source-card-notice-message {
+    display: flex;
+    flex: 1 1 12rem;
+    align-items: baseline;
+    gap: 6px;
+    min-width: 0;
+}
+.source-item .source-card-notice-text,
+.source-item .source-card-error {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+.source-item .source-card-notice-actions,
+.source-item .source-card-action-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+.source-item .source-card-notice-actions button {
+    min-height: 36px;
+    padding: 6px 10px;
+    font-size: 11px;
+}
+.source-item .source-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-main);
+}
+.source-item .source-card-actions button {
+    min-width: 44px;
+    min-height: 44px;
+}
+.source-item .source-card-toggle {
+    min-width: 88px;
+}
+.source-item .source-card-action-buttons {
+    margin-inline-start: auto;
+}
+.source-item .source-card-handle,
+.source-item .source-card-selection {
+    flex: 0 0 24px;
+    justify-content: center;
+    min-height: 44px;
 }

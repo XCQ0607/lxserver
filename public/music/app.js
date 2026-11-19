@@ -2176,6 +2176,7 @@ function toggleQueueDrawer(targetIndex = null) {
 
     const isHidden = drawer.classList.contains('translate-x-full');
     if (isHidden) {
+        delete drawer.__lxQueueOutsideDismiss;
         drawer.classList.remove('translate-x-full');
         renderQueue();
         // 自动定位当前歌曲
@@ -2197,6 +2198,18 @@ function toggleQueueDrawer(targetIndex = null) {
     }
 }
 window.toggleQueueDrawer = toggleQueueDrawer;
+
+// Capture runs before outside controls that stop bubbling. Queue toggles must
+// keep their own one-toggle behavior rather than closing here then reopening.
+document.addEventListener('click', event => {
+    const drawer = document.getElementById('queue-drawer');
+    if (!drawer || drawer.classList.contains('translate-x-full') || drawer.contains(event.target)) return;
+    const toggleSelector = '[data-queue-toggle],[data-mobile-btn="queue"],button[onclick*="toggleQueueDrawer"]';
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    if (path.some(node => node?.matches?.(toggleSelector)) || event.target?.closest?.(toggleSelector)) return;
+    drawer.__lxQueueOutsideDismiss = true;
+    window.toggleQueueDrawer();
+}, true);
 
 function scrollToSongInQueue(index) {
     const item = document.getElementById('queue-list')?.children[index];
@@ -5315,6 +5328,7 @@ function renderResults(list) {
         const isDisliked = Boolean(window.DislikeManager && window.DislikeManager.isDisliked(item));
 
         let rowClass = 'grid grid-cols-12 gap-2 md:gap-4 px-3 py-2.5 rounded-xl hover:t-bg-panel group transition-colors cursor-pointer items-center border border-transparent ';
+        if (pagedNetwork) rowClass += 'network-search-song-row ';
         if (window.glSortMode) rowClass += 'sort-row select-none ';
         if (isDisliked && window.currentViewingListId !== 'dislike_songs') rowClass += 'opacity-40 grayscale hover:opacity-80 transition-opacity ';
         if (isCurrentMatch) rowClass += 'search-current ';
@@ -5440,11 +5454,11 @@ function renderResults(list) {
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
             const menu = document.createElement('details');
-            menu.className = 'queue-actions';
-            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
-            menu.addEventListener('click', event => event.stopPropagation());
+            menu.className = 'queue-actions song-more-menu';
+            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button>' + (pagedNetwork ? '' : '<button type="button" data-queue-add>加入播放队列</button>') + '</div>';
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
-            menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
+            const queueAdd = menu.querySelector('[data-queue-add]');
+            if (queueAdd) queueAdd.onclick = () => { enqueueSong(item); menu.open = false; };
             const rateButton = document.createElement('button');
             rateButton.type = 'button';
             rateButton.className = 'rating-menu-item';
@@ -5452,20 +5466,7 @@ function renderResults(list) {
             window.RatingManager?.attach(rateButton, item);
             window.RatingManager?.attachTag(row.querySelector('[data-rating-badges]'), item);
             const popup = menu.querySelector('.queue-actions-menu');
-            if (typeof popup.showPopover === 'function') {
-                popup.setAttribute('popover', 'auto');
-                menu.addEventListener('toggle', () => {
-                    if (!menu.open) { if (popup.matches(':popover-open')) popup.hidePopover(); return; }
-                    popup.showPopover();
-                    const anchor = menu.querySelector('summary').getBoundingClientRect();
-                    const bounds = popup.getBoundingClientRect();
-                    const footerTop = document.getElementById('player-footer').getBoundingClientRect().top;
-                    const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
-                    popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
-                    popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
-                });
-                popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
-            }
+            attachSongRowPopover(menu);
             for (const button of [...actions.querySelectorAll('button')]) {
                 if (!['下载', '不喜欢', '取消不喜欢', '删除'].includes(button.title)) continue;
                 const label = document.createElement('span');
@@ -5477,10 +5478,14 @@ function renderResults(list) {
         }
         const addToPlaylistBtn = row.querySelector('.add-to-playlist-btn');
         if (addToPlaylistBtn) {
-            addToPlaylistBtn.onclick = (event) => {
-                event.stopPropagation();
-                openPlaylistAddModalForSong(actualIndexInOriginal);
-            };
+            if (pagedNetwork) {
+                addToPlaylistBtn.replaceWith(createSongAddMenu(item, () => openPlaylistAddModalForSongObject(item)));
+            } else {
+                addToPlaylistBtn.onclick = (event) => {
+                    event.stopPropagation();
+                    openPlaylistAddModalForSong(actualIndexInOriginal);
+                };
+            }
         }
         const deleteSongBtn = row.querySelector('.delete-song-btn');
         if (deleteSongBtn) {
@@ -5522,6 +5527,77 @@ function renderResults(list) {
     applyMarqueeChecks(container);
     window.ServerFileState?.paintBadges(container);
 }
+
+// Native details remains keyboard-operable without Popover API support. Where
+// supported, the top layer keeps row menus outside scroll-container clipping.
+function attachSongRowPopover(menu) {
+    const popup = menu.querySelector('.queue-actions-menu');
+    const summary = menu.querySelector('summary');
+    let outsideListening = false;
+    let removalObserver = null;
+    const stopOutsideListening = () => {
+        if (outsideListening) document.removeEventListener('click', outsideClick, true);
+        outsideListening = false;
+        removalObserver?.disconnect();
+        removalObserver = null;
+    };
+    const close = () => {
+        menu.open = false;
+        stopOutsideListening();
+        if (typeof popup.hidePopover === 'function' && popup.matches(':popover-open')) popup.hidePopover();
+    };
+    const outsideClick = event => { if (!menu.contains(event.target)) close(); };
+    menu.addEventListener('click', event => event.stopPropagation());
+    menu.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        summary.focus();
+    });
+    if (typeof popup.showPopover === 'function') {
+        popup.setAttribute('popover', 'auto');
+        menu.addEventListener('toggle', () => {
+            if (!menu.open || !menu.isConnected) { close(); return; }
+            popup.showPopover();
+            const anchor = summary.getBoundingClientRect();
+            const bounds = popup.getBoundingClientRect();
+            const footer = document.getElementById('player-footer');
+            const footerTop = footer ? footer.getBoundingClientRect().top : window.innerHeight;
+            const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
+            popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+            popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
+        });
+        popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
+    } else {
+        menu.addEventListener('toggle', () => {
+            if (!menu.open) { stopOutsideListening(); return; }
+            if (outsideListening) return;
+            document.addEventListener('click', outsideClick, true);
+            outsideListening = true;
+            // Re-rendering either list can remove an open menu without a toggle.
+            // Observe only while open, releasing both resources on detachment.
+            if (typeof MutationObserver === 'function' && document.body) {
+                removalObserver = new MutationObserver(() => { if (!menu.isConnected) close(); });
+                removalObserver.observe(document.body, { childList: true, subtree: true });
+            }
+        });
+    }
+    return close;
+}
+
+// Search and ranking use the same Add chooser, capturing the displayed song
+// rather than looking it up again through a mutable view/page index on click.
+function createSongAddMenu(song, onAddToPlaylist) {
+    const menu = document.createElement('details');
+    menu.className = 'song-add-menu queue-actions';
+    menu.innerHTML = '<summary aria-label="添加" title="添加"><i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-song-add-queue>加入播放队列</button><button type="button" data-song-add-playlist>添加到歌单</button></div>';
+    const close = attachSongRowPopover(menu);
+    menu.querySelector('[data-song-add-queue]').onclick = () => { close(); enqueueSong(song); };
+    menu.querySelector('[data-song-add-playlist]').onclick = () => { close(); onAddToPlaylist(); };
+    return menu;
+}
+window.createSongAddMenu = createSongAddMenu;
 
 /**
  * 搜索结果页「不喜欢」按钮的全局处理函数。
@@ -15537,6 +15613,7 @@ async function renderCustomSources() {
     targetIds.forEach(containerId => {
         const container = document.getElementById(containerId);
         if (!container) return;
+        container.classList.add('source-list-stack');
 
         // 如果开启了公开限制且未通过验证，则显示锁定提示
         if (shouldShowHidden) {
@@ -15571,8 +15648,8 @@ async function renderCustomSources() {
 
         list.forEach((source, index) => {
             const div = document.createElement('div');
-            // 设置界面使用稍紧凑的样式，模态框使用标准样式 (这里为了统一先用一样的，微调边距)
-            div.className = `t-bg-panel p-3 md:p-4 rounded-xl border t-border-main shadow-sm hover:shadow-md transition-all mb-2.5 md:mb-3 relative group flex items-start source-item`;
+            // Both settings and management use the same stacked card at every width.
+            div.className = `t-bg-panel rounded-xl border t-border-main shadow-sm hover:shadow-md transition-all relative group flex items-start source-item`;
             div.dataset.id = source.id;
             div.dataset.enabled = source.enabled;
             div.dataset.index = index;
@@ -15589,9 +15666,9 @@ async function renderCustomSources() {
                     'mg': { name: '咪咕', color: 't-badge-pink' }
                 };
 
-                supportedBadges = `<div class="flex flex-wrap gap-1 md:gap-1.5 mt-1.5 md:mt-2">
+                supportedBadges = `<div class="source-card-platforms">
                 ${source.supportedSources.map(s => {
-                    const info = sourceMap[s] || { name: s, color: 't-badge-gray' };
+                    const info = sourceMap[s] || { name: escapeHtmlText(s), color: 't-badge-gray' };
                     const isPlatformDisabled = disabledSources.includes(s);
                     if (isPlatformDisabled) {
                         return `<span class="px-1.5 py-0.5 rounded-md text-[9px] md:text-[10px] font-medium transition-colors border border-transparent bg-gray-100 text-gray-400 dark:bg-neutral-800 dark:text-neutral-500 opacity-50 line-through whitespace-nowrap cursor-help" title="${info.name} (在此音源中已关闭)">${info.name}</span>`;
@@ -15600,7 +15677,7 @@ async function renderCustomSources() {
                 }).join('')}
             </div>`;
             } else {
-                supportedBadges = `<div class="mt-1.5 md:mt-2 text-[10px] t-text-muted italic">未知支持源</div>`;
+                supportedBadges = `<div class="source-card-platforms text-[11px] t-text-muted italic">未知支持源</div>`;
             }
 
             const size = source.size && !isNaN(source.size) ? (source.size / 1024).toFixed(1) + ' KB' : '未知大小';
@@ -15625,7 +15702,7 @@ async function renderCustomSources() {
                     const encodedUrl = encodeURIComponent(alertUrl);
                     const encodedId = encodeURIComponent(source.id);
                     actionButtons = `
-                    <div class="flex items-center gap-1 shrink-0 ml-1">
+                    <div class="source-card-notice-actions">
                         <button type="button"
                                 ${isBatchContainer ? 'disabled' : `onclick="event.stopPropagation(); updateCustomSource(decodeURIComponent('${encodedId}'), decodeURIComponent('${encodedUrl}'))"`}
                                 class="inline-flex items-center gap-1 text-[9px] md:text-[10px] bg-amber-500 hover:bg-amber-600 active:scale-95 text-white px-2 py-0.5 rounded font-bold shrink-0 whitespace-nowrap shadow-sm transition-all ${isBatchContainer ? 'opacity-50 cursor-not-allowed pointer-events-none' : 'cursor-pointer'}"
@@ -15642,10 +15719,10 @@ async function renderCustomSources() {
                 }
 
                 updateAlertBanner = `
-                <div class="mt-1.5 p-1.5 md:p-2 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 text-amber-700 dark:text-amber-300 text-[10px] md:text-[11px] flex items-center justify-between gap-1.5">
-                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                <div class="source-card-notice rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-700/40 text-amber-700 dark:text-amber-300">
+                    <div class="source-card-notice-message">
                         <i class="fas fa-bell text-amber-500 shrink-0"></i>
-                        ${createMarqueeHtml(alertLog, "font-medium text-[10px] md:text-[11px]")}
+                        <span class="source-card-notice-text">${escapeHtmlText(alertLog)}</span>
                     </div>
                     ${actionButtons}
                 </div>`;
@@ -15655,9 +15732,9 @@ async function renderCustomSources() {
                 if (source.status === 'success') {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-emerald-50 text-emerald-600 dark:bg-emerald-500/20 dark:text-emerald-400 dark:border-emerald-500/30 px-1.5 py-0.5 rounded-full border border-emerald-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-check-circle"></i>正常</span>`;
                 } else if (source.status === 'failed') {
-                    statusBadge = `<span class="text-[9px] md:text-[10px] bg-red-50 text-red-600 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1 cursor-help transition-colors whitespace-nowrap" title="${source.error || '加载失败'}"><i class="fas fa-times-circle"></i>失败</span>`;
+                    statusBadge = `<span class="text-[9px] md:text-[10px] bg-red-50 text-red-600 dark:bg-red-500/20 dark:text-red-400 dark:border-red-500/30 px-1.5 py-0.5 rounded-full border border-red-100 flex items-center gap-1 cursor-help transition-colors whitespace-nowrap" title="${escapeHtmlText(source.error || '加载失败')}"><i class="fas fa-times-circle"></i>失败</span>`;
                     if (!source.updateAlert) {
-                        errorMsg = `<div class="text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${source.error || '未知错误'}</span></div>`;
+                        errorMsg = `<div class="source-card-error text-[9px] md:text-[10px] text-red-500 dark:text-red-400 mt-1 flex items-start gap-1 p-1.5 bg-red-50 dark:bg-red-900/20 rounded transition-colors"><i class="fas fa-info-circle mt-0.5 flex-shrink-0"></i><span class="break-all">${escapeHtmlText(source.error || '未知错误')}</span></div>`;
                     }
                 } else {
                     statusBadge = `<span class="text-[9px] md:text-[10px] bg-blue-50 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400 dark:border-blue-500/30 px-1.5 py-0.5 rounded-full border border-blue-100 flex items-center gap-1 transition-colors whitespace-nowrap"><i class="fas fa-circle-notch fa-spin"></i>加载...</span>`;
@@ -15665,7 +15742,7 @@ async function renderCustomSources() {
             }
 
             const ownerTag = (source.owner && source.owner !== 'open') ?
-                `<span class="px-1.5 md:px-2 py-0.5 rounded-md text-[9px] md:text-[10px] font-bold bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 whitespace-nowrap">${source.owner}</span>` :
+                `<span class="px-1.5 md:px-2 py-0.5 rounded-md text-[9px] md:text-[10px] font-bold bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300 whitespace-nowrap">${escapeHtmlText(source.owner)}</span>` :
                 `<span class="px-1.5 md:px-2 py-0.5 rounded-md text-[9px] md:text-[10px] font-bold bg-blue-50 text-blue-500 whitespace-nowrap">公开</span>`;
 
             const vmTag = source.allowUnsafeVM ?
@@ -15677,7 +15754,7 @@ async function renderCustomSources() {
 
             div.innerHTML = `
             ${isBatchContainer ? `
-            <div class="flex items-center self-stretch pr-2 md:pr-4 -ml-1 md:-ml-2 touch-none" onclick="toggleSourceBatchSelect('${source.id}', '${containerId}')">
+            <div class="source-card-selection flex items-center self-stretch touch-none" onclick="toggleSourceBatchSelect('${source.id}', '${containerId}')">
                 <div class="w-5 h-5 rounded-md border-2 flex items-center justify-center transition-all cursor-pointer
                     ${window._sourceBatchSelected?.has(source.id)
                         ? 'bg-blue-500 border-blue-500 text-white'
@@ -15686,31 +15763,31 @@ async function renderCustomSources() {
                     ${window._sourceBatchSelected?.has(source.id) ? '<i class="fas fa-check text-[10px]"></i>' : ''}
                 </div>
             </div>` : `
-            <div class="flex items-center self-stretch cursor-grab custom-source-handle t-text-muted hover:text-emerald-500 pr-2 md:pr-4 -ml-1 md:-ml-2 transition-all active:scale-110 touch-none" title="拖拽排序">
+            <div class="flex items-center self-stretch cursor-grab custom-source-handle source-card-handle t-text-muted hover:text-emerald-500 transition-all active:scale-110 touch-none" title="拖拽排序">
                 <i class="fas fa-grip-vertical text-base md:text-lg"></i>
             </div>`}
-            <div class="flex justify-between items-start flex-1 min-w-0">
-                <div class="flex-1 pr-2 md:pr-4 min-w-0">
-                    <div class="flex flex-wrap items-center gap-1.5 md:gap-2 mb-1">
+            <div class="source-card-content">
+                <div class="source-card-info">
+                    <div class="source-card-heading">
                         <i class="fas fa-file-code text-emerald-500 flex-shrink-0 text-xs md:text-sm"></i>
-                         ${createMarqueeHtml(source.name, "font-bold t-text-main text-xs md:text-sm")}
+                         <span class="source-card-name font-bold t-text-main">${escapeHtmlText(source.name || source.id || '未知音源')}</span>
                         ${ownerTag}
                         ${vmTag}
                     </div>
-                    ${errorMsg}
-                    <div class="flex flex-wrap items-center text-[10px] t-text-muted gap-x-2.5 md:gap-x-3 gap-y-1 mt-1 md:mt-1.5">
-                        <span class="flex items-center whitespace-nowrap max-w-[110px] sm:max-w-[160px] md:max-w-none truncate" title="${source.author || '未知'}"><i class="fas fa-user mr-1 opacity-70 shrink-0"></i><span class="truncate">${source.author || '未知'}</span></span>
+                    <div class="source-card-meta t-text-muted">
+                        <span class="source-card-author" title="${escapeHtmlText(source.author || '未知')}"><i class="fas fa-user opacity-70 shrink-0"></i><span>${escapeHtmlText(source.author || '未知')}</span></span>
                         <span class="flex items-center whitespace-nowrap"><i class="far fa-hdd mr-1 opacity-70 shrink-0"></i>${size}</span>
-                        <span class="t-bg-main t-text-muted px-1.5 py-0.5 rounded-lg shrink-0 transition-colors font-mono pointer-events-none border t-border-main text-[9px] md:text-[10px] whitespace-nowrap">${source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : '未知'}</span>
+                        <span class="t-bg-main t-text-muted px-1.5 py-0.5 rounded-lg shrink-0 transition-colors font-mono pointer-events-none border t-border-main text-[9px] md:text-[10px] whitespace-nowrap">${escapeHtmlText(source.version ? (/^v/i.test(source.version) ? source.version : 'v' + source.version) : '未知')}</span>
                         ${statusBadge}
                     </div>
+                    ${errorMsg}
                     ${updateAlertBanner}
                     ${supportedBadges}
                 </div>
                 
-                <div class="flex flex-col items-end gap-1.5 md:gap-2 shrink-0">
-                    <button onclick="${isBatchContainer ? '' : `toggleSource('${source.id}', ${source.enabled})`}" 
-                            class="px-2 md:px-3 py-1 rounded-lg text-[11px] md:text-xs font-medium transition-colors whitespace-nowrap w-16 md:w-20 flex justify-center items-center ${source.enabled
+                <div class="source-card-actions">
+                    <button ${isBatchContainer ? 'disabled' : ''} aria-pressed="${!!source.enabled}" onclick="${isBatchContainer ? '' : `toggleSource('${source.id}', ${source.enabled})`}"
+                            class="source-card-toggle px-3 py-2 rounded-lg text-xs font-medium transition-colors whitespace-nowrap flex justify-center items-center ${source.enabled
                     ? (source.status === 'failed'
                         ? (isBatchContainer ? 'bg-red-100/50 text-red-400 dark:bg-red-500/10 dark:text-red-600 opacity-50 cursor-not-allowed' : 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-500/30')
                         : (isBatchContainer ? 'bg-emerald-100/50 text-emerald-500/60 dark:bg-emerald-500/10 dark:text-emerald-600/60 opacity-60 cursor-not-allowed' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-500/30'))
@@ -15718,7 +15795,7 @@ async function renderCustomSources() {
                         ${source.enabled ? '已启用' : '已禁用'}
                     </button>
                     
-                    <div class="flex items-center gap-1">
+                    <div class="source-card-action-buttons">
                         ${source.enabled && source.status === 'failed' && canManageSource ? `
                         <button ${isBatchContainer ? 'disabled' : `onclick="reloadSource('${source.id}')"`}
                                 class="p-1 md:p-1.5 ${isBatchContainer ? 'text-gray-300 dark:text-neutral-700 cursor-not-allowed' : 'text-blue-500 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 hover:bg-blue-50 dark:hover:bg-blue-900/40'} rounded-lg transition-colors"

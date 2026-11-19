@@ -71,6 +71,7 @@
                     if (outerBtn) outerBtn.classList.add('hidden');
                     const item = document.createElement('button');
                     item.type = 'button';
+                    if (def.key === 'queue') item.setAttribute('data-queue-toggle', '');
                     item.className = 'mobile-menu-item';
                     item.innerHTML = `<i class="${def.icon}"></i><span>${def.label}</span>`;
                     item.onclick = (e) => {
@@ -108,6 +109,7 @@
             const old = top;
             const active = document.activeElement;
             const returning = old && previousFocus.get(old);
+            const outsideQueueDismiss = old?.id === 'queue-drawer' && old.__lxQueueOutsideDismiss === true;
             top = next;
             if (top) {
                 top.id ||= 'player-dialog-' + ++dialogSequence;
@@ -121,8 +123,11 @@
                 } else top.setAttribute('aria-label', top.id === 'main-sidebar' ? '导航菜单' : '对话框');
                 top.tabIndex = -1;
                 (returning?.isConnected && top.contains(returning) ? returning : buttons(top)[0] || top).focus({ preventScroll: true });
-            } else if (returning?.isConnected && !returning.closest('[inert]')) returning.focus({ preventScroll: true });
-            if (old && !isOpen(old)) previousFocus.delete(old);
+            } else if (!outsideQueueDismiss && returning?.isConnected && !returning.closest('[inert]')) returning.focus({ preventScroll: true });
+            if (old && !isOpen(old)) {
+                previousFocus.delete(old);
+                delete old.__lxQueueOutsideDismiss;
+            }
         }
         if (top) {
             let branch = top;
@@ -162,7 +167,7 @@
         }
     }, true);
     document.addEventListener('focusin', event => {
-        if (top && !top.contains(event.target)) (buttons(top)[0] || top).focus({ preventScroll: true });
+        if (top && isOpen(top) && !top.contains(event.target)) (buttons(top)[0] || top).focus({ preventScroll: true });
     });
     function observePlayerFooter() {
         const footer = document.getElementById('player-footer');
