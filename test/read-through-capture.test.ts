@@ -54,7 +54,7 @@ test('only a complete known-length MPEG response is eligible; Range, format and 
   assert.equal(canCaptureReadThrough(response(200, { 'content-length': undefined })), false)
   assert.equal(canCaptureReadThrough(response(200, { 'content-type': 'application/octet-stream' })), false)
   assert.equal(canCaptureReadThrough(response(200, { 'transfer-encoding': 'chunked' })), false)
-  assert.equal(canCaptureReadThrough(response(200, { 'content-length': String(33 * 1024 ** 2) }), Infinity), false)
+  assert.equal(canCaptureReadThrough(response(200, { 'content-length': String(33 * 1024 ** 2) }), 64 * 1024 ** 2), false)
   assert.equal(canCaptureReadThrough(response(), audio.length - 1), false)
 })
 
@@ -110,22 +110,42 @@ test('wrong media, incomplete bodies or a client abort do not publish and do not
   }
 })
 
-test('disk-stage errors and a chunk above the short write buffer never slow or fail playback', async t => {
+test('a chunk above the short write buffer never slows or fails playback', async t => {
   const dir = await temporary(t)
-  let published = 0
   const bytes = Buffer.alloc(300 * 1024)
   bytes.set(audio)
-  for (const stagingDir of [dir, path.join(dir, 'missing')]) {
-    const upstream = response(200, { 'content-length': String(bytes.length) })
-    assert.equal(attachReadThroughCapture(upstream, { stagingDir, publish: () => { published++ } }), true)
-    const forwarded = receive(upstream)
-    if (stagingDir === dir) await until(async () => (await readdir(stagingDir)).length === 1)
-    upstream.complete = true
-    upstream.end(bytes)
-    assert.deepEqual(await forwarded, bytes)
-    await until(async () => (await readdir(dir)).length === 0)
-    assert.equal(published, 0)
-  }
+  const upstream = response(200, { 'content-length': String(bytes.length) })
+  assert.equal(attachReadThroughCapture(upstream, { stagingDir: dir, publish: () => assert.fail('oversized buffer published') }), true)
+  const forwarded = receive(upstream)
+  await until(async () => (await readdir(dir)).length === 1)
+  upstream.complete = true
+  upstream.end(bytes)
+  assert.deepEqual(await forwarded, bytes)
+  await until(async () => (await readdir(dir)).length === 0)
+})
+
+test('a missing staging directory rejects ordinary-sized audio and releases the capture slot', async t => {
+  const dir = await temporary(t)
+  const upstream = response()
+  assert.equal(attachReadThroughCapture(upstream, { stagingDir: path.join(dir, 'missing'), publish: () => assert.fail('disk error published') }), true)
+  const forwarded = receive(upstream)
+  upstream.complete = true
+  upstream.end(audio)
+  assert.deepEqual(await forwarded, audio)
+  let published = false
+  let retry: ReturnType<typeof response> | undefined
+  await until(async () => {
+    const candidate = response()
+    if (!attachReadThroughCapture(candidate, { stagingDir: dir, publish: () => { published = true } })) { candidate.destroy(); return false }
+    retry = candidate
+    return true
+  })
+  assert.ok(retry)
+  const next = receive(retry)
+  retry.complete = true
+  retry.end(audio)
+  assert.deepEqual(await next, audio)
+  await until(async () => published && (await readdir(dir)).length === 0)
 })
 
 test('one global capture slot is bounded and an already-aborted capture writes nothing', async t => {
@@ -201,4 +221,68 @@ test('a real relay forwards native Range unchanged and publishes from one upstre
   await until(async () => !!published && (await readdir(dir)).length === 0)
   assert.deepEqual(published, audio)
   assert.equal(requests, 1)
+})
+
+
+test('a stuck publisher times out, cannot commit late, and releases the slot without interrupting media', async t => {
+  const dir = await temporary(t)
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let finish!: () => void
+  let started!: () => void
+  let publicationSignal: AbortSignal | undefined
+  let committed = false
+  const entered = new Promise<void>(resolve => { started = resolve })
+  const upstream = response()
+  assert.equal(attachReadThroughCapture(upstream, { stagingDir: dir, publish: async ({ signal }) => {
+    publicationSignal = signal
+    started()
+    await new Promise<void>(resolve => { finish = resolve })
+    if (!signal?.aborted) committed = true
+  } }), true)
+  const forwarded = receive(upstream)
+  upstream.complete = true
+  upstream.end(audio)
+  assert.deepEqual(await forwarded, audio)
+  await entered
+  t.mock.timers.tick(10_000)
+  // Restore real timers while asynchronous unlink and reservation release finish.
+  t.mock.timers.reset()
+  await until(async () => (await readdir(dir)).length === 0)
+  assert.equal(publicationSignal?.aborted, true)
+  finish()
+  await delay(0)
+  assert.equal(committed, false)
+  let published = false
+  const next = response()
+  assert.equal(attachReadThroughCapture(next, { stagingDir: dir, publish: () => { published = true } }), true)
+  const again = receive(next)
+  next.complete = true
+  next.end(audio)
+  assert.deepEqual(await again, audio)
+  await until(async () => published && (await readdir(dir)).length === 0)
+})
+
+
+test('failed unlink cleanup retains its bounded reservation instead of accumulating untracked spools', async t => {
+  const dir = await temporary(t)
+  const promises = require('node:fs/promises')
+  let failures = 0
+  t.mock.method(promises, 'unlink', async () => {
+    failures++
+    throw Object.assign(new Error('fixture cleanup denied'), { code: 'EACCES' })
+  })
+  for (let i = 0; i < 2; i++) {
+    const upstream = response()
+    assert.equal(attachReadThroughCapture(upstream, { stagingDir: dir, publish: () => {} }), true)
+    const forwarded = receive(upstream)
+    upstream.complete = true
+    upstream.end(audio)
+    assert.deepEqual(await forwarded, audio)
+    await until(async () => failures === i + 1 && (await readdir(dir)).length === i + 1)
+    await delay(0) // Let the old active reservation be released.
+  }
+  const denied = response()
+  assert.equal(attachReadThroughCapture(denied, { stagingDir: dir, publish: () => assert.fail('cleanup cap bypassed') }), false)
+  denied.destroy()
+  assert.equal((await readdir(dir)).length, 2)
 })

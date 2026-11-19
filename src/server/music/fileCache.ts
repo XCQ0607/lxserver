@@ -350,13 +350,26 @@ class CacheIndexManager {
     }
 
     // Keep the read-through path distinct from ordinary downloads: a completed
-    // capture may add a variant, but must never replace an existing entry.
+    // capture may add a variant or atomically repair metadata for a missing,
+    // empty or truncated same-key cache file. Never overwrite/delete media,
+    // and never replace an entry whose existing file remains usable.
     publishNew(username: string, item: CacheItem, folder: CacheFolder, location?: string): boolean {
         if (isRemasterStage(username) || isCloudRestoreRunning()) return false
         const loc = location || getUserCacheLocation(username)
         const index = this.load(username, folder, loc, false)
         const itemKey = `${item.id}_${item.quality}`
-        if (index.has(itemKey)) return false
+        const previous = index.get(itemKey)
+        if (previous) {
+            try {
+                const directory = getCacheDir(username, folder === 'music', loc, false)
+                const oldPath = resolveContainedPath(directory, previous.filename)
+                const old = fs.lstatSync(oldPath)
+                if (!old.isFile() || (old.size > 0 && (!previous.size || old.size >= previous.size))) return false
+            } catch (error: any) {
+                // Only proven missing files can be repaired. Permission/path errors fail closed.
+                if (error.code !== 'ENOENT') return false
+            }
+        }
 
         const file = this.getIndexFile(username, folder, loc, false)
         let temp: string | undefined

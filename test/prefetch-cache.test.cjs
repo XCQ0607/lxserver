@@ -235,3 +235,24 @@ test('cache hit restarts buffering after the previous buffer was stopped', async
     manager.clear();
     assert.equal(manager.bufferer.src, '');
 });
+
+test('malformed alternates cannot invalidate the primary cache lookup or consume valid slots', async () => {
+    const { refresh, calls } = setup(saved);
+    const valid = { ...song, id: 'valid', source: 'kw', singer: 'Artist' };
+    const malformed = { ...valid, id: 'bad', singer: 'x'.repeat(513) };
+    const result = await refresh({ ...song, _alternates: [null, malformed, valid] }, online);
+    assert.equal(result.url, saved.url);
+    assert.deepEqual(calls[0].body.songs.map(s => s.id), ['1', 'valid']);
+});
+
+test('the actual resolved prefetch identity is primary, deduplicated and included within eight members', async () => {
+    const { refresh, calls } = setup(saved);
+    const resolved = { ...song, id: 'resolved', source: 'kw', name: 'Different provider title', singer: 'Artist' };
+    const alternates = Array.from({ length: 10 }, (_, i) => ({ id: String(i + 2), source: 'tx' }));
+    const result = await refresh({ ...song, _alternates: [resolved, ...alternates] }, { ...online, songInfo: resolved, switchedSource: true });
+    assert.equal(result.songInfo, resolved);
+    assert.equal(result.switchedSource, true);
+    assert.equal(calls[0].body.songs[0].id, 'resolved');
+    assert.equal(calls[0].body.songs.length, 8);
+    assert.equal(calls[0].body.songs.filter(s => s.id === 'resolved').length, 1);
+});

@@ -132,7 +132,7 @@ test('recovery excludes the failed file and resumes a ready replacement without 
     const alternate = { ...ready, url: '/api/music/cache/file/example/other.flac?folder=music', quality: 'flac' };
     const state = { originalSong: track, currentSong: track, thisRequestId: 7, currentIndex: 2, currentQuality: '320k', cacheTargetQuality: 'flac' };
     const context = vm.createContext({
-        URL, console, settings: {}, window: { location }, currentRecoveryState: state,
+        URL, console, audio: { isRemote: false }, settings: {}, window: { location }, currentRecoveryState: state,
         restorePlaybackSession: async () => false,
         resolvePlaybackCache: async (_song, wanted, options) => {
             calls.push({ wanted, exclusions: [...options.excludedFiles] });
@@ -211,4 +211,53 @@ test('final non-aborted cache auth rejections remain terminal, including forbidd
         await assert.rejects(fixture.context.checkPlaybackCache([track], 'flac', false, controller.signal), error => error.status === status);
         assert.equal(fixture.calls.length, 1);
     }
+});
+
+test('a lower-quality retry checks newly completed local bytes at that exact tier and retains failed-file exclusions', async () => {
+    const fixture = setup({ cache: null, result: { error: 'provider failed' }, proxyOptions: { playbackErrorPriority: 'quality', enableAutoSwitchSource: false } });
+    fixture.context.window.QualityManager.getNextLowerQuality = q => q === 'flac' ? '320k' : null;
+    let lookups = 0;
+    fixture.context.resolvePlaybackCache = async (_song, quality, options) => {
+        lookups++;
+        if (lookups === 1) return null;
+        assert.equal(quality, '320k');
+        assert.equal(options.exactQuality, true);
+        assert.equal(options.excludedFiles, excluded);
+        return { url: ready.url, sourceType: 'server_cache', quality: '320k' };
+    };
+    const excluded = new Set(['["cache","failed.mp3"]']);
+    const resolved = await fixture.context.resolveSongUrl(track, 'flac', true, false, false, { excludedFiles: excluded, exactQuality: false });
+    assert.equal(resolved.url, ready.url);
+    assert.equal(lookups, 2);
+    assert.equal(fixture.calls.filter(call => call.url.endsWith('/url')).length, 1);
+});
+
+test('superseded URL-resolution SSE events cannot update the current playback UI', async () => {
+    const fixture = setup({ cache: null });
+    let progress, messages = 0, current = true;
+    fixture.context.EventSource = class { constructor() { progress = this; } close() {} };
+    fixture.context.showSuccess = fixture.context.showError = () => { messages++; };
+    fixture.context.RecoveryToast = { isActive: () => false };
+    await fixture.context.resolveSongUrl(track, 'flac', false, false, true, { isCurrent: () => current });
+    progress.onmessage({ data: JSON.stringify({ name: track.name, status: 'success' }) });
+    assert.equal(messages, 1);
+    current = false;
+    progress.onmessage({ data: JSON.stringify({ name: track.name, status: 'fail' }) });
+    assert.equal(messages, 1);
+});
+
+test('cache replacement auth rejection is visible without an active recovery toast', async () => {
+    const state = { currentSong: track, originalSong: track, currentQuality: 'flac', thisRequestId: 7 };
+    const messages = [];
+    const context = vm.createContext({
+        URL, console, audio: { isRemote: false }, settings: {}, window: { location }, currentRecoveryState: state,
+        restorePlaybackSession: async () => false,
+        resolvePlaybackCache: async () => { throw { status: 403, message: 'denied' }; },
+        RecoveryToast: { error() {} }, setPlayerStatus() {}, updatePlayButton() {},
+        showError: msg => messages.push(msg),
+    });
+    vm.runInContext(extract('function getPlaybackCacheFileKey(', 'const samePlaybackQuality') +
+        extract('async function runRecoveryFlow(', 'async function playSong('), context);
+    await context.runRecoveryFlow(new Error('cached media failed'), 3, state, { ...ready, sourceType: 'server_cache' });
+    assert.deepEqual(messages, ['登录已失效，请重新登录']);
 });

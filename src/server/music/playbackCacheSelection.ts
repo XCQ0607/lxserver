@@ -106,6 +106,7 @@ const readRequest = (input: unknown) => {
 
 type PlaybackIndex = {
   revision: number
+  truncatedBuckets: Set<string>
   byId: Map<string, CacheItem[]>
   byRecording: Map<string, Map<number, CacheItem[]>>
 }
@@ -116,7 +117,7 @@ const playbackIndexes = new WeakMap<ReadonlyMap<string, CacheItem>, PlaybackInde
 const getView = (index: ReadonlyMap<string, CacheItem>, revision: number) => {
   const previous = playbackIndexes.get(index)
   if (previous?.revision === revision) return previous
-  const view: PlaybackIndex = { revision, byId: new Map(), byRecording: new Map() }
+  const view: PlaybackIndex = { revision, truncatedBuckets: new Set(), byId: new Map(), byRecording: new Map() }
   for (const item of index.values()) {
     if (!item || typeof item.id !== 'string' || typeof item.source !== 'string' || typeof item.quality !== 'string') continue
     const id = JSON.stringify([item.source, item.id])
@@ -134,7 +135,8 @@ const getView = (index: ReadonlyMap<string, CacheItem>, revision: number) => {
     const durationBucket = Math.floor(seconds)
     let bucket = buckets.get(durationBucket)
     if (!bucket) buckets.set(durationBucket, bucket = [])
-    if (bucket.length <= MAX_TITLE_MATCHES) bucket.push(item)
+    if (bucket.length < MAX_TITLE_MATCHES) bucket.push(item)
+    else view.truncatedBuckets.add(JSON.stringify([signature, durationBucket]))
   }
   playbackIndexes.set(index, view)
   return view
@@ -222,6 +224,7 @@ export async function selectPlaybackCache(input: unknown, username: string): Pro
     for (const { folder, directory, view } of views) {
       const buckets = view.byRecording.get(primary.signature)
       for (let k = Math.floor(primary.seconds - MAX_DURATION_DELTA); k <= Math.floor(primary.seconds + MAX_DURATION_DELTA); ++k) {
+        if (view.truncatedBuckets.has(JSON.stringify([primary.signature, k]))) { overflow = true; break }
         for (const item of buckets?.get(k) || []) {
           if (item.source === primary.source || !matchingDuration(primary.seconds, durationSeconds(item.interval))) continue
           let ids = seenBySource.get(item.source)

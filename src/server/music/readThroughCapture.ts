@@ -4,13 +4,16 @@ import { unlink } from 'node:fs/promises'
 import type { IncomingHttpHeaders, IncomingMessage } from 'node:http'
 import path from 'node:path'
 
-// This trial reserves at most one bounded spool per process. It never owns the
-// media response and must discard the spool rather than backpressure playback.
+// This trial allows one active capture and at most two unresolved finalization
+// reservations per process. It never owns or backpressures the media response.
 const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
 const MAX_PENDING_BYTES = 256 * 1024
 const IDLE_TIMEOUT_MS = 20_000
 const CAPTURE_TIMEOUT_MS = 120_000
-let active = false
+const FINALIZE_TIMEOUT_MS = 10_000
+const MAX_PENDING_FINALIZATIONS = 2
+let pendingFinalizations = 0
+let active: symbol | undefined
 const attached = new WeakSet<IncomingMessage>()
 
 export interface ReadThroughCapture {
@@ -24,7 +27,7 @@ interface ReadThroughCaptureOptions {
   stagingDir: string
   maxBytes?: number
   signal?: AbortSignal
-  /** Verify actual audio independently, then publish without overwriting media. */
+  /** Verify audio independently; honor capture.signal immediately before committing. */
   publish: (capture: ReadThroughCapture) => Promise<void> | void
 }
 
@@ -106,7 +109,7 @@ function makePrefixCheck(length: number) {
  */
 export function attachReadThroughCapture(upstream: IncomingMessage, options: ReadThroughCaptureOptions): boolean {
   const length = eligibleLength(upstream, options.maxBytes)
-  if (length === null || active || options.signal?.aborted || attached.has(upstream) ||
+  if (length === null || active || pendingFinalizations >= MAX_PENDING_FINALIZATIONS || options.signal?.aborted || attached.has(upstream) ||
       upstream.destroyed || upstream.readableDidRead || upstream.readableEnded) return false
   const expected = length
 
@@ -116,7 +119,8 @@ export function attachReadThroughCapture(upstream: IncomingMessage, options: Rea
     tempPath = path.join(options.stagingDir, `.lx-readthrough-${randomBytes(16).toString('hex')}.part`)
     sink = createWriteStream(tempPath, { flags: 'wx', mode: 0o600, highWaterMark: MAX_PENDING_BYTES })
   } catch { return false }
-  active = true
+  const reservation = Symbol()
+  active = reservation
   attached.add(upstream)
 
   let rejected = false, ended = false, ownsTemp = false, received = 0
@@ -165,16 +169,56 @@ export function attachReadThroughCapture(upstream: IncomingMessage, options: Rea
     clearTimeout(idle)
     clearTimeout(limit)
     stopReading()
+    pendingFinalizations++
     void (async () => {
+      let publicationFinished = true, removed = !ownsTemp, reservationReleased = false
+      const releasePending = () => {
+        if (!reservationReleased && publicationFinished && removed) {
+          reservationReleased = true
+          pendingFinalizations--
+        }
+      }
+      const expires = Date.now() + FINALIZE_TIMEOUT_MS
+      let cleanupTimer: ReturnType<typeof setTimeout> | undefined
+      const lifetime = new AbortController()
+      const signal = options.signal ? AbortSignal.any([lifetime.signal, options.signal]) : lifetime.signal
+      let onStop!: () => void
+      const stopped = new Promise<void>(resolve => {
+        onStop = resolve
+        if (signal.aborted) resolve()
+        else signal.addEventListener('abort', onStop, { once: true })
+      })
+      // This deadline covers publication AND cleanup. A late publication is
+      // invalidated by its signal before the reservation can be reused.
+      const deadline = setTimeout(() => lifetime.abort(), FINALIZE_TIMEOUT_MS).unref()
       try {
-        if (!rejected && ended && ownsTemp && sink.writableFinished && !options.signal?.aborted) {
-          await options.publish({ tempPath, bytes: received, signal: options.signal })
+        if (!rejected && ended && ownsTemp && sink.writableFinished && !signal.aborted) {
+          publicationFinished = false
+          const publication = Promise.resolve().then(() => options.publish({ tempPath, bytes: received, signal }))
+            .finally(() => { publicationFinished = true; releasePending() })
+          await Promise.race([publication, stopped])
         }
       } catch { /* Staging/verification failure does not affect the media pipe. */ }
       finally {
+        lifetime.abort()
         options.signal?.removeEventListener('abort', reject)
-        if (ownsTemp) await unlink(tempPath).catch(() => {})
-        active = false
+        // Do not accumulate unlimited spools if filesystem cleanup itself stalls.
+        // Retain a reservation until publication has settled AND unlink has
+        // succeeded, even if the active capture slot was released on deadline.
+        const cleanup = (ownsTemp ? unlink(tempPath).then(() => { removed = true }).catch((error: NodeJS.ErrnoException) => {
+          if (error.code === 'ENOENT') removed = true
+        }) : Promise.resolve()).finally(releasePending)
+        // lifetime is now aborted, so use the independent wall-clock deadline
+        // for cleanup rather than the already-resolved publication stop signal.
+        const cleanupDeadline = new Promise<void>(resolve => {
+          if (Date.now() >= expires) resolve()
+          else cleanupTimer = setTimeout(resolve, expires - Date.now()).unref()
+        })
+        await Promise.race([cleanup, cleanupDeadline])
+        clearTimeout(deadline)
+        if (cleanupTimer) clearTimeout(cleanupTimer)
+        signal.removeEventListener('abort', onStop)
+        if (active === reservation) active = undefined
       }
     })()
   })

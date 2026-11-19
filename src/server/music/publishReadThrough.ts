@@ -66,7 +66,7 @@ function inspectCompleteMp3(data: Buffer) {
   if (frames < 4) return null
   const bitrate = Math.round(weightedBitrate / totalSamples)
   if (bitrate < 120) return null // No supported quality tier for noticeably lower bitrates.
-  return { seconds: totalSamples / sampleRate, sampleRate, bitrate, quality: bitrate >= 240 ? '320k' : bitrate >= 170 ? '192k' : '128k' }
+  return { seconds: totalSamples / sampleRate, sampleRate, bitrate, quality: bitrate >= 320 ? '320k' : bitrate >= 192 ? '192k' : '128k' }
 }
 
 function sameFile(a: Stats, b: Stats) {
@@ -126,6 +126,7 @@ async function hasRoom(directory: string, incoming: number, signal?: AbortSignal
 export async function publishReadThrough(
   tempPath: string, bytes: number, song: any, username: string, expectedCacheDir: string, signal?: AbortSignal,
 ): Promise<boolean> {
+  if (process.platform === 'win32') return false // No verified private ACL contract for this pilot.
   if (!Number.isSafeInteger(bytes) || bytes < 1024 || bytes > MAX_CAPTURE_BYTES ||
       typeof username !== 'string' || !username || ['.', '..', 'open', '_open', 'default'].includes(username) ||
       /[\\/:\0]/.test(username) || !song || typeof song !== 'object' || !policyAllowsPublish(username, signal)) return false

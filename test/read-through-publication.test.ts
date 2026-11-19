@@ -1,10 +1,11 @@
-import test, { type TestContext } from 'node:test'
+import nodeTest, { type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { CacheItem } from '../src/server/music/fileCache'
 
+const test: typeof nodeTest = process.platform === 'win32' ? nodeTest.skip : nodeTest
 const suiteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-read-through-publish-'))
 process.once('exit', () => fs.rmSync(suiteRoot, { recursive: true, force: true }))
 // The server's user-data module dereferences dataPath on import.
@@ -16,7 +17,7 @@ const {
 const { publishReadThrough }: typeof import('../src/server/music/publishReadThrough') = require('../src/server/music/publishReadThrough')
 
 function framedMp3(bitrate = 128, seconds = 2) {
-  const index = ({ 128: 9, 192: 11, 320: 14 } as Record<number, number>)[bitrate]
+  const index = ({ 128: 9, 192: 11, 256: 13, 320: 14 } as Record<number, number>)[bitrate]
   const frameLength = Math.floor(144_000 * bitrate / 44_100)
   const audio = Buffer.alloc(frameLength * Math.round(seconds * 44_100 / 1152))
   for (let i = 0; i < audio.length; i += frameLength) audio.set([0xff, 0xfb, index << 4, 0], i)
@@ -177,4 +178,36 @@ test('rejects malformed artwork and oversized native IDs before touching the ind
   const saved = JSON.parse(fs.readFileSync(indexPath, 'utf8')).tx_1_128k
   assert.equal(saved.img, img)
   assert.equal(saved.nativeIds.albumMid.length, 512)
+})
+
+
+test('256 kbps is not labeled 320k, while actual 320 kbps retains its tier', async t => {
+  for (const [bitrate, quality] of [[256, '192k'], [320, '320k']] as const) {
+    const { stageMusic, publish, indexPath } = fixture(t)
+    const audio = stageMusic(framedMp3(bitrate))
+    assert.equal(await publish(audio.length), true)
+    const item = JSON.parse(fs.readFileSync(indexPath, 'utf8'))[`tx_1_${quality}`]
+    assert.equal(item.bitrate, bitrate)
+    assert.equal(item.quality, quality)
+  }
+})
+
+test('a complete capture atomically repairs a missing, empty or truncated same-key row without deleting old files', async t => {
+  for (const state of ['missing', 'empty', 'truncated']) {
+    const { stageMusic, publish, indexPath, cacheDir, username, song } = fixture(t)
+    const oldPath = path.join(cacheDir, 'old.mp3')
+    if (state !== 'missing') fs.writeFileSync(oldPath, state === 'empty' ? '' : 'partial')
+    indexManager.update(username, { ...song, album: '', quality: '128k', filename: 'old.mp3', size: 10000,
+      folder: 'cache', mtime: 0, ext: 'mp3' } as CacheItem, 'cache')
+    const audio = stageMusic()
+    assert.equal(await publish(audio.length), true)
+    const saved = JSON.parse(fs.readFileSync(indexPath, 'utf8')).tx_1_128k
+    assert.notEqual(saved.filename, 'old.mp3')
+    assert.deepEqual(fs.readFileSync(path.join(cacheDir, saved.filename)), audio)
+    if (state !== 'missing') assert.equal(fs.readFileSync(oldPath, 'utf8'), state === 'empty' ? '' : 'partial')
+  }
+})
+
+nodeTest('Windows publication fails closed until private ACL verification is supported', { skip: process.platform !== 'win32' }, async () => {
+  assert.equal(await publishReadThrough('unused', 2048, {}, 'user', 'unused'), false)
 })

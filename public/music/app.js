@@ -5873,7 +5873,23 @@ async function resolvePlaybackCache(song, quality, options = {}) {
     checkPlaybackStillCurrent(options);
     if (settings.preferServerCache === false) return null;
     const alternates = settings.enableAutoSwitchSource === false || !Array.isArray(song._alternates) ? [] : song._alternates;
-    const members = [song, ...alternates.filter(Boolean).slice(0, 7)];
+    // A resolved prefetch track is the actual media identity, even when the
+    // provider matching step returned slightly different recording metadata.
+    const resolved = settings.enableAutoSwitchSource === false ? null : options.resolvedSong;
+    const primary = resolved || song;
+    const members = [primary];
+    const seen = new Set([cleanSongData(primary).id]);
+    for (const candidate of [...(resolved ? [song] : []), ...alternates]) {
+        try {
+            const identity = cleanSongData(candidate);
+            if (!identity || seen.has(identity.id) || typeof identity.id !== 'string' || !identity.id.trim() || identity.id.length > 384 || /[\x00-\x1f]/.test(identity.id) ||
+                !/^[a-z][a-z0-9]{0,15}$/.test(identity.source || '') ||
+                [identity.name, identity.singer].some(value => value !== undefined && (typeof value !== 'string' || value.length > 512))) continue;
+            seen.add(identity.id);
+            members.push(candidate);
+            if (members.length === 8) break;
+        } catch (_) { /* Invalid alternate metadata must not invalidate the primary. */ }
+    }
     const signal = AbortSignal.timeout(1200);
     const hit = await checkPlaybackCache(members, quality, !!options.exactQuality, signal, options.excludedFiles);
     checkPlaybackStillCurrent(options);
@@ -5892,7 +5908,7 @@ async function refreshPrefetchedCache(song, result, quality = result.quality, op
     // Explicit library files do not need a lookup.
     if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url) return result;
     // A prefetched local result is a hint, not proof the same file still exists.
-    const cached = await resolvePlaybackCache(song, quality, options);
+    const cached = await resolvePlaybackCache(song, quality, { ...options, resolvedSong: result.songInfo });
     if (cached) return { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false };
     if (result.sourceType === 'server_cache' ||
         (settings.preferServerCache === false && result.sourceType === 'openlist') ||
@@ -5949,7 +5965,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                             status: 'trying'
                         });
                     }
-                    return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false, { ...options, skipPlaybackCache: true });
+                    return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false, { ...options, cacheQuality: nextQuality, exactCacheQuality: true, skipPlaybackCache: false });
                 }
             } else if (step === 'switch_platform') {
                 if (!isSilent) {
@@ -6321,7 +6337,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 
     if (settings.preferServerCache !== false && !shouldBypassServerCache && !options.skipPlaybackCache) {
         const hit = await resolvePlaybackCache(song, options.cacheQuality || quality, {
-            ...options, exactQuality: options.exactQuality ?? !!isRetry,
+            ...options, exactQuality: options.exactCacheQuality ?? options.exactQuality ?? !!isRetry,
         });
         if (hit) return hit;
     }
@@ -6352,7 +6368,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     try {
         progressEs = new EventSource(`/api/music/progress?reqId=${reqId}`);
         progressEs.onmessage = (e) => {
-            if (isSilent) return;
+            if (isSilent || options.isCurrent?.() === false) return;
             try {
                 const attempt = JSON.parse(e.data);
                 const songNamePrefix = attempt.name || song.name || '';
@@ -7287,6 +7303,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
             if (!isCurrent() || cacheError?.name === 'AbortError') return;
             if (cacheError?.status === 401 || cacheError?.status === 403) {
                 setPlayerStatus('请重新登录');
+                showError('登录已失效，请重新登录');
                 RecoveryToast.error(cacheError.message);
                 updatePlayButton(false);
                 return;
@@ -7749,7 +7766,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             currentRecoveryState.currentApiSourceName = urlResult.sourceName || '';
             currentRecoveryState.currentApiSourceId = urlResult.sourceId || '';
             currentRecoveryState.currentHasMoreSources = !!urlResult.hasMoreSources;
-            currentRecoveryState.mediaRequestedQuality = targetQuality || prefetchQuality || currentRecoveryState.currentQuality;
+            if (!(isRetry && preparedResult && ['server_cache', 'cache', 'openlist'].includes(urlResult.sourceType))) {
+                currentRecoveryState.mediaRequestedQuality = targetQuality || prefetchQuality || currentRecoveryState.currentQuality;
+            }
             currentRecoveryState.currentQuality = urlResult.quality || targetQuality;
             currentRecoveryState.mediaResult = urlResult;
         }
@@ -7832,11 +7851,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             return true;
         };
         currentPlaybackErrorHandler = async () => {
-            if (!claimMediaRecovery()) return;
+            if (!shouldAutoRecoverPlayback || !claimMediaRecovery()) return;
             prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
             currentPlaybackErrorHandler = null;
-            if (noPlay) return;
-
             const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
             const recoveryEpoch = currentRecoveryState?.recoveryEpoch;
             const isOnline = await checkServerOnline();
@@ -8442,8 +8459,12 @@ async function togglePlay() {
                 fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 600);
             }
         } catch (e) {
-            shouldAutoRecoverPlayback = false;
             console.error("[Player] Play blocked:", e);
+            if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError' && currentPlaybackErrorHandler) {
+                await currentPlaybackErrorHandler();
+            } else {
+                shouldAutoRecoverPlayback = false;
+            }
         }
     } else {
         if (currentRecoveryState) currentRecoveryState.recoveryEpoch = (currentRecoveryState.recoveryEpoch || 0) + 1;
@@ -8879,28 +8900,14 @@ function handlePlaybackStallOrWait() {
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
         const stallWasRemote = !!audio.isRemote;
 
-        playbackStallDetectionTimer = setTimeout(async () => {
+        playbackStallDetectionTimer = setTimeout(() => {
             playbackStallDetectionTimer = null;
             if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
             if (audio.paused || audio.ended || isServerReconnecting) return;
             if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
-
-            // 超过 4 秒一直处于卡顿状态，探测服务端连通性
-            const isOnline = await checkServerOnline();
-            if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
-            if (audio.paused || audio.ended || isServerReconnecting) return;
-            if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
-
-            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
-            if (!isOnline && currentPlayingSong) {
-                console.warn('[Player] 缓冲超时且服务端失联，触发自动重连恢复');
-                shouldAutoRecoverPlayback = false;
-                reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
-            } else if (isOnline && currentPlayingSong && shouldAutoRecoverPlayback) {
-                console.warn('[Player] 服务端在线但音频持续卡死超时，触发播放恢复重试');
-                shouldAutoRecoverPlayback = false;
-                void runRecoveryFlow(new Error('音频缓冲超时停滞'), savedTime, currentRecoveryState, currentRecoveryState?.mediaResult);
-            }
+            // Use the same request-level claim as native errors and play rejection.
+            // The handler also performs server reachability and reconnect checks.
+            if (shouldAutoRecoverPlayback && currentPlaybackErrorHandler) void currentPlaybackErrorHandler();
         }, 4000);
     }
 }

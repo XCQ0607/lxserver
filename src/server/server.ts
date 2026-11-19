@@ -962,43 +962,58 @@ type ReadThroughOffer = {
   owner: string; url: string; song: any; expires: number; cacheDir?: string; stagingDir?: string
 }
 const readThroughOffers = new Map<string, ReadThroughOffer>()
+type ReadThroughDirectory = { cacheDir: string; stagingDir: string; expires: number; ready: boolean; preparing: boolean }
+const readThroughDirectories = new Map<string, ReadThroughDirectory>()
 const issueReadThroughOffer = (owner: string, audioUrl: string, song: any) => {
-  if (process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
+  if (process.platform === 'win32' || process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
     !owner || ['.', '..', 'open', '_open', 'default'].includes(owner) || /[\\/:\0]/.test(owner) ||
     !global.lx.config.users.some(user => user.name === owner && !user.disabled) || !song.name || !song.singer || !song.interval || !/^https?:\/\//i.test(audioUrl) || audioUrl.length > 4096 ||
     !['tx', 'wy', 'kw', 'kg', 'mg'].includes(song.source)) return undefined
   const metadata = fileCache.extractSongMetadata(song)
   if (!metadata.id || metadata.id.length > 200 || [metadata.name, metadata.singer, metadata.album, metadata.interval]
     .some(value => typeof value !== 'string' || value.length > 512)) return undefined
+  const nativeIds = fileCache.extractNativeIds(song)
+  if (nativeIds && Object.values(nativeIds).some(value => value.length > 512)) return undefined
+  const rawMediaMid = song.strMediaMid ?? song.meta?.strMediaMid
+  if (metadata.source === 'tx' && (typeof rawMediaMid !== 'string' || !rawMediaMid || rawMediaMid.length > 512)) return undefined
   const now = Date.now()
   for (const [key, entry] of readThroughOffers) if (entry.expires <= now) readThroughOffers.delete(key)
+  for (const [key, entry] of readThroughDirectories) if (entry.expires <= now && !entry.preparing) readThroughDirectories.delete(key)
   if (readThroughOffers.size >= 128) return undefined
-  const key = crypto.randomBytes(16).toString('hex')
-  const offer: ReadThroughOffer = {
-    owner, url: audioUrl, expires: now + 2 * 60_000,
-    song: { id: metadata.id, source: metadata.source, name: metadata.name, singer: metadata.singer,
-      albumName: metadata.album, interval: metadata.interval },
+  const cacheDir = fileCache.getCacheDir(owner, false, undefined, false)
+  let directory = readThroughDirectories.get(owner)
+  if (directory?.preparing && directory.cacheDir !== cacheDir) return undefined
+  if (!directory || directory.cacheDir !== cacheDir) {
+    if (readThroughDirectories.size >= 128) return undefined
+    directory = { cacheDir, stagingDir: path.join(cacheDir, fileCache.READ_THROUGH_STAGING_DIR), expires: now + 60_000, ready: false, preparing: true }
+    const preparing = directory
+    readThroughDirectories.set(owner, preparing)
+    // Warm the directory asynchronously; this request keeps ordinary playback
+    // and background-save behavior instead of advertising an unusable ticket.
+    setImmediate(async () => {
+      try {
+        await fs.promises.mkdir(cacheDir, { recursive: true })
+        if (!(await fs.promises.lstat(cacheDir)).isDirectory()) return
+        try { await fs.promises.mkdir(preparing.stagingDir, { mode: 0o700 }) }
+        catch (error: any) { if (error.code !== 'EEXIST') return }
+        const stage = await fs.promises.lstat(preparing.stagingDir)
+        if (!stage.isDirectory() || (stage.mode & 0o077) !== 0) return
+        const handle = await fs.promises.opendir(preparing.stagingDir)
+        try { if (await handle.read()) return }
+        finally { await handle.close() }
+        if (readThroughDirectories.get(owner) === preparing) preparing.ready = true
+      } catch { /* Read-through remains opportunistic. */ }
+      finally { preparing.preparing = false }
+    })
   }
-  readThroughOffers.set(key, offer)
-  // Missing or slow staging must not delay receiving the playable URL.
-  setImmediate(async () => {
-    try {
-      const cacheDir = fileCache.getCacheDir(owner, false, undefined, false)
-      await fs.promises.mkdir(cacheDir, { recursive: true })
-      if (!(await fs.promises.lstat(cacheDir)).isDirectory()) return
-      const stagingDir = path.join(cacheDir, fileCache.READ_THROUGH_STAGING_DIR)
-      try { await fs.promises.mkdir(stagingDir, { mode: 0o700 }) }
-      catch (error: any) { if (error.code !== 'EEXIST') return }
-      const stage = await fs.promises.lstat(stagingDir)
-      if (!stage.isDirectory() || (stage.mode & 0o077) !== 0) return
-      // Crash leftovers never accumulate: fail closed for this owner until the
-      // private spool is empty. Do not delete user files from the playback path.
-      const handle = await fs.promises.opendir(stagingDir)
-      try { if (await handle.read()) return }
-      finally { await handle.close() }
-      offer.cacheDir = cacheDir
-      offer.stagingDir = stagingDir
-    } catch { /* Read-through remains opportunistic. */ }
+  if (!directory.ready) return undefined
+  // Recheck emptiness asynchronously before another offer for this owner.
+  readThroughDirectories.delete(owner)
+  const key = crypto.randomBytes(16).toString('hex')
+  readThroughOffers.set(key, {
+    owner, url: audioUrl, expires: now + 2 * 60_000, cacheDir, stagingDir: directory.stagingDir,
+    song: { id: metadata.id, source: metadata.source, name: metadata.name, singer: metadata.singer,
+      albumName: metadata.album, interval: metadata.interval, meta: nativeIds },
   })
   return key
 }

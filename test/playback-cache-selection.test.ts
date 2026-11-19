@@ -153,3 +153,16 @@ test('file verification yields while filesystem work is pending and still select
   release()
   assert.equal((await pending as { filename?: string }).filename, 'ready.flac')
 })
+
+
+test('a truncated duration bucket cannot make an ambiguous provider recording look unique', async () => {
+  const { put, select } = fixture()
+  // Primary-provider rows fill the retained bucket but are skipped during
+  // discovery. A second alternate-provider ID is hidden past the truncation.
+  put('cache', 'flac', 'eligible.flac', { ...alt, id: 'kw_candidate', interval: '02:36' })
+  for (let i = 0; i < 32; i++) {
+    put('cache', `custom${i}`, `filler${i}.mp3`, { ...alt, source: 'tx', id: `tx_filler${i}`, interval: '02:36' })
+  }
+  put('cache', 'flac', 'ambiguous.flac', { ...alt, id: 'kw_hidden', interval: '02:36' })
+  assert.equal((await select()).exists, false)
+})
