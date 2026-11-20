@@ -8,4 +8,4 @@
 
 ## Verification
 
-Five targeted regressions, 24 Chromium/WebKit native navigation cases, 20 viewport cases with four wireless states each, and TypeScript/build pass. The full CJS suite has 276 passes and the existing OpenList teardown failure, also reproduced on pristine dev. Native device discovery, physical iPhone and audible receiver playback were not tested.
+Five targeted regressions, 24 Chromium/WebKit native navigation cases, 20 viewport cases with four wireless states each, and TypeScript/build pass. The initial full CJS run reproduced the existing OpenList teardown race on pristine dev. Test-only cleanup exposes the legacy deferred writer only in the bundled fixture, flushes it before removing temporary data, and restores global state. The final suite passes 276 CJS and 201 TypeScript tests. No production OpenList code changes. Native device discovery, physical iPhone and audible receiver playback were not tested.
