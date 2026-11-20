@@ -2281,7 +2281,7 @@ function renderQueue() {
                     </div>
                 </div>
 
-                <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onclick="event.stopPropagation(); openPlaylistAddModalForSongObject(currentPlaylist[${index}])" class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>
@@ -2295,6 +2295,11 @@ function renderQueue() {
             </div>
         `;
     }).join('');
+
+    currentPlaylist.forEach((song, index) => {
+        const actions = listContainer.children[index]?.querySelector('.song-row-actions');
+        if (actions) actions.appendChild(createSongMoreMenu(song));
+    });
 
     // Initialize/Update Sortable (Supports Mobile Touch)
     if (typeof Sortable !== 'undefined' && listContainer) {
@@ -5414,8 +5419,8 @@ function renderResults(list) {
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
             const menu = document.createElement('details');
-            menu.className = 'queue-actions';
-            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            menu.className = 'queue-actions song-more-menu';
+            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next><i class="fas fa-step-forward" aria-hidden="true"></i><span>下一首播放</span></button><button type="button" data-queue-add><i class="fas fa-list-ul" aria-hidden="true"></i><span>加入播放队列</span></button></div>';
             menu.addEventListener('click', event => event.stopPropagation());
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
@@ -5426,6 +5431,7 @@ function renderResults(list) {
             window.RatingManager?.attach(rateButton, item);
             window.RatingManager?.attachTag(row.querySelector('[data-rating-badges]'), item);
             const popup = menu.querySelector('.queue-actions-menu');
+            appendStartRadioAction(menu, item);
             if (typeof popup.showPopover === 'function') {
                 popup.setAttribute('popover', 'auto');
                 menu.addEventListener('toggle', () => {
@@ -5502,6 +5508,86 @@ function renderResults(list) {
  * renderResults 里的按钮通过 JSON.stringify 把整个 song 对象传进来，
  * 这里调用 DislikeManager.toggleSong 后重新渲染当前搜索结果。
  */
+function attachSongRowPopover(menu) {
+    const popup = menu.querySelector('.queue-actions-menu');
+    const summary = menu.querySelector('summary');
+    let outsideListening = false;
+    let removalObserver = null;
+    const stopOutsideListening = () => {
+        if (outsideListening) document.removeEventListener('click', outsideClick, true);
+        outsideListening = false;
+        removalObserver?.disconnect();
+        removalObserver = null;
+    };
+    const close = () => {
+        menu.open = false;
+        stopOutsideListening();
+        if (typeof popup.hidePopover === 'function' && popup.matches(':popover-open')) popup.hidePopover();
+    };
+    const outsideClick = event => { if (!menu.contains(event.target)) close(); };
+    menu.addEventListener('click', event => event.stopPropagation());
+    menu.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        summary.focus();
+    });
+    if (typeof popup.showPopover === 'function') {
+        popup.setAttribute('popover', 'auto');
+        menu.addEventListener('toggle', () => {
+            if (!menu.open || !menu.isConnected) { close(); return; }
+            popup.showPopover();
+            const anchor = summary.getBoundingClientRect();
+            const bounds = popup.getBoundingClientRect();
+            const footer = document.getElementById('player-footer');
+            const footerTop = footer ? footer.getBoundingClientRect().top : window.innerHeight;
+            const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
+            popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+            popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
+        });
+        popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
+    } else {
+        menu.addEventListener('toggle', () => {
+            if (!menu.open) { stopOutsideListening(); return; }
+            if (outsideListening) return;
+            document.addEventListener('click', outsideClick, true);
+            outsideListening = true;
+            // Re-rendering either list can remove an open menu without a toggle.
+            // Observe only while open, releasing both resources on detachment.
+            if (typeof MutationObserver === 'function' && document.body) {
+                removalObserver = new MutationObserver(() => { if (!menu.isConnected) close(); });
+                removalObserver.observe(document.body, { childList: true, subtree: true });
+            }
+        });
+    }
+    return close;
+}
+
+function appendStartRadioAction(menu, songOrFactory, close = () => { menu.open = false; }) {
+    const radio = document.createElement('button');
+    radio.type = 'button';
+    radio.setAttribute('data-start-radio', '');
+    radio.innerHTML = '<i class="fas fa-broadcast-tower" aria-hidden="true"></i><span>开启电台</span>';
+    radio.onclick = () => {
+        close();
+        const seed = typeof songOrFactory === 'function' ? songOrFactory() : songOrFactory;
+        void startSearchRadio(seed);
+    };
+    menu.querySelector('.queue-actions-menu').appendChild(radio);
+    return radio;
+}
+
+function createSongMoreMenu(songOrFactory) {
+    const menu = document.createElement('details');
+    menu.className = 'queue-actions song-more-menu';
+    menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"></div>';
+    const close = attachSongRowPopover(menu);
+    appendStartRadioAction(menu, songOrFactory, close);
+    return menu;
+}
+window.createSongMoreMenu = createSongMoreMenu;
+
 async function toggleDislikeSong(song) {
     if (!song || !window.DislikeManager) return;
 
@@ -6445,6 +6531,11 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 
 function getNextIndex() {
     if (!currentPlaylist || currentPlaylist.length === 0) return -1;
+
+    // Explicit song radio stays sequential without overwriting the saved playback mode.
+    const after = currentPlaylist[currentIndex + 1];
+    if (typeof currentPlayingScope !== 'undefined' && currentPlayingScope === 'search_radio' &&
+        (after?._explicitRadio || after?._playNextRequested)) return currentIndex + 1;
 
     // [Random Prefetch Fix] 如果处于随机播放模式，且已有预选内容，优先返回预选
     if (playMode === 'random' && preSelectedNextIndex !== null) {
@@ -8325,6 +8416,9 @@ async function togglePlay() {
         return;
     }
     if (audio.paused) {
+        if ((isExplicitRadioCurrent(pendingExplicitRadio) && pendingExplicitRadio.waitingAtEnd) || songRadioSession?.handoff) {
+            cancelSearchRadioContinuation();
+        }
         try {
             // [Crossfade] 如果开启了淡入淡出，先将进度置为 0，播放后再淡入
             if (settings.enableCrossfade && !audio.isRemote) {
@@ -8373,6 +8467,11 @@ function updatePlayButton(isPlaying) {
  * @param {Number} depth 递归尝试深度，防止死循环
  */
 function playNext() {
+    if (isExplicitRadioCurrent(pendingExplicitRadio)) {
+        cancelSearchRadioContinuation();
+        songRadioSession = null;
+    }
+    if (isSongRadioActive()) { void advanceSongRadio(); return; }
     if (isSearchRadioDue()) {
         continueWithSimilarSongs();
         return;
@@ -8381,6 +8480,225 @@ function playNext() {
 }
 
 // --- 搜索电台：搜索歌曲播到队列末尾后，用相似歌曲自动续播 ---
+
+let pendingExplicitRadio = null;
+let songRadioSession = null;
+
+function isSongRadioActive(session = songRadioSession) {
+    return !!session && session === songRadioSession && currentPlayingScope === 'search_radio' &&
+        session.members.has(currentPlaylist[currentIndex]);
+}
+
+function radioSongsRemaining(session = songRadioSession) {
+    if (!isSongRadioActive(session)) return 0;
+    let count = 0;
+    for (const song of currentPlaylist.slice(currentIndex + 1)) {
+        if (song._playNextRequested) continue;
+        if (!session.members.has(song) || !song._explicitRadio) break;
+        count++;
+    }
+    return count;
+}
+
+function pruneSongRadioHistory(session) {
+    if (currentPlaylist.length < 950) return;
+    let removed = 0;
+    currentPlaylist = currentPlaylist.filter((song, index) => {
+        const discard = index < currentIndex && session.members.has(song) && song._explicitRadio && !song._playNextRequested;
+        if (discard) removed++;
+        return !discard;
+    });
+    currentIndex -= removed;
+    if (removed) { renderQueue(); savePlaybackState(); }
+}
+
+function replenishSongRadio() {
+    const session = songRadioSession;
+    if (!isSongRadioActive(session) || radioSongsRemaining(session) > 2 || isExplicitRadioCurrent(pendingExplicitRadio)) return Promise.resolve([]);
+    if (session.pending?.epoch === searchRadioEpoch) return session.pending.promise;
+    const anchor = currentPlaylist[currentIndex];
+    if (!anchor._playNextRequested) session.lastSeed = anchor;
+    const seed = session.lastSeed || session.seed;
+    const epoch = searchRadioEpoch;
+    const task = { epoch, promise: null };
+    session.pending = task;
+    task.promise = (async () => {
+        let timer;
+        try {
+            // The legacy source profile also needs a bounded body/lookup handoff.
+            const response = await Promise.race([
+                loadSearchRadioSongs(seed),
+                new Promise(resolve => { timer = setTimeout(() => resolve([]), 9000); }),
+            ]);
+            if (!isSongRadioActive(session) || epoch !== searchRadioEpoch) return [];
+            const songs = Array.isArray(response) ? response : response.list || [];
+            pruneSongRadioHistory(session);
+            const fresh = pickSearchRadioSongs(songs).filter(song => !session.seen.has(cleanSongData(song).id));
+            if (!fresh.length) return [];
+            const batch = fresh.map(song => ({ ...song, _explicitRadio: true }));
+            batch.forEach(song => { session.members.add(song); session.seen.add(cleanSongData(song).id); });
+            let insertAt = currentIndex + 1;
+            while (currentPlaylist[insertAt]?._playNextRequested ||
+                (currentPlaylist[insertAt]?._explicitRadio && session.members.has(currentPlaylist[insertAt]))) insertAt++;
+            currentPlaylist.splice(insertAt, 0, ...batch);
+            preSelectedNextIndex = null;
+            renderQueue(); savePlaybackState();
+            return batch;
+        } catch (_) {
+            return [];
+        } finally {
+            clearTimeout(timer);
+            if (session.pending === task) session.pending = null;
+        }
+    })();
+    return task.promise;
+}
+
+async function advanceSongRadio() {
+    const session = songRadioSession;
+    if (!isSongRadioActive(session)) return;
+    const next = currentPlaylist[currentIndex + 1];
+    if (next?._playNextRequested || (next?._explicitRadio && session.members.has(next))) {
+        if (next._playNextRequested) session.members.add(next);
+        playNextInQueue();
+        void replenishSongRadio();
+        return;
+    }
+    if (session.handoff?.epoch === searchRadioEpoch) return session.handoff.promise;
+    const anchor = currentPlaylist[currentIndex], requestId = loadingRequestCounter, epoch = searchRadioEpoch;
+    const handoff = { epoch, promise: null };
+    session.handoff = handoff;
+    handoff.promise = (async () => {
+        await replenishSongRadio();
+        if (!isSongRadioActive(session) || epoch !== searchRadioEpoch || requestId !== loadingRequestCounter || currentPlaylist[currentIndex] !== anchor) return;
+        const following = currentPlaylist[currentIndex + 1];
+        if (following?._playNextRequested || (following?._explicitRadio && session.members.has(following))) {
+            if (following._playNextRequested) session.members.add(following);
+            playNextInQueue();
+        }
+        else {
+            // Empty/error responses must not loop requests or replay the seed forever.
+            songRadioSession = null;
+            showInfo('暂未找到可播放的相似歌曲');
+            if (following) void playSong(following, currentIndex + 1);
+        }
+    })().finally(() => { if (session.handoff === handoff) session.handoff = null; });
+    return handoff.promise;
+}
+
+
+
+function isExplicitRadioCurrent(request) {
+    return request && request === pendingExplicitRadio && request.epoch === searchRadioEpoch &&
+        request.requestId === loadingRequestCounter && currentPlayingScope === 'search_radio' &&
+        request.anchor === currentPlaylist[currentIndex];
+}
+
+function playAfterNaturalEnd() {
+    const request = pendingExplicitRadio;
+    if (!isExplicitRadioCurrent(request)) {
+        playNext();
+        return;
+    }
+    if (request.waitingAtEnd) return;
+    request.waitingAtEnd = true;
+
+    // Manual Play Next stays first and doesn't wait for the network.
+    const next = currentPlaylist[currentIndex + 1];
+    if (!next?._playNextRequested) return;
+    if (songRadioSession) songRadioSession.members.add(next);
+    void playSong(next, currentIndex + 1);
+    if (currentPlaylist[currentIndex] === next && currentPlayingScope === 'search_radio') {
+        request.anchor = next;
+        request.requestId = loadingRequestCounter;
+        request.waitingAtEnd = false;
+    }
+}
+
+function describeEmptyExplicitRadio(songs, seedId) {
+    const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
+    const playable = songs.filter(song => cleanSongData(song).id !== seedId && !(skipDisliked && window.DislikeManager.isDisliked(song)));
+    if (!playable.length) return '暂未找到可播放的相似歌曲';
+    const queued = new Set(currentPlaylist.map(song => cleanSongData(song).id));
+    return playable.every(song => queued.has(cleanSongData(song).id))
+        ? '相似歌曲已在播放队列中'
+        : '播放队列最多 1000 首歌曲';
+}
+
+// Start from the captured song on any page, not a potentially stale row index.
+async function startSearchRadio(seed) {
+    if (!seed?.name?.trim() || !seed.source) {
+        showInfo('缺少歌曲信息，无法开启电台');
+        return;
+    }
+    const seedId = cleanSongData(seed).id;
+    const matches = song => song === seed ||
+        (seedId && song?.source === seed.source && cleanSongData(song).id === seedId);
+    const adopting = currentLoadingSongId === seed.id;
+    const existing = currentPlaylist[currentIndex];
+    if (adopting && !matches(existing)) {
+        showInfo('歌曲正在加载，请稍后再试');
+        return;
+    }
+    let index = currentIndex;
+    if (!adopting) {
+        const previous = currentPlaylist.slice(0, currentIndex + 1).filter(song => !matches(song));
+        const upcoming = currentPlaylist.slice(currentIndex + 1).filter(song => !matches(song));
+        if (previous.length + upcoming.length >= 1000) {
+            showInfo('播放队列最多 1000 首歌曲');
+            return;
+        }
+        index = previous.length;
+        currentPlaylist = [...previous, seed, ...upcoming];
+    }
+
+    cancelSearchRadioContinuation();
+    currentPlayingScope = 'search_radio'; // Do not replace the queue with the default list.
+    setSearchRadioArmed(false);
+    preSelectedNextIndex = null;
+    if (!adopting) void playSong(seed, index, null, false, false, false);
+    const request = {
+        anchor: adopting ? existing : seed,
+        epoch: searchRadioEpoch,
+        requestId: loadingRequestCounter,
+        waitingAtEnd: false,
+    };
+    pendingExplicitRadio = request;
+    const session = { seed, lastSeed: seed, members: new WeakSet([request.anchor]), seen: new Set([seedId]), pending: null, handoff: null };
+    songRadioSession = session;
+    showInfo('正在加载电台推荐');
+    let songs = [];
+    try {
+        const response = await loadSearchRadioSongs(seed);
+        songs = response.list;
+    } catch (_) {
+        // The existing loader already converts failures to an empty pool.
+    }
+    if (!isExplicitRadioCurrent(request)) {
+        if (pendingExplicitRadio === request) pendingExplicitRadio = null;
+        return;
+    }
+
+    const fresh = pickSearchRadioSongs(songs);
+    if (fresh.length) {
+        // Preserve only explicit Play Next pins ahead of the new batch.
+        let insertAt = currentIndex + 1;
+        while (currentPlaylist[insertAt]?._playNextRequested) insertAt++;
+        const batch = fresh.map(song => ({ ...song, _explicitRadio: true }));
+        batch.forEach(song => { session.members.add(song); session.seen.add(cleanSongData(song).id); });
+        currentPlaylist.splice(insertAt, 0, ...batch);
+        preSelectedNextIndex = null;
+        renderQueue();
+        savePlaybackState();
+        showInfo('已开启电台');
+    } else {
+        if (songRadioSession === session) songRadioSession = null;
+        showInfo(describeEmptyExplicitRadio(songs, seedId));
+    }
+    pendingExplicitRadio = null;
+    if (request.waitingAtEnd) playNext();
+    else if (fresh.length && !audio.paused) void prefetchNextSong();
+}
 
 function isSearchRadioDue() {
     if (settings.autoPlaySimilarAfterSearch === false || !searchRadioArmed) return false;
@@ -8394,7 +8712,12 @@ function isSearchRadioDue() {
 
 // 用户点了「下一首播放」：这首歌不让续播顶替
 function keepAsNextSong(song) {
-    if (song) { searchRadioSongs.add(song); song._searchRadio = true; }
+    if (!song) return;
+    searchRadioSongs.add(song);
+    song._searchRadio = true;
+    song._playNextRequested = true;
+    // Manually promoting an earlier recommendation makes it a user priority.
+    delete song._explicitRadio;
 }
 
 // 用户暂停或睡眠定时到点时调用：正在等待的续播请求回来后不再自动开播
@@ -8429,11 +8752,13 @@ let preparedSearchRadio = null;
 // reused across editions, or omit the separate QQ numeric ID.
 function getSearchRadioSeedQuery(seed) {
     const meta = seed.meta || {};
+    // Local paths, filenames and private media URLs must never become provider identifiers.
+    const provider = ['kw', 'kg', 'tx', 'wy', 'mg'].includes(seed.source);
     const params = new URLSearchParams({
-        source: seed.source || '',
+        source: provider ? seed.source : 'local',
         // QQ 音乐的相似歌曲接口要数字 ID，列表里的歌把它存在 meta.id
-        songId: String((seed.source === 'tx' ? (meta.id || seed.songId) : (seed.songId || meta.songId)) || ''),
-        songmid: String(seed.songmid || meta.songId || ''),
+        songId: provider ? String((seed.source === 'tx' ? (meta.id || seed.songId) : (seed.songId || meta.songId)) || '') : '',
+        songmid: provider ? String(seed.songmid || meta.songId || '') : '',
         name: seed.name || '',
         singer: seed.singer || '',
     });
@@ -8504,6 +8829,7 @@ function pickSearchRadioSongs(songs) {
 
 // 队列将尽时提前取好相似歌曲并预读第一首，减少续播时的停顿；不适用时走普通预读
 async function prefetchUpcomingSong() {
+    if (isSongRadioActive()) { void replenishSongRadio(); return prefetchNextSong(); }
     if (!isSearchRadioDue() || settings.enablePreloader === false) return prefetchNextSong();
     const seed = currentPlaylist[currentIndex];
     prefetchManager.stop();
@@ -8583,7 +8909,7 @@ function playNextInQueue() {
     const nextIndex = getNextIndex();
     if (nextIndex !== -1 && currentPlaylist[nextIndex]) {
         const nextSong = currentPlaylist[nextIndex];
-
+        if (isSongRadioActive() && nextSong._playNextRequested) songRadioSession.members.add(nextSong);
         playSong(nextSong, nextIndex);
     } else {
         console.log('[Queue] No next song or reached end of order playlist');
@@ -8942,7 +9268,7 @@ window.updatePositionState = updatePositionState; // 暴露给保活模块调用
 // 歌曲播放结束时根据播放模式处理
 audio.addEventListener('ended', () => {
     shouldAutoRecoverPlayback = false;
-    playNext();
+    playAfterNaturalEnd();
 });
 
 audio.addEventListener('canplay', () => {

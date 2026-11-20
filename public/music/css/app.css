@@ -2439,3 +2439,8 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     overflow-y: auto;
     overscroll-behavior: contain;
 }
+
+/* Keep song menus readable and independently scrollable above the player. */
+.song-more-menu .queue-actions-menu { max-height: calc(100dvh - var(--player-footer-inset, 11rem) - 16px); overflow-y: auto; }
+.queue-actions-menu > button { display: flex; align-items: center; gap: 0.5rem; }
+.queue-actions-menu > button > i { flex: none; width: 1em; text-align: center; color: var(--c-500, #10b981); }

@@ -261,7 +261,7 @@ window.LeaderboardManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- 操作 -->
-                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                             title="播放"
                             onclick="event.stopPropagation(); window.LeaderboardManager.playSong(${index})">
@@ -291,6 +291,19 @@ window.LeaderboardManager = (function () {
         if (typeof window.lazyLoadImages === 'function') window.lazyLoadImages();
         if (typeof window.applyMarqueeChecks === 'function') window.applyMarqueeChecks();
         container.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, state.songs[Number(button.dataset.ratingIndex)]));
+        for (const entry of pageList) {
+            const row = container.querySelector(`#lb-row-${entry.originalIndex}`);
+            const actions = row?.querySelector('.song-row-actions');
+            if (!actions || !window.createSongMoreMenu) continue;
+            const menu = window.createSongMoreMenu({ ...entry.item, source: entry.item.source || state.source });
+            const popup = menu.querySelector('.queue-actions-menu');
+            for (const action of [...actions.querySelectorAll('button')]) {
+                if (!['下载', '评分', '不喜欢', '取消不喜欢'].includes(action.title)) continue;
+                const label = document.createElement('span'); label.textContent = ' ' + action.title;
+                action.appendChild(label); popup.appendChild(action);
+            }
+            actions.appendChild(menu);
+        }
         window.ServerFileState?.paintBadges(container);
     }
 

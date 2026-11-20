@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v66';
-// Refresh cached assets after organizing JavaScript modules by feature.
+const CACHE_NAME = 'lx-music-web-v67-song-radio';
+// Refresh continuous song radio and shared song-menu actions.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',

@@ -1086,7 +1086,7 @@ window.CustomDirManager = {
                 </div>
 
                 <!-- Action Buttons -->
-                <div class="col-span-4 sm:col-span-2 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 md:gap-2">
+                <div class="col-span-4 sm:col-span-2 md:col-span-2 lg:col-span-2 flex flex-wrap items-center justify-end gap-0.5 md:gap-2">
                     <div class="hidden lg:block text-xs text-right pr-2 font-mono t-text-muted shrink-0 mr-1">
                         ${formatSize(item.size)}
                     </div>
@@ -1130,6 +1130,9 @@ window.CustomDirManager = {
             const button = document.createElement('button'); button.type = 'button';
             button.className = 'text-xs text-amber-500 px-1 shrink-0';
             anchor.parentElement.insertBefore(button, anchor);
+            const location = document.getElementById('lm-location-select')?.value || 'root';
+            const menu = window.createSongMoreMenu?.(() => this.buildPlaybackSong(item, location));
+            if (menu) anchor.parentElement.appendChild(menu);
             window.RatingManager?.attach(button, { ...item.songInfo, name: item.name || item.songInfo?.name, singer: item.singer || item.songInfo?.singer, isLocal: true, _localFilename: item.filename, _localFolder: true ? 'custom' : item.folder || 'cache', _localLocation: true ? undefined : document.getElementById('lm-location-select')?.value || 'root', _isCustomDir: true });
         });
         container.querySelectorAll('.lm-cover-image').forEach(img => {
@@ -1242,24 +1245,29 @@ window.CustomDirManager = {
         if (span) span.textContent = this.selectedItems.size;
     },
 
-    playItem(index) {
-        const item = this.displayData[index];
-        if (!item) return;
-
+    buildPlaybackSong(item) {
+        if (!item) return null;
         const authToken = (window.getUserAuthHeaders ? window.getUserAuthHeaders()['x-user-token'] : null) || localStorage.getItem('lx_user_token') || '';
         const username = this.getCurrentUsername();
-        const playlist = this.displayData.map(d => ({
-            ...d.songInfo,
-            url: `/api/music/custom/file?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            pic: `/api/music/custom/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`,
-            isLocal: true,
-            folder: 'custom',
-            // 附加本地文件定位信息，供 fetchLyric 读取内嵌歌词（未关联歌曲时优先使用）
-            _localFilename: d.filename,
-            _localUsername: username,
-            _isCustomDir: true
-        }));
+        const query = `filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}${authToken ? `&token=${encodeURIComponent(authToken)}` : ''}`;
+        const song = item.songInfo || {};
+        return {
+            ...song,
+            id: song.id || item.id || `local_${item.filename}`,
+            name: item.name || song.name || '',
+            singer: item.singer || song.singer || '',
+            albumName: item.album || song.albumName || '',
+            source: song.source || item.source || 'local',
+            url: `/api/music/custom/file?${query}`,
+            pic: `/api/music/custom/cover?${query}`,
+            isLocal: true, folder: 'custom', _localFilename: item.filename,
+            _localUsername: username, _isCustomDir: true,
+        };
+    },
 
+    playItem(index) {
+        if (!this.displayData[index]) return;
+        const playlist = this.displayData.map(item => this.buildPlaybackSong(item));
         if (typeof window.updatePlaylist === 'function') {
             window.updatePlaylist(playlist, index, 'custom_dir_all');
         } else if (typeof window.playSong === 'function') {
