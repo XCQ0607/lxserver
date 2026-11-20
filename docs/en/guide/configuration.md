@@ -82,6 +82,7 @@ Defaults below refer to code defaults. Bundled configuration, saved values and i
 
 Cache cleanup applies only to `cache/` (including subdirectories), never to `music/`. Each user at each location (working directory and data directory) has an independent size quota. Cleanup runs after downloads, on startup, after changing cleanup settings, and every 12 hours. Oldest access/modification time is used; same-name audio and lyrics are grouped, active backups are protected, and indexes/partial files are excluded. Set `cache.maxAgeDays` in config.js or the admin UI (default 14); 0 disables expiration only, not size-based cleanup.
 
+`cache.unplayedMaxAgeDays` (default 7) applies a shorter retention to playback cache that was never played at all — preloaded, probed or streamed-but-never-played files — and evicts them first under size pressure. Any Subsonic scrobble (started or completed) marks the track as played and exempts it, so half-listened songs are not swept early. Users without playback history are unaffected. 0 disables it.
 
 Boolean values are case-insensitive: `true/1/yes/y/on` and `false/0/no/n/off`.
 
@@ -205,11 +206,13 @@ These are configuration keys, **not automatically supported uppercase environmen
 | `openlist.username`, `openlist.password` | `''` | Login credentials when not using a token |
 | `openlist.root` | `'/lx_music'` | Path within an existing OpenList mount, not a physical disk path |
 | `openlist.externalUrl` | `''` | External address; empty uses endpoint |
-| `openlist.syncInterval` | `60` | Backup/cache-rule check interval, minutes |
-| `openlist.verifyInterval` | `5` | Background status check interval, minutes; not scheduled full-body SHA-256 verification |
+| `openlist.syncInterval` | `60` | Backup/cache-rule check interval, minutes. Event-driven sync additionally has a 5-minute minimum interval |
+| `openlist.verifyInterval` | `5` | Background status check interval, minutes; not scheduled full-body SHA-256 verification. Verified rows are not probed individually on every round |
 | `openlist.historyRetentionDays` | `7` | Cloud history retention, days |
 | `openlist.userBackups` | `'[]'` | Advanced user cache rules as a JSON-array string; edit through the UI |
 | `openlist.includeNonAudio` | `false` | Include existing cache lyrics/artwork; does not change ordinary music scope |
+| `openlist.onlyPlayed` | `false` | Upload only cache files the server saw a playback report for (Subsonic scrobble), excluding preloaded/probed files; explicit client downloads are never filtered; applies to user cache only, not the downloaded music folder |
+| `openlist.onlyPlayedCompleted` | `false` | Strict mode for `onlyPlayed`: only count completed playback (`submission=true`); brief previews do not qualify; legacy history without the flag counts as incomplete |
 | `openlist.playback.enable` | `false` | Allow registered OpenList files as playback fallback; player/Subsonic options also apply |
 
 ```js

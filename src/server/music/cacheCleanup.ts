@@ -59,6 +59,9 @@ export class CacheUsageGuard {
 export const cleanupCacheDirectory = async (directory: string, options: {
   limitBytes?: number
   retentionMs?: number
+  /** 未完成播放的缓存文件（绝对路径）；这类文件用更短的保留期并优先淘汰 */
+  unplayedPaths?: Set<string>
+  unplayedRetentionMs?: number
   protectedPaths: Set<string>
   refreshProtectedPaths?: () => Set<string>
   isProtected?: (file: string) => boolean
@@ -75,6 +78,9 @@ export const cleanupCacheDirectory = async (directory: string, options: {
     group.used = Math.max(group.used, file.used)
     groups.set(key, group)
   }
+  const isUnplayed = (group: { files: typeof files }) => !!options.unplayedPaths && group.files.some(file => options.unplayedPaths!.has(path.resolve(file.path)))
+  /** 分组实际适用的保留期：未播放缓存优先用更短的保留期 */
+  const retentionFor = (group: { files: typeof files }) => isUnplayed(group) ? (options.unplayedRetentionMs ?? options.retentionMs) : options.retentionMs
   let totalSize = files.reduce((sum, file) => sum + file.size, 0)
   const overLimit = options.limitBytes !== undefined && totalSize > options.limitBytes
   const target = overLimit ? options.limitBytes! * 0.95 : Infinity
@@ -82,13 +88,16 @@ export const cleanupCacheDirectory = async (directory: string, options: {
   let deletedCount = 0
   let batch = 0
   let protectedPaths = options.protectedPaths
-  for (const { files: group, used } of [...groups.values()].sort((a, b) => a.used - b.used)) {
+  // 未完成播放的缓存排在前面，同等新旧时先删它们
+  const ordered = [...groups.values()].sort((a, b) => (Number(isUnplayed(b)) - Number(isUnplayed(a))) || (a.used - b.used))
+  for (const { files: group, used } of ordered) {
     if (batch++ % 32 === 0) {
       await new Promise<void>(resolve => setImmediate(resolve))
       protectedPaths = options.refreshProtectedPaths?.() ?? protectedPaths
     }
     if (options.shouldStop?.()) break
-    const expired = !!options.retentionMs && now - used > options.retentionMs
+    const retention = retentionFor({ files: group })
+    const expired = !!retention && now - used > retention
     if (!expired && !(overLimit && totalSize > target)) continue
     if (group.some(file => protectedPaths.has(path.resolve(file.path)) || options.isProtected?.(file.path))) continue
     // Each small deletion group is synchronous: no backup/download can start between protection and unlink.
@@ -98,7 +107,7 @@ export const cleanupCacheDirectory = async (directory: string, options: {
     if (group.some((file, i) => {
       const stat = current[i]
       return !stat?.isFile() || stat.ino !== file.ino || stat.size !== file.size || stat.mtimeMs !== file.mtime ||
-        (!(overLimit && totalSize > target) && now - Math.max(stat.atimeMs, stat.mtimeMs) <= options.retentionMs!)
+        (!(overLimit && totalSize > target) && (retention === undefined || now - Math.max(stat.atimeMs, stat.mtimeMs) <= retention))
     })) continue
     for (const file of group.sort((a, b) => Number(path.extname(a.path).toLowerCase() === '.lrc') - Number(path.extname(b.path).toLowerCase() === '.lrc'))) {
       try { fs.unlinkSync(file.path) } catch { break }

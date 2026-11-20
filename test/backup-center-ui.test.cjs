@@ -119,6 +119,8 @@ test('Sidebar and HTML structure unify Backup Management into 5 tabs with unique
         'openlist.historyRetentionDays',
         'openlist.playback.enable',
         'openlist.includeNonAudio',
+        'openlist.onlyPlayed',
+        'openlist.onlyPlayedCompleted',
         'openlist.userBackupUsers',
     ];
     for (const name of singleFields) {
