@@ -104,7 +104,20 @@ function setupRanking({ width = 1440, filtered = false } = {}) {
 
 // Resolve only opacity from actual CSS at this seam, including the existing
 // row-group hover and focus-within rules; this does not model browser layout.
-function opacityForState(element, width, { hoveredRow = false, focusWithin = false } = {}) {
+function opacityForState(element, width, { hoveredRow = false, focusWithin = false, hoverCapable = true, pointer = 'fine' } = {}) {
+    function mediaMatches(params) {
+        return params.split(',').some(query => {
+            if (/prefers-/.test(query)) return false;
+            const hover = query.match(/hover\s*:\s*(none|hover)/);
+            if (hover && (hover[1] === 'hover') !== hoverCapable) return false;
+            const primary = query.match(/(?:^|[^-])pointer\s*:\s*(none|coarse|fine)/);
+            if (primary && primary[1] !== pointer) return false;
+            for (const [, bound, value] of query.matchAll(/(min|max)-width\s*:\s*(\d+)px/g)) {
+                if (bound === 'min' ? width < Number(value) : width > Number(value)) return false;
+            }
+            return true;
+        });
+    }
     function simpleMatches(token, node) {
         if (!node || !/^(?:[.#](?:\\.|[\w-])+)+$/.test(token)) return false;
         return [...token.matchAll(/([.#])((?:\\.|[\w-])+)/g)].every(([, kind, value]) => kind === '#' ? node.id === value : node.classList.contains(value.replace(/\\(.)/g, '$1')));
@@ -136,9 +149,7 @@ function opacityForState(element, width, { hoveredRow = false, focusWithin = fal
             if (parent.name === 'layer') layered = true;
             if (/keyframes/.test(parent.name)) return;
             if (parent.name !== 'media') continue;
-            if (/hover:/.test(parent.params) && !hoveredRow) return;
-            if (/pointer:|prefers-/.test(parent.params)) return;
-            for (const [, bound, value] of parent.params.matchAll(/(min|max)-width\s*:\s*(\d+)px/g)) if (bound === 'min' ? width < Number(value) : width > Number(value)) return;
+            if (!mediaMatches(parent.params)) return;
         }
         for (const selector of rule.selectors.filter(matches)) {
             const simple = [...selector.matchAll(/([.#])(?:\\.|[\w-])+/g)];
@@ -199,6 +210,20 @@ test('existing row-group hover and keyboard focus still reveal list actions', ()
     assert.equal(opacityForState(view.actions, 1440), 0);
     assert.equal(opacityForState(view.actions, 1440, { hoveredRow: true }), 1);
     assert.equal(opacityForState(view.actions, 1440, { focusWithin: true }), 1);
+});
+
+for (const width of [669, 768, 951, 1024, 1440]) test(`touch default-list row actions remain visible without hover at ${width}px`, () => {
+    const view = setup({ width, scope: 'local_list' });
+    assert.equal(opacityForState(view.actions, width, { hoverCapable: false, pointer: 'coarse' }), 1);
+    assert.ok(view.menu.querySelector('[data-queue-add]'), 'the visible action retains the existing queue command');
+});
+
+test('touch detail rows and hoverless pointers do not require a simulated first hover', () => {
+    const detail = setup({ width: 951, detail: true });
+    assert.equal(opacityForState(detail.actions, 951, { hoverCapable: false, pointer: 'coarse' }), 1);
+    const local = setup({ width: 951, scope: 'local_list' });
+    assert.equal(opacityForState(local.actions, 951, { hoverCapable: false, pointer: 'fine' }), 1);
+    assert.equal(opacityForState(local.actions, 951, { hoverCapable: true, pointer: 'coarse' }), 1);
 });
 
 test('opening the search queue menu preserves visibility and existing close-after-action behavior', () => {

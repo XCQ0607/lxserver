@@ -1094,10 +1094,16 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
 .queue-actions-menu button { display: block; width: 100%; min-height: 44px; text-align: left; padding: .5rem 1rem; }
 .song-row-actions:focus-within { opacity: 1; }
 /* Search/ranking share one discoverable Add chooser on desktop and mobile.
-   Hover-only hiding concealed the existing queue command. Other lists retain
-   their existing row-action behavior and the same queue insertion semantics. */
+   Hover-only hiding concealed the existing queue command. Fine-pointer list
+   views retain their existing hover behavior and queue insertion semantics. */
 #search-results .network-search-song-row > .song-row-actions,
 #lb-songs-list .song-row-actions { opacity: 1; }
+/* A wide touch viewport is not a mouse: local/detail row actions must remain
+   discoverable in landscape rather than relying on a first simulated hover. */
+@media (hover: none), (pointer: coarse) {
+    #search-results .song-row-actions,
+    #lb-songs-list .song-row-actions { opacity: 1; }
+}
 .song-add-menu > summary { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 32px; padding: 6px; color: var(--c-600); border-radius: .5rem; }
 .song-add-menu > summary:hover { background: var(--c-50); }
 button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--c-500); outline-offset: 3px; }
@@ -2838,4 +2844,47 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     flex: 0 0 24px;
     justify-content: center;
     min-height: 44px;
+}
+
+/* Short, wide touch screens need the expanded player beside its transport,
+   not three full-width rows. Keep every control and the normal-flow meter;
+   the existing footer observer reserves the resulting automatic height. */
+@media (min-width: 640px) and (max-width: 1024px) and (max-height: 650px) and (orientation: landscape) and (pointer: coarse) {
+    #player-footer {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr);
+        align-items: center;
+        gap: 8px 12px;
+        padding-top: 8px;
+        padding-left: max(12px, env(safe-area-inset-left, 0px));
+        padding-right: max(40px, env(safe-area-inset-right, 0px));
+    }
+    #player-song-info {
+        display: grid;
+        grid-template-columns: 44px minmax(0, 1fr);
+        align-items: center;
+        gap: 4px 8px;
+        width: 100%;
+        min-width: 0;
+        min-height: 0;
+        margin: 0;
+        padding-right: 0;
+    }
+    #player-song-info > .relative {
+        width: 44px;
+        height: 44px;
+    }
+    #player-mobile-actions {
+        grid-column: 1 / -1;
+        justify-content: flex-start;
+        margin-left: 0;
+    }
+    #player-transport {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+        margin: 0;
+        padding: 0;
+        order: initial;
+    }
 }

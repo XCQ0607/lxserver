@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v66';
-// Refresh cached assets after source-card, Add menu and queue dismissal fixes.
+const CACHE_NAME = 'lx-music-web-v67';
+// Refresh touch song actions and compact landscape player layout.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
