@@ -17874,8 +17874,9 @@ window.addEventListener('resize', () => {
     const expandBtn = document.getElementById('sidebar-expand-btn');
 
     if (sidebar && window.innerWidth >= 1025) {
-        // Reset styles for desktop
+        // Reset styles for desktop; the mobile overlay never consumes the saved desktop preference.
         sidebar.classList.remove('-translate-x-full', 'translate-x-0');
+        try { sidebar.classList.toggle('desktop-collapsed', localStorage.getItem('desktop_sidebar_collapsed') === 'true'); } catch (_) {}
         if (backdrop) backdrop.classList.add('hidden');
         if (expandBtn) {
             if (sidebar.classList.contains('desktop-collapsed')) {
@@ -17945,7 +17946,7 @@ function toggleDesktopSidebar(expand) {
 function initDesktopSidebar() {
     try {
         const isCollapsed = localStorage.getItem('desktop_sidebar_collapsed') === 'true';
-        if (isCollapsed && window.innerWidth >= 768) {
+        if (isCollapsed && window.innerWidth >= 1025) {
             const sidebar = document.getElementById('main-sidebar');
             const expandBtn = document.getElementById('sidebar-expand-btn');
             if (sidebar) sidebar.classList.add('desktop-collapsed');

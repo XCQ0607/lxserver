@@ -330,6 +330,8 @@ window.SongListManager = (function () {
 
             // Reset header collapse state & bind scroll listener
             expandSongListDetailHeader();
+            const scroller = getSongListDetailScroller();
+            if (scroller) scroller.scrollTop = 0;
             initSongListScrollListener();
 
         }
@@ -1425,8 +1427,13 @@ function updateSlMiniExpandButton(st) {
     if (textEl) textEl.textContent = atTop ? '展开' : '顶部';
 }
 
+function getSongListDetailScroller() {
+    return document.getElementById(window.matchMedia('(max-width: 1024px)').matches
+        ? 'sl-detail-scroll' : 'sl-detail-list');
+}
+
 function handleSongListMiniExpandClick() {
-    const listContainer = document.getElementById('sl-detail-list');
+    const listContainer = getSongListDetailScroller();
     const st = listContainer ? listContainer.scrollTop : 0;
     if (st > 20) {
         listContainer.scrollTo({ top: 0, behavior: 'smooth' });
@@ -1437,9 +1444,10 @@ function handleSongListMiniExpandClick() {
 window.handleSongListMiniExpandClick = handleSongListMiniExpandClick;
 
 function handleSongListScrollEvent() {
-    if (slScrollRaf) return;
+    if (slScrollRaf || window.matchMedia('(max-width: 1024px)').matches) return;
     slScrollRaf = requestAnimationFrame(() => {
         slScrollRaf = null;
+        if (window.matchMedia('(max-width: 1024px)').matches) return;
         const listContainer = document.getElementById('sl-detail-list');
         const header = document.getElementById('sl-detail-header');
         const miniBar = document.getElementById('sl-mini-bar');
@@ -1464,6 +1472,11 @@ function collapseSongListDetailHeader() {
     const header = document.getElementById('sl-detail-header');
     const miniBar = document.getElementById('sl-mini-bar');
     if (header && !header.classList.contains('sl-hero-collapsed')) {
+        if (window.matchMedia('(max-width: 1024px)').matches) {
+            // Convert auto height to pixels before animating to zero.
+            header.style.maxHeight = header.getBoundingClientRect().height + 'px';
+            void header.offsetHeight;
+        }
         header.classList.add('sl-hero-collapsed');
         header.style.maxHeight = '0px';
         header.style.opacity = '0';
@@ -1484,7 +1497,7 @@ window.collapseSongListDetailHeader = collapseSongListDetailHeader;
 function expandSongListDetailHeader() {
     const header = document.getElementById('sl-detail-header');
     const miniBar = document.getElementById('sl-mini-bar');
-    const listContainer = document.getElementById('sl-detail-list');
+    const listContainer = getSongListDetailScroller();
 
     if (slMiniBarHideTimeout) {
         clearTimeout(slMiniBarHideTimeout);
@@ -1493,7 +1506,7 @@ function expandSongListDetailHeader() {
 
     if (header) {
         header.classList.remove('sl-hero-collapsed');
-        header.style.maxHeight = '1000px';
+        header.style.maxHeight = '';
         header.style.opacity = '1';
         header.style.overflow = '';
         header.style.transform = 'translateY(0)';
