@@ -13,7 +13,8 @@ let controller: AbortController | undefined
 let cachedFile = '', cachedStore: Store | undefined
 let lastWrite = 0
 let saveTimer: ReturnType<typeof setTimeout> | undefined
-const location = () => path.join(global.lx.dataPath, 'runtime', 'openlist-metadata.json')
+// 防抖写入可能在 dataPath 变化/缺省后触发，兜底到工作目录，避免定时器里抛未捕获异常。
+const location = () => path.join(global.lx?.dataPath || path.join(process.cwd(), 'data'), 'runtime', 'openlist-metadata.json')
 const key = (source: string, remote: string, side: string) => crypto.createHash('sha256').update(JSON.stringify([source, remote, side])).digest('hex')
 export const metadataBaseline = (row: Row) => JSON.stringify([row.size, row.local_hash, row.remote_mtime])
 function read(): Store {

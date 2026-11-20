@@ -82,6 +82,7 @@
 
 缓存清理仅处理 `cache/`（含子目录），不处理 `music/`。运行根目录和数据目录中，每个用户、每个位置分别计算空间额度；下载完成后检查空间，启动、修改清理设置后及每 12 小时检查两处缓存。按最近访问或修改时间清理，同名音频与歌词成组处理，跳过活跃备份、索引与临时文件。`cache.maxAgeDays` 可在 config.js 或后台设置，默认 14 天；0 仅关闭过期清理，不关闭空间限制。
 
+`cache.unplayedMaxAgeDays`（默认 7 天）单独约束「从未播放」的播放缓存：预加载、探测、只拉流未播放的文件用更短的保留期，容量超限时也优先淘汰；只要服务端收到过该曲的播放上报（起播或完成），就不再按此提前清理，避免误删听了半首的歌。没有播放历史的用户（不走 Subsonic 上报）不参与该加速清理。设为 0 关闭。
 
 布尔值不区分大小写，开启可用 `true/1/yes/y/on`，关闭可用 `false/0/no/n/off`。
 
@@ -226,11 +227,13 @@ npm run dev
 | `openlist.username`、`openlist.password` | `''` | 未使用令牌时的登录凭据 |
 | `openlist.root` | `'/lx_music'` | 已存在的 OpenList 挂载内路径，不是主机磁盘路径 |
 | `openlist.externalUrl` | `''` | 外网地址，留空使用 endpoint |
-| `openlist.syncInterval` | `60` | 备份与缓存规则的检查间隔，分钟 |
-| `openlist.verifyInterval` | `5` | 后台状态检查间隔，分钟；不是定时下载正文做 SHA-256 校验 |
+| `openlist.syncInterval` | `60` | 备份与缓存规则的检查间隔，分钟。事件触发的同步另有 5 分钟最小间隔，不受此值影响 |
+| `openlist.verifyInterval` | `5` | 后台状态检查间隔，分钟；不是定时下载正文做 SHA-256 校验。已验证记录不会每轮逐行探测远端 |
 | `openlist.historyRetentionDays` | `7` | 云端历史版本保留天数 |
 | `openlist.userBackups` | `'[]'` | 高级按用户缓存规则，JSON 数组字符串；建议通过界面编辑 |
 | `openlist.includeNonAudio` | `false` | 高级缓存规则附带已有歌词与封面，不控制常规 music 备份 |
+| `openlist.onlyPlayed` | `false` | 高级缓存规则只上传服务端收到播放上报（Subsonic scrobble）的歌曲，排除预加载/探测落盘的文件；客户端手动「下载」的歌曲不受限制；只作用于用户 cache，不影响已下载 music 目录 |
+| `openlist.onlyPlayedCompleted` | `false` | 配合 `onlyPlayed` 的严格模式：只认完成播放（`submission=true`），"听一下就切走"不算；旧历史无完成标记时按未完成处理 |
 | `openlist.playback.enable` | `false` | 允许已登记 OpenList 文件参与播放回退，另需播放器/Subsonic 相应设置 |
 
 ```js

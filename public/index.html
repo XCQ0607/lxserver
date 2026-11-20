@@ -1217,6 +1217,15 @@
                                         启动、保存清理设置后及每12小时检查根目录与数据目录的 cache（含子目录），不清理 music 下载目录；音频与同名歌词一起处理，正在备份的文件跳过。<strong>设为 0 仅关闭按天清理，空间限制仍可清理缓存。</strong>
                                     </span>
                                 </div>
+                                <div class="config-field">
+                                    <label class="config-label">从未播放的缓存保留时间 (天)</label>
+                                    <input type="number" name="cache.unplayedMaxAgeDays" class="form-input config-input"
+                                        placeholder="默认 7" min="0" />
+                                    <span class="tone-secondary config-field-desc"
+                                        style="display:block;margin-top:4px;font-size:12px">
+                                        预加载、探测、只拉流从未播放的缓存按此天数优先淘汰，容量超限时也优先删除；听过半首的歌不算从未播放，不会被提前清理。需同时开启上面的按天清理；设为 0 关闭该加速清理。
+                                    </span>
+                                </div>
                                 <div class="config-divider"></div>
                                 <div class="config-toggle-row">
                                     <div class="config-toggle-info">
@@ -1548,6 +1557,17 @@
                                         </div>
                                         <label class="toggle-switch">
                                             <input type="checkbox" name="subsonic.cacheOnPlay" />
+                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                        </label>
+                                    </div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info">
+                                            <span class="config-toggle-label">下载歌曲保存到服务器 <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="默认关闭：下载只投递到客户端，服务器不占空间、不写缓存、不补传备份。开启后，服务器会自动识别下载请求（标准 /rest/download，以及部分客户端用裸 OkHttp 拉 stream 的下载），并把文件存入 music 下载目录而非 cache 播放缓存：不受缓存滚动清理影响，备份时也不受「仅播放过」限制。播放请求不会被误判为下载。">?</button></span>
+                                        </div>
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" name="subsonic.saveDownload" />
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
@@ -2851,6 +2871,23 @@
                                                 type="button" class="btn-secondary btn-sync-highlight"
                                                 onclick="app.runOpenlistSync()">立即备份并同步缓存</button></div>
                                     </div>
+                                    <div class="bm-op-block" id="openlist-rename-panel" style="display:none;">
+                                        <div class="bm-group-title">切换命名格式后同步存量文件名（手动执行）</div>
+                                        <div class="backup-policy-banner"><svg viewBox="0 0 24 24" fill="none"
+                                                stroke="currentColor" stroke-width="2" class="backup-banner-icon">
+                                                <circle cx="12" cy="12" r="10"></circle>
+                                                <line x1="12" y1="16" x2="12" y2="12"></line>
+                                                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                                            </svg><span id="openlist-naming-advice">在「设置 → 歌曲命名方式」切换格式后，已有文件不会被自动改名。请在此先只读预览，确认无误再执行，把本地文件名、备份库记录与云端文件名一起改成新格式。</span></div>
+                                        <p class="config-hint">
+                                            预览为只读，不改动任何内容，可反复执行。执行时逐个文件同步：本地音频与歌词、缓存索引、OpenList 备份库中的文件名相关字段、云端文件名（走云端重命名接口，不重新上传音频字节）。目标名冲突会跳过而不覆盖，中途失败可重复执行继续收敛。云端同步开启时才会改云端文件名。</p>
+                                        <div class="backup-policy-actions"><button type="button" class="btn-secondary"
+                                                onclick="app.previewCacheRename()">预览待改名清单（只读）</button><button
+                                                type="button" class="btn-secondary"
+                                                onclick="app.applyCacheRename()">执行重命名</button></div>
+                                        <pre id="openlist-rename-result"
+                                            style="display:none;white-space:pre-wrap;word-break:break-all;margin-top:10px;padding:10px;border-radius:6px;font-size:12px;max-height:260px;overflow:auto;"></pre>
+                                    </div>
                                 </div>
                             </form>
                             <form id="openlist-cache-form" class="config-card glass" style="display:none;"
@@ -2897,6 +2934,26 @@
                                                     data-help="仅处理所选用户缓存目录中已有的封面与歌词，随缓存歌曲一起上传，不会自动补下载附件。选择“校验后删除本地缓存”时，音频及已上传附件均需完整内容校验后删除，可能产生下载流量。此开关不影响常规歌曲备份范围。">?</span></span>
                                         </div><label class="toggle-switch"><input type="checkbox"
                                                 name="openlist.includeNonAudio" /><span class="toggle-track"><span
+                                                    class="toggle-thumb"></span></span></label>
+                                    </div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info"><span
+                                                class="config-toggle-label"><span>仅上传实际播放过的缓存（排除预加载）</span><span
+                                                    class="help-icon" role="button" tabindex="0"
+                                                    onclick="app.toggleHelp(this)"
+                                                    data-help="开启后，只有服务端收到播放上报（Subsonic scrobble）的歌曲，才会把播放缓存上传到 OpenList。预加载、探测、只拉流却未播放的文件会留在本地，不上传。客户端里手动点「下载」的歌曲视为明确留档，不受此限制。仅作用于用户 cache 播放缓存；已下载歌曲 music 目录与常规数据备份不受影响。播放后通常在下一次播放上报时立即补传，也可等定时同步。">?</span></span>
+                                        </div><label class="toggle-switch"><input type="checkbox"
+                                                name="openlist.onlyPlayed" /><span class="toggle-track"><span
+                                                    class="toggle-thumb"></span></span></label>
+                                    </div>
+                                    <div class="config-toggle-row">
+                                        <div class="config-toggle-info"><span
+                                                class="config-toggle-label"><span>仅上传「完整播放」的缓存（更严格）</span><span
+                                                    class="help-icon" role="button" tabindex="0"
+                                                    onclick="app.toggleHelp(this)"
+                                                    data-help="需同时开启上一项才生效。开启后只认客户端上报的「完成播放」（Subsonic scrobble submission=true）：点开听几秒就切走的歌曲不算播放过，不会上传。注意：历史记录里没有完成标记的老数据会被视为未完成；若客户端从不发送完成上报，则一首都不会上传。">?</span></span>
+                                        </div><label class="toggle-switch"><input type="checkbox"
+                                                name="openlist.onlyPlayedCompleted" /><span class="toggle-track"><span
                                                     class="toggle-thumb"></span></span></label>
                                     </div>
                                     <div class="config-divider"></div>

@@ -43,6 +43,7 @@ export interface BackupFileRow {
   status: BackupStatus
   error: string | null
   retry_count: number
+  cloud_missing_count: number
   remote_mtime: number | null
   local_mtime: number | null
   local_hash: string | null
@@ -124,6 +125,10 @@ export function getBackupDb(): DatabaseSync {
   // 老库兼容：补齐 retry_count 列
   try {
     db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN retry_count INTEGER DEFAULT 0`)
+  } catch { /* 列已存在 */ }
+  // 云端缺失（版权删除等）自动重传计数：成功上传不清零，仅手动重试或本地内容变更时清零
+  try {
+    db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN cloud_missing_count INTEGER DEFAULT 0`)
   } catch { /* 列已存在 */ }
   // 软删除支持：deleted_at 标记（NULL 表示未删除）
   try { db.exec(`ALTER TABLE openlist_backup_files ADD COLUMN deleted_at INTEGER`) } catch { /* 列已存在 */ }
@@ -249,7 +254,7 @@ export function upsertBackupFile(input: UpsertBackupInput): BackupFileRow {
 export function setBackupStatus(
   id: number,
   status: BackupStatus,
-  opts: { error?: string | null; size?: number | null; name?: string | null; remotePath?: string | null; retryCount?: number | null; remoteMtime?: number | null; localMtime?: number | null; localHash?: string | null } = {},
+  opts: { error?: string | null; size?: number | null; name?: string | null; remotePath?: string | null; retryCount?: number | null; cloudMissingCount?: number | null; remoteMtime?: number | null; localMtime?: number | null; localHash?: string | null } = {},
 ): void {
   const db = getBackupDb()
   const sets: string[] = ['status = ?', 'updated_at = ?']
@@ -259,6 +264,7 @@ export function setBackupStatus(
   if (opts.name !== undefined) { sets.push('name = ?'); params.push(opts.name) }
   if (opts.remotePath !== undefined) { sets.push('remote_path = ?'); params.push(opts.remotePath) }
   if (opts.retryCount !== undefined) { sets.push('retry_count = ?'); params.push(opts.retryCount) }
+  if (opts.cloudMissingCount !== undefined) { sets.push('cloud_missing_count = ?'); params.push(opts.cloudMissingCount) }
   if (opts.remoteMtime !== undefined) { sets.push('remote_mtime = ?'); params.push(opts.remoteMtime) }
   if (opts.localMtime !== undefined) { sets.push('local_mtime = ?'); params.push(opts.localMtime) }
   if (opts.localHash !== undefined) { sets.push('local_hash = ?'); params.push(opts.localHash) }
