@@ -36,6 +36,7 @@ async function setup(page, collapsed) {
         window.getSongAlbumName = window.getSourceTag = window.getSourceTags = window.getSourceStack = window.getQualityTags = () => '';
         window.escapeHtmlText = window.createMarqueeHtml = String;
         window.startSearchRadio = song => window.radioSeeds.push(song);
+        window.updateSongRadioCount = () => {}; // Station state is covered by start-radio-up-next.cjs.
         window.playFromView = index => window.ordinaryPlays.push(index);
         window.updatePlaylist = (songs, index) => window.ordinaryPlays.push(songs[index]);
         window.getUserAuthHeaders = () => ({}); window.enqueueSong = () => {};
