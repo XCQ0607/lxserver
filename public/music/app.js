@@ -9316,6 +9316,8 @@ document.addEventListener('keydown', (e) => {
 
     switch (e.code) {
         case 'Space':
+            // Preserve Space activation for focused native and custom controls.
+            if (e.defaultPrevented || target.closest?.('button, summary, select, [role="button"], [role="checkbox"], [role="switch"]')) return;
             e.preventDefault();
             togglePlay();
             break;
@@ -10623,7 +10625,27 @@ let isProgrammaticScroll = false; // 标记是否为程序自动滚动
 const SCROLL_LOCK_DURATION = 5000; // 5秒后解除锁定
 
 let lyricHistoryClosing = false;
-function toggleLyrics(fromPopState = false) {
+let lyricReturnFocus = null;
+
+// Use the same query/source path as footer metadata on every viewport.
+// Keep the song identity and playback generation across an asynchronous multi-artist picker.
+async function searchLyricsMetadata(kind) {
+    const song = currentPlayingSong;
+    const requestId = loadingRequestCounter;
+    if (!song || !isLyricViewOpen || !['song', 'artist'].includes(kind)) return;
+    let query = kind === 'song' ? song.name : song.singer;
+    if (kind === 'artist') {
+        const singers = String(song.singer || '').split(/[、&,，]| \/ /).map(s => s.trim()).filter(Boolean);
+        if (singers.length > 1) {
+            query = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
+        }
+    }
+    if (!query || loadingRequestCounter !== requestId || currentPlayingSong !== song || !isLyricViewOpen) return;
+    toggleLyrics();
+    performSearch(query, song.source);
+}
+
+function toggleLyrics(fromPopState = false, trigger = null) {
     if (!fromPopState && isLyricViewOpen) {
         if (window.history.state && window.history.state.page === 'player-detail') {
             lyricHistoryClosing = true;
@@ -10635,6 +10657,9 @@ function toggleLyrics(fromPopState = false) {
     }
 
     isLyricViewOpen = !isLyricViewOpen;
+    for (const id of ['player-lyrics-cover', 'player-lyrics-button']) {
+        document.getElementById(id)?.setAttribute('aria-expanded', String(isLyricViewOpen));
+    }
     const view = document.getElementById('view-player-detail');
 
     if (isLyricViewOpen) {
@@ -10642,6 +10667,8 @@ function toggleLyrics(fromPopState = false) {
         // Trigger reflow
         void view.offsetWidth;
         view.classList.remove('translate-y-[100%]', 'opacity-0');
+        lyricReturnFocus = trigger || document.activeElement;
+        document.getElementById('btn-toggle-lyrics')?.focus({ preventScroll: true });
 
         // 开始歌词按钮淡化倒计时
         startToggleLyricsBtnTimer();
@@ -10685,6 +10712,8 @@ function toggleLyrics(fromPopState = false) {
         if (settings.autoCompactPlaybar !== false && window.innerWidth < 1025) {
             window.setCompactPlaybar(false);
         }
+        if (lyricReturnFocus?.isConnected) lyricReturnFocus.focus({ preventScroll: true });
+        lyricReturnFocus = null;
     }
 }
 
