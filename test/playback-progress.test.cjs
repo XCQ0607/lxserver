@@ -33,7 +33,7 @@ function setup({ retry = false, seekFails = false } = {}) {
         currentRecoveryState: retry ? { savedResumeTime: 37 } : null,
         scrollLockTimeout: null, hintTimeout: null,
         RecoveryToast: { dismiss() {}, isActive: () => false }, prefetchManager: { stop() {}, get() { return null; } },
-        updatePlayerInfo() {}, updateMediaSessionMetadata() {}, fetchLyric() {},
+        updatePlayerInfo() {}, updateMediaSessionMetadata() {}, fetchLyric() {}, updateSongRadioCount() {},
         showInfo() {}, setPlayerStatus() {}, updatePlayButton() {},
         formatTime: seconds => seconds === 0 ? '00:00' : String(seconds),
         resolveSongUrl: async () => { throw Error('URL resolution failed'); },

@@ -2239,6 +2239,7 @@ function renderQueue() {
     const listContainer = document.getElementById('queue-list');
     const countEl = document.getElementById('queue-count');
     if (!listContainer) return;
+    updateSongRadioCount();
     if (countEl) countEl.innerText = `${currentPlaylist.length} SONGS`;
     if (document.getElementById('queue-drawer')?.classList.contains('translate-x-full')) {
         listContainer.replaceChildren();
@@ -2343,6 +2344,7 @@ function renderQueue() {
 
                 renderQueue();
                 savePlaybackState();
+                if (!audio.paused) void replenishSongRadio();
                 showInfo('播放顺序已更新');
             }
         });
@@ -2368,11 +2370,14 @@ window.playSongFromQueue = playSongFromQueue;
 function removeFromQueue(index) {
     if (!currentPlaylist || index < 0 || index >= currentPlaylist.length) return;
 
-    const removedId = currentPlaylist[index].id;
     currentPlaylist.splice(index, 1);
 
     // If we removed the currently playing song's index, we need to adjust currentIndex
     if (index === currentIndex) {
+        if (pendingExplicitRadio || songRadioSession) {
+            cancelSearchRadioContinuation();
+            songRadioSession = null;
+        } else setQueueRadioStatus();
         // [Optional] Auto-play next or just stop? Here we just adjust index for next song
         // Typically people expect it to stay at same index but if it was last, wrap around
         if (currentPlaylist.length === 0) {
@@ -2391,6 +2396,7 @@ function removeFromQueue(index) {
 
     renderQueue();
     savePlaybackState(); // Save state after removal
+    if (!audio.paused) void replenishSongRadio();
     showSuccess('已从队列移除');
 }
 window.removeFromQueue = removeFromQueue;
@@ -2398,6 +2404,8 @@ window.removeFromQueue = removeFromQueue;
 async function clearQueue() {
     if (!currentPlaylist || currentPlaylist.length === 0) return;
     if (await showSelect('清空队列', '确定要清空当前播放队列吗？', { danger: true })) {
+        cancelSearchRadioContinuation();
+        songRadioSession = null;
         currentPlaylist = [];
         currentIndex = -1;
         shouldAutoRecoverPlayback = false;
@@ -7270,10 +7278,12 @@ function enqueueSong(song, next = false) {
             if (i < currentIndex) currentIndex--;
         }
         currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
+        const wasRadio = !!queuedSong._explicitRadio;
         if (typeof keepAsNextSong === 'function') keepAsNextSong(queuedSong);
         preSelectedNextIndex = null;
         renderQueue();
         savePlaybackState();
+        if (wasRadio && !audio.paused) void replenishSongRadio();
         showSuccess('已移至下一首播放');
         return;
     }
@@ -7624,6 +7634,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     const queueDrawer = document.getElementById('queue-drawer');
     if (queueDrawer && !queueDrawer.classList.contains('translate-x-full')) {
         renderQueue();
+    } else {
+        updateSongRadioCount();
     }
 
     // [Fix] 切换歌曲前强制重置手动滚动状态
@@ -8483,6 +8495,16 @@ function playNext() {
 
 let pendingExplicitRadio = null;
 let songRadioSession = null;
+const SONG_RADIO_TARGET = 24;
+const SONG_RADIO_CANDIDATE_LIMIT = 48;
+const SONG_RADIO_FILL_BUDGET_MS = 12000;
+const SONG_RADIO_FILL_COOLDOWN_MS = 30000;
+const SONG_RADIO_SEED_RETRY_MS = 60000;
+
+function setQueueRadioStatus(message = '') {
+    const status = document.getElementById('queue-radio-status');
+    if (status && status.textContent !== message) status.textContent = message;
+}
 
 function isSongRadioActive(session = songRadioSession) {
     return !!session && session === songRadioSession && currentPlayingScope === 'search_radio' &&
@@ -8512,46 +8534,159 @@ function pruneSongRadioHistory(session) {
     if (removed) { renderQueue(); savePlaybackState(); }
 }
 
-function replenishSongRadio() {
+function stationRecordingKey(song) {
+    // Match a recording across catalogs even when one omits duration. Keep
+    // version words in the title, and normalize artist aliases/separators.
+    const compact = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\p{P}\p{Z}\s]/gu, '');
+    const title = compact(song.name);
+    const artists = Array.from(new Set(String(song.singer || '')
+        .normalize('NFKC').toLowerCase().replace(/[（(【\[].*?[）)】\]]/g, ' ')
+        .split(/[、,，/&／|;；]+| feat\.? | ft\.? /).map(compact).filter(Boolean))).sort();
+    return title && artists.length ? JSON.stringify([title, artists]) : '';
+}
+
+function updateSongRadioCount(session = songRadioSession) {
+    if (isExplicitRadioCurrent(pendingExplicitRadio)) return;
+    if (!isSongRadioActive(session)) {
+        if (session) setQueueRadioStatus();
+        return;
+    }
+    const count = radioSongsRemaining(session);
+    const suffix = count >= SONG_RADIO_TARGET ? ''
+        : session.pending?.epoch === searchRadioEpoch ? ' · 正在补充' : ' · 暂无更多推荐';
+    setQueueRadioStatus(`电台待播：${count} / ${SONG_RADIO_TARGET} 首${suffix}`);
+}
+
+function stationSeedKey(song) {
+    return stationRecordingKey(song) || cleanSongData(song).id;
+}
+
+function storeStationSeedResult(session, seed, response, list) {
+    const key = stationSeedKey(seed);
+    const attempts = (session.queriedSeeds.get(key)?.attempts || 0) + 1;
+    // Repeating a complete response within the memo TTL cannot fill the
+    // deficit. A thin/failed result gets one later retry, not a tight loop.
+    const retryable = attempts < 2 &&
+        (response?.incomplete === true || list.length < SONG_RADIO_TARGET);
+    session.queriedSeeds.set(key, { attempts, retryAt: retryable ? Date.now() + SONG_RADIO_SEED_RETRY_MS : Infinity });
+}
+
+function pickStationRadioSongs(session, songs) {
+    const known = new Set(currentPlaylist.map(stationRecordingKey).filter(Boolean));
+    const ids = new Set(currentPlaylist.map(song => cleanSongData(song).id));
+    const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
+    const selected = [];
+    for (const song of songs.slice(0, SONG_RADIO_CANDIDATE_LIMIT)) {
+        if (!song?.source || !song.id || typeof song.name !== 'string' || !song.name.trim() ||
+            (skipDisliked && window.DislikeManager.isDisliked(song))) continue;
+        const id = cleanSongData(song).id;
+        if (ids.has(id) || session.seen.has(id)) continue;
+        const key = stationRecordingKey(song);
+        if (key && (known.has(key) || session.seenRecordings.has(key))) continue;
+        if (key) known.add(key);
+        ids.add(id);
+        selected.push(song);
+    }
+    return selected;
+}
+
+function commitStationRadioSongs(session, songs, response) {
+    pruneSongRadioHistory(session);
+    const slots = Math.max(0, Math.min(SONG_RADIO_TARGET - radioSongsRemaining(session), 1000 - currentPlaylist.length));
+    const expandable = response?.strategy === 'radio' || response?.strategy === 'similar';
+    const eligible = pickStationRadioSongs(session, songs);
+    const batch = eligible.slice(0, slots).map(song => ({ ...song, _explicitRadio: true }));
+    // Keep the excess from this song-level list in memory only; favorites,
+    // history, and Up Next must not include it until it is really queued.
+    if (expandable) session.reserve = eligible.slice(batch.length);
+    if (!batch.length) return batch;
+    for (const song of batch) {
+        session.members.add(song);
+        session.seen.add(cleanSongData(song).id);
+        const recording = stationRecordingKey(song);
+        if (recording) session.seenRecordings.add(recording);
+        if (expandable) session.reseedPool.push(song);
+        if (response?.strategy === 'artist') session.artistOnly.add(song);
+    }
+    session.reseedPool = session.reseedPool.slice(-SONG_RADIO_CANDIDATE_LIMIT);
+    let insertAt = currentIndex + 1;
+    while (currentPlaylist[insertAt]?._playNextRequested ||
+        (currentPlaylist[insertAt]?._explicitRadio && session.members.has(currentPlaylist[insertAt]))) insertAt++;
+    currentPlaylist.splice(insertAt, 0, ...batch);
+    preSelectedNextIndex = null;
+    renderQueue();
+    savePlaybackState();
+    return batch;
+}
+
+function replenishSongRadio({ additional = false, nextOnly = false } = {}) {
     const session = songRadioSession;
-    if (!isSongRadioActive(session) || radioSongsRemaining(session) > 2 || isExplicitRadioCurrent(pendingExplicitRadio)) return Promise.resolve([]);
-    if (session.pending?.epoch === searchRadioEpoch) return session.pending.promise;
+    if (!isSongRadioActive(session) || isExplicitRadioCurrent(pendingExplicitRadio)) return Promise.resolve([]);
+    if (session.pending?.epoch === searchRadioEpoch) return nextOnly ? session.pending.ready : session.pending.promise;
+    if (radioSongsRemaining(session) >= SONG_RADIO_TARGET) return Promise.resolve([]);
+    // Original recommendations outrank querying a new seed, and work
+    // without a provider connection. Recheck their eligibility at insertion.
+    const buffered = session.reserve.length
+        ? commitStationRadioSongs(session, session.reserve, { strategy: 'similar' }) : [];
+    if (radioSongsRemaining(session) >= SONG_RADIO_TARGET || Date.now() < session.nextFillAt) return Promise.resolve(buffered);
+    if (currentPlaylist.length >= 1000) {
+        pruneSongRadioHistory(session);
+        if (currentPlaylist.length >= 1000) return Promise.resolve(buffered);
+    }
     const anchor = currentPlaylist[currentIndex];
-    if (!anchor._playNextRequested) session.lastSeed = anchor;
-    const seed = session.lastSeed || session.seed;
+    if (!anchor._playNextRequested && !session.artistOnly.has(anchor)) session.lastSeed = anchor;
     const epoch = searchRadioEpoch;
-    const task = { epoch, promise: null };
+    const tried = new Set();
+    const candidate = () => [session.lastSeed || session.seed, ...session.reseedPool].find(seed => {
+        if (!seed?.name || seed._playNextRequested || session.artistOnly.has(seed)) return false;
+        const key = stationSeedKey(seed);
+        return key && !tried.has(key) && Date.now() >= (session.queriedSeeds.get(key)?.retryAt || 0);
+    });
+    if (!candidate()) { updateSongRadioCount(session); return Promise.resolve(buffered); }
+    let signalReady;
+    const task = { epoch, controller: new AbortController(), ready: new Promise(resolve => { signalReady = resolve; }), promise: null };
     session.pending = task;
+    updateSongRadioCount(session);
+    if (buffered.length) signalReady(buffered);
     task.promise = (async () => {
-        let timer;
+        const started = Date.now(), appended = [...buffered];
         try {
-            // The legacy source profile also needs a bounded body/lookup handoff.
-            const response = await Promise.race([
-                loadSearchRadioSongs(seed),
-                new Promise(resolve => { timer = setTimeout(() => resolve([]), 9000); }),
-            ]);
-            if (!isSongRadioActive(session) || epoch !== searchRadioEpoch) return [];
-            const songs = Array.isArray(response) ? response : response.list || [];
-            pruneSongRadioHistory(session);
-            const fresh = pickSearchRadioSongs(songs).filter(song => !session.seen.has(cleanSongData(song).id));
-            if (!fresh.length) return [];
-            const batch = fresh.map(song => ({ ...song, _explicitRadio: true }));
-            batch.forEach(song => { session.members.add(song); session.seen.add(cleanSongData(song).id); });
-            let insertAt = currentIndex + 1;
-            while (currentPlaylist[insertAt]?._playNextRequested ||
-                (currentPlaylist[insertAt]?._explicitRadio && session.members.has(currentPlaylist[insertAt]))) insertAt++;
-            currentPlaylist.splice(insertAt, 0, ...batch);
-            preSelectedNextIndex = null;
-            renderQueue(); savePlaybackState();
-            return batch;
-        } catch (_) {
-            return [];
+            const attempts = additional ? 2 : 3;
+            for (let i = 0; i < attempts && radioSongsRemaining(session) < SONG_RADIO_TARGET; i++) {
+                const budget = SONG_RADIO_FILL_BUDGET_MS - (Date.now() - started);
+                const seed = budget > 0 && candidate();
+                if (!seed || !isSongRadioActive(session) || epoch !== searchRadioEpoch) break;
+                tried.add(stationSeedKey(seed));
+                let response;
+                try {
+                    response = await loadSearchRadioSongs(seed, {
+                        station: true, timeoutMs: Math.min(9000, budget), signal: task.controller.signal,
+                    });
+                } catch (_) {}
+                if (!isSongRadioActive(session) || epoch !== searchRadioEpoch || task.controller.signal.aborted) break;
+                const songs = Array.isArray(response) ? response : response?.list || [];
+                storeStationSeedResult(session, seed, response, songs);
+                // The original seed may offer a small same-artist fallback.
+                // Later seeds must genuinely offer song-level recommendations.
+                const batch = response?.strategy === 'artist' ? [] : commitStationRadioSongs(session, songs, response);
+                if (batch.length) { appended.push(...batch); signalReady(batch); }
+            }
         } finally {
-            clearTimeout(timer);
-            if (session.pending === task) session.pending = null;
+            signalReady([]);
+            if (session.pending === task) {
+                session.pending = null;
+                if (epoch === searchRadioEpoch && isSongRadioActive(session)) {
+                    // Slow or sparse catalogs cannot be hammered on every
+                    // player event. A later transition can try again.
+                    if (radioSongsRemaining(session) < SONG_RADIO_TARGET) session.nextFillAt = Date.now() + SONG_RADIO_FILL_COOLDOWN_MS;
+                    updateSongRadioCount(session);
+                }
+            }
+            task.controller.abort();
         }
+        return appended;
     })();
-    return task.promise;
+    return nextOnly ? task.ready : task.promise;
 }
 
 async function advanceSongRadio() {
@@ -8569,7 +8704,7 @@ async function advanceSongRadio() {
     const handoff = { epoch, promise: null };
     session.handoff = handoff;
     handoff.promise = (async () => {
-        await replenishSongRadio();
+        await replenishSongRadio({ nextOnly: true });
         if (!isSongRadioActive(session) || epoch !== searchRadioEpoch || requestId !== loadingRequestCounter || currentPlaylist[currentIndex] !== anchor) return;
         const following = currentPlaylist[currentIndex + 1];
         if (following?._playNextRequested || (following?._explicitRadio && session.members.has(following))) {
@@ -8579,6 +8714,7 @@ async function advanceSongRadio() {
         else {
             // Empty/error responses must not loop requests or replay the seed forever.
             songRadioSession = null;
+            setQueueRadioStatus('暂未找到可播放的相似歌曲');
             showInfo('暂未找到可播放的相似歌曲');
             if (following) void playSong(following, currentIndex + 1);
         }
@@ -8612,17 +8748,21 @@ function playAfterNaturalEnd() {
         request.anchor = next;
         request.requestId = loadingRequestCounter;
         request.waitingAtEnd = false;
+        setQueueRadioStatus('正在加载电台推荐');
     }
 }
 
 function describeEmptyExplicitRadio(songs, seedId) {
     const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
-    const playable = songs.filter(song => cleanSongData(song).id !== seedId && !(skipDisliked && window.DislikeManager.isDisliked(song)));
+    const playable = songs.filter(song => song?.source && song.id && typeof song.name === 'string' && song.name.trim() &&
+        cleanSongData(song).id !== seedId && !(skipDisliked && window.DislikeManager.isDisliked(song)));
     if (!playable.length) return '暂未找到可播放的相似歌曲';
     const queued = new Set(currentPlaylist.map(song => cleanSongData(song).id));
-    return playable.every(song => queued.has(cleanSongData(song).id))
-        ? '相似歌曲已在播放队列中'
-        : '播放队列最多 1000 首歌曲';
+    const recordings = new Set(currentPlaylist.map(stationRecordingKey).filter(Boolean));
+    if (playable.every(song => queued.has(cleanSongData(song).id) || recordings.has(stationRecordingKey(song)))) {
+        return '相似歌曲已在播放队列中';
+    }
+    return currentPlaylist.length >= 1000 ? '播放队列最多 1000 首歌曲' : '暂未找到可播放的相似歌曲';
 }
 
 // Start from the captured song on any page, not a potentially stale row index.
@@ -8641,15 +8781,22 @@ async function startSearchRadio(seed) {
         return;
     }
     let index = currentIndex;
+    // Only superseded station recommendations in the unplayed tail are dropped.
+    // Keep ordinary queue entries, played history and explicit Play Next pins.
+    const previousTail = currentPlaylist.slice(currentIndex + 1);
+    const survivingTail = previousTail.filter(song => !song._explicitRadio || song._playNextRequested);
+    const removedPreviousStation = survivingTail.length !== previousTail.length;
     if (!adopting) {
         const previous = currentPlaylist.slice(0, currentIndex + 1).filter(song => !matches(song));
-        const upcoming = currentPlaylist.slice(currentIndex + 1).filter(song => !matches(song));
+        const upcoming = survivingTail.filter(song => !matches(song));
         if (previous.length + upcoming.length >= 1000) {
             showInfo('播放队列最多 1000 首歌曲');
             return;
         }
         index = previous.length;
         currentPlaylist = [...previous, seed, ...upcoming];
+    } else if (removedPreviousStation) {
+        currentPlaylist = [...currentPlaylist.slice(0, currentIndex + 1), ...survivingTail];
     }
 
     cancelSearchRadioContinuation();
@@ -8662,40 +8809,49 @@ async function startSearchRadio(seed) {
         epoch: searchRadioEpoch,
         requestId: loadingRequestCounter,
         waitingAtEnd: false,
+        controller: new AbortController(),
     };
     pendingExplicitRadio = request;
-    const session = { seed, lastSeed: seed, members: new WeakSet([request.anchor]), seen: new Set([seedId]), pending: null, handoff: null };
+    const recording = stationRecordingKey(seed);
+    const session = {
+        seed, lastSeed: seed, members: new WeakSet([request.anchor]), seen: new Set([seedId]),
+        seenRecordings: new Set(recording ? [recording] : []), queriedSeeds: new Map(),
+        reseedPool: [], reserve: [], artistOnly: new WeakSet(), nextFillAt: 0, pending: null, handoff: null,
+    };
     songRadioSession = session;
-    showInfo('正在加载电台推荐');
-    let songs = [];
+    // Update the actual queue without moving the user's window or scroll.
+    renderQueue();
+    setQueueRadioStatus('正在加载电台推荐');
+    let songs = [], response;
     try {
-        const response = await loadSearchRadioSongs(seed);
-        songs = response.list;
+        response = await loadSearchRadioSongs(seed, { station: true, signal: request.controller.signal });
+        songs = Array.isArray(response) ? response : response?.list || [];
     } catch (_) {
         // The existing loader already converts failures to an empty pool.
     }
     if (!isExplicitRadioCurrent(request)) {
-        if (pendingExplicitRadio === request) pendingExplicitRadio = null;
+        if (pendingExplicitRadio === request) {
+            pendingExplicitRadio = null;
+            setQueueRadioStatus();
+        }
         return;
     }
 
-    const fresh = pickSearchRadioSongs(songs);
+    storeStationSeedResult(session, seed, response, songs);
+    pendingExplicitRadio = null;
+    const fresh = commitStationRadioSongs(session, songs, response);
     if (fresh.length) {
-        // Preserve only explicit Play Next pins ahead of the new batch.
-        let insertAt = currentIndex + 1;
-        while (currentPlaylist[insertAt]?._playNextRequested) insertAt++;
-        const batch = fresh.map(song => ({ ...song, _explicitRadio: true }));
-        batch.forEach(song => { session.members.add(song); session.seen.add(cleanSongData(song).id); });
-        currentPlaylist.splice(insertAt, 0, ...batch);
-        preSelectedNextIndex = null;
-        renderQueue();
-        savePlaybackState();
         showInfo('已开启电台');
+        if (radioSongsRemaining(session) < SONG_RADIO_TARGET && session.reseedPool.length) {
+            void replenishSongRadio({ additional: true });
+        }
     } else {
         if (songRadioSession === session) songRadioSession = null;
-        showInfo(describeEmptyExplicitRadio(songs, seedId));
+        const message = describeEmptyExplicitRadio(songs, seedId);
+        setQueueRadioStatus(message);
+        showInfo(message);
+        if (removedPreviousStation) savePlaybackState();
     }
-    pendingExplicitRadio = null;
     if (request.waitingAtEnd) playNext();
     else if (fresh.length && !audio.paused) void prefetchNextSong();
 }
@@ -8724,6 +8880,10 @@ function keepAsNextSong(song) {
 let searchRadioEpoch = 0;
 function cancelSearchRadioContinuation() {
     searchRadioEpoch++;
+    pendingExplicitRadio?.controller?.abort();
+    songRadioSession?.pending?.controller?.abort();
+    pendingExplicitRadio = null;
+    setQueueRadioStatus();
 }
 
 
@@ -8768,18 +8928,26 @@ function getSearchRadioSeedQuery(seed) {
     return params.toString();
 }
 
-function loadSearchRadioSongs(seed, { prefetch = false, timeoutMs = SEARCH_RADIO_TIMEOUT_MS } = {}) {
-    const seedKey = getSearchRadioSeedQuery(seed);
-    if (searchRadioCache?.seedKey === seedKey && (searchRadioCache.pending || performance.now() < searchRadioCache.expires)) {
+function loadSearchRadioSongs(seed, { prefetch = false, timeoutMs = SEARCH_RADIO_TIMEOUT_MS, station = false, signal } = {}) {
+    const query = getSearchRadioSeedQuery(seed);
+    const seedKey = station ? `${query}&target=${SONG_RADIO_TARGET}&limit=${SONG_RADIO_CANDIDATE_LIMIT}` : query;
+    if (signal?.aborted) return Promise.resolve({ list: [], strategy: 'none' });
+    if (searchRadioCache?.seedKey === seedKey &&
+        ((!station && searchRadioCache.pending) || performance.now() < searchRadioCache.expires)) {
         return searchRadioCache.promise;
     }
     const controller = new AbortController();
-    let timer;
-    const timeout = new Promise((_, reject) => {
+    let timer, onAbort;
+    const deadline = new Promise((_, reject) => {
         timer = setTimeout(() => {
             controller.abort();
             reject(new Error('相似歌曲请求超时'));
         }, timeoutMs);
+        onAbort = () => {
+            controller.abort();
+            reject(new Error('相似歌曲请求已取消'));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
     });
     const request = (async () => {
         const res = await fetch(`${API_BASE}/similar?${seedKey}`, { headers: getUserAuthHeaders(), signal: controller.signal });
@@ -8793,24 +8961,28 @@ function loadSearchRadioSongs(seed, { prefetch = false, timeoutMs = SEARCH_RADIO
         return { list, strategy: data?.strategy, incomplete: data?.incomplete === true };
     })();
     const entry = { seedKey, prefetch, pending: true, expires: 0 };
-    entry.promise = Promise.race([request, timeout])
+    entry.promise = Promise.race([request, deadline])
         .catch(e => {
-            console.warn('[SearchRadio] 获取相似歌曲失败:', e.message);
+            if (!signal?.aborted) console.warn('[SearchRadio] 获取相似歌曲失败:', e.message);
             return { list: [], strategy: 'none' };
         })
         .then(result => {
             // 空预读（包括没有可用标识的响应）不能一直遮住播放结束时的重试。
             entry.pending = false;
+            if (signal?.aborted) result = { list: [], strategy: 'none' };
             if (!result.list.length) {
                 if (searchRadioCache === entry) searchRadioCache = null;
             } else {
                 // 与服务端默认 limit 的候选池期限对齐，不把临时降级的结果当作长期的电台。
-                const degraded = result.incomplete || result.strategy === 'artist' || result.list.length < 5;
+                const degraded = result.incomplete || result.strategy === 'artist' || result.list.length < (station ? SONG_RADIO_TARGET : 5);
                 entry.expires = performance.now() + (degraded ? 60000 : 6 * 60 * 60 * 1000);
             }
             return result;
         })
-        .finally(() => clearTimeout(timer));
+        .finally(() => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+        });
     searchRadioCache = entry;
     return entry.promise;
 }

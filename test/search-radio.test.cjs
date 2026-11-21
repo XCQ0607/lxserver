@@ -21,6 +21,7 @@ function setup({ list, index, similar = [], settings = {}, playMode = 'list', ar
     const mediaCache = new Map();
     const context = vm.createContext({
         console: { log() {}, warn() {} },
+        document: { getElementById() { return null; } },
         window: { QualityManager: { getBestQuality: (_song, requested) => requested } },
         URLSearchParams, AbortController, setTimeout: timer, clearTimeout, performance,
         prefetchManager: {

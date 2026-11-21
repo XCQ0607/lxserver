@@ -11,11 +11,14 @@ const fn = name => {
     return app.slice(start, app.indexOf('\n}', mark) + 2);
 };
 const song = (id, flags = {}) => ({ id, songmid: id, name: id, source: 'wy', ...flags });
-const legacyLoader = app.includes('return list.filter(item => item.id && item.source)');
+const constants = app.match(/^const SONG_RADIO_.+;$/gm).join('\n');
 
 function fixture(overrides = {}) {
     const prior = song('playing'), playNext = song('pinned', { _searchRadio: true, _playNextRequested: true }), manual = song('manual');
+    let now = 100000;
     const c = vm.createContext({
+        document: { getElementById(id) { return id === 'queue-radio-status' ? c.statusNode : null; } },
+        statusNode: { textContent: '' }, drawerOpen: false, opens: 0, drawnTracks: [], scrolls: [],
         window: {}, settings: { autoPlaySimilarAfterSearch: false, switchPlaylistOnSearchPlay: false },
         searchRadioSongs: new WeakSet(),
         audio: { paused: true, addEventListener(name, callback) { c[name] = callback; } },
@@ -25,26 +28,35 @@ function fixture(overrides = {}) {
         pendingExplicitRadio: null, songRadioSession: null,
         currentLoadingSongId: null, searchRadioArmed: true, playMode: 'single', preSelectedNextIndex: 2,
         cleanSongData: track => ({ id: track.source + '_' + track.id }),
-        setTimeout, clearTimeout,
+        setTimeout, clearTimeout, AbortController, Date: { now: () => now },
+        advanceClock(ms) { now += ms; },
         playSong(...args) { c.currentIndex = args[1]; c.currentPlayingSong = args[0]; c.loadingRequestCounter++; c.plays.push(args); },
-        loadSearchRadioSongs(seed) {
-            return new Promise(resolve => { c.resolveLookup = list => resolve(legacyLoader ? list : { list }); c.lookups.push(seed); });
+        loadSearchRadioSongs(seed, options) {
+            return new Promise(resolve => {
+                c.resolveLookup = (list, strategy, incomplete) => resolve({ list, strategy, incomplete });
+                c.lookups.push(seed);
+                c.lookupOptions.push(options);
+            });
         },
         setSearchRadioArmed(value) { c.searchRadioArmed = value; },
-        renderQueue() { c.renders++; }, savePlaybackState() { c.saves++; },
+        toggleQueueDrawer() { c.drawerOpen = !c.drawerOpen; c.opens++; c.renderQueue(); },
+        scrollToCurrentSongInQueue(flash, block) { c.scrolls.push([flash, block]); },
+        renderQueue() { c.renders++; c.updateSongRadioCount(); c.drawnTracks = c.drawerOpen ? ids(c) : []; },
+        savePlaybackState() { c.saves++; },
         showInfo(message) { c.messages.push(message); },
         prefetchNextSong() { c.prefetches++; },
-        plays: [], lookups: [], messages: [], saves: 0, renders: 0, prefetches: 0,
+        plays: [], lookups: [], lookupOptions: [], messages: [], saves: 0, renders: 0, prefetches: 0,
         ...overrides,
     });
-    const helpers = ['startSearchRadio', 'cancelSearchRadioContinuation', 'pickSearchRadioSongs', 'getNextIndex',
+    const helpers = ['setQueueRadioStatus', 'startSearchRadio', 'cancelSearchRadioContinuation', 'pickSearchRadioSongs', 'getNextIndex',
         'keepAsNextSong', 'playNext', 'playNextInQueue', 'isSearchRadioDue',
-        'isSongRadioActive', 'radioSongsRemaining', 'pruneSongRadioHistory', 'replenishSongRadio', 'advanceSongRadio'];
+        'isSongRadioActive', 'radioSongsRemaining', 'pruneSongRadioHistory', 'replenishSongRadio', 'advanceSongRadio',
+        'stationRecordingKey', 'updateSongRadioCount', 'stationSeedKey', 'storeStationSeedResult', 'pickStationRadioSongs', 'commitStationRadioSongs'];
     for (const name of ['isExplicitRadioCurrent', 'playAfterNaturalEnd', 'describeEmptyExplicitRadio']) {
         if (app.includes('function ' + name + '(')) helpers.push(name);
     }
     const endedHandler = app.match(/audio\.addEventListener\('ended', \(\) => \{[\s\S]*?\n\}\);/)[0];
-    vm.runInContext(helpers.map(fn).join('\n') + '\n' + endedHandler, c);
+    vm.runInContext(constants + '\n' + helpers.map(fn).join('\n') + '\n' + endedHandler, c);
     return c;
 }
 
@@ -58,6 +70,10 @@ test('explicit radio starts the captured result immediately and keeps pinned/man
     assert.equal(c.plays[0][0], seed);
     assert.equal(c.plays[0][5], false, 'do not mutate default list or switch to it');
     assert.equal(c.lookups[0], seed);
+    assert.equal(c.drawerOpen, false, 'Start Radio does not open the queue');
+    assert.deepEqual(c.drawnTracks, []);
+    assert.equal(c.lookupOptions[0].station, true);
+    assert.equal(c.statusNode.textContent, '正在加载电台推荐');
     assert.equal(c.currentPlayingScope, 'search_radio');
     assert.equal(c.searchRadioArmed, false, 'independent of automatic radio');
     const recommendation = song('similar');
@@ -72,7 +88,10 @@ test('explicit radio starts the captured result immediately and keeps pinned/man
     c.currentIndex = 3;
     assert.equal(c.getNextIndex(), 3, 'resume the saved repeat-one mode after the batch');
     assert.equal(c.playMode, 'single');
-    assert.equal(c.renders, 1);
+    assert.equal(c.renders, 2);
+    assert.equal(c.statusNode.textContent, '电台待播：1 / 24 首 · 暂无更多推荐');
+    assert.deepEqual(c.drawnTracks, []);
+    assert.deepEqual(c.scrolls, []);
     assert.equal(c.saves, 1);
 });
 
@@ -105,6 +124,7 @@ test('empty recommendations leave the seed and remaining queue playable', async 
     assert.deepEqual(ids(c), ['playing', 'seed', 'pinned', 'manual']);
     assert.equal(c.plays.length, 1);
     assert.equal(c.saves, 0);
+    assert.equal(c.statusNode.textContent, '暂未找到可播放的相似歌曲');
     assert.equal(c.messages.at(-1), '暂未找到可播放的相似歌曲');
 });
 
@@ -112,7 +132,10 @@ for (const change of ['stop', 'new song', 'exit radio', 'remove seed']) {
     test('pending radio results cannot change the queue after ' + change, async () => {
         const c = fixture();
         const pending = c.startSearchRadio(song('seed'));
-        if (change === 'stop') c.cancelSearchRadioContinuation();
+        if (change === 'stop') {
+            c.cancelSearchRadioContinuation();
+            assert.equal(c.statusNode.textContent, '', 'pause clears the pending UI immediately');
+        }
         if (change === 'new song') c.loadingRequestCounter++;
         if (change === 'exit radio') c.currentPlayingScope = 'local_list';
         if (change === 'remove seed') c.currentPlaylist.splice(c.currentIndex, 1);
@@ -120,6 +143,7 @@ for (const change of ['stop', 'new song', 'exit radio', 'remove seed']) {
         c.resolveLookup([song('late')]);
         await pending;
         assert.deepEqual(ids(c), before);
+        assert.equal(c.statusNode.textContent, '');
         assert.equal(c.saves, 0);
     });
 }
@@ -243,8 +267,7 @@ test('the production lookup deadline unblocks an ended seed and falls back to th
         clearTimeout() {},
         fetch: () => new Promise(() => {}),
     });
-    const lookup = (legacyLoader ? '' : 'const SEARCH_RADIO_TIMEOUT_MS = 9000;\n' + fn('getSearchRadioSeedQuery') + '\n') +
-        fn('loadSearchRadioSongs');
+    const lookup = 'const SEARCH_RADIO_TIMEOUT_MS = 9000;\n' + fn('getSearchRadioSeedQuery') + '\n' + fn('loadSearchRadioSongs');
     vm.runInContext(lookup, c);
     const pending = c.startSearchRadio(song('seed'));
     c.ended();
@@ -271,6 +294,7 @@ test('song radio replenishes through multiple batches without replaying seen son
     assert.equal(c.playMode, 'single');
     assert.ok(ids(c).includes('manual'));
     c.currentIndex = c.currentPlaylist.findIndex(s => s.id === 'g'); c.currentPlayingSong = c.currentPlaylist[c.currentIndex];
+    c.advanceClock(30001);
     c.ended(); const second = c.songRadioSession.handoff.promise;
     c.resolveLookup([song('h')]); await second;
     assert.equal(c.currentPlaylist[c.currentIndex].id, 'h');
@@ -342,4 +366,212 @@ test('missing metadata produces feedback instead of a silent radio action or pro
     const c = fixture(); await c.startSearchRadio({ source: 'local', name: '' });
     assert.equal(c.lookups.length, 0); assert.equal(c.plays.length, 0);
     assert.ok(c.messages.some(message => message.includes('缺少歌曲信息')));
+});
+
+test('an already-open drawer stays open and late results never reopen a dismissed drawer', async () => {
+    const c = fixture({ drawerOpen: true });
+    const pending = c.startSearchRadio(song('seed'));
+    assert.equal(c.opens, 0);
+    assert.deepEqual(c.scrolls, []);
+    assert.deepEqual(c.drawnTracks, ['playing', 'seed', 'pinned', 'manual']);
+    c.drawerOpen = false;
+    c.resolveLookup([song('similar')]);
+    await pending;
+    assert.equal(c.opens, 0);
+    assert.equal(c.drawerOpen, false);
+    assert.equal(c.statusNode.textContent, '电台待播：1 / 24 首 · 暂无更多推荐');
+    assert.deepEqual(c.drawnTracks, []);
+    assert.equal(c.currentPlaylist[c.getNextIndex()].id, 'pinned');
+    assert.deepEqual(ids(c), ['playing', 'seed', 'pinned', 'similar', 'manual']);
+});
+
+test('a failed replacement station removes only old generated upcoming rows', async () => {
+    const played = song('played-by-old-station', { _explicitRadio: true });
+    const current = song('playing');
+    const oldGenerated = song('superseded', { _explicitRadio: true });
+    const pin = song('promoted', { _explicitRadio: true, _playNextRequested: true });
+    const manual = song('manual');
+    const c = fixture({ currentPlaylist: [played, current, oldGenerated, pin, manual], currentIndex: 1, currentPlayingSong: current, drawerOpen: true });
+    const pending = c.startSearchRadio(song('new-station'));
+    assert.deepEqual(c.drawnTracks, [played.id, current.id, 'new-station', pin.id, manual.id]);
+    c.resolveLookup([]);
+    await pending;
+    assert.equal(c.currentPlaylist[c.getNextIndex()].id, pin.id);
+    assert.equal(c.statusNode.textContent, '暂未找到可播放的相似歌曲');
+    assert.equal(c.saves, 1, 'persist removal without mutating saved playlists');
+});
+
+test('a stale result arriving while a new station is pending leaves its loading announcement alone', async () => {
+    const c = fixture();
+    const first = c.startSearchRadio(song('first'));
+    const resolveFirst = c.resolveLookup;
+    const second = c.startSearchRadio(song('second'));
+    resolveFirst([song('never')]);
+    await first;
+    assert.equal(c.statusNode.textContent, '正在加载电台推荐');
+    assert.equal(c.opens, 0);
+    c.resolveLookup([song('next')]);
+    await second;
+    assert.equal(c.statusNode.textContent, '电台待播：1 / 24 首 · 暂无更多推荐');
+    assert.deepEqual(c.drawnTracks, []);
+    assert.ok(ids(c).includes('next'));
+    assert.ok(!ids(c).includes('never'));
+});
+
+test('a rejected recommendation request clears loading and retains the real ordinary queue', async () => {
+    const c = fixture({ drawerOpen: true, async loadSearchRadioSongs() { throw Error('offline'); } });
+    await c.startSearchRadio(song('seed'));
+    assert.equal(c.statusNode.textContent, '暂未找到可播放的相似歌曲');
+    assert.deepEqual(c.drawnTracks, ['playing', 'seed', 'pinned', 'manual']);
+});
+
+test('the initial target counts only 24 distinct upcoming recordings, not history or pins', async () => {
+    const prior = song('played-original', { name: 'Old Take', singer: 'Artist' });
+    const pin = song('pinned-original', { name: 'Pinned', singer: 'Band', _playNextRequested: true });
+    const seed = song('seed', { name: 'Seed', singer: 'Singer' });
+    const c = fixture({ currentPlaylist: [prior, pin, song('manual')], currentPlayingSong: prior, drawerOpen: true });
+    const pending = c.startSearchRadio(seed);
+    const first = song('one', { name: 'Night-Sky', singer: 'Band ＆ Artist', interval: '03:00' });
+    const candidates = Array.from({ length: 32 }, (_, i) => song('rec-' + i));
+    c.resolveLookup([
+        song('seed-version', { source: 'tx', name: seed.name, singer: seed.singer }),
+        song('played-cross-catalog', { source: 'tx', name: prior.name, singer: prior.singer }),
+        song('pin-cross-catalog', { source: 'tx', name: pin.name, singer: pin.singer }),
+        first, song('other', { source: 'tx', name: 'Night Sky', singer: 'Artist、Band' }),
+        song('missing-name', { name: '' }), ...candidates,
+    ], 'radio');
+    await pending;
+    assert.equal(c.radioSongsRemaining(), 24);
+    assert.equal(c.currentPlaylist[c.getNextIndex()], pin);
+    assert.deepEqual(ids(c), [prior.id, seed.id, pin.id, first.id, ...candidates.slice(0, 23).map(s => s.id), 'manual']);
+    assert.equal(c.statusNode.textContent, '电台待播：24 / 24 首');
+    assert.deepEqual(c.drawnTracks, ids(c));
+    assert.equal(c.lookups.length, 1);
+    assert.deepEqual(c.scrolls, []);
+});
+
+test('initial thin recommendations publish immediately and subsequent related seeds fill the exact deficit', async () => {
+    const c = fixture({ drawerOpen: true });
+    const pending = c.startSearchRadio(song('seed'));
+    c.resolveLookup([song('a'), song('b')], 'radio', true);
+    await pending;
+    assert.equal(c.radioSongsRemaining(), 2);
+    assert.deepEqual(c.drawnTracks, ['playing', 'seed', 'pinned', 'a', 'b', 'manual']);
+    assert.equal(c.statusNode.textContent, '电台待播：2 / 24 首 · 正在补充');
+    assert.deepEqual(c.lookups.map(s => s.id), ['seed', 'a']);
+    const refill = c.songRadioSession.pending.promise;
+    assert.equal(c.replenishSongRadio(), refill, 'simultaneous events share the same refill');
+    c.resolveLookup([song('not-song-level')], 'artist');
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    assert.deepEqual(c.lookups.map(s => s.id), ['seed', 'a', 'b']);
+    const fresh = Array.from({ length: 24 }, (_, i) => song('extra-' + i));
+    c.resolveLookup([song('a'), song('b'), ...fresh], 'similar');
+    await refill;
+    assert.equal(c.radioSongsRemaining(), 24);
+    assert.equal(c.statusNode.textContent, '电台待播：24 / 24 首');
+    assert.deepEqual(c.drawnTracks, ['playing', 'seed', 'pinned', 'a', 'b', ...fresh.slice(0, 22).map(s => s.id), 'manual']);
+    assert.equal(c.currentPlaylist[c.getNextIndex()].id, 'pinned');
+    assert.deepEqual(c.scrolls, []);
+});
+
+test('a provider shortfall is shown honestly, and state changes do not hammer candidates during cooldown', async () => {
+    const c = fixture();
+    const pending = c.startSearchRadio(song('seed'));
+    c.resolveLookup([song('a'), song('b')], 'radio');
+    await pending;
+    const refill = c.songRadioSession.pending.promise;
+    c.resolveLookup([song('a')], 'similar');
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    c.resolveLookup([], 'none');
+    await refill;
+    assert.equal(c.radioSongsRemaining(), 2);
+    assert.equal(c.statusNode.textContent, '电台待播：2 / 24 首 · 暂无更多推荐');
+    await c.replenishSongRadio();
+    c.advanceClock(31000);
+    await c.replenishSongRadio();
+    assert.deepEqual(c.lookups.map(s => s.id), ['seed', 'a', 'b'], 'do not immediately retry seeds that did not fill the floor');
+    c.advanceClock(30000);
+    const retry = c.replenishSongRadio();
+    assert.deepEqual(c.lookups.map(s => s.id), ['seed', 'a', 'b', 'seed']);
+    c.resolveLookup(Array.from({ length: 24 }, (_, i) => song('later-' + i)), 'radio');
+    await retry;
+    assert.equal(c.radioSongsRemaining(), 24);
+});
+
+test('a small initial artist-only fallback is not expanded into a full station', async () => {
+    const c = fixture();
+    const pending = c.startSearchRadio(song('seed'));
+    c.resolveLookup([song('a'), song('b'), song('c')], 'artist');
+    await pending;
+    await c.replenishSongRadio();
+    assert.equal(c.radioSongsRemaining(), 3);
+    assert.equal(c.statusNode.textContent, '电台待播：3 / 24 首 · 暂无更多推荐');
+    assert.deepEqual(c.lookups.map(s => s.id), ['seed']);
+});
+
+test('available queue capacity is spent on distinct tracks rather than cross-catalog repeats', async () => {
+    const filler = Array.from({ length: 997 }, (_, i) => song('filler-' + i));
+    const c = fixture({ currentPlaylist: filler, currentPlayingSong: filler[0] });
+    const pending = c.startSearchRadio(song('seed'));
+    c.resolveLookup([
+        song('a', { name: 'Recording', singer: 'Artist' }),
+        song('same-a', { name: 'Recording', singer: 'Artist', source: 'tx' }),
+        song('b', { name: 'Another Recording', singer: 'Artist' }),
+        song('overflow', { name: 'Another Unqueued Recording', singer: 'Artist' }),
+    ], 'radio');
+    await pending;
+    assert.equal(c.currentPlaylist.length, 1000);
+    assert.equal(c.lookups.length, 1, 'do not query providers when all queue slots are full');
+    assert.equal(c.radioSongsRemaining(), 2);
+    assert.deepEqual(ids(c).slice(0, 5), ['filler-0', 'seed', 'a', 'b', 'filler-1']);
+});
+
+test('a station lookup uses an independent cache key and cancellation settles a stalled fetch', async () => {
+    const calls = [];
+    const c = fixture({
+        API_BASE: '/fixture', URLSearchParams, AbortController, performance, searchRadioCache: null,
+        getUserAuthHeaders: () => ({}), console: { log() {}, warn() {} },
+        fetch(url, options) { calls.push({ url, signal: options.signal }); return new Promise(() => {}); },
+    });
+    vm.runInContext('const SEARCH_RADIO_TIMEOUT_MS = 9000;\n' + fn('getSearchRadioSeedQuery') + '\n' + fn('loadSearchRadioSongs'), c);
+    const seed = song('seed');
+    const stationSignal = new AbortController();
+    const station = c.loadSearchRadioSongs(seed, { station: true, signal: stationSignal.signal });
+    const automaticSignal = new AbortController();
+    const automatic = c.loadSearchRadioSongs(seed, { signal: automaticSignal.signal });
+    stationSignal.abort();
+    assert.equal((await station).list.length, 0);
+    assert.equal(calls[0].signal.aborted, true);
+    assert.equal(calls[1].signal.aborted, false);
+    const stationParams = new URL(calls[0].url, 'https://fixture.example').searchParams;
+    const automaticParams = new URL(calls[1].url, 'https://fixture.example').searchParams;
+    assert.equal(stationParams.get('target'), '24');
+    assert.equal(stationParams.get('limit'), '48');
+    assert.equal(automaticParams.has('target'), false);
+    automaticSignal.abort();
+    await automatic;
+});
+
+test('unpublished same-seed overflow fills later slots even offline, rechecking manual rows and dislikes', async () => {
+    const disliked = new Set();
+    const c = fixture({ drawerOpen: true, window: { DislikeManager: { isDisliked: track => disliked.has(track.id) } } });
+    const pending = c.startSearchRadio(song('seed'));
+    const overflow = [song('later-disliked'), song('manual-later'), song('use-overflow'), song('another-overflow')];
+    c.resolveLookup([...Array.from({ length: 24 }, (_, i) => song('first-' + i)), ...overflow], 'radio');
+    await pending;
+    assert.equal(c.radioSongsRemaining(), 24);
+    assert.equal(c.lookups.length, 1);
+    assert.ok(!overflow.some(s => ids(c).includes(s.id)), 'the reserve is not shown or saved as queued');
+
+    c.currentPlaylist.push(overflow[1]); // explicit user addition while the provider is unavailable
+    disliked.add(overflow[0].id);
+    c.currentIndex = c.currentPlaylist.findIndex(s => s.id === 'first-0');
+    c.currentPlayingSong = c.currentPlaylist[c.currentIndex];
+    await c.replenishSongRadio();
+    assert.equal(c.lookups.length, 1, 'the queue uses buffered results without another provider lookup');
+    assert.equal(c.radioSongsRemaining(), 24);
+    assert.deepEqual(c.drawnTracks.slice(-5), ['first-22', 'first-23', 'use-overflow', 'manual', 'manual-later']);
+    assert.ok(!ids(c).includes('another-overflow'));
+    assert.ok(!ids(c).includes('later-disliked'));
+    assert.equal(ids(c).filter(id => id === 'manual-later').length, 1);
 });

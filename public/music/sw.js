@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v68-song-radio-aligned';
+const CACHE_NAME = 'lx-music-web-v68-song-radio-queue';
 // Refresh continuous song radio and shared song-menu actions.
 const ASSETS_TO_CACHE = [
     './',
