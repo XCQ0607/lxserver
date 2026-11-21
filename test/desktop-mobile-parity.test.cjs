@@ -110,6 +110,36 @@ test('single-artist and invalid actions never open an unnecessary picker', async
     assert.deepEqual(calls, [['close'], ['search', 'Solo', 'kw']]);
 });
 
+test('Space preserves focused control activation and remains a shortcut outside controls', () => {
+    const start = app.indexOf("// 注册全局键盘监听");
+    assert.ok(start >= 0, 'global keyboard shortcut handler');
+    const source = app.slice(start, app.indexOf("\ndocument.addEventListener('keyup'", start));
+    const calls = [];
+    let keydown;
+    runInNewContext(source, {
+        settings: { enableKeyboardShortcuts: true },
+        document: { addEventListener(name, listener) { if (name === 'keydown') keydown = listener; } },
+        togglePlay() { calls.push('toggle-play'); },
+    });
+    const press = (tagName, matches, defaultPrevented = false) => keydown({
+        code: 'Space', defaultPrevented, target: {
+            tagName,
+            closest(selector) {
+                return selector.split(',').some(value => matches.includes(value.trim())) ? this : null;
+            },
+        },
+        preventDefault() { calls.push('prevent-default'); },
+    });
+    press('BUTTON', ['button']); // opening/collapse/search buttons
+    press('I', ['button']); // a descendant of a focused button
+    press('SUMMARY', ['summary']);
+    press('SPAN', ['[role="button"]']);
+    press('DIV', [], true);
+    assert.deepEqual(calls, []);
+    press('BODY', []);
+    assert.deepEqual(calls, ['prevent-default', 'toggle-play']);
+});
+
 test('lyrics history is marked so underlying navigation does not undo a detail search', () => {
     const start = app.indexOf("window.addEventListener('popstate', (e) => {", app.indexOf('function toggleLyrics('));
     const source = app.slice(start, app.indexOf('\nfunction updateDetailInfo(', start));

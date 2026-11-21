@@ -9316,6 +9316,8 @@ document.addEventListener('keydown', (e) => {
 
     switch (e.code) {
         case 'Space':
+            // Preserve Space activation for focused native and custom controls.
+            if (e.defaultPrevented || target.closest?.('button, summary, select, [role="button"], [role="checkbox"], [role="switch"]')) return;
             e.preventDefault();
             togglePlay();
             break;
