@@ -222,7 +222,7 @@ window.LeaderboardManager = (function () {
                     ` : `<span class="${rankClass}">${rank}</span>`}
                 </div>
                 <!-- 封面 + 歌名 -->
-                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
+                <div class="lb-song-track col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
                     <div class="w-10 h-10 md:w-12 md:h-12 flex-shrink-0 relative rounded-lg overflow-hidden shadow-sm border t-border-main group-hover:shadow-md transition-all group-hover:scale-105 duration-300">
                         <img data-src="${imgUrl}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"

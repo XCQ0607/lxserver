@@ -1106,6 +1106,16 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
 }
 .song-add-menu > summary { display: inline-flex; align-items: center; justify-content: center; min-width: 28px; min-height: 32px; padding: 6px; color: var(--c-600); border-radius: .5rem; }
 .song-add-menu > summary:hover { background: var(--c-50); }
+/* Keep a readable title and independent touch targets on compact charts. */
+@media (width < 640px) {
+    #lb-songs-list .lb-song-track { grid-column: 2 / -1; }
+    #lb-songs-list .song-row-actions { grid-column: 1 / -1; gap: 4px; }
+    #lb-songs-list .song-row-actions > button,
+    #lb-songs-list .song-row-actions > .song-add-menu > summary {
+        flex-shrink: 0; min-width: 44px; min-height: 44px;
+    }
+}
+
 button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px solid var(--c-500); outline-offset: 3px; }
 
 @media (max-width: 1024px) {
