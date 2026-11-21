@@ -192,14 +192,14 @@ test('after a cached media miss, refreshes the same track once before normal rec
     }
 });
 
-test('cache renewal exceeding its lookup budget is a miss, not a false authentication rejection', async () => {
+test('cache renewal exceeding its lookup budget is unavailable, not a miss or false authentication rejection', async () => {
     let finishRenewal;
     const fixture = setup({ status: 401, refresh: () => new Promise(resolve => { finishRenewal = resolve; }) });
     const controller = new AbortController();
     const pending = fixture.context.checkPlaybackCache([track], 'flac', false, controller.signal);
     await new Promise(resolve => setImmediate(resolve));
     controller.abort();
-    assert.equal(await pending, null);
+    assert.equal((await pending).unavailable, true);
     finishRenewal(true);
     assert.equal(fixture.calls.length, 1);
 });
@@ -260,4 +260,40 @@ test('cache replacement auth rejection is visible without an active recovery toa
         extract('async function runRecoveryFlow(', 'async function playSong('), context);
     await context.runRecoveryFlow(new Error('cached media failed'), 3, state, { ...ready, sourceType: 'server_cache' });
     assert.deepEqual(messages, ['登录已失效，请重新登录']);
+});
+
+test('foreground playback accepts a completed lower tier before touching a provider', async () => {
+    const f = setup();
+    const result = await f.resolve({ foregroundCache: true, exactQuality: true });
+    assert.equal(result.quality, '320k');
+    assert.equal(result.verifiedPlaybackCache, true);
+    assert.deepEqual(f.calls.map(call => call.url), ['/api/music/cache/select']);
+    assert.equal(f.calls[0].body.exactQuality, false);
+});
+
+test('known lower cache survives an outage, then next play uses a newly-published tier', async () => {
+    const f = setup();
+    const result = await f.resolve({ foregroundCache: true });
+    f.context.fetch = async url => {
+        assert.equal(url, '/api/music/cache/select');
+        return { ok: false, status: 503 };
+    };
+    assert.equal((await f.resolve({ foregroundCache: true })).url, result.url);
+    const upgraded = { ...ready, quality: 'flac', url: '/api/music/cache/file/example/new.flac?folder=cache' };
+    f.context.fetch = async url => {
+        assert.equal(url, '/api/music/cache/select');
+        return { ok: true, status: 200, json: async () => upgraded };
+    };
+    const fresh = await f.context.refreshPrefetchedCache(track, { ...result, isPrefetch: true, triedPlatforms: ['other'] }, 'flac', { foregroundCache: true });
+    assert.equal(fresh.url, upgraded.url);
+    assert.equal(fresh.quality, 'flac');
+    assert.equal(fresh.triedPlatforms, undefined);
+});
+
+test('no-provider guard on two failed foreground selector requests does not hide a genuine miss', async () => {
+    const f = setup({ status: 503 });
+    await assert.rejects(f.resolve({ foregroundCache: true }), err => err.code === 'CACHE_LOOKUP_UNAVAILABLE');
+    assert.deepEqual(f.calls.map(call => call.url), ['/api/music/cache/select', '/api/music/cache/select']);
+    const miss = setup({ cache: { exists: false } });
+    assert.equal((await miss.resolve({ foregroundCache: true })).sourceType, 'normal');
 });

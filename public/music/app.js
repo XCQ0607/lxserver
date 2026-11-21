@@ -5822,6 +5822,14 @@ function checkPlaybackStillCurrent(options) {
     }
 }
 
+const completedPlaybackHints = new Map();
+const canonicalPlaybackTier = quality => quality === 'flac24bit' ? 'hires' : quality;
+const playbackAccount = () => {
+    const owner = getUserAuthHeaders()['x-user-name'];
+    return owner && !['default', '_open', 'open'].includes(owner) ? owner : '';
+};
+const cacheLookupUnavailable = () => Object.assign(new Error('服务器缓存暂时无法连接，请重试'), { code: 'CACHE_LOOKUP_UNAVAILABLE' });
+
 async function checkPlaybackCache(members, quality, exactQuality, signal, excludedFiles) {
     const songs = members.map(member => {
         const { id, source, name, singer, interval } = cleanSongData(member);
@@ -5855,17 +5863,17 @@ async function checkPlaybackCache(members, quality, exactQuality, signal, exclud
                 }
             } finally { signal.removeEventListener('abort', onAbort); }
         }
-        // A renewal outliving this cache budget is a miss, not a final auth denial.
-        if (res.status === 401 && signal.aborted) return null;
+        // A renewal outliving this cache budget is neither a cache miss nor final auth denial.
+        if (res.status === 401 && signal.aborted) return { unavailable: true };
         if (res.status === 401 || res.status === 403) {
             throw Object.assign(new Error('登录已失效，请重新登录'), { status: res.status });
         }
         const result = res.ok ? await res.json() : null;
         assertAccount(getUserAuthHeaders());
-        return result;
+        return res.ok ? result : { unavailable: true };
     } catch (error) {
         if (error?.status === 401 || error?.status === 403 || (error?.name === 'AbortError' && !signal.aborted)) throw error;
-        return null;
+        return { unavailable: true };
     }
 }
 
@@ -5890,18 +5898,63 @@ async function resolvePlaybackCache(song, quality, options = {}) {
             if (members.length === 8) break;
         } catch (_) { /* Invalid alternate metadata must not invalidate the primary. */ }
     }
-    const signal = AbortSignal.timeout(1200);
-    const hit = await checkPlaybackCache(members, quality, !!options.exactQuality, signal, options.excludedFiles);
-    checkPlaybackStillCurrent(options);
+    const exact = options.foregroundCache !== true && !!options.exactQuality;
+    const owner = playbackAccount();
+    const contextKey = () => JSON.stringify([playbackAccount(), settings.serverCacheLocation || '',
+        settings.enableAutoSwitchSource !== false, canonicalPlaybackTier(quality), members.map(member => {
+            const track = cleanSongData(member);
+            return [track.id, track.source, track.name, track.singer, track.interval];
+        })]);
+    const context = contextKey();
+    const known = () => {
+        const hint = completedPlaybackHints.get(context);
+        if (!hint || hint.expires <= Date.now() || options.excludedFiles?.has(hint.fileKey) ||
+            (exact && !samePlaybackQuality(hint.result.quality, quality))) return null;
+        return hint.result;
+    };
+    if (options.foregroundCache && !options.excludedFiles?.size) {
+        const ready = known();
+        if (ready && samePlaybackQuality(ready.quality, quality)) return ready;
+    }
+    const lookup = async ms => {
+        const signal = AbortSignal.timeout(ms);
+        const hit = await checkPlaybackCache(members, quality, exact, signal, options.excludedFiles);
+        checkPlaybackStillCurrent(options);
+        if (contextKey() !== context || settings.preferServerCache === false) {
+            throw Object.assign(new Error('Cache selection superseded'), { name: 'AbortError' });
+        }
+        return signal.aborted ? { unavailable: true } : hit;
+    };
+    let hit;
+    try {
+        hit = await lookup(1200);
+        if (hit?.unavailable && options.foregroundCache) {
+            const fallback = known();
+            if (fallback) return fallback;
+            hit = await lookup(2200);
+            if (hit?.unavailable) throw cacheLookupUnavailable();
+        }
+    } catch (error) {
+        if (error?.status === 401 || error?.status === 403) completedPlaybackHints.clear();
+        throw error;
+    }
+    if (hit?.unavailable) return null;
     const key = getPlaybackCacheFileKey(hit?.url, hit?.folder);
     const member = hit && members[hit.memberIndex];
-    if (signal.aborted || settings.preferServerCache === false || !hit?.exists || !key ||
-        !Number.isInteger(hit.memberIndex) || !member || options.excludedFiles?.has(key) ||
+    if (!hit?.exists || !key || !Number.isInteger(hit.memberIndex) || !member || options.excludedFiles?.has(key) ||
         !window.QualityManager.QUALITY_PRIORITY.includes(hit.quality) ||
         (settings.enableAutoSwitchSource === false && (hit.isCollision || member !== song)) ||
-        (options.exactQuality && !samePlaybackQuality(hit.quality, quality))) return null;
-    return { url: authorizeMediaUrl(hit.url), quality: hit.quality, sourceType: 'server_cache',
-        folder: hit.folder, songInfo: member, switchedSource: member !== song, originalSource: song.source };
+        (exact && !samePlaybackQuality(hit.quality, quality))) {
+        completedPlaybackHints.delete(context);
+        return null;
+    }
+    const result = { url: authorizeMediaUrl(hit.url), quality: hit.quality, sourceType: 'server_cache',
+        folder: hit.folder, songInfo: member, switchedSource: member !== song, originalSource: song.source, verifiedPlaybackCache: true };
+    if (owner) {
+        if (completedPlaybackHints.size >= 24) completedPlaybackHints.delete(completedPlaybackHints.keys().next().value);
+        completedPlaybackHints.set(context, { result, fileKey: key, expires: Date.now() + 30000 });
+    }
+    return result;
 }
 
 async function refreshPrefetchedCache(song, result, quality = result.quality, options = {}) {
@@ -5909,7 +5962,7 @@ async function refreshPrefetchedCache(song, result, quality = result.quality, op
     if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url) return result;
     // A prefetched local result is a hint, not proof the same file still exists.
     const cached = await resolvePlaybackCache(song, quality, { ...options, resolvedSong: result.songInfo });
-    if (cached) return { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false };
+    if (cached) return { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false, triedPlatforms: undefined };
     if (result.sourceType === 'server_cache' ||
         (settings.preferServerCache === false && result.sourceType === 'openlist') ||
         (settings.enableAutoSwitchSource === false && result.switchedSource) ||
@@ -5929,7 +5982,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
         if (result.errorMsg) throw new Error(result.errorMsg);
         return result;
     } catch (error) {
-        if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE' || error.name === 'AbortError' || error.status === 401 || error.status === 403) {
+        if (disableFallback || error.code === 'CACHE_LOOKUP_UNAVAILABLE' || error.errorCode === 'NO_AVAILABLE_SOURCE' || error.name === 'AbortError' || error.status === 401 || error.status === 403) {
             throw error;
         }
 
@@ -6881,6 +6934,174 @@ function updateAdminUI() {
     });
 }
 
+// A background upgrade is never part of URL selection and never owns the audio
+// element. Only a validated selector hit can arm it, and only moving playback
+// can submit it. The NAS queue independently enforces one automatic transfer.
+let playbackCacheUpgrade = null;
+let activeCacheUpgrade = null;
+const cacheUpgradeAttempts = new Map();
+const CACHE_UPGRADE_TIERS = ['hires', 'flac', '320k', '192k', '128k'];
+const cacheUpgradeContext = () => JSON.stringify([
+    playbackAccount(), settings.serverCacheLocation || '',
+    settings.enableAutoSwitchSource !== false, settings.enableAutoSwitchApiSource !== false,
+]);
+const cacheUpgradeEnabled = () => Boolean(playbackAccount() && settings.enableServerCache === true &&
+    settings.preferServerCache !== false);
+const cacheUpgradeContextCurrent = job => cacheUpgradeEnabled() && job.context === cacheUpgradeContext();
+
+function armPlaybackCacheUpgrade(song, result, quality, requestId, explicitQuality) {
+    playbackCacheUpgrade = null;
+    if (!cacheUpgradeEnabled() || audio.isRemote || !result.verifiedPlaybackCache || !song) return;
+    const target = canonicalPlaybackTier(quality);
+    const wanted = CACHE_UPGRADE_TIERS.indexOf(target);
+    const actual = CACHE_UPGRADE_TIERS.indexOf(canonicalPlaybackTier(result.quality));
+    if (wanted < 0 || actual <= wanted) return;
+    const { id, source, name, singer, interval, meta = {} } = cleanSongData(song);
+    if (!id || !source || target === '128k') return;
+    // Send provider identity only, not a media URL, auth query, local path, or
+    // user-controlled quality/URL claims from the selected cache result.
+    const songInfo = { id, source, name, singer, interval, meta: {
+        songId: meta.songId, id: meta.id, strMediaMid: meta.strMediaMid,
+        hash: meta.hash, copyrightId: meta.copyrightId, albumMid: meta.albumMid,
+        albumId: meta.albumId, albumName: meta.albumName,
+    } };
+    const context = cacheUpgradeContext();
+    const key = JSON.stringify([context, source, id, target]);
+    playbackCacheUpgrade = { requestId, context, key, songInfo, quality: target, explicitQuality,
+        crossSource: settings.enableAutoSwitchSource !== false, switchApi: settings.enableAutoSwitchApiSource !== false,
+        progressed: 0 };
+}
+
+async function cacheUpgradeQueueRequest(suffix, payload) {
+    const res = await fetch(`${API_BASE}/cache${suffix}`, {
+        method: payload ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+        body: payload && JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`Background cache request failed (${res.status})`);
+    const response = await res.json();
+    if (response?.success === false) throw new Error('Background cache request failed');
+    return response.data;
+}
+
+function finishPlaybackCacheUpgrade(job, completed = false) {
+    if (activeCacheUpgrade !== job) return;
+    clearTimeout(job.pollTimer);
+    activeCacheUpgrade = null;
+    if (completed) window.ServerFileState?.repaintAll();
+}
+
+const terminalCacheUpgradeStatuses = ['finished', 'exists', 'error'];
+function observeCacheUpgrade(job, task) {
+    if (terminalCacheUpgradeStatuses.includes(task.status)) {
+        finishPlaybackCacheUpgrade(job, task.status !== 'error');
+    } else if (task.status === 'paused' && !job.pausedByPlayer) {
+        // Respect a manual pause; this client must not resume it.
+        finishPlaybackCacheUpgrade(job);
+    }
+}
+
+function pollPlaybackCacheUpgrade(job) {
+    if (activeCacheUpgrade !== job) return;
+    job.pollTimer = setTimeout(async () => {
+        if (activeCacheUpgrade !== job) return;
+        if (!cacheUpgradeContextCurrent(job) || Date.now() >= job.deadline) {
+            finishPlaybackCacheUpgrade(job);
+            return;
+        }
+        if (!job.control) {
+            try {
+                const tasks = await cacheUpgradeQueueRequest(`/queue?id=${encodeURIComponent(job.id)}`);
+                if (activeCacheUpgrade !== job || !cacheUpgradeContextCurrent(job)) return finishPlaybackCacheUpgrade(job);
+                if (!job.control && Array.isArray(tasks)) {
+                    const task = tasks.find(item => item.id === job.id && item.cacheUpgrade === true);
+                    if (!task) return finishPlaybackCacheUpgrade(job);
+                    observeCacheUpgrade(job, task);
+                }
+            } catch (_) { /* A transient status failure does not change playback. */ }
+        }
+        if (job.pauseRequested && !job.pausedByPlayer && job.pauseAttempts < 2) void pausePlaybackCacheUpgrade(job);
+        pollPlaybackCacheUpgrade(job);
+    }, 3000);
+}
+
+async function startPlaybackCacheUpgrade(candidate) {
+    if (activeCacheUpgrade || playbackCacheUpgrade !== candidate || !cacheUpgradeContextCurrent(candidate) ||
+        (!candidate.explicitQuality && canonicalPlaybackTier(settings.preferredQuality || 'flac') !== candidate.quality)) return;
+    const now = Date.now();
+    if ((cacheUpgradeAttempts.get(candidate.key) || 0) > now) return;
+    if (cacheUpgradeAttempts.size >= 24) cacheUpgradeAttempts.delete(cacheUpgradeAttempts.keys().next().value);
+    cacheUpgradeAttempts.set(candidate.key, now + 60000);
+    const job = activeCacheUpgrade = { ...candidate, pauseRequested: false, pausedByPlayer: false,
+        pauseAttempts: 0, stable: 0, deadline: now + 10 * 60 * 1000 };
+    try {
+        const tasks = await cacheUpgradeQueueRequest('/queue', { tasks: [{
+            cacheUpgrade: true, songInfo: job.songInfo, quality: job.quality,
+            enableAutoSwitchSource: job.crossSource, enableAutoSwitchApiSource: job.switchApi,
+        }] });
+        if (activeCacheUpgrade !== job || !cacheUpgradeContextCurrent(job)) return finishPlaybackCacheUpgrade(job);
+        const task = Array.isArray(tasks) && tasks.find(item => item.cacheUpgrade === true && /^lx_upgrade_[a-z0-9_-]+$/i.test(item.id));
+        if (!task) return finishPlaybackCacheUpgrade(job);
+        job.id = task.id;
+        observeCacheUpgrade(job, task);
+        if (job.pauseRequested) void pausePlaybackCacheUpgrade(job);
+        pollPlaybackCacheUpgrade(job);
+    } catch (_) {
+        finishPlaybackCacheUpgrade(job);
+    }
+}
+
+async function pausePlaybackCacheUpgrade(job = activeCacheUpgrade) {
+    if (!job || activeCacheUpgrade !== job || !cacheUpgradeContextCurrent(job)) return;
+    job.pauseRequested = true;
+    job.stable = 0;
+    if (!job.id || job.control || job.pausedByPlayer || job.pauseAttempts >= 2) return;
+    job.control = true;
+    job.pauseAttempts++;
+    try {
+        await cacheUpgradeQueueRequest('/stop', { queueId: job.id });
+        job.pausedByPlayer = true;
+        job.pauseRequested = false;
+    } catch (_) { /* Bounded retry on the next status poll. */ }
+    finally { job.control = false; }
+}
+
+async function resumePlaybackCacheUpgrade(job) {
+    if (activeCacheUpgrade !== job || !job.pausedByPlayer || job.control || job.resumed ||
+        !cacheUpgradeContextCurrent(job)) return;
+    job.resumed = true;
+    job.control = true;
+    try {
+        await cacheUpgradeQueueRequest('/queue/resume', { id: job.id });
+        job.pausedByPlayer = false;
+        job.pauseAttempts = 0;
+    } catch (_) { /* Do not repeatedly restart the transfer. */ }
+    finally {
+        job.control = false;
+        if (job.pauseRequested) void pausePlaybackCacheUpgrade(job);
+    }
+}
+
+let cacheUpgradePlayhead = null;
+function advancePlaybackCacheUpgrade() {
+    const position = audio.currentTime;
+    if (!Number.isFinite(position) || audio.isRemote || audio.paused || audio.ended || audio.seeking || audio.readyState < 3) {
+        cacheUpgradePlayhead = null;
+        return;
+    }
+    const delta = position - (cacheUpgradePlayhead ?? position);
+    cacheUpgradePlayhead = position;
+    // A seek or a single event fired on assigning src is not proof of playback.
+    if (delta <= 0 || delta > 1.5) return;
+    const job = activeCacheUpgrade;
+    if (job?.pausedByPlayer && !job.control && (job.stable += delta) >= 3) void resumePlaybackCacheUpgrade(job);
+    const candidate = playbackCacheUpgrade;
+    if (candidate?.requestId === currentRecoveryState?.thisRequestId && candidate && (candidate.progressed += delta) >= 0.35) {
+        void startPlaybackCacheUpgrade(candidate);
+    }
+}
+
 const watchedCacheSongKeys = new Set();
 
 /**
@@ -7246,6 +7467,46 @@ function playFromView(index) {
 }
 window.playFromView = playFromView;
 
+function canRetryCachedTransport(error, state, result) {
+    if (!state || state.cacheTransportRetried || !state.cacheMediaOwner ||
+        state.cacheMediaOwner !== playbackAccount() || state.cacheMediaScope !== cacheUpgradeContext() ||
+        (result?.switchedSource && settings.enableAutoSwitchSource === false) || !result?.verifiedPlaybackCache ||
+        result.sourceType !== 'server_cache') return false;
+    return error?.code === 2 || error?.name === 'NetworkError' || error?.code === 'PLAYBACK_CACHE_STALL';
+}
+
+async function retryCachedTransport(error, savedTime, state, result, isCurrent, signal) {
+    if (!canRetryCachedTransport(error, state, result)) return false;
+    state.cacheTransportRetried = true;
+    // A native MEDIA_ERR_NETWORK does not expose HTTP status. Ask the same
+    // same-origin file for two bytes, never ask a provider or follow a redirect.
+    try {
+        const timeout = AbortSignal.timeout(1500);
+        const response = await fetch(result.url, {
+            headers: { Range: 'bytes=0-1' }, cache: 'no-store', redirect: 'error',
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+        const closing = response.body?.cancel();
+        closing?.catch(() => {});
+        if (!isCurrent() || state.cacheMediaScope !== cacheUpgradeContext()) return true;
+        if (response.status === 401 || response.status === 403) {
+            throw Object.assign(new Error('登录已失效，请重新登录'), { status: response.status });
+        }
+        // Definitively absent, invalid, or not audio: use ordinary recovery.
+        if ((!response.ok && response.status < 500 && ![408, 429].includes(response.status)) ||
+            (response.ok && !/^audio\//i.test(response.headers.get('content-type') || ''))) return false;
+    } catch (probeError) {
+        if (probeError?.status === 401 || probeError?.status === 403) throw probeError;
+        // A transport failure is inconclusive, not proof that the file vanished.
+    }
+    if (!isCurrent() || state.cacheMediaScope !== cacheUpgradeContext()) return true;
+    const song = state.currentSong || state.originalSong;
+    if (!song) return false;
+    if (savedTime > 0) window._resumeInfo = { time: savedTime, song };
+    void playSong(song, state.currentIndex, result.quality, false, 'cache_transport', false, { ...result, isPrefetch: false });
+    return true;
+}
+
 async function runRecoveryFlow(error, savedResumeTime, state = currentRecoveryState, failedResult = null) {
     if (!state) return;
 
@@ -7263,6 +7524,8 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
 
     // A lost login session affects every track. Repair it before excluding providers.
     try {
+        if (failedResult && state.cacheMediaOwner &&
+            await retryCachedTransport(error, effectiveResumeTime, state, failedResult, isCurrent)) return;
         if (error?.status === 401 || error?.status === 403) {
             throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
         }
@@ -7286,7 +7549,14 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     // retry the same faulty file or hold up recovery with repeated local queries.
     if (failedResult?.sourceType === 'server_cache') {
         const key = getPlaybackCacheFileKey(failedResult.url, failedResult.folder);
-        if (key && (state.failedCacheFiles?.size || 0) < 8) (state.failedCacheFiles ||= new Set()).add(key);
+        if (key) {
+            if ((state.failedCacheFiles?.size || 0) < 8) (state.failedCacheFiles ||= new Set()).add(key);
+            if (typeof completedPlaybackHints !== 'undefined') {
+                for (const [context, hint] of completedPlaybackHints) {
+                    if (hint.fileKey === key) completedPlaybackHints.delete(context);
+                }
+            }
+        }
     }
     const wanted = state.cacheTargetQuality || state.originalQuality || state.currentQuality;
     const original = state.originalSong || state.currentSong;
@@ -7576,6 +7846,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
     }
 
+    playbackCacheUpgrade = null;
+    cacheUpgradePlayhead = null;
     const thisRequestId = ++loadingRequestCounter;
     prefetchManager.stop();
     currentLoadingSongId = thisRequestSongId;
@@ -7610,8 +7882,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             originalQuality: startQuality,
             currentQuality: startQuality,
             explicitQuality: !!forceQuality,
-            cacheTargetQuality: forceQuality || (settings.enableAutoDegradeQuality === false
-                ? startQuality : settings.preferredQuality || startQuality),
+            cacheTargetQuality: forceQuality || settings.preferredQuality || startQuality,
             triedQualities: [startQuality],
             triedPlatforms: [song.source],
             triedApiSourcesByPlatform: { [song.source]: [] },
@@ -7743,6 +8014,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             cacheQuality: currentRecoveryState?.cacheTargetQuality,
             excludedFiles: currentRecoveryState?.failedCacheFiles,
             requestReadThrough: !noPlay && !audio.isRemote,
+            foregroundCache: !noPlay && !audio.isRemote && !isRetry,
         };
         if (prefetchedResult) {
             urlResult = await refreshPrefetchedCache(song, prefetchedResult, playbackOptions.cacheQuality, playbackOptions);
@@ -7850,12 +8122,19 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             shouldAutoRecoverPlayback = false;
             return true;
         };
-        currentPlaybackErrorHandler = async () => {
+        currentPlaybackErrorHandler = async event => {
             if (!shouldAutoRecoverPlayback || !claimMediaRecovery()) return;
             prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
             currentPlaybackErrorHandler = null;
             const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
             const recoveryEpoch = currentRecoveryState?.recoveryEpoch;
+            const mediaError = audio.error || (event?.cacheTransportStall
+                ? Object.assign(new Error('音频缓冲超时停滞'), { code: 'PLAYBACK_CACHE_STALL' })
+                : new Error('媒体播放失败'));
+            if (canRetryCachedTransport(mediaError, currentRecoveryState, urlResult)) {
+                void runRecoveryFlow(mediaError, savedTime, currentRecoveryState, urlResult);
+                return;
+            }
             const isOnline = await checkServerOnline();
             if (currentRecoveryState?.thisRequestId !== thisRequestId || currentRecoveryState.recoveryEpoch !== recoveryEpoch) return;
             if (!isOnline) {
@@ -7865,11 +8144,16 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             if (['normal', 'cache'].includes(urlResult.sourceType)) {
                 try { localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`); } catch (_) { }
             }
-            const mediaError = audio.error || new Error('媒体播放失败');
             void runRecoveryFlow(mediaError, savedTime, currentRecoveryState, urlResult);
         };
         audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
 
+        if (currentRecoveryState) {
+            currentRecoveryState.cacheMediaOwner = urlResult.verifiedPlaybackCache ? playbackAccount() : '';
+            currentRecoveryState.cacheMediaScope = urlResult.verifiedPlaybackCache ? cacheUpgradeContext() : '';
+        }
+        if (!noPlay) armPlaybackCacheUpgrade(currentRecoveryState?.originalSong || song, urlResult,
+            currentRecoveryState?.cacheTargetQuality, thisRequestId, currentRecoveryState?.explicitQuality);
         audio.src = finalUrl;
         sourceAssigned = true;
 
@@ -7985,7 +8269,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
                 console.error('[Player] Playback failed:', playError);
                 const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
-                await runRecoveryFlow(playError, savedTime, currentRecoveryState, urlResult);
+                await runRecoveryFlow(audio.error || playError, savedTime, currentRecoveryState, urlResult);
             }
         }
 
@@ -7994,6 +8278,12 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
     } catch (error) {
         if (currentLoadingRequestId !== thisRequestId || error?.name === 'AbortError') return;
+        if (error?.code === 'CACHE_LOOKUP_UNAVAILABLE') {
+            setPlayerStatus('服务器缓存暂时无法连接，请重试');
+            showError(error.message);
+            updatePlayButton(false);
+            return;
+        }
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
@@ -8553,7 +8843,7 @@ function fadeVolume(targetVolume, duration = 800) {
 // Audio Events
 audio.addEventListener('timeupdate', () => {
     if (audio.currentTime > 0) lastKnownPlaybackTime = audio.currentTime;
-    if (playbackStallDetectionTimer && audio.currentTime > 0) {
+    if (playbackStallDetectionTimer && audio.currentTime > (audio._lxStallPosition ?? 0) + 0.25) {
         clearTimeout(playbackStallDetectionTimer);
         playbackStallDetectionTimer = null;
     }
@@ -8887,7 +9177,8 @@ audio.addEventListener('seeked', () => {
         }
     }
 });
-function handlePlaybackStallOrWait() {
+function handlePlaybackStallOrWait(event) {
+    if (event?.type === 'stalled' && !audio.isRemote && audio.readyState >= 3) return;
     setPlayerStatus('缓冲歌曲中', null, true);
     if (lyricPlayer) {
         lyricPlayer.pause();
@@ -8899,7 +9190,8 @@ function handlePlaybackStallOrWait() {
         const stallRequestId = currentRecoveryState?.thisRequestId;
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
         const stallWasRemote = !!audio.isRemote;
-
+        const playhead = audio.currentTime || 0;
+        audio._lxStallPosition = playhead;
         playbackStallDetectionTimer = setTimeout(() => {
             playbackStallDetectionTimer = null;
             if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
@@ -8907,9 +9199,22 @@ function handlePlaybackStallOrWait() {
             if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
             // Use the same request-level claim as native errors and play rejection.
             // The handler also performs server reachability and reconnect checks.
-            if (shouldAutoRecoverPlayback && currentPlaybackErrorHandler) void currentPlaybackErrorHandler();
+            if (shouldAutoRecoverPlayback && currentPlaybackErrorHandler && (audio.currentTime || 0) <= playhead + 0.25) {
+                void currentPlaybackErrorHandler({ cacheTransportStall: true });
+            }
         }, 4000);
     }
+}
+
+audio.addEventListener('timeupdate', advancePlaybackCacheUpgrade);
+audio.addEventListener('seeking', () => { cacheUpgradePlayhead = null; });
+for (const event of ['waiting', 'stalled']) {
+    audio.addEventListener(event, () => {
+        if (audio.isRemote || audio.paused || audio.ended || audio.readyState >= 3) return;
+        cacheUpgradePlayhead = null;
+        if (playbackCacheUpgrade) playbackCacheUpgrade.progressed = 0;
+        void pausePlaybackCacheUpgrade();
+    });
 }
 
 audio.addEventListener('waiting', handlePlaybackStallOrWait);
@@ -10610,6 +10915,7 @@ async function removeCacheItem(index) {
 
         const result = await res.json();
         if (res.ok && result.success) {
+            completedPlaybackHints.clear();
             showSuccess('已删除');
             refreshCacheList();
         } else {
@@ -10658,6 +10964,7 @@ async function batchDeleteCache() {
 
         const result = await res.json();
         if (result.deletedCount > 0) {
+            completedPlaybackHints.clear();
             exitCacheBatchMode();
             await refreshCacheList();
         }
@@ -10693,6 +11000,7 @@ async function clearServerCache() {
         const res = await fetch('/api/music/cache/clear', { method: 'POST', headers });
         if (res.ok) {
             const data = await res.json();
+            completedPlaybackHints.clear();
             showSuccess(`清理完成，释放 ${(data.data.freedSize / (1024 * 1024)).toFixed(2)} MB`);
             refreshCacheList();
             if (cacheBatchMode) exitCacheBatchMode();
