@@ -19,6 +19,8 @@ const SOURCES = ['kw', 'kg', 'tx', 'wy', 'mg']
 const MAX_LIMIT = 50
 // 电台候选不足时尝试补充 QQ 的歌曲级关联推荐
 const MIN_SIMILAR = 5
+// An explicit station can ask for a larger pool without changing normal auto-radio.
+const MAX_STATION_TARGET = 24
 
 export interface SimilarSeed {
   source?: string | null
@@ -40,6 +42,11 @@ export interface RadioTrack {
   name: string
   singer: string
   duration: number // 秒，未知为 0
+}
+
+export interface SimilarOptions {
+  /** Soft minimum for a station batch; never pad missing recommendations. */
+  target?: number
 }
 
 export interface SimilarDeps {
@@ -384,6 +391,15 @@ const hasSeedId = (song: any, seed: SimilarSeed): boolean => !!seed.source && so
     return !!id && id === validId(song[key])
   })
 
+const recommendationKeys = (song: any, seed: SimilarSeed) => {
+  if (!song?.name || hasSeedId(song, seed) || isSameSong(song, seed)) return null
+  // Keep seed replacements, derivative versions and invalid provider IDs out.
+  const name = normalizeText(song.name)
+  const id = playableId(song)
+  if (!id || !name || name === normalizeText(seed.name) || isVariant(song.name)) return null
+  return { name, id: `${song.source}_${id}` }
+}
+
 // 把电台推荐的一首歌对到某个平台上可播放的条目：歌名一致、歌手对得上，多个版本时取时长最接近的
 const resolveRadioTrack = async (track: RadioTrack, seed: SimilarSeed, sources: string[], deps: SimilarDeps): Promise<any | null> => {
   // 搜索词去掉括号里的附注（如「五月天 (Mayday)」「… - 电影主题曲」之类），否则容易搜不到
@@ -444,13 +460,25 @@ async function searchRadioCatalog<T>(parent: AbortSignal, deadline: number, run:
 }
 
 const resolveRadioTracks = async (tracks: RadioTrack[], seed: SimilarSeed, sources: string[], deps: SimilarDeps,
-  control: AbortController, deadline: number, limit: number) => {
+  control: AbortController, deadline: number, limit: number, target = 0) => {
   const resolved: any[] = new Array(tracks.length).fill(null)
   const settled = new Set<number>()
   const names = new Set<string>()
+  const accepted = target ? new Array<ReturnType<typeof recommendationKeys>>(tracks.length) : undefined
+  const countTargetedMatches = () => {
+    // Use the same rank and two-key dedupe as the final pool, not worker
+    // completion order. Overlapping IDs/titles cannot satisfy the goal.
+    const matchedNames = new Set<string>(), matchedIds = new Set<string>()
+    for (const keys of accepted || []) {
+      if (!keys || matchedNames.has(keys.name) || matchedIds.has(keys.id)) continue
+      matchedNames.add(keys.name)
+      matchedIds.add(keys.id)
+    }
+    return matchedNames.size
+  }
   const head = Math.min(RESOLVE_CONCURRENCY, limit, tracks.length)
   const headReady = () => Array.from({ length: head }, (_, i) => settled.has(i)).every(Boolean)
-  let cursor = 0, slots = limit, incomplete = false, inPrefixGrace = false
+  let cursor = 0, slots = limit, distinct = 0, incomplete = false, inPrefixGrace = false
   let grace: ReturnType<typeof setTimeout> | undefined
   const finishOrWaitForHead = () => {
     if (headReady()) control.abort()
@@ -460,7 +488,7 @@ const resolveRadioTracks = async (tracks: RadioTrack[], seed: SimilarSeed, sourc
     }
   }
   const worker = async () => {
-    while (!control.signal.aborted && slots > 0 && cursor < tracks.length) {
+    while (!control.signal.aborted && (target ? distinct < limit : slots > 0) && cursor < tracks.length) {
       const index = cursor++
       slots--
       let failedSearch = false
@@ -475,10 +503,17 @@ const resolveRadioTracks = async (tracks: RadioTrack[], seed: SimilarSeed, sourc
       const song = await resolveRadioTrack(tracks[index], seed, sources, scoped)
       if (control.signal.aborted) { incomplete = true; break }
       settled.add(index)
-      const key = song && normalizeText(song.name)
+      const keys = target ? recommendationKeys(song, seed) : null
+      if (accepted && keys) {
+        accepted[index] = keys
+        distinct = countTargetedMatches()
+      }
+      const key = target ? keys?.name : song && normalizeText(song.name)
       if (key) {
         resolved[index] = song
-        grace ??= setTimeout(finishOrWaitForHead, MATCH_GRACE_MS)
+        // Automatic radio can hand off a thin usable list quickly. A station
+        // top-up instead keeps searching, within the same hard stage deadline.
+        if (!grace && (!target || distinct >= target)) grace = setTimeout(finishOrWaitForHead, MATCH_GRACE_MS)
       }
       if (!key || names.has(key)) slots++ // try a lower-ranked candidate only for an unfilled slot
       if (key) names.add(key)
@@ -499,12 +534,12 @@ const CACHE_MAX = 200
 // then (only if necessary) the seed artist's catalog. Never shuffle across them.
 type SimilarPool = SimilarResult & { radioEnd: number, similarEnd: number }
 
-export const similarSongsCacheKey = (seed: SimilarSeed, limit: number): string => {
+export const similarSongsCacheKey = (seed: SimilarSeed, limit: number, target = 0): string => {
   const text = (s: unknown) => String(s ?? '').normalize('NFKC').trim().toLowerCase()
   // IDs are opaque. If absent, keep full credits and edition qualifiers so
   // different recordings do not share the same six-hour recommendation pool.
   return JSON.stringify([seed.source ?? '', String(seed.songId ?? ''), String(seed.songmid ?? ''),
-    text(seed.name), text(seed.singer), text(seed.album), limit])
+    text(seed.name), text(seed.singer), text(seed.album), limit, target])
 }
 
 const orderSimilarPool = (pool: SimilarPool, shuffle: SimilarDeps['shuffle']): SimilarResult => {
@@ -545,15 +580,16 @@ const resolveTxSongId = async (seed: SimilarSeed, deps: SimilarDeps): Promise<st
 export const createSimilarSongResolver = (defaults: SimilarDeps) => {
   const resultCache = new Map<string, { expires: number, result: SimilarPool }>()
   const building = new Map<string, Promise<SimilarPool>>()
-  return async (seed: SimilarSeed, limit = 30, deps: SimilarDeps = defaults): Promise<SimilarResult> => {
+  return async (seed: SimilarSeed, limit = 30, deps: SimilarDeps = defaults, { target: wanted = 0 }: SimilarOptions = {}): Promise<SimilarResult> => {
     const safeLimit = Math.min(Math.max(parseInt(String(limit)) || 30, 1), MAX_LIMIT)
-    const cacheKey = deps === defaults ? similarSongsCacheKey(seed, safeLimit) : ''
+    const target = Number.isFinite(wanted) ? Math.max(0, Math.min(Math.floor(wanted), MAX_STATION_TARGET, safeLimit)) : 0
+    const cacheKey = deps === defaults ? similarSongsCacheKey(seed, safeLimit, target) : ''
     const cached = cacheKey ? resultCache.get(cacheKey) : undefined
     let result = cached && cached.expires > Date.now() ? cached.result : null
     if (!result) {
       const pending = cacheKey && building.get(cacheKey)
       if (pending) return orderSimilarPool(await pending, deps.shuffle)
-      const build = buildSimilarSongs(seed, safeLimit, deps)
+      const build = buildSimilarSongs(seed, safeLimit, deps, target)
       if (cacheKey) building.set(cacheKey, build)
       try {
         result = await build
@@ -561,7 +597,7 @@ export const createSimilarSongResolver = (defaults: SimilarDeps) => {
           if (resultCache.size >= CACHE_MAX) resultCache.delete(resultCache.keys().next().value as string)
           // A brief provider outage should not turn a catalog-only or thin answer
           // into this recording's recommendations for the rest of the day.
-          const ttl = !result.incomplete && result.similarEnd >= Math.min(MIN_SIMILAR, safeLimit) ? CACHE_TTL : 60_000
+          const ttl = !result.incomplete && result.similarEnd >= (target || Math.min(MIN_SIMILAR, safeLimit)) ? CACHE_TTL : 60_000
           resultCache.set(cacheKey, { expires: Date.now() + ttl, result })
         }
       } finally {
@@ -574,25 +610,18 @@ export const createSimilarSongResolver = (defaults: SimilarDeps) => {
 
 export const fetchSimilarSongs = createSimilarSongResolver(defaultDeps)
 
-const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: SimilarDeps) => {
+const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: SimilarDeps, target: number) => {
   const deadline = performance.now() + TOTAL_MS
-  const minCount = Math.min(safeLimit, MIN_SIMILAR)
+  const minCount = target || Math.min(safeLimit, MIN_SIMILAR)
   const list: any[] = []
   const seenIds = new Set<string>()
   const seenNames = new Set<string>()
   const add = (song: any): boolean => {
-    if (!song?.name || hasSeedId(song, seed) || isSameSong(song, seed)) return false
-    // 不推荐种子歌曲自己的其他版本（翻唱、DJ 版等），也不推荐任何衍生版本
-    const baseName = normalizeText(song.name)
-    if (!baseName || baseName === normalizeText(seed.name) || isVariant(song.name)) return false
-    const rawId = playableId(song)
-    if (!rawId) return false
-    const idKey = `${song.source}_${rawId}`
+    const keys = recommendationKeys(song, seed)
     // 同名歌曲只留一首：另一位歌手的同名歌多半是同一首歌的翻唱
-    const nameKey = baseName
-    if (seenIds.has(idKey) || seenNames.has(nameKey)) return false
-    seenIds.add(idKey)
-    seenNames.add(nameKey)
+    if (!keys || seenIds.has(keys.id) || seenNames.has(keys.name)) return false
+    seenIds.add(keys.id)
+    seenNames.add(keys.name)
     list.push(song)
     return true
   }
@@ -607,7 +636,7 @@ const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: Sim
       const tracks = (await withSourceRequestSignal(control.signal, () => deps.radio(seed)))
         .filter(track => normalizeText(track.name) !== normalizeText(seed.name) && !isVariant(track.name))
         .slice(0, Math.min(MAX_LIMIT, safeLimit + RESOLVE_CONCURRENCY))
-      return resolveRadioTracks(tracks, seed, sources, deps, control, radioDeadline, safeLimit)
+      return resolveRadioTracks(tracks, seed, sources, deps, control, radioDeadline, safeLimit, target)
     })
     incomplete = radio.incomplete
     for (const song of radio.songs) add(song)
@@ -618,7 +647,7 @@ const buildSimilarSongs = async (seed: SimilarSeed, safeLimit: number, deps: Sim
   }
 
   const radioEnd = list.length
-  const fillDeadline = radioEnd ? deadlineAfter(TOP_UP_MS, deadline) : deadline
+  const fillDeadline = radioEnd && !target ? deadlineAfter(TOP_UP_MS, deadline) : deadline
   if (list.length < minCount) {
     try {
       const similar = await inWindow(deadlineAfter(QQ_MS, fillDeadline), async control => {

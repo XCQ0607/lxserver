@@ -6733,7 +6733,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             name,
             singer: urlObj.searchParams.get('singer'),
             album: urlObj.searchParams.get('album'),
-          }, parseInt(urlObj.searchParams.get('limit') || '30'))
+          }, parseInt(urlObj.searchParams.get('limit') || '30'), undefined, {
+            target: Number(urlObj.searchParams.get('target') || 0),
+          })
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(data))
         } catch (err: any) {
