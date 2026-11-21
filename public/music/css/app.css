@@ -2696,7 +2696,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     height: 40px;
     flex-shrink: 0;
     border-radius: 9999px;
-    background: #10b981;
+    background-color: var(--c-500, #10b981);
     color: #ffffff;
     font-size: 14px;
 }
