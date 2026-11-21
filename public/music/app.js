@@ -17888,7 +17888,8 @@ window.addEventListener('resize', () => {
             }
         }
     } else if (sidebar) {
-        // Ensure default closed state for mobile if not explicitly open
+        // Clear the desktop class, not the saved preference. The local directory panel also reads this class.
+        sidebar.classList.remove('desktop-collapsed');
         if (!sidebar.classList.contains('translate-x-0')) {
             sidebar.classList.add('-translate-x-full');
         }

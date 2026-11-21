@@ -41,9 +41,22 @@ async function setup(page, collapsed) {
         window.currentPlaylist = []; window.currentIndex = 0;
         window.playSongFromQueue = index => window.ordinaryPlays.push(index);
     }, collapsed);
+    await page.addScriptTag({ path: path.join(root, 'js/local/customDir.js') });
     await page.addScriptTag({ content: sidebar });
     await page.addScriptTag({ path: path.join(root, 'js/ui/ui_accessibility.js') });
-    await page.evaluate(() => document.dispatchEvent(new Event('DOMContentLoaded')));
+    await page.evaluate(() => {
+        document.dispatchEvent(new Event('DOMContentLoaded'));
+        window.CustomDirManager.isActive = true;
+        window.CustomDirManager.syncSidePanel();
+    });
+}
+async function assertDirectoryMode(page, showsPanel, savedPreference) {
+    assert.deepEqual(await page.evaluate(() => ({
+        collapsed: document.getElementById('main-sidebar').classList.contains('desktop-collapsed'),
+        panel: !document.getElementById('cd-dir-side-panel').classList.contains('hidden'),
+        filter: !document.getElementById('cd-dir-filter-container').classList.contains('hidden'),
+        preference: localStorage.getItem('desktop_sidebar_collapsed'),
+    })), { collapsed: showsPanel, panel: showsPanel, filter: !showsPanel, preference: String(savedPreference) });
 }
 async function radio(page, host, expected, touch) {
     const row = page.locator(host).first();
@@ -64,11 +77,12 @@ async function radio(page, host, expected, touch) {
     for (const [engine, launcher] of [['chromium', chromium], ['webkit', webkit]]) {
         const browser = await launcher.launch();
         try {
-            for (const [width, height] of (process.env.SKIP_NAV ? [] : [[320, 568], [390, 844], [768, 620], [844, 390], [951, 584], [1024, 650]])) {
+            for (const [width, height] of (process.env.SKIP_NAV ? [] : [[768, 620], [320, 568], [390, 844], [844, 390], [951, 584], [1024, 650]])) {
                 for (const collapsed of [false, true]) {
                     const context = await browser.newContext({ viewport: { width, height }, isMobile: true, hasTouch: true });
                     const page = await context.newPage(); const errors = []; page.on('pageerror', e => errors.push(e.message));
                     await setup(page, collapsed);
+                    await assertDirectoryMode(page, false, collapsed);
                     for (let cycle = 0; cycle < 3; cycle++) {
                         await page.locator('#test-nav-open').tap(); await page.waitForTimeout(330);
                         assert.equal(await page.locator('#main-sidebar').evaluate(el => el.inert), false);
@@ -83,9 +97,10 @@ async function radio(page, host, expected, touch) {
                     }
                     // Return to desktop, then mobile; preserve preference without stale modal isolation.
                     await page.setViewportSize({ width: 1280, height: 900 }); await page.waitForTimeout(330);
-                    assert.equal(await page.locator('#main-sidebar').evaluate(el => el.classList.contains('desktop-collapsed')), collapsed);
+                    await assertDirectoryMode(page, collapsed, collapsed);
                     assert.equal(await page.locator('#search-input').evaluate(el => !!el.closest('[inert]')), false);
                     await page.setViewportSize({ width, height }); await page.waitForTimeout(330);
+                    await assertDirectoryMode(page, false, collapsed);
                     await page.locator('#test-nav-open').tap(); await page.waitForTimeout(330);
                     assert.equal(Math.round((await page.locator('#main-sidebar').boundingBox()).width), 288);
                     await page.touchscreen.tap(width - 8, 180); await page.waitForTimeout(330);
