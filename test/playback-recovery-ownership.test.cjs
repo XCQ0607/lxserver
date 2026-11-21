@@ -9,7 +9,7 @@ function setup(noPlay = false) {
     const pending = new Promise(resolve => { release = resolve; });
     const timers = [];
     const context = vm.createContext({
-        console, noPlay, thisRequestId: 7, playbackRecoveryTriggeredForRequestId: 0,
+        console, settings: {}, playbackAccount: () => '', noPlay, thisRequestId: 7, playbackRecoveryTriggeredForRequestId: 0,
         shouldAutoRecoverPlayback: !noPlay, currentRecoveryState: { thisRequestId: 7 },
         currentPlayingSong: { id: 'track' }, song: { id: 'track' }, playbackSong: { id: 'track' },
         prefetchedResult: null, prefetchQuality: 'flac', currentQuality: '320k', targetQuality: 'flac', index: 0,
@@ -23,7 +23,9 @@ function setup(noPlay = false) {
         reconnectServerAndResume: () => assert.fail('must not reconnect an online server'),
         setTimeout: fn => { timers.push(fn); return 1; },
     });
-    vm.runInContext(between('// A native media event and play() rejection', '        audio.src = finalUrl;') +
+    vm.runInContext(between('let playbackCacheUpgrade', 'const watchedCacheSongKeys') +
+        between('function canRetryCachedTransport(', 'async function retryCachedTransport(') +
+        between('// A native media event and play() rejection', '        audio.src = finalUrl;') +
         between('function handlePlaybackStallOrWait(', "audio.addEventListener('waiting'"), context);
     return { context, timers, release, calls: () => calls };
 }
