@@ -6788,9 +6788,22 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             const source = songInfo.source
             let result: any
 
+            // custom（自定义目录）歌曲的音频只存在于本站，没有任何可替换的外部音源。
+            // 前端在音频加载失败后会把这首歌回退到本接口换取播放地址，若这里按「平台源」处理
+            // 就会抛 PLATFORM_SOURCE_UNAVAILABLE，前端据此认定该曲无解并自动切歌。
+            // 因此对已带本地直链的 custom 歌曲，直接原样回传该直链。
+            const customLocalUrl = (source === 'custom' || songInfo._isCustomDir || songInfo.folder === 'custom') &&
+              typeof songInfo.url === 'string' && songInfo.url.startsWith('/api/music/custom/file')
+              ? songInfo.url
+              : null
+            if (customLocalUrl) {
+              console.log(`[歌曲播放] custom 目录歌曲直接回传本地直链 (请求ID: ${reqId || '无'})`)
+              result = { url: customLocalUrl, source, quality: quality || '320k' }
+            }
+
             let customSourceError: string | null = null
             let attempts: any[] = []
-            if (isSourceSupported(source, verifiedUsername)) {
+            if (!result && isSourceSupported(source, verifiedUsername)) {
               try {
                 console.log(`[歌曲播放] 使用自定义源解析: ${source} (请求ID: ${reqId || '无'}, 用户: ${verifiedUsername})`)
 

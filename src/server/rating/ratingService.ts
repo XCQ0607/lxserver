@@ -11,6 +11,70 @@ import { getCacheDir } from '../music/fileCache'
 import { getCustomMusicDir } from '../music/customMusicManager'
 
 const metaFile = (user: string) => path.join(global.lx.userPath, getUserDirname(user), 'subsonic-meta.json')
+/**
+ * 评分解析是批量接口（一次最多 100 首），逐首遍历整个本地曲库并 realpath 会让复杂度退化成
+ * O(歌曲数 × 曲库)，曲库上万首时单次请求可阻塞事件循环数秒，进而拖垮同进程的其它接口。
+ * getLocalTracks 在缓存期内返回同一数组引用，因此按引用缓存三张索引，整库 realpath 只做一次。
+ */
+const fileIndexCache = new WeakMap<object, Map<string, any>>()
+function localFileIndex(tracks: any[]): Map<string, any> {
+  const cached = fileIndexCache.get(tracks)
+  if (cached) return cached
+  const index = new Map<string, any>()
+  for (const track of tracks) {
+    try {
+      const resolved = localFile(track)
+      if (resolved && !index.has(resolved)) index.set(resolved, track)
+    } catch { /* 单个曲目不可读不影响整库索引 */ }
+  }
+  fileIndexCache.set(tracks, index)
+  return index
+}
+const idIndexCache = new WeakMap<object, Map<string, any>>()
+function localIdIndex(tracks: any[]): Map<string, any> {
+  const cached = idIndexCache.get(tracks)
+  if (cached) return cached
+  const index = new Map<string, any>()
+  for (const track of tracks) if (track && typeof track.id === 'string' && !index.has(track.id)) index.set(track.id, track)
+  idIndexCache.set(tracks, index)
+  return index
+}
+/** 只收录文件仍可解析的曲目，保持原先 `t.id === id && localFile(t)` 的语义。 */
+const resolvedIdIndexCache = new WeakMap<object, Map<string, any>>()
+function localResolvedIdIndex(tracks: any[]): Map<string, any> {
+  const cached = resolvedIdIndexCache.get(tracks)
+  if (cached) return cached
+  const index = new Map<string, any>()
+  for (const track of localFileIndex(tracks).values()) {
+    if (track && typeof track.id === 'string' && !index.has(track.id)) index.set(track.id, track)
+  }
+  resolvedIdIndexCache.set(tracks, index)
+  return index
+}
+const ratingIdCountCache = new WeakMap<object, Map<string, number>>()
+function localRatingIdCount(tracks: any[], ratingId: string): number {
+  let index = ratingIdCountCache.get(tracks)
+  if (!index) {
+    index = new Map<string, number>()
+    for (const track of tracks) {
+      const key = localRatingId(track)
+      if (key) index.set(key, (index.get(key) || 0) + 1)
+    }
+    ratingIdCountCache.set(tracks, index)
+  }
+  return index.get(ratingId) || 0
+}
+/** 批量解析时同一请求内会反复汇总评分，短 TTL 缓存避免重复同步读取多个 JSON。 */
+const listItemsCache = new Map<string, { at: number, rows: any[] }>()
+const LIST_ITEMS_TTL = 2000
+function listRatingItemsCached(user: string): any[] {
+  const hit = listItemsCache.get(user)
+  if (hit && Date.now() - hit.at < LIST_ITEMS_TTL) return hit.rows
+  const rows = listRatingItems(user)
+  listItemsCache.set(user, { at: Date.now(), rows })
+  return rows
+}
+function invalidateRatingItemsCache(user: string) { listItemsCache.delete(user) }
 export const readRatings = (user: string): any => {
   const file = metaFile(user)
   recoverRatingTransaction(path.dirname(file))
@@ -52,7 +116,7 @@ export async function resolveRatingId(user: string, song: any): Promise<string> 
     if (!root) throw new Error('Local storage unavailable')
     const file = localFile({ root, filename })
     const tracks = await getLocalTracks(user, false, folder === 'custom' ? undefined : location)
-    let track = file ? tracks.find(t => localFile(t) === file) : undefined
+    let track = file ? localFileIndex(tracks).get(file) : undefined
     if (!file) {
       // 仅接受由本地文件注册表记录的改名别名，不按歌名或在线ID猜测文件。
       const actualRoot = fs.realpathSync(root)
@@ -61,7 +125,7 @@ export async function resolveRatingId(user: string, song: any): Promise<string> 
       const registryFile = path.join(path.dirname(metaFile(user)), 'subsonic-local-registry.json')
       const registry = fs.existsSync(registryFile) ? JSON.parse(fs.readFileSync(registryFile, 'utf8')) : { tracks: {} }
       const prior = registry.tracks?.[key]
-      if (prior) track = tracks.find(t => t.id === prior.id && localFile(t))
+      if (prior) track = localResolvedIdIndex(tracks).get(prior.id)
     }
     if (!track) throw new Error('该文件不在当前用户本地曲库中，请刷新本地列表')
     return localRatingId(track)
@@ -77,7 +141,7 @@ export async function resolveRatingId(user: string, song: any): Promise<string> 
 }
 export async function resolveStoredRatingId(user: string, id: string): Promise<string> {
   if (!id.startsWith('local_')) return id
-  const track = (await getLocalTracks(user)).find(t => t.id === id)
+  const track = localIdIndex(await getLocalTracks(user)).get(id)
   if (track) return localRatingId(track)
   if (Object.hasOwn(readRatings(user).ratings, id)) return id
   throw new Error('Unknown local song')
@@ -147,6 +211,7 @@ export async function writeRatingUnlocked(user: string, id: string, rating: numb
     const result = await flushRatingSnapshot(user); snapshotWarning = result || snapshotWarning
   }
   if (options.onlyMissing) setRatingTask(user, 'backfill:' + id, null)
+  invalidateRatingItemsCache(user)
   return { id, meta, snapshotWarning, unchanged }
 }
 
@@ -197,11 +262,11 @@ export async function ratingIdentityDetails(user: string, song: any, details = f
   const identity = local ? (id.startsWith('local_') ? 'local' : 'linked-online') : 'online'
   if (!details) return { id, identity }
   const tracks = await getLocalTracks(user)
-  const related = tracks.filter(t => localRatingId(t) === id)
-  const rows = listRatingItems(user)
+  const related = localRatingIdCount(tracks, id)
+  const rows = listRatingItemsCached(user)
   return { id, identity,
     target: rows.find(x => x.id === id) || { id },
-    linkedCopies: related.length }
+    linkedCopies: related }
 }
 
 function ratingDescriptor(id: string, song: any) {

@@ -301,6 +301,10 @@ let serverReconnectTimer = null;
 let serverReconnectAbortCtrl = null;
 let playbackStallDetectionTimer = null;
 let lastKnownPlaybackTime = 0;
+// custom 目录歌曲只有本站一个音源，播放失败时原地重试需要有次数上限，避免坏文件无限重试。
+let customRetryState = { id: null, count: 0, at: 0 };
+const CUSTOM_RETRY_LIMIT = 2;
+const CUSTOM_RETRY_WINDOW = 60000;
 
 async function checkServerOnline() {
     try {
@@ -7721,6 +7725,23 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 return;
             }
 
+            // custom 目录歌曲没有外部换源平台：换源必然 500，前端就会判定无解并自动切歌。
+            // 这里只做原地重试（重新解析本地直链），并设次数上限，绝不换源/切歌。
+            if (playbackSong?.source === 'custom' || playbackSong?._isCustomDir || playbackSong?.folder === 'custom') {
+                shouldAutoRecoverPlayback = false;
+                const customSongId = cleanSongData(playbackSong).id;
+                const retryExpired = Date.now() - customRetryState.at > CUSTOM_RETRY_WINDOW;
+                const customRetryCount = (!retryExpired && customRetryState.id === customSongId) ? customRetryState.count : 0;
+                if (customRetryCount < CUSTOM_RETRY_LIMIT) {
+                    customRetryState = { id: customSongId, count: customRetryCount + 1, at: Date.now() };
+                    console.warn(`[Player] custom 目录源播放失败，原地重试 ${customRetryCount + 1}/${CUSTOM_RETRY_LIMIT}（不换源不切歌）`);
+                    playSong(playbackSong, index, targetQuality, noPlay, true);
+                    return;
+                }
+                customRetryState = { id: null, count: 0, at: 0 };
+                console.warn('[Player] custom 目录源连续失败已达上限，交给默认恢复流程');
+            }
+
             playbackRecoveryTriggeredForRequestId = thisRequestId;
             shouldAutoRecoverPlayback = false;
             try {
@@ -8502,6 +8523,7 @@ audio.addEventListener('play', () => {
 
 audio.addEventListener('playing', () => {
     // [Fix] 'playing' 事件表示音频真正开始震动输出，此时同步最准确
+    if (customRetryState.id) customRetryState = { id: null, count: 0, at: 0 }; // 播放成功，重置 custom 原地重试计数
     setPlayerStatus('', true); // 恢复正常播放状态
     if ('mediaSession' in navigator) {
         updatePositionState(); // 立即同步
@@ -8756,6 +8778,12 @@ function handlePlaybackStallOrWait() {
         const stallRequestId = currentRecoveryState?.thisRequestId;
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
         const stallWasRemote = !!audio.isRemote;
+        // 本地/自定义曲库通常是几十 MB 的无损原文件（WAV/FLAC），慢网下缓冲本身就要更久。
+        // 仍按 4 秒判死会反复误触发恢复（历史上还会连锁跳到下一首），这里单独放宽。
+        const stallSong = currentPlayingSong || null;
+        const stallIsLocalStream = !!(stallSong && (stallSong.isLocal || stallSong.source === 'local' ||
+            stallSong.source === 'custom' || stallSong._isCustomDir || stallSong.folder === 'custom'));
+        const stallTimeoutMs = stallIsLocalStream ? 15000 : 4000;
 
         playbackStallDetectionTimer = setTimeout(async () => {
             playbackStallDetectionTimer = null;
@@ -8763,7 +8791,7 @@ function handlePlaybackStallOrWait() {
             if (audio.paused || audio.ended || isServerReconnecting) return;
             if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
 
-            // 超过 4 秒一直处于卡顿状态，探测服务端连通性
+            // 超过阈值一直处于卡顿状态，探测服务端连通性（本地/自定义流为 15 秒）
             const isOnline = await checkServerOnline();
             if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
             if (audio.paused || audio.ended || isServerReconnecting) return;
@@ -8779,7 +8807,7 @@ function handlePlaybackStallOrWait() {
                 shouldAutoRecoverPlayback = false;
                 void runRecoveryFlow(new Error('音频缓冲超时停滞'), savedTime);
             }
-        }, 4000);
+        }, stallTimeoutMs);
     }
 }
 
