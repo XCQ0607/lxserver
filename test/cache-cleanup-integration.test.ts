@@ -109,6 +109,9 @@ test('production index scan skips a file removed after enumeration and continues
     } } },
     cleanupStaleTempFiles: () => {}, getCacheDir: () => root,
     indexManager: { load: () => index, save: () => { saved = true } },
+    READ_THROUGH_STAGING_DIR: '.lx-read-through',
+    READ_THROUGH_CACHE_FILENAME: /^lx-readthrough-[a-f0-9]{32}\.mp3$/,
+    CACHE_UPGRADE_FILENAME: /^lx-upgrade-[a-f0-9]{32}\.(?:mp3|flac)$/,
     COVER_CHECK_VERSION: 4, needsQualityCorrection: () => false,
   }
   vm.createContext(context)
