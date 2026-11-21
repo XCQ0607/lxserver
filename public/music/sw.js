@@ -1,4 +1,4 @@
-const CACHE_NAME = 'lx-music-web-v67-sidebar-controls';
+const CACHE_NAME = 'lx-music-web-v67-sidebar-controls-2';
 // Refresh mobile navigation, playlist scrolling and native route controls.
 const ASSETS_TO_CACHE = [
     './',

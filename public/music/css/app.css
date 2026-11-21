@@ -2489,3 +2489,10 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 }
 .player-route-button:focus-visible { outline: 2px solid var(--c-500, #10b981); outline-offset: 2px; }
 .player-route-button:disabled { opacity: 0.45; cursor: not-allowed; }
+/* AirPlay uses the native route glyph without a second, painted button frame.
+   Keep the connected color/dot and visible keyboard focus from the shared control. */
+#btn-airplay {
+    flex-basis: 44px; width: 44px; min-width: 44px; min-height: 44px;
+    border: 0; background: transparent;
+}
+#btn-airplay[aria-pressed="true"]::after { right: 7px; top: 7px; }

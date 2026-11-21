@@ -60,6 +60,38 @@ const server=http.createServer((req,res)=>{
       for(const id of shown) {
         const button=page.locator('#'+id),box=await button.boundingBox();
         assert.ok(box.width>0 && box.x>=0 && box.y>=footer.y && box.y+box.height<=height+1,engine+' '+width+' '+id+' usable');
+        if(id==='btn-cast') {
+          assert.equal(await button.evaluate(el=>getComputedStyle(el).borderWidth),'1px','Chromecast chrome is unchanged');
+        } else {
+          const style=()=>button.evaluate(el=>{
+            const css=getComputedStyle(el), dot=getComputedStyle(el,'::after');
+            return {border:css.borderWidth,background:css.backgroundColor,color:css.color,dot:dot.content};
+          });
+          const idle=await style();
+          assert.equal(idle.border,'0px','AirPlay must have no outer frame');
+          assert.equal(idle.background,'rgba(0, 0, 0, 0)','AirPlay must not paint a background box');
+          assert.ok(box.width>=44 && box.height>=44,'AirPlay keeps a 44 px target');
+          assert.equal(await button.evaluate(el=>{
+            const r=el.getBoundingClientRect();
+            return [r.left+3,r.left+r.width/2,r.right-3].every(x=>
+              [r.top+3,r.top+r.height/2,r.bottom-3].every(y=>el.contains(document.elementFromPoint(x,y))));
+          }),true,'the entire AirPlay target must belong to its button');
+          await button.evaluate(el=>el.setAttribute('aria-pressed','true'));
+          await page.waitForTimeout(170);
+          const active=await style();
+          assert.equal(active.border,idle.border);
+          assert.equal(active.background,idle.background);
+          assert.notEqual(active.color,idle.color,'AirPlay active color changes');
+          assert.notEqual(active.dot,'none','AirPlay keeps a non-color connected marker');
+          if(!touch) {
+            await page.keyboard.press('Tab');
+            await button.focus();
+            assert.equal(await button.evaluate(el=>el.matches(':focus-visible') && getComputedStyle(el).outlineWidth==='2px'),true,'keyboard focus stays visible');
+            await button.evaluate(el=>el.blur());
+          }
+          await button.evaluate(el=>el.setAttribute('aria-pressed','false'));
+          await page.waitForTimeout(170);
+        }
       }
       routeProof.push({route,footerHeight:Math.round(footer.height)});
     }
