@@ -129,6 +129,8 @@
             while (branch.parentElement && branch.parentElement !== document.documentElement) {
                 for (const sibling of branch.parentElement.children) {
                     if (sibling === branch || ['SCRIPT', 'STYLE', 'LINK'].includes(sibling.tagName)) continue;
+                    // The active navigation backdrop is a dismiss control, not background content.
+                    if (top.id === 'main-sidebar' && sibling.id === 'mobile-sidebar-backdrop') continue;
                     background.set(sibling, sibling.inert);
                     sibling.inert = true;
                 }
