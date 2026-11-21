@@ -290,7 +290,6 @@ window.LeaderboardManager = (function () {
 
         if (typeof window.lazyLoadImages === 'function') window.lazyLoadImages();
         if (typeof window.applyMarqueeChecks === 'function') window.applyMarqueeChecks();
-        container.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, state.songs[Number(button.dataset.ratingIndex)]));
         for (const entry of pageList) {
             const row = container.querySelector(`#lb-row-${entry.originalIndex}`);
             const actions = row?.querySelector('.song-row-actions');
@@ -299,11 +298,21 @@ window.LeaderboardManager = (function () {
             const popup = menu.querySelector('.queue-actions-menu');
             for (const action of [...actions.querySelectorAll('button')]) {
                 if (!['下载', '评分', '不喜欢', '取消不喜欢'].includes(action.title)) continue;
-                const label = document.createElement('span'); label.textContent = ' ' + action.title;
+                if (action.hasAttribute('data-rating-index')) {
+                    action.classList.add('rating-menu-item');
+                    const icon = document.createElement('span');
+                    icon.className = 'song-action-icon';
+                    icon.textContent = '☆';
+                    icon.setAttribute('aria-hidden', 'true');
+                    action.replaceChildren(icon);
+                }
+                const label = document.createElement('span'); label.textContent = action.title;
                 action.appendChild(label); popup.appendChild(action);
             }
             actions.appendChild(menu);
         }
+        // Attach after migration so score refresh keeps the same icon and label columns.
+        container.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, state.songs[Number(button.dataset.ratingIndex)]));
         window.ServerFileState?.paintBadges(container);
     }
 

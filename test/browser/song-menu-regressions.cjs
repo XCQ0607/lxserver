@@ -46,6 +46,7 @@ async function setup(page, collapsed) {
     await page.addScriptTag({ content: sidebar });
     await page.addScriptTag({ content: helpers + '\nwindow.createSongMoreMenu=createSongMoreMenu;if(typeof createSongAddMenu==="function")window.createSongAddMenu=createSongAddMenu;' });
     await page.addScriptTag({ path: path.join(root, 'js/ui/ui_accessibility.js') });
+    await page.addScriptTag({ path: path.join(root, 'js/library/rating_manager.js') });
     await page.evaluate(() => document.dispatchEvent(new Event('DOMContentLoaded')));
 }
 async function radio(page, host, expected, touch) {
@@ -55,6 +56,23 @@ async function radio(page, host, expected, touch) {
     if (touch) await menu.locator('summary').tap(); else await menu.locator('summary').click();
     const button = menu.locator('[data-start-radio]');
     await button.waitFor({ state: 'visible' });
+    const alignment = await menu.locator('.queue-actions-menu').evaluate(el => {
+        const rows = [...el.querySelectorAll(':scope > button')];
+        return rows.map(row => {
+            const label = row.querySelector('span:not(.song-action-icon)');
+            const icon = row.querySelector('i, .song-action-icon');
+            return { label: label?.getBoundingClientRect().left ?? null, icon: icon?.getBoundingClientRect().left ?? null,
+                height: row.getBoundingClientRect().height, name: row.textContent.trim() };
+        });
+    });
+    const first = alignment[0];
+    for (const action of alignment) {
+        assert.notEqual(action.icon, null, 'missing icon column: ' + action.name);
+        assert.notEqual(action.label, null, 'missing label column: ' + action.name);
+        assert.ok(Math.abs(action.label - first.label) < 1 && Math.abs(action.icon - first.icon) < 1,
+            'misaligned song actions: ' + JSON.stringify(alignment));
+    }
+    assert.ok(alignment.every(action => action.height >= 44), 'song menu needs full touch targets');
     const before = await page.evaluate(() => window.ordinaryPlays.length);
     if (touch) await button.tap(); else await button.click();
     assert.equal(await page.evaluate(() => window.radioSeeds.at(-1)?.name), expected);
