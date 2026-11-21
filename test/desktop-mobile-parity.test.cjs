@@ -45,7 +45,7 @@ function setup({ song = { name: 'A Song', singer: 'First / A & B', source: 'tx' 
     assert.ok(start >= 0, 'shared detail-search handler');
     const source = app.slice(start, app.indexOf('\n}', start) + 2);
     const ctx = {
-        currentPlayingSong: song, isLyricViewOpen: open,
+        currentPlayingSong: song, isLyricViewOpen: open, loadingRequestCounter: 1,
         escapeHtmlText: value => value.replace(/</g, '&lt;'),
         async showOptions(_title, _message, options) {
             calls.push(['pick', options]);
@@ -84,6 +84,22 @@ test('artist cancellation, a stale choice and an absent track do not navigate', 
         await fixture.search('artist');
         assert.ok(fixture.calls.every(([verb]) => verb === 'pick'));
     }
+});
+
+test('an artist picker cannot navigate after playback returns to the same song object', async () => {
+    const { search, calls } = setup({
+        picker: async (_, ctx) => {
+            const original = ctx.currentPlayingSong;
+            ctx.currentPlayingSong = { name: 'Other Song' };
+            ctx.loadingRequestCounter++;
+            await Promise.resolve();
+            ctx.currentPlayingSong = original;
+            ctx.loadingRequestCounter++;
+            return 'First';
+        },
+    });
+    await search('artist');
+    assert.deepEqual(calls.map(([verb]) => verb), ['pick']);
 });
 
 test('single-artist and invalid actions never open an unnecessary picker', async () => {

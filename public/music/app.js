@@ -10626,9 +10626,10 @@ let lyricHistoryClosing = false;
 let lyricReturnFocus = null;
 
 // Use the same query/source path as footer metadata on every viewport.
-// Keep the song identity across an asynchronous multi-artist picker.
+// Keep the song identity and playback generation across an asynchronous multi-artist picker.
 async function searchLyricsMetadata(kind) {
     const song = currentPlayingSong;
+    const requestId = loadingRequestCounter;
     if (!song || !isLyricViewOpen || !['song', 'artist'].includes(kind)) return;
     let query = kind === 'song' ? song.name : song.singer;
     if (kind === 'artist') {
@@ -10637,7 +10638,7 @@ async function searchLyricsMetadata(kind) {
             query = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
         }
     }
-    if (!query || currentPlayingSong !== song || !isLyricViewOpen) return;
+    if (!query || loadingRequestCounter !== requestId || currentPlayingSong !== song || !isLyricViewOpen) return;
     toggleLyrics();
     performSearch(query, song.source);
 }
