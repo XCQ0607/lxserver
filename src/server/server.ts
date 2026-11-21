@@ -122,6 +122,7 @@ import { withCacheBrowseLocation } from './music/cacheBrowseLocation'
 import { remasterStaging } from './task/remasterStaging'
 import * as customMusicManager from './music/customMusicManager'
 import * as serverDownloadQueue from './task/serverDownloadQueue'
+import { canUpgradeForAccount, isSameUpgradeTier, requestedProviderQuality } from './music/cacheUpgrade'
 import * as remasterQueue from './task/remasterQueue'
 import { AutoLinkQueue } from './task/autoLinkQueue'
 import { identifyLocalSong } from './utils/identify'
@@ -4502,7 +4503,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: true, data: serverDownloadQueue.list(username) }))
+        const id = urlObj.searchParams.get('id') || undefined
+        res.end(JSON.stringify({ success: true, data: serverDownloadQueue.list(username, { id, includeUpgrades: false }) }))
         return
       }
 
@@ -4525,10 +4527,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
 
-        void readBody(req).then(body => {
+        void readBody(req, 2 * 1024 * 1024).then(body => {
           try {
             const { tasks, namingPattern, concurrency } = JSON.parse(body)
             if (!Array.isArray(tasks) || tasks.length === 0) throw new Error('Missing tasks')
+            if (tasks.some(task => task?.cacheUpgrade === true)) {
+              if (isPublic || !canUpgradeForAccount(username)) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Cache upgrades require a supported authenticated account' }))
+                return
+              }
+              if (tasks.length !== 1 || concurrency !== undefined || namingPattern !== undefined) {
+                throw new Error('Invalid cache upgrade request')
+              }
+            }
             if (concurrency !== undefined) serverDownloadQueue.setConcurrency(username, concurrency)
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
@@ -4544,6 +4556,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: err.message || 'Invalid queue request' }))
           }
+        }, (err: any) => {
+          res.writeHead(err?.status === 413 ? 413 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Invalid queue request body' }))
         })
         return
       }
@@ -9782,9 +9797,27 @@ export const startServer = async (port: number, ip: string) => {
     console.warn('[缓存] 恢复缓存设置失败:', err.message)
   }
 
-  serverDownloadQueue.initialize(async task => {
-    const songInfo = normalizeSongInfo(task.songInfo)
+  serverDownloadQueue.initialize(async (task, signal) => {
     const apiUsername = task.username === '_open' ? 'open' : task.username
+    if (task.cacheUpgrade) {
+      signal.throwIfAborted()
+      // Use only the provider and identity chosen by the foreground player.
+      // The normal queue stays free to switch sources or fall back in quality.
+      const songInfo = normalizeSongInfo({ ...task.songInfo })
+      if (!canUpgradeForAccount(task.username) || !isSourceSupported(songInfo.source, apiUsername)) {
+        throw new Error('Selected catalog is not available for this account')
+      }
+      const quality = requestedProviderQuality(songInfo.source, task.requestedQuality)
+      const resolved = await callUserApiGetMusicUrl(songInfo.source, songInfo, quality,
+        apiUsername, undefined, task.enableAutoSwitchApiSource !== false)
+      signal.throwIfAborted()
+      if (!resolved?.url || !isSameUpgradeTier(resolved.type, task.requestedQuality)) {
+        throw new Error('Provider did not return the requested upgrade profile')
+      }
+      return { url: resolved.url, quality: resolved.type, requestedSource: songInfo.source,
+        downloadSource: fileCache.detectDownloadSource(resolved.url, songInfo.source), sourceName: resolved.sourceName }
+    }
+    const songInfo = normalizeSongInfo(task.songInfo)
     const resolved = await resolveServerSong(songInfo, task.requestedQuality, apiUsername, true)
     return {
       url: resolved.url,

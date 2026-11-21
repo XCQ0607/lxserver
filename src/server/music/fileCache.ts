@@ -257,6 +257,7 @@ export interface CacheItem {
 export type CacheFolder = 'cache' | 'music'
 
 export const READ_THROUGH_CACHE_FILENAME = /^lx-readthrough-[a-f0-9]{32}\.mp3$/
+const CACHE_UPGRADE_FILENAME = /^lx-upgrade-[a-f0-9]{32}\.(?:mp3|flac)$/
 export const READ_THROUGH_STAGING_DIR = '.lx-read-through'
 
 export interface RemoveCacheFileResult {
@@ -353,13 +354,15 @@ class CacheIndexManager {
     // capture may add a variant or atomically repair metadata for a missing,
     // empty or truncated same-key cache file. Never overwrite/delete media,
     // and never replace an entry whose existing file remains usable.
-    publishNew(username: string, item: CacheItem, folder: CacheFolder, location?: string): boolean {
+    publishNew(username: string, item: CacheItem, folder: CacheFolder, location?: string,
+        { replaceUnavailable = true }: { replaceUnavailable?: boolean } = {}): boolean {
         if (isRemasterStage(username) || isCloudRestoreRunning()) return false
         const loc = location || getUserCacheLocation(username)
         const index = this.load(username, folder, loc, false)
         const itemKey = `${item.id}_${item.quality}`
         const previous = index.get(itemKey)
         if (previous) {
+            if (!replaceUnavailable) return false
             try {
                 const directory = getCacheDir(username, folder === 'music', loc, false)
                 const oldPath = resolveContainedPath(directory, previous.filename)
@@ -949,7 +952,7 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
             if (!extensions.includes(ext)) continue
             // A crash between link and index publication can leave a reserved
             // orphan. Do not import it as an unrelated local recording.
-            if (folder === 'cache' && READ_THROUGH_CACHE_FILENAME.test(file) && !filenameToItemMap.has(file)) continue
+            if (folder === 'cache' && (READ_THROUGH_CACHE_FILENAME.test(file) || CACHE_UPGRADE_FILENAME.test(file)) && !filenameToItemMap.has(file)) continue
 
             const filePath = path.join(dir, file)
             let stats: Stats

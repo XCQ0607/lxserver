@@ -1,6 +1,8 @@
 import fs from 'node:fs'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import * as fileCache from '../music/fileCache'
+import * as cacheUpgrade from '../music/cacheUpgrade'
 
 export type ServerDownloadStatus = 'waiting' | 'downloading' | 'tagging' | 'paused' | 'finished' | 'exists' | 'error'
 
@@ -12,6 +14,8 @@ export interface ServerDownloadTask {
   songInfo: any
   quality: string
   requestedQuality: string
+  cacheUpgrade?: true
+  enableAutoSwitchApiSource?: boolean
   status: ServerDownloadStatus
   progress: number
   total: number
@@ -27,8 +31,10 @@ export interface ServerDownloadTask {
 
 interface QueueInput {
   id?: string
+  cacheUpgrade?: boolean
   songInfo: any
   quality?: string
+  enableAutoSwitchApiSource?: boolean
   enableOnlyDownloadMode?: boolean
   cacheLyric?: boolean
   embedLyric?: boolean
@@ -43,10 +49,17 @@ interface ResolveResult {
   sourceName?: string
 }
 
-type DownloadResolver = (task: ServerDownloadTask) => Promise<ResolveResult>
+type DownloadResolver = (task: ServerDownloadTask, signal: AbortSignal) => Promise<ResolveResult>
 
 const DEFAULT_CONCURRENT = 3
 const MAX_CONCURRENT_PER_USER = 5
+const UPGRADE_PREFIX = 'lx_upgrade_'
+const MAX_QUEUED_UPGRADES = 20
+const MAX_ACCOUNT_UPGRADES = 4
+const MAX_UPGRADE_HISTORY = 128
+const UPGRADE_RETRY_MS = 10 * 60_000
+const MAX_UPGRADE_AGE_MS = 30 * 60_000
+let activeUpgrade: string | undefined
 const tasks = new Map<string, ServerDownloadTask>()
 const controllers = new Map<string, AbortController>()
 const concurrencyByUser = new Map<string, number>()
@@ -75,7 +88,23 @@ export const getConcurrency = (username: string) => concurrencyByUser.get(userna
 
 const sanitizeId = (value: unknown) => {
   const id = String(value || '')
-  return /^[A-Za-z0-9_-]{1,160}$/.test(id) ? id : `server_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+  return !id.startsWith(UPGRADE_PREFIX) && /^[A-Za-z0-9_-]{1,160}$/.test(id) ? id : `server_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`
+}
+
+const upgradeId = (username: string, song: any, quality: string) =>
+  UPGRADE_PREFIX + createHash('sha256').update(JSON.stringify(
+    [username, song.source, fileCache.normalizeSongId(song), cacheUpgrade.canonicalUpgradeQuality(quality)],
+  )).digest('hex').slice(0, 32)
+
+const pruneUpgrades = () => {
+  const now = Date.now()
+  const cutoff = now - MAX_UPGRADE_AGE_MS
+  for (const [key, task] of tasks) {
+    if (!task.cacheUpgrade || controllers.has(key)) continue
+    const expired = ['error', 'finished', 'exists'].includes(task.status)
+      ? now - task.updatedAt >= UPGRADE_RETRY_MS : task.createdAt < cutoff
+    if (expired) tasks.delete(key)
+  }
 }
 
 const saveNow = () => {
@@ -118,18 +147,24 @@ const loadTasks = () => {
     }
     for (const raw of savedTasks) {
       if (!raw || !raw.username || !raw.songInfo) continue
-      const id = sanitizeId(raw.id)
       const savedStatus = validStatuses.has(raw.status) ? raw.status as ServerDownloadStatus : 'waiting'
       const status: ServerDownloadStatus = savedStatus === 'downloading' || savedStatus === 'tagging' ? 'waiting' : savedStatus
       const quality = String(raw.quality || raw.requestedQuality || '320k')
       const requestedQuality = String(raw.requestedQuality || quality)
+      const isUpgrade = raw.cacheUpgrade === true
+      const songInfo = isUpgrade ? cacheUpgrade.sanitizeCacheUpgradeSong(raw.songInfo) : raw.songInfo
       const now = Date.now()
+      if (isUpgrade && (!songInfo || !cacheUpgrade.canUpgradeForAccount(raw.username) ||
+          !cacheUpgrade.validateUpgradeInput(songInfo, requestedQuality) ||
+          Number(raw.createdAt || 0) < now - MAX_UPGRADE_AGE_MS)) continue
+      const id = isUpgrade ? upgradeId(raw.username, songInfo, requestedQuality) : sanitizeId(raw.id)
       const task: ServerDownloadTask = {
         id,
+        ...(isUpgrade ? { cacheUpgrade: true as const, enableAutoSwitchApiSource: raw.enableAutoSwitchApiSource !== false } : {}),
         username: String(raw.username),
-        songKey: String(raw.songKey || `${fileCache.normalizeSongId(raw.songInfo)}_${requestedQuality}`),
+        songKey: String(raw.songKey || `${fileCache.normalizeSongId(songInfo)}_${requestedQuality}`),
         activeSongKey: status === 'waiting' ? undefined : raw.activeSongKey ? String(raw.activeSongKey) : undefined,
-        songInfo: raw.songInfo,
+        songInfo,
         quality: status === 'waiting' ? requestedQuality : quality,
         requestedQuality,
         status,
@@ -142,7 +177,7 @@ const loadTasks = () => {
         cacheLyric: raw.cacheLyric !== false,
         embedLyric: raw.embedLyric !== false,
         createdAt: Number(raw.createdAt || now),
-        updatedAt: now,
+        updatedAt: isUpgrade ? Number(raw.updatedAt || raw.createdAt || now) : now,
       }
       tasks.set(taskMapKey(task.username, task.id), task)
     }
@@ -152,10 +187,13 @@ const loadTasks = () => {
   }
 }
 
+const liveProgress = (task: ServerDownloadTask) => task.activeSongKey
+  ? fileCache.cacheProgress.get(task.cacheUpgrade ? cacheUpgrade.getUpgradeProgressKey(task.activeSongKey, task.username)
+    : fileCache.getProgressKey(task.activeSongKey, task.username))
+  : undefined
+
 const getPublicTask = (task: ServerDownloadTask) => {
-  const live = task.status === 'downloading' && task.activeSongKey
-    ? fileCache.cacheProgress.get(fileCache.getProgressKey(task.activeSongKey, task.username))
-    : undefined
+  const live = task.status === 'downloading' ? liveProgress(task) : undefined
   const liveStatus = live?.status as ServerDownloadStatus | undefined
   return {
     id: task.id,
@@ -163,6 +201,7 @@ const getPublicTask = (task: ServerDownloadTask) => {
     songInfo: task.songInfo,
     quality: task.quality,
     requestedQuality: task.requestedQuality,
+    ...(task.cacheUpgrade ? { cacheUpgrade: true as const } : {}),
     status: liveStatus || task.status,
     progress: Number(live?.progress ?? task.progress ?? 0),
     total: Number(live?.total ?? task.total ?? 0),
@@ -179,6 +218,7 @@ const runTask = async (task: ServerDownloadTask) => {
   const key = taskMapKey(task.username, task.id)
   const controller = new AbortController()
   controllers.set(key, controller)
+  if (task.cacheUpgrade) activeUpgrade = key
   task.status = 'downloading'
   task.progress = 0
   task.total = 0
@@ -189,9 +229,37 @@ const runTask = async (task: ServerDownloadTask) => {
   scheduleSave()
 
   try {
-    const resolved = await resolver(task)
+    const original = task.songInfo
+    if (task.cacheUpgrade) {
+      if (!cacheUpgrade.canUpgradeForAccount(task.username)) throw new Error('Cache upgrade account is unavailable')
+      if (cacheUpgrade.hasExactUpgradeCopy(original, task.requestedQuality, task.username)) {
+        task.status = 'exists'
+        task.progress = 100
+        return
+      }
+    }
+    const resolved = await resolver(task, controller.signal)
     if (controller.signal.aborted) return
     if (!resolved?.url) throw new Error('无法解析下载地址')
+    if (task.cacheUpgrade) {
+      if (resolved.quality && !cacheUpgrade.isSameUpgradeTier(resolved.quality, task.requestedQuality)) {
+        throw new Error('Cache upgrade returned a different quality')
+      }
+      task.activeSongKey = fileCache.normalizeSongId(original) + '_' + task.requestedQuality
+      const status = await cacheUpgrade.downloadCacheUpgrade(original, resolved.url, task.requestedQuality,
+        task.username, controller.signal, {
+          requestedSource: resolved.requestedSource,
+          downloadSource: resolved.downloadSource,
+          sourceName: resolved.sourceName,
+        })
+      if (controller.signal.aborted) return
+      const progress = liveProgress(task)
+      task.status = status
+      task.progress = 100
+      task.total = Number(progress?.total || 0)
+      task.received = Number(progress?.received || task.total)
+      return
+    }
     task.songInfo = resolved.songInfo || task.songInfo
     task.quality = resolved.quality || task.requestedQuality
     task.activeSongKey = fileCache.normalizeSongId(task.songInfo) + '_' + task.quality
@@ -206,7 +274,7 @@ const runTask = async (task: ServerDownloadTask) => {
     })
 
     if (controller.signal.aborted) return
-    const progress = fileCache.cacheProgress.get(fileCache.getProgressKey(task.activeSongKey, task.username))
+    const progress = liveProgress(task)
     task.status = progress?.status === 'exists' ? 'exists' : 'finished'
     task.progress = 100
     task.total = Number(progress?.total || progress?.received || task.total || 0)
@@ -226,6 +294,7 @@ const runTask = async (task: ServerDownloadTask) => {
     task.speed = 0
   } finally {
     if (controllers.get(key) === controller) controllers.delete(key)
+    if (activeUpgrade === key) activeUpgrade = undefined
     task.updatedAt = Date.now()
     scheduleSave()
     void processQueue()
@@ -236,16 +305,29 @@ const processQueue = async () => {
   if (processing || !resolver) return
   processing = true
   try {
+    pruneUpgrades()
     while (true) {
+      const waiting = Array.from(tasks.values()).filter(task =>
+        task.status === 'waiting' && !controllers.has(taskMapKey(task.username, task.id)))
+      const waitingManual = waiting.filter(task => !task.cacheUpgrade)
+      // Explicit downloads take priority. Let an automatic transfer unwind
+      // before it can restart, but never make a manual download wait for it.
+      if (waitingManual.length && activeUpgrade) {
+        const automatic = tasks.get(activeUpgrade)
+        if (automatic?.status === 'downloading') {
+          automatic.status = 'waiting'
+          automatic.activeSongKey = undefined
+          controllers.get(activeUpgrade)?.abort()
+        }
+      }
       const activeByUser = new Map<string, number>()
       for (const key of controllers.keys()) {
-        const username = tasks.get(key)?.username
-        if (!username) continue
-        activeByUser.set(username, (activeByUser.get(username) || 0) + 1)
+        const active = tasks.get(key)
+        if (!active || active.cacheUpgrade) continue
+        activeByUser.set(active.username, (activeByUser.get(active.username) || 0) + 1)
       }
-      const next = Array.from(tasks.values()).find(task => (
-        task.status === 'waiting' && !controllers.has(taskMapKey(task.username, task.id)) && (activeByUser.get(task.username) || 0) < getConcurrency(task.username)
-      ))
+      const manual = waitingManual.find(task => (activeByUser.get(task.username) || 0) < getConcurrency(task.username))
+      const next = manual || (!waitingManual.length && !controllers.size && !activeUpgrade ? waiting[0] : undefined)
       if (!next) break
       void runTask(next)
     }
@@ -273,15 +355,30 @@ export const initialize = (downloadResolver: DownloadResolver) => {
 }
 
 export const enqueue = (username: string, inputs: QueueInput[]) => {
+  inputs = inputs.map(input => {
+    if (input?.cacheUpgrade !== true) return input
+    const song = cacheUpgrade.sanitizeCacheUpgradeSong(input.songInfo)
+    if (!song || !cacheUpgrade.canUpgradeForAccount(username) ||
+        !cacheUpgrade.validateUpgradeInput(song, input.quality || '')) {
+      throw new Error('Cache upgrade unavailable for account, track or quality')
+    }
+    return { ...input, songInfo: song }
+  })
+  pruneUpgrades()
   const added: ServerDownloadTask[] = []
   for (const input of inputs) {
     if (!input?.songInfo) continue
-    const id = sanitizeId(input.id)
-    const key = taskMapKey(username, id)
+    const isUpgrade = input.cacheUpgrade === true
     const quality = input.quality || '320k'
+    const id = isUpgrade ? upgradeId(username, input.songInfo, quality) : sanitizeId(input.id)
+    const key = taskMapKey(username, id)
     const existing = tasks.get(key)
     if (existing) {
-      if (['waiting', 'downloading', 'tagging'].includes(existing.status)) continue
+      if (['waiting', 'downloading', 'tagging'].includes(existing.status) ||
+          (isUpgrade && (existing.status === 'paused' || Date.now() - existing.updatedAt < UPGRADE_RETRY_MS))) {
+        if (isUpgrade) added.push(existing)
+        continue
+      }
 
       const now = Date.now()
       existing.songKey = fileCache.normalizeSongId(input.songInfo) + '_' + quality
@@ -289,13 +386,14 @@ export const enqueue = (username: string, inputs: QueueInput[]) => {
       existing.songInfo = input.songInfo
       existing.quality = quality
       existing.requestedQuality = quality
+      if (isUpgrade) existing.enableAutoSwitchApiSource = input.enableAutoSwitchApiSource !== false
       existing.status = 'waiting'
       existing.progress = 0
       existing.total = 0
       existing.received = 0
       existing.speed = 0
       existing.errorMsg = ''
-      existing.enableOnlyDownloadMode = !!input.enableOnlyDownloadMode
+      existing.enableOnlyDownloadMode = !isUpgrade && !!input.enableOnlyDownloadMode
       existing.cacheLyric = input.cacheLyric !== false
       existing.embedLyric = input.embedLyric !== false
       existing.createdAt = now
@@ -303,15 +401,22 @@ export const enqueue = (username: string, inputs: QueueInput[]) => {
       added.push(existing)
       continue
     }
+    if (isUpgrade) {
+      const automatic = Array.from(tasks.values()).filter(task => task.cacheUpgrade)
+      const pending = automatic.filter(task => ['waiting', 'downloading', 'tagging'].includes(task.status))
+      if (automatic.length >= MAX_UPGRADE_HISTORY || pending.length >= MAX_QUEUED_UPGRADES ||
+          pending.filter(task => task.username === username).length >= MAX_ACCOUNT_UPGRADES) continue
+    }
     const now = Date.now()
     const task: ServerDownloadTask = {
       id, username,
+      ...(isUpgrade ? { cacheUpgrade: true as const, enableAutoSwitchApiSource: input.enableAutoSwitchApiSource !== false } : {}),
       songKey: fileCache.normalizeSongId(input.songInfo) + '_' + quality,
       songInfo: input.songInfo,
       quality,
       requestedQuality: quality,
       status: 'waiting', progress: 0, total: 0, received: 0, speed: 0, errorMsg: '',
-      enableOnlyDownloadMode: !!input.enableOnlyDownloadMode,
+      enableOnlyDownloadMode: !isUpgrade && !!input.enableOnlyDownloadMode,
       cacheLyric: input.cacheLyric !== false,
       embedLyric: input.embedLyric !== false,
       createdAt: now, updatedAt: now,
@@ -324,8 +429,8 @@ export const enqueue = (username: string, inputs: QueueInput[]) => {
   return added.map(task => getPublicTask(task))
 }
 
-export const list = (username: string) => Array.from(tasks.values())
-  .filter(task => task.username === username)
+export const list = (username: string, options: { id?: string; includeUpgrades?: boolean } = {}) => Array.from(tasks.values())
+  .filter(task => task.username === username && (options.id ? task.id === options.id : options.includeUpgrades !== false || !task.cacheUpgrade))
   .sort((a, b) => a.createdAt - b.createdAt)
   .map(task => getPublicTask(task))
 
@@ -346,6 +451,7 @@ export const resume = (username: string, id?: string) => {
   for (const task of tasks.values()) {
     if (task.username !== username || (id && task.id !== id)) continue
     if (task.status !== 'paused' && task.status !== 'error') continue
+    if (task.cacheUpgrade && (!id || task.status !== 'paused' || Date.now() - task.createdAt >= MAX_UPGRADE_AGE_MS)) continue
     task.status = 'waiting'
     task.progress = 0
     task.total = 0
@@ -362,7 +468,7 @@ export const resume = (username: string, id?: string) => {
 
 export const remove = (username: string, options: { id?: string; all?: boolean; completed?: boolean }) => {
   for (const [key, task] of tasks) {
-    if (task.username !== username) continue
+    if (task.username !== username || (task.cacheUpgrade && task.id !== options.id)) continue
     const shouldRemove = options.all || (options.id && task.id === options.id) || (options.completed && ['finished', 'exists'].includes(task.status))
     if (!shouldRemove) continue
     controllers.get(key)?.abort()
