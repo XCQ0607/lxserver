@@ -2439,3 +2439,34 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     overflow-y: auto;
     overscroll-behavior: contain;
 }
+
+/* Keep song menus readable and independently scrollable above the player. */
+.song-more-menu .queue-actions-menu { max-height: calc(100dvh - var(--player-footer-inset, 11rem) - 16px); overflow-y: auto; }
+/* Every song action uses the same icon column, label inset, and touch target. */
+.queue-actions-menu > button,
+.queue-actions-menu > .rating-chip.rating-menu-item:not(.rating-score-tag):not(#player-rating) {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr);
+    align-items: center;
+    gap: .5rem;
+    width: 100%;
+    min-height: 44px;
+    padding: .5rem 1rem;
+    font-size: .875rem;
+    line-height: 1.35;
+    text-align: start;
+}
+.queue-actions-menu > button > i,
+.queue-actions-menu > button > .song-action-icon {
+    grid-column: 1;
+    width: auto;
+    text-align: center;
+    color: var(--c-500, #10b981);
+}
+.queue-actions-menu > button > span:not(.song-action-icon) {
+    grid-column: 2;
+    text-align: start;
+    overflow-wrap: anywhere;
+}
+.queue-actions-menu > button > i { font-size: .875rem; }
+.queue-actions-menu > button > .song-action-icon { color: inherit; }

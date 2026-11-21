@@ -31,6 +31,9 @@ let currentIndex = -1;
 let preSelectedNextIndex = null; // 预先选定的下一首索引 (用于确保随机模式下的预读一致性)
 window.viewingPlaylist = []; // Currently displayed list in UI
 let currentPlayingScope = 'network'; // Scope for active playback
+let searchRadioArmed = false; // 当前播放是否由歌曲搜索结果起播（playFromView / 续播维护）
+const searchRadioSongs = new WeakSet(); // 不该被续播顶替的下一首：续播插入的相似歌曲、用户点了「下一首播放」的歌曲
+let searchRadioCache = null; // Prefetch and playback share identical recommendation requests.
 window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' - Scope for UI view
 let currentPlayingSong = null; // Track currently playing song independently of view
 window.batchCollectSongs = null; // Store songs for batch collection modal
@@ -132,6 +135,7 @@ const DEFAULT_SETTINGS = {
     lyricFontSize: 1.25, // 歌词字体大小 (rem)
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
+    autoPlaySimilarAfterSearch: true, // 搜索歌曲播完后自动续播相似歌曲 (默认开启)
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
@@ -263,7 +267,7 @@ async function setupAudioDeviceChangeListener() {
             console.log('[Audio] Audio device removed (e.g. earphone disconnected). Halting playback to prevent speaker blast.');
             shouldAutoRecoverPlayback = false;
             try {
-                if (audio) audio.pause();
+                if (audio) { cancelSearchRadioContinuation(); audio.pause(); }
             } catch (e) { }
             if (typeof setPlayerStatus === 'function') setPlayerStatus('', false);
             if (typeof updatePlayButton === 'function') updatePlayButton(false);
@@ -1544,6 +1548,7 @@ async function handleLogout() {
     try {
         if (typeof audio !== 'undefined' && audio) {
             shouldAutoRecoverPlayback = false;
+            cancelSearchRadioContinuation();
             audio.pause();
             audio.currentTime = 0;
             audio.src = '';
@@ -2234,6 +2239,7 @@ function renderQueue() {
     const listContainer = document.getElementById('queue-list');
     const countEl = document.getElementById('queue-count');
     if (!listContainer) return;
+    updateSongRadioCount();
     if (countEl) countEl.innerText = `${currentPlaylist.length} SONGS`;
     if (document.getElementById('queue-drawer')?.classList.contains('translate-x-full')) {
         listContainer.replaceChildren();
@@ -2276,7 +2282,7 @@ function renderQueue() {
                     </div>
                 </div>
 
-                <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button onclick="event.stopPropagation(); openPlaylistAddModalForSongObject(currentPlaylist[${index}])" class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>
@@ -2290,6 +2296,11 @@ function renderQueue() {
             </div>
         `;
     }).join('');
+
+    currentPlaylist.forEach((song, index) => {
+        const actions = listContainer.children[index]?.querySelector('.song-row-actions');
+        if (actions) actions.appendChild(createSongMoreMenu(song));
+    });
 
     // Initialize/Update Sortable (Supports Mobile Touch)
     if (typeof Sortable !== 'undefined' && listContainer) {
@@ -2333,6 +2344,7 @@ function renderQueue() {
 
                 renderQueue();
                 savePlaybackState();
+                if (!audio.paused) void replenishSongRadio();
                 showInfo('播放顺序已更新');
             }
         });
@@ -2358,11 +2370,14 @@ window.playSongFromQueue = playSongFromQueue;
 function removeFromQueue(index) {
     if (!currentPlaylist || index < 0 || index >= currentPlaylist.length) return;
 
-    const removedId = currentPlaylist[index].id;
     currentPlaylist.splice(index, 1);
 
     // If we removed the currently playing song's index, we need to adjust currentIndex
     if (index === currentIndex) {
+        if (pendingExplicitRadio || songRadioSession) {
+            cancelSearchRadioContinuation();
+            songRadioSession = null;
+        } else setQueueRadioStatus();
         // [Optional] Auto-play next or just stop? Here we just adjust index for next song
         // Typically people expect it to stay at same index but if it was last, wrap around
         if (currentPlaylist.length === 0) {
@@ -2381,6 +2396,7 @@ function removeFromQueue(index) {
 
     renderQueue();
     savePlaybackState(); // Save state after removal
+    if (!audio.paused) void replenishSongRadio();
     showSuccess('已从队列移除');
 }
 window.removeFromQueue = removeFromQueue;
@@ -2388,6 +2404,8 @@ window.removeFromQueue = removeFromQueue;
 async function clearQueue() {
     if (!currentPlaylist || currentPlaylist.length === 0) return;
     if (await showSelect('清空队列', '确定要清空当前播放队列吗？', { danger: true })) {
+        cancelSearchRadioContinuation();
+        songRadioSession = null;
         currentPlaylist = [];
         currentIndex = -1;
         shouldAutoRecoverPlayback = false;
@@ -5409,8 +5427,8 @@ function renderResults(list) {
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
             const menu = document.createElement('details');
-            menu.className = 'queue-actions';
-            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            menu.className = 'queue-actions song-more-menu';
+            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next><i class="fas fa-step-forward" aria-hidden="true"></i><span>下一首播放</span></button><button type="button" data-queue-add><i class="fas fa-list-ul" aria-hidden="true"></i><span>加入播放队列</span></button></div>';
             menu.addEventListener('click', event => event.stopPropagation());
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
@@ -5421,6 +5439,7 @@ function renderResults(list) {
             window.RatingManager?.attach(rateButton, item);
             window.RatingManager?.attachTag(row.querySelector('[data-rating-badges]'), item);
             const popup = menu.querySelector('.queue-actions-menu');
+            appendStartRadioAction(menu, item);
             if (typeof popup.showPopover === 'function') {
                 popup.setAttribute('popover', 'auto');
                 menu.addEventListener('toggle', () => {
@@ -5497,6 +5516,86 @@ function renderResults(list) {
  * renderResults 里的按钮通过 JSON.stringify 把整个 song 对象传进来，
  * 这里调用 DislikeManager.toggleSong 后重新渲染当前搜索结果。
  */
+function attachSongRowPopover(menu) {
+    const popup = menu.querySelector('.queue-actions-menu');
+    const summary = menu.querySelector('summary');
+    let outsideListening = false;
+    let removalObserver = null;
+    const stopOutsideListening = () => {
+        if (outsideListening) document.removeEventListener('click', outsideClick, true);
+        outsideListening = false;
+        removalObserver?.disconnect();
+        removalObserver = null;
+    };
+    const close = () => {
+        menu.open = false;
+        stopOutsideListening();
+        if (typeof popup.hidePopover === 'function' && popup.matches(':popover-open')) popup.hidePopover();
+    };
+    const outsideClick = event => { if (!menu.contains(event.target)) close(); };
+    menu.addEventListener('click', event => event.stopPropagation());
+    menu.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        event.preventDefault();
+        event.stopPropagation();
+        close();
+        summary.focus();
+    });
+    if (typeof popup.showPopover === 'function') {
+        popup.setAttribute('popover', 'auto');
+        menu.addEventListener('toggle', () => {
+            if (!menu.open || !menu.isConnected) { close(); return; }
+            popup.showPopover();
+            const anchor = summary.getBoundingClientRect();
+            const bounds = popup.getBoundingClientRect();
+            const footer = document.getElementById('player-footer');
+            const footerTop = footer ? footer.getBoundingClientRect().top : window.innerHeight;
+            const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
+            popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+            popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
+        });
+        popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
+    } else {
+        menu.addEventListener('toggle', () => {
+            if (!menu.open) { stopOutsideListening(); return; }
+            if (outsideListening) return;
+            document.addEventListener('click', outsideClick, true);
+            outsideListening = true;
+            // Re-rendering either list can remove an open menu without a toggle.
+            // Observe only while open, releasing both resources on detachment.
+            if (typeof MutationObserver === 'function' && document.body) {
+                removalObserver = new MutationObserver(() => { if (!menu.isConnected) close(); });
+                removalObserver.observe(document.body, { childList: true, subtree: true });
+            }
+        });
+    }
+    return close;
+}
+
+function appendStartRadioAction(menu, songOrFactory, close = () => { menu.open = false; }) {
+    const radio = document.createElement('button');
+    radio.type = 'button';
+    radio.setAttribute('data-start-radio', '');
+    radio.innerHTML = '<i class="fas fa-broadcast-tower" aria-hidden="true"></i><span>开启电台</span>';
+    radio.onclick = () => {
+        close();
+        const seed = typeof songOrFactory === 'function' ? songOrFactory() : songOrFactory;
+        void startSearchRadio(seed);
+    };
+    menu.querySelector('.queue-actions-menu').appendChild(radio);
+    return radio;
+}
+
+function createSongMoreMenu(songOrFactory) {
+    const menu = document.createElement('details');
+    menu.className = 'queue-actions song-more-menu';
+    menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"></div>';
+    const close = attachSongRowPopover(menu);
+    appendStartRadioAction(menu, songOrFactory, close);
+    return menu;
+}
+window.createSongMoreMenu = createSongMoreMenu;
+
 async function toggleDislikeSong(song) {
     if (!song || !window.DislikeManager) return;
 
@@ -6441,6 +6540,11 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 function getNextIndex() {
     if (!currentPlaylist || currentPlaylist.length === 0) return -1;
 
+    // Explicit song radio stays sequential without overwriting the saved playback mode.
+    const after = currentPlaylist[currentIndex + 1];
+    if (typeof currentPlayingScope !== 'undefined' && currentPlayingScope === 'search_radio' &&
+        (after?._explicitRadio || after?._playNextRequested)) return currentIndex + 1;
+
     // [Random Prefetch Fix] 如果处于随机播放模式，且已有预选内容，优先返回预选
     if (playMode === 'random' && preSelectedNextIndex !== null) {
         if (preSelectedNextIndex >= 0 && preSelectedNextIndex < currentPlaylist.length) {
@@ -6505,38 +6609,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
     if (!nextSong) return;
 
     try {
-        const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
-        const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
-
-        // 1. 检查内存缓存
-        let result = prefetchManager.get(nextSong, targetQual);
-        if (result) {
-            const alive = await probeUrl(result.url);
-            if (!canCommit()) return;
-            if (alive) {
-                prefetchManager.set(nextSong, targetQual, result);
-                return;
-            }
-            prefetchManager.invalidate(nextSong, targetQual, result);
-        }
-
-        // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
-        result = await resolveSongUrl(nextSong, targetQual, true);
-        if (!canCommit()) return;
-
-        // 3. 探活获取到的链接
-        const alive = await probeUrl(result.url);
-        if (!canCommit()) return;
-        if (!alive) {
-            localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
-            result = await resolveSongUrl(nextSong, targetQual, true, true);
-            if (!canCommit()) return;
-        }
-
-        prefetchManager.set(nextSong, targetQual, result);
-        const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
-        console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
-
+        await prefetchSongUrl(nextSong, isCurrent);
     } catch (e) {
         if (!isCurrent()) return;
         // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
@@ -6549,6 +6622,45 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
             return prefetchNextSong(followingIndex, depth + 1, generation);
         }
     }
+}
+
+// 解析并缓存一首歌的播放链接，失败时抛出；isCurrent 失效后不再写入缓存
+async function prefetchSongUrl(nextSong, isCurrent, { verifyRetry = false } = {}) {
+    const targetQual = window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
+    const canCommit = () => isCurrent() && targetQual === window.QualityManager.getBestQuality(nextSong, settings.preferredQuality || 'flac');
+
+    // 1. 检查内存缓存
+    let result = prefetchManager.get(nextSong, targetQual);
+    if (result) {
+        const alive = await probeUrl(result.url);
+        if (!canCommit()) return false;
+        if (alive) {
+            prefetchManager.set(nextSong, targetQual, result);
+            return { requestedQuality: targetQual, url: result.url };
+        }
+        prefetchManager.invalidate(nextSong, targetQual, result);
+    }
+
+    // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
+    result = await resolveSongUrl(nextSong, targetQual, true);
+    if (!canCommit()) return false;
+
+    // 3. 探活获取到的链接
+    const alive = await probeUrl(result.url);
+    if (!canCommit()) return false;
+    if (!alive) {
+        localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
+        result = await resolveSongUrl(nextSong, targetQual, true, true);
+        if (!canCommit()) return false;
+        // A retry can return the same unreachable URL. Verify it before pinning
+        // a radio handoff; leave ordinary next-song prefetch latency unchanged.
+        if (verifyRetry && (!await probeUrl(result.url) || !canCommit())) return false;
+    }
+
+    prefetchManager.set(nextSong, targetQual, result);
+    const sourceDesc = getSourceTypeText(result.sourceType, result.folder);
+    console.log(`[Prefetch] Readied: ${nextSong.name} (${result.quality} / ${sourceDesc})`);
+    return { requestedQuality: targetQual, url: result.url };
 }
 
 // --- Server Cache Helpers ---
@@ -7166,15 +7278,19 @@ function enqueueSong(song, next = false) {
             if (i < currentIndex) currentIndex--;
         }
         currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
+        const wasRadio = !!queuedSong._explicitRadio;
+        if (typeof keepAsNextSong === 'function') keepAsNextSong(queuedSong);
         preSelectedNextIndex = null;
         renderQueue();
         savePlaybackState();
+        if (wasRadio && !audio.paused) void replenishSongRadio();
         showSuccess('已移至下一首播放');
         return;
     }
     if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
     const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
     currentPlaylist.splice(position, 0, song);
+    if (next && typeof keepAsNextSong === 'function') keepAsNextSong(song);
     preSelectedNextIndex = null;
     renderQueue();
     savePlaybackState();
@@ -7185,7 +7301,9 @@ window.enqueueSong = enqueueSong;
 function playFromView(index) {
     if (!viewingPlaylist || !viewingPlaylist[index]) return;
     // Update playlist and scope when user explicitly clicks a song to play
+    const fromSongSearch = isSongSearchView();
     updatePlaylist(viewingPlaylist, index, currentSearchScope);
+    setSearchRadioArmed(fromSongSearch);
 }
 window.playFromView = playFromView;
 
@@ -7414,7 +7532,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         RecoveryToast.error(`无法播放${isPlatformNotSupported ? '（不支持该平台）' : ''}，即将自动跳过`);
         setPlayerStatus('播放失败，即将跳过', null, true);
         if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
-        window._autoSkipTimer = setTimeout(() => playNext(), isPlatformNotSupported ? 2000 : 3000);
+        window._autoSkipTimer = setTimeout(() => playNextInQueue(), isPlatformNotSupported ? 2000 : 3000);
     }
 }
 
@@ -7516,6 +7634,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     const queueDrawer = document.getElementById('queue-drawer');
     if (queueDrawer && !queueDrawer.classList.contains('translate-x-full')) {
         renderQueue();
+    } else {
+        updateSongRadioCount();
     }
 
     // [Fix] 切换歌曲前强制重置手动滚动状态
@@ -7817,6 +7937,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                     const newIdx = currentPlaylist.findIndex(s => s.id === targetId);
                     currentIndex = newIdx !== -1 ? newIdx : 0;
                     currentPlayingScope = 'local_list';
+                    setSearchRadioArmed(false);
                     window.currentViewingListId = 'default';
                     if (typeof renderQueue === 'function' && document.getElementById('queue-list')) {
                         renderQueue();
@@ -7852,7 +7973,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
 
         // [Trigger Prefetch] 确保即便 play() 被拦截也尝试发起下一首预读
-        if (currentLoadingRequestId === thisRequestId) prefetchNextSong();
+        if (currentLoadingRequestId === thisRequestId) prefetchUpcomingSong();
 
     } catch (error) {
         if (currentLoadingRequestId !== thisRequestId) return;
@@ -8038,14 +8159,16 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
 
     // [New] Deduplicate by quality if setting enabled
     if (settings.deduplicatePlaylistByQuality && window.QualityManager) {
+        const identity = song => (song?.meta?.songId || song?.songId || song?.songmid || song?.id)
+            ? cleanSongData(song).id : null;
         const targetSong = list[startIndex];
-        const targetId = targetSong ? (targetSong.songmid || targetSong.id) : null;
+        const targetId = identity(targetSong);
 
         const deduplicated = [];
         const seenIds = new Map(); // id -> index in deduplicated
 
         list.forEach((song) => {
-            const id = song.songmid || song.id;
+            const id = identity(song);
             if (!id) {
                 deduplicated.push(song);
                 return;
@@ -8074,7 +8197,7 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
 
         // Find new startIndex based on targetId (identity matching)
         if (targetId) {
-            const newIndex = deduplicated.findIndex(s => (s.songmid || s.id) === targetId);
+            const newIndex = deduplicated.findIndex(s => identity(s) === targetId);
             if (newIndex !== -1) startIndex = newIndex;
         }
 
@@ -8084,6 +8207,7 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
     // [New] Use a shallow copy to prevent mutations from affecting the source list
     currentPlaylist = [...list];
     currentPlayingScope = scope;
+    setSearchRadioArmed(false);
 
     // 如果是从网络搜索或歌单来源，确保 playSong 能识别并更新 UI/历史
     playSong(currentPlaylist[startIndex], startIndex, null, false, false, shouldAddToDefault);
@@ -8304,6 +8428,9 @@ async function togglePlay() {
         return;
     }
     if (audio.paused) {
+        if ((isExplicitRadioCurrent(pendingExplicitRadio) && pendingExplicitRadio.waitingAtEnd) || songRadioSession?.handoff) {
+            cancelSearchRadioContinuation();
+        }
         try {
             // [Crossfade] 如果开启了淡入淡出，先将进度置为 0，播放后再淡入
             if (settings.enableCrossfade && !audio.isRemote) {
@@ -8330,6 +8457,8 @@ async function togglePlay() {
             await fadeVolume(0, 600);
         }
         shouldAutoRecoverPlayback = false;
+        // 用户暂停了：还在等相似歌曲的话，取回来也不要自动开播
+        if (typeof cancelSearchRadioContinuation === 'function') cancelSearchRadioContinuation();
         audio.pause();
         if (window._autoSkipTimer) {
             clearTimeout(window._autoSkipTimer);
@@ -8350,10 +8479,609 @@ function updatePlayButton(isPlaying) {
  * @param {Number} depth 递归尝试深度，防止死循环
  */
 function playNext() {
+    if (isExplicitRadioCurrent(pendingExplicitRadio)) {
+        cancelSearchRadioContinuation();
+        songRadioSession = null;
+    }
+    if (isSongRadioActive()) { void advanceSongRadio(); return; }
+    if (isSearchRadioDue()) {
+        continueWithSimilarSongs();
+        return;
+    }
+    playNextInQueue();
+}
+
+// --- 搜索电台：搜索歌曲播到队列末尾后，用相似歌曲自动续播 ---
+
+let pendingExplicitRadio = null;
+let songRadioSession = null;
+const SONG_RADIO_TARGET = 24;
+const SONG_RADIO_CANDIDATE_LIMIT = 48;
+const SONG_RADIO_FILL_BUDGET_MS = 12000;
+const SONG_RADIO_FILL_COOLDOWN_MS = 30000;
+const SONG_RADIO_SEED_RETRY_MS = 60000;
+
+function setQueueRadioStatus(message = '') {
+    const status = document.getElementById('queue-radio-status');
+    if (status && status.textContent !== message) status.textContent = message;
+}
+
+function isSongRadioActive(session = songRadioSession) {
+    return !!session && session === songRadioSession && currentPlayingScope === 'search_radio' &&
+        session.members.has(currentPlaylist[currentIndex]);
+}
+
+function radioSongsRemaining(session = songRadioSession) {
+    if (!isSongRadioActive(session)) return 0;
+    let count = 0;
+    for (const song of currentPlaylist.slice(currentIndex + 1)) {
+        if (song._playNextRequested) continue;
+        if (!session.members.has(song) || !song._explicitRadio) break;
+        count++;
+    }
+    return count;
+}
+
+function pruneSongRadioHistory(session) {
+    if (currentPlaylist.length < 950) return;
+    let removed = 0;
+    currentPlaylist = currentPlaylist.filter((song, index) => {
+        const discard = index < currentIndex && session.members.has(song) && song._explicitRadio && !song._playNextRequested;
+        if (discard) removed++;
+        return !discard;
+    });
+    currentIndex -= removed;
+    if (removed) { renderQueue(); savePlaybackState(); }
+}
+
+function stationRecordingKey(song) {
+    // Match a recording across catalogs even when one omits duration. Keep
+    // version words in the title, and normalize artist aliases/separators.
+    const compact = text => String(text || '').normalize('NFKC').toLowerCase().replace(/[\p{P}\p{Z}\s]/gu, '');
+    const title = compact(song.name);
+    const artists = Array.from(new Set(String(song.singer || '')
+        .normalize('NFKC').toLowerCase().replace(/[（(【\[].*?[）)】\]]/g, ' ')
+        .split(/[、,，/&／|;；]+| feat\.? | ft\.? /).map(compact).filter(Boolean))).sort();
+    return title && artists.length ? JSON.stringify([title, artists]) : '';
+}
+
+function updateSongRadioCount(session = songRadioSession) {
+    if (isExplicitRadioCurrent(pendingExplicitRadio)) return;
+    if (!isSongRadioActive(session)) {
+        if (session) setQueueRadioStatus();
+        return;
+    }
+    const count = radioSongsRemaining(session);
+    const suffix = count >= SONG_RADIO_TARGET ? ''
+        : session.pending?.epoch === searchRadioEpoch ? ' · 正在补充' : ' · 暂无更多推荐';
+    setQueueRadioStatus(`电台待播：${count} / ${SONG_RADIO_TARGET} 首${suffix}`);
+}
+
+function stationSeedKey(song) {
+    return stationRecordingKey(song) || cleanSongData(song).id;
+}
+
+function storeStationSeedResult(session, seed, response, list) {
+    const key = stationSeedKey(seed);
+    const attempts = (session.queriedSeeds.get(key)?.attempts || 0) + 1;
+    // Repeating a complete response within the memo TTL cannot fill the
+    // deficit. A thin/failed result gets one later retry, not a tight loop.
+    const retryable = attempts < 2 &&
+        (response?.incomplete === true || list.length < SONG_RADIO_TARGET);
+    session.queriedSeeds.set(key, { attempts, retryAt: retryable ? Date.now() + SONG_RADIO_SEED_RETRY_MS : Infinity });
+}
+
+function pickStationRadioSongs(session, songs) {
+    const known = new Set(currentPlaylist.map(stationRecordingKey).filter(Boolean));
+    const ids = new Set(currentPlaylist.map(song => cleanSongData(song).id));
+    const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
+    const selected = [];
+    for (const song of songs.slice(0, SONG_RADIO_CANDIDATE_LIMIT)) {
+        if (!song?.source || !song.id || typeof song.name !== 'string' || !song.name.trim() ||
+            (skipDisliked && window.DislikeManager.isDisliked(song))) continue;
+        const id = cleanSongData(song).id;
+        if (ids.has(id) || session.seen.has(id)) continue;
+        const key = stationRecordingKey(song);
+        if (key && (known.has(key) || session.seenRecordings.has(key))) continue;
+        if (key) known.add(key);
+        ids.add(id);
+        selected.push(song);
+    }
+    return selected;
+}
+
+function commitStationRadioSongs(session, songs, response) {
+    pruneSongRadioHistory(session);
+    const slots = Math.max(0, Math.min(SONG_RADIO_TARGET - radioSongsRemaining(session), 1000 - currentPlaylist.length));
+    const expandable = response?.strategy === 'radio' || response?.strategy === 'similar';
+    const eligible = pickStationRadioSongs(session, songs);
+    const batch = eligible.slice(0, slots).map(song => ({ ...song, _explicitRadio: true }));
+    // Keep the excess from this song-level list in memory only; favorites,
+    // history, and Up Next must not include it until it is really queued.
+    if (expandable) session.reserve = eligible.slice(batch.length);
+    if (!batch.length) return batch;
+    for (const song of batch) {
+        session.members.add(song);
+        session.seen.add(cleanSongData(song).id);
+        const recording = stationRecordingKey(song);
+        if (recording) session.seenRecordings.add(recording);
+        if (expandable) session.reseedPool.push(song);
+        if (response?.strategy === 'artist') session.artistOnly.add(song);
+    }
+    session.reseedPool = session.reseedPool.slice(-SONG_RADIO_CANDIDATE_LIMIT);
+    let insertAt = currentIndex + 1;
+    while (currentPlaylist[insertAt]?._playNextRequested ||
+        (currentPlaylist[insertAt]?._explicitRadio && session.members.has(currentPlaylist[insertAt]))) insertAt++;
+    currentPlaylist.splice(insertAt, 0, ...batch);
+    preSelectedNextIndex = null;
+    renderQueue();
+    savePlaybackState();
+    return batch;
+}
+
+function replenishSongRadio({ additional = false, nextOnly = false } = {}) {
+    const session = songRadioSession;
+    if (!isSongRadioActive(session) || isExplicitRadioCurrent(pendingExplicitRadio)) return Promise.resolve([]);
+    if (session.pending?.epoch === searchRadioEpoch) return nextOnly ? session.pending.ready : session.pending.promise;
+    if (radioSongsRemaining(session) >= SONG_RADIO_TARGET) return Promise.resolve([]);
+    // Original recommendations outrank querying a new seed, and work
+    // without a provider connection. Recheck their eligibility at insertion.
+    const buffered = session.reserve.length
+        ? commitStationRadioSongs(session, session.reserve, { strategy: 'similar' }) : [];
+    if (radioSongsRemaining(session) >= SONG_RADIO_TARGET || Date.now() < session.nextFillAt) return Promise.resolve(buffered);
+    if (currentPlaylist.length >= 1000) {
+        pruneSongRadioHistory(session);
+        if (currentPlaylist.length >= 1000) return Promise.resolve(buffered);
+    }
+    const anchor = currentPlaylist[currentIndex];
+    if (!anchor._playNextRequested && !session.artistOnly.has(anchor)) session.lastSeed = anchor;
+    const epoch = searchRadioEpoch;
+    const tried = new Set();
+    const candidate = () => [session.lastSeed || session.seed, ...session.reseedPool].find(seed => {
+        if (!seed?.name || seed._playNextRequested || session.artistOnly.has(seed)) return false;
+        const key = stationSeedKey(seed);
+        return key && !tried.has(key) && Date.now() >= (session.queriedSeeds.get(key)?.retryAt || 0);
+    });
+    if (!candidate()) { updateSongRadioCount(session); return Promise.resolve(buffered); }
+    let signalReady;
+    const task = { epoch, controller: new AbortController(), ready: new Promise(resolve => { signalReady = resolve; }), promise: null };
+    session.pending = task;
+    updateSongRadioCount(session);
+    if (buffered.length) signalReady(buffered);
+    task.promise = (async () => {
+        const started = Date.now(), appended = [...buffered];
+        try {
+            const attempts = additional ? 2 : 3;
+            for (let i = 0; i < attempts && radioSongsRemaining(session) < SONG_RADIO_TARGET; i++) {
+                const budget = SONG_RADIO_FILL_BUDGET_MS - (Date.now() - started);
+                const seed = budget > 0 && candidate();
+                if (!seed || !isSongRadioActive(session) || epoch !== searchRadioEpoch) break;
+                tried.add(stationSeedKey(seed));
+                let response;
+                try {
+                    response = await loadSearchRadioSongs(seed, {
+                        station: true, timeoutMs: Math.min(9000, budget), signal: task.controller.signal,
+                    });
+                } catch (_) {}
+                if (!isSongRadioActive(session) || epoch !== searchRadioEpoch || task.controller.signal.aborted) break;
+                const songs = Array.isArray(response) ? response : response?.list || [];
+                storeStationSeedResult(session, seed, response, songs);
+                // The original seed may offer a small same-artist fallback.
+                // Later seeds must genuinely offer song-level recommendations.
+                const batch = response?.strategy === 'artist' ? [] : commitStationRadioSongs(session, songs, response);
+                if (batch.length) { appended.push(...batch); signalReady(batch); }
+            }
+        } finally {
+            signalReady([]);
+            if (session.pending === task) {
+                session.pending = null;
+                if (epoch === searchRadioEpoch && isSongRadioActive(session)) {
+                    // Slow or sparse catalogs cannot be hammered on every
+                    // player event. A later transition can try again.
+                    if (radioSongsRemaining(session) < SONG_RADIO_TARGET) session.nextFillAt = Date.now() + SONG_RADIO_FILL_COOLDOWN_MS;
+                    updateSongRadioCount(session);
+                }
+            }
+            task.controller.abort();
+        }
+        return appended;
+    })();
+    return nextOnly ? task.ready : task.promise;
+}
+
+async function advanceSongRadio() {
+    const session = songRadioSession;
+    if (!isSongRadioActive(session)) return;
+    const next = currentPlaylist[currentIndex + 1];
+    if (next?._playNextRequested || (next?._explicitRadio && session.members.has(next))) {
+        if (next._playNextRequested) session.members.add(next);
+        playNextInQueue();
+        void replenishSongRadio();
+        return;
+    }
+    if (session.handoff?.epoch === searchRadioEpoch) return session.handoff.promise;
+    const anchor = currentPlaylist[currentIndex], requestId = loadingRequestCounter, epoch = searchRadioEpoch;
+    const handoff = { epoch, promise: null };
+    session.handoff = handoff;
+    handoff.promise = (async () => {
+        await replenishSongRadio({ nextOnly: true });
+        if (!isSongRadioActive(session) || epoch !== searchRadioEpoch || requestId !== loadingRequestCounter || currentPlaylist[currentIndex] !== anchor) return;
+        const following = currentPlaylist[currentIndex + 1];
+        if (following?._playNextRequested || (following?._explicitRadio && session.members.has(following))) {
+            if (following._playNextRequested) session.members.add(following);
+            playNextInQueue();
+        }
+        else {
+            // Empty/error responses must not loop requests or replay the seed forever.
+            songRadioSession = null;
+            setQueueRadioStatus('暂未找到可播放的相似歌曲');
+            showInfo('暂未找到可播放的相似歌曲');
+            if (following) void playSong(following, currentIndex + 1);
+        }
+    })().finally(() => { if (session.handoff === handoff) session.handoff = null; });
+    return handoff.promise;
+}
+
+
+
+function isExplicitRadioCurrent(request) {
+    return request && request === pendingExplicitRadio && request.epoch === searchRadioEpoch &&
+        request.requestId === loadingRequestCounter && currentPlayingScope === 'search_radio' &&
+        request.anchor === currentPlaylist[currentIndex];
+}
+
+function playAfterNaturalEnd() {
+    const request = pendingExplicitRadio;
+    if (!isExplicitRadioCurrent(request)) {
+        playNext();
+        return;
+    }
+    if (request.waitingAtEnd) return;
+    request.waitingAtEnd = true;
+
+    // Manual Play Next stays first and doesn't wait for the network.
+    const next = currentPlaylist[currentIndex + 1];
+    if (!next?._playNextRequested) return;
+    if (songRadioSession) songRadioSession.members.add(next);
+    void playSong(next, currentIndex + 1);
+    if (currentPlaylist[currentIndex] === next && currentPlayingScope === 'search_radio') {
+        request.anchor = next;
+        request.requestId = loadingRequestCounter;
+        request.waitingAtEnd = false;
+        setQueueRadioStatus('正在加载电台推荐');
+    }
+}
+
+function describeEmptyExplicitRadio(songs, seedId) {
+    const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
+    const playable = songs.filter(song => song?.source && song.id && typeof song.name === 'string' && song.name.trim() &&
+        cleanSongData(song).id !== seedId && !(skipDisliked && window.DislikeManager.isDisliked(song)));
+    if (!playable.length) return '暂未找到可播放的相似歌曲';
+    const queued = new Set(currentPlaylist.map(song => cleanSongData(song).id));
+    const recordings = new Set(currentPlaylist.map(stationRecordingKey).filter(Boolean));
+    if (playable.every(song => queued.has(cleanSongData(song).id) || recordings.has(stationRecordingKey(song)))) {
+        return '相似歌曲已在播放队列中';
+    }
+    return currentPlaylist.length >= 1000 ? '播放队列最多 1000 首歌曲' : '暂未找到可播放的相似歌曲';
+}
+
+// Start from the captured song on any page, not a potentially stale row index.
+async function startSearchRadio(seed) {
+    if (!seed?.name?.trim() || !seed.source) {
+        showInfo('缺少歌曲信息，无法开启电台');
+        return;
+    }
+    const seedId = cleanSongData(seed).id;
+    const matches = song => song === seed ||
+        (seedId && song?.source === seed.source && cleanSongData(song).id === seedId);
+    const adopting = currentLoadingSongId === seed.id;
+    const existing = currentPlaylist[currentIndex];
+    if (adopting && !matches(existing)) {
+        showInfo('歌曲正在加载，请稍后再试');
+        return;
+    }
+    let index = currentIndex;
+    // Only superseded station recommendations in the unplayed tail are dropped.
+    // Keep ordinary queue entries, played history and explicit Play Next pins.
+    const previousTail = currentPlaylist.slice(currentIndex + 1);
+    const survivingTail = previousTail.filter(song => !song._explicitRadio || song._playNextRequested);
+    const removedPreviousStation = survivingTail.length !== previousTail.length;
+    if (!adopting) {
+        const previous = currentPlaylist.slice(0, currentIndex + 1).filter(song => !matches(song));
+        const upcoming = survivingTail.filter(song => !matches(song));
+        if (previous.length + upcoming.length >= 1000) {
+            showInfo('播放队列最多 1000 首歌曲');
+            return;
+        }
+        index = previous.length;
+        currentPlaylist = [...previous, seed, ...upcoming];
+    } else if (removedPreviousStation) {
+        currentPlaylist = [...currentPlaylist.slice(0, currentIndex + 1), ...survivingTail];
+    }
+
+    cancelSearchRadioContinuation();
+    currentPlayingScope = 'search_radio'; // Do not replace the queue with the default list.
+    setSearchRadioArmed(false);
+    preSelectedNextIndex = null;
+    if (!adopting) void playSong(seed, index, null, false, false, false);
+    const request = {
+        anchor: adopting ? existing : seed,
+        epoch: searchRadioEpoch,
+        requestId: loadingRequestCounter,
+        waitingAtEnd: false,
+        controller: new AbortController(),
+    };
+    pendingExplicitRadio = request;
+    const recording = stationRecordingKey(seed);
+    const session = {
+        seed, lastSeed: seed, members: new WeakSet([request.anchor]), seen: new Set([seedId]),
+        seenRecordings: new Set(recording ? [recording] : []), queriedSeeds: new Map(),
+        reseedPool: [], reserve: [], artistOnly: new WeakSet(), nextFillAt: 0, pending: null, handoff: null,
+    };
+    songRadioSession = session;
+    // Update the actual queue without moving the user's window or scroll.
+    renderQueue();
+    setQueueRadioStatus('正在加载电台推荐');
+    let songs = [], response;
+    try {
+        response = await loadSearchRadioSongs(seed, { station: true, signal: request.controller.signal });
+        songs = Array.isArray(response) ? response : response?.list || [];
+    } catch (_) {
+        // The existing loader already converts failures to an empty pool.
+    }
+    if (!isExplicitRadioCurrent(request)) {
+        if (pendingExplicitRadio === request) {
+            pendingExplicitRadio = null;
+            setQueueRadioStatus();
+        }
+        return;
+    }
+
+    storeStationSeedResult(session, seed, response, songs);
+    pendingExplicitRadio = null;
+    const fresh = commitStationRadioSongs(session, songs, response);
+    if (fresh.length) {
+        showInfo('已开启电台');
+        if (radioSongsRemaining(session) < SONG_RADIO_TARGET && session.reseedPool.length) {
+            void replenishSongRadio({ additional: true });
+        }
+    } else {
+        if (songRadioSession === session) songRadioSession = null;
+        const message = describeEmptyExplicitRadio(songs, seedId);
+        setQueueRadioStatus(message);
+        showInfo(message);
+        if (removedPreviousStation) savePlaybackState();
+    }
+    if (request.waitingAtEnd) playNext();
+    else if (fresh.length && !audio.paused) void prefetchNextSong();
+}
+
+function isSearchRadioDue() {
+    if (settings.autoPlaySimilarAfterSearch === false || !searchRadioArmed) return false;
+    if (playMode !== 'list' && playMode !== 'order') return false;
+    if (!currentPlaylist[currentIndex]) return false;
+    // 下一首是续播插入的相似歌曲、或用户指定的「下一首播放」时照常播放；
+    // 否则（搜索结果里的其他条目或队列末尾）取新的相似歌曲
+    const next = currentPlaylist[currentIndex + 1];
+    return !(next && (searchRadioSongs.has(next) || next._searchRadio));
+}
+
+// 用户点了「下一首播放」：这首歌不让续播顶替
+function keepAsNextSong(song) {
+    if (!song) return;
+    searchRadioSongs.add(song);
+    song._searchRadio = true;
+    song._playNextRequested = true;
+    // Manually promoting an earlier recommendation makes it a user priority.
+    delete song._explicitRadio;
+}
+
+// 用户暂停或睡眠定时到点时调用：正在等待的续播请求回来后不再自动开播
+let searchRadioEpoch = 0;
+function cancelSearchRadioContinuation() {
+    searchRadioEpoch++;
+    pendingExplicitRadio?.controller?.abort();
+    songRadioSession?.pending?.controller?.abort();
+    pendingExplicitRadio = null;
+    setQueueRadioStatus();
+}
+
+
+// The radio mode belongs to the queue snapshot, not a separate storage write.
+function setSearchRadioArmed(armed) {
+    searchRadioArmed = armed;
+}
+
+// 歌曲搜索结果视图（不含歌手 / 专辑详情里的歌曲列表）
+function isSongSearchView() {
+    if (currentSearchScope !== 'network') return false;
+    return !['artist-detail-header', 'album-detail-header'].some(id => {
+        const header = document.getElementById(id);
+        return header && !header.classList.contains('hidden');
+    });
+}
+
+// 服务端有 7.5 秒的总预算，额外留出传输时间；响应正文也在时限内。
+const SEARCH_RADIO_TIMEOUT_MS = 9000;
+
+// A metadata TTL covers future lookups, not the handoff already prepared for
+// this particular play. Never persist the prepared pool across play requests.
+let preparedSearchRadio = null;
+
+// Use the actual resolver query as its cache key: queue IDs can be missing,
+// reused across editions, or omit the separate QQ numeric ID.
+function getSearchRadioSeedQuery(seed) {
+    const meta = seed.meta || {};
+    // Local paths, filenames and private media URLs must never become provider identifiers.
+    const provider = ['kw', 'kg', 'tx', 'wy', 'mg'].includes(seed.source);
+    const params = new URLSearchParams({
+        source: provider ? seed.source : 'local',
+        // QQ 音乐的相似歌曲接口要数字 ID，列表里的歌把它存在 meta.id
+        songId: provider ? String((seed.source === 'tx' ? (meta.id || seed.songId) : (seed.songId || meta.songId)) || '') : '',
+        songmid: provider ? String(seed.songmid || meta.songId || '') : '',
+        name: seed.name || '',
+        singer: seed.singer || '',
+    });
+    // 用户上传的版本歌名常是乱写的，专辑名能帮服务端认出原曲
+    const album = seed.albumName || meta.albumName || '';
+    if (album) params.set('album', album);
+    return params.toString();
+}
+
+function loadSearchRadioSongs(seed, { prefetch = false, timeoutMs = SEARCH_RADIO_TIMEOUT_MS, station = false, signal } = {}) {
+    const query = getSearchRadioSeedQuery(seed);
+    const seedKey = station ? `${query}&target=${SONG_RADIO_TARGET}&limit=${SONG_RADIO_CANDIDATE_LIMIT}` : query;
+    if (signal?.aborted) return Promise.resolve({ list: [], strategy: 'none' });
+    if (searchRadioCache?.seedKey === seedKey &&
+        ((!station && searchRadioCache.pending) || performance.now() < searchRadioCache.expires)) {
+        return searchRadioCache.promise;
+    }
+    const controller = new AbortController();
+    let timer, onAbort;
+    const deadline = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+            controller.abort();
+            reject(new Error('相似歌曲请求超时'));
+        }, timeoutMs);
+        onAbort = () => {
+            controller.abort();
+            reject(new Error('相似歌曲请求已取消'));
+        };
+        signal?.addEventListener('abort', onAbort, { once: true });
+    });
+    const request = (async () => {
+        const res = await fetch(`${API_BASE}/similar?${seedKey}`, { headers: getUserAuthHeaders(), signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const list = (Array.isArray(data?.list) ? data.list : []).filter(item => {
+            if (!item?.source) return false;
+            if (!item.id || item.id === 'undefined') item.id = item.songmid || item.songId || item.hash || item.copyrightId;
+            return item.id;
+        });
+        return { list, strategy: data?.strategy, incomplete: data?.incomplete === true };
+    })();
+    const entry = { seedKey, prefetch, pending: true, expires: 0 };
+    entry.promise = Promise.race([request, deadline])
+        .catch(e => {
+            if (!signal?.aborted) console.warn('[SearchRadio] 获取相似歌曲失败:', e.message);
+            return { list: [], strategy: 'none' };
+        })
+        .then(result => {
+            // 空预读（包括没有可用标识的响应）不能一直遮住播放结束时的重试。
+            entry.pending = false;
+            if (signal?.aborted) result = { list: [], strategy: 'none' };
+            if (!result.list.length) {
+                if (searchRadioCache === entry) searchRadioCache = null;
+            } else {
+                // 与服务端默认 limit 的候选池期限对齐，不把临时降级的结果当作长期的电台。
+                const degraded = result.incomplete || result.strategy === 'artist' || result.list.length < (station ? SONG_RADIO_TARGET : 5);
+                entry.expires = performance.now() + (degraded ? 60000 : 6 * 60 * 60 * 1000);
+            }
+            return result;
+        })
+        .finally(() => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', onAbort);
+        });
+    searchRadioCache = entry;
+    return entry.promise;
+}
+
+// 去掉已在队列里的和标记为不喜欢的歌曲
+function pickSearchRadioSongs(songs) {
+    const queued = new Set(currentPlaylist.map(item => cleanSongData(item).id));
+    const skipDisliked = settings.autoFilterDislikedSongs !== false && window.DislikeManager;
+    return songs.filter(item => {
+        const id = cleanSongData(item).id;
+        if (queued.has(id)) return false;
+        queued.add(id);
+        return !(skipDisliked && window.DislikeManager.isDisliked(item));
+    }).slice(0, Math.max(0, 1000 - currentPlaylist.length));
+}
+
+// 队列将尽时提前取好相似歌曲并预读第一首，减少续播时的停顿；不适用时走普通预读
+async function prefetchUpcomingSong() {
+    if (isSongRadioActive()) { void replenishSongRadio(); return prefetchNextSong(); }
+    if (!isSearchRadioDue() || settings.enablePreloader === false) return prefetchNextSong();
+    const seed = currentPlaylist[currentIndex];
+    prefetchManager.stop();
+    const generation = prefetchManager.generation;
+    const requestId = loadingRequestCounter;
+    const isCurrent = () => settings.enablePreloader !== false && requestId === loadingRequestCounter &&
+        generation === prefetchManager.generation && currentPlaylist[currentIndex] === seed;
+    const seedKey = getSearchRadioSeedQuery(seed);
+    const result = await loadSearchRadioSongs(seed, { prefetch: true });
+    if (!isCurrent()) return;
+    const radioSong = pickSearchRadioSongs(result.list)[0];
+    if (!radioSong) return prefetchNextSong();
+    try {
+        const ready = await prefetchSongUrl(radioSong, isCurrent, { verifyRetry: true });
+        if (ready && isCurrent()) preparedSearchRadio = { seed, seedKey, requestId, result, song: radioSong, media: ready };
+    } catch (e) {
+        console.warn(`[Prefetch] Could not preload [${radioSong.name}]:`, e.message);
+    }
+}
+
+async function continueWithSimilarSongs() {
+    const seed = currentPlaylist[currentIndex];
+    const epoch = ++searchRadioEpoch; // 重复的 Next/ended 通知只由最新的一次提交队列。
+    const requestId = loadingRequestCounter;
+    const isCurrent = () => currentPlaylist[currentIndex] === seed && epoch === searchRadioEpoch && loadingRequestCounter === requestId;
+    const joinedPrefetch = searchRadioCache?.pending && searchRadioCache.prefetch && searchRadioCache.seedKey === getSearchRadioSeedQuery(seed);
+    const deadline = performance.now() + SEARCH_RADIO_TIMEOUT_MS;
+    // Only the first media URL was verified. Don't pin the rest of an expired
+    // pool if that track was disliked, its quality changed, or its URL was evicted.
+    const getReadyPool = () => {
+        const handoff = preparedSearchRadio;
+        if (!handoff || handoff.seed !== seed || handoff.requestId !== requestId ||
+            handoff.seedKey !== getSearchRadioSeedQuery(seed) || settings.enablePreloader === false) return null;
+        const first = pickSearchRadioSongs(handoff.result.list)[0];
+        if (first !== handoff.song) return null;
+        const quality = window.QualityManager.getBestQuality(first, settings.preferredQuality || 'flac');
+        return quality === handoff.media.requestedQuality && handoff.media.url &&
+            prefetchManager.get(first, quality)?.url === handoff.media.url ? handoff.result : null;
+    };
+    const prepared = getReadyPool();
+    const usePrepared = prepared && prepared.strategy !== 'artist';
+    let result = await (usePrepared ? prepared : loadSearchRadioSongs(seed));
+    if (!isCurrent()) return;
+    if (usePrepared && getReadyPool() !== prepared) {
+        result = await loadSearchRadioSongs(seed);
+        if (!isCurrent()) return;
+    }
+    if (joinedPrefetch && !result.list.length && isSearchRadioDue()) {
+        // 若切歌时预读还在进行，可在本次剩余预算内重试一次，不能重新开始计时。
+        const remaining = Math.floor(deadline - performance.now());
+        if (remaining > 0) result = await loadSearchRadioSongs(seed, { timeoutMs: remaining });
+        if (!isCurrent()) return;
+    }
+    let fresh = isSearchRadioDue() ? pickSearchRadioSongs(result.list) : [];
+    if (!fresh.length && isSearchRadioDue()) {
+        const fallback = getReadyPool();
+        if (fallback && fallback !== result) {
+            result = fallback;
+            fresh = pickSearchRadioSongs(fallback.list);
+        }
+    }
+    if (!fresh.length) {
+        playNextInQueue();
+        return;
+    }
+    showInfo(`已续播 ${fresh.length} 首${result.strategy === 'artist' ? '同歌手歌曲' : '相似歌曲'}`);
+    // 标记写在歌曲对象上，随播放队列一起保存，刷新页面后仍认得出这些是续播插入的
+    fresh.forEach(item => { item._searchRadio = true; });
+    // 相似歌曲插在当前歌曲之后，未播放的搜索结果留在其后。
+    // 与点击搜索结果播放走同一条路径：加入试听列表、遵循「播放搜索歌曲时切换歌单」设置
+    const nextIndex = currentIndex + 1;
+    updatePlaylist([...currentPlaylist.slice(0, nextIndex), ...fresh, ...currentPlaylist.slice(nextIndex)], nextIndex, 'network');
+    setSearchRadioArmed(true);
+}
+
+function playNextInQueue() {
     const nextIndex = getNextIndex();
     if (nextIndex !== -1 && currentPlaylist[nextIndex]) {
         const nextSong = currentPlaylist[nextIndex];
-
+        if (isSongRadioActive() && nextSong._playNextRequested) songRadioSession.members.add(nextSong);
         playSong(nextSong, nextIndex);
     } else {
         console.log('[Queue] No next song or reached end of order playlist');
@@ -8557,6 +9285,7 @@ function savePlaybackState() {
             index: currentIndex,
             time: audio.currentTime,
             scope: currentPlayingScope,
+            searchRadioArmed,
             listId: window.currentViewingListId,
             // [Fix] 保存整个当前播放队列副本。
             // 限制长度为 300 首以兼顾性能和容量（通常足够临时列表使用）
@@ -8610,6 +9339,8 @@ async function restorePlaybackState() {
         if (state.playlist && state.playlist.length > 0) {
             currentPlaylist = state.playlist;
             currentPlayingScope = state.scope || 'network';
+            searchRadioArmed = state.scope === 'network' && (typeof state.searchRadioArmed === 'boolean'
+                ? state.searchRadioArmed : localStorage.getItem('lx_search_radio_armed') === '1');
         } else if (['local_list', 'local_all', 'songlist'].includes(state.scope)) {
             // 回退逻辑：如果队列没存，根据作用域恢复
             currentPlayingScope = state.scope;
@@ -8709,7 +9440,7 @@ window.updatePositionState = updatePositionState; // 暴露给保活模块调用
 // 歌曲播放结束时根据播放模式处理
 audio.addEventListener('ended', () => {
     shouldAutoRecoverPlayback = false;
-    playNext();
+    playAfterNaturalEnd();
 });
 
 audio.addEventListener('canplay', () => {
@@ -9502,6 +10233,7 @@ const SETTINGS_UI_MAP = {
     // 逻辑 (Logic)
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
+    autoPlaySimilarAfterSearch: { id: 'setting-auto-play-similar', type: 'checkbox' },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
@@ -12841,6 +13573,7 @@ async function handleSyncLogout(skipConfirm = false) {
         if (typeof audio !== 'undefined' && audio) {
             try {
                 shouldAutoRecoverPlayback = false;
+                cancelSearchRadioContinuation();
                 audio.pause();
                 audio.currentTime = 0;
                 audio.src = '';
@@ -17650,6 +18383,7 @@ function updateSleepTimerDisplay() {
 
 function finishSleepTimer() {
     cancelSleepTimer();
+    if (typeof cancelSearchRadioContinuation === 'function') cancelSearchRadioContinuation();
     // Use audio.pause directly or togglePlay if music is active
     if (audio && !audio.paused) {
         shouldAutoRecoverPlayback = false;

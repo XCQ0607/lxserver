@@ -183,6 +183,6 @@ button.rc-bar:hover { background: #64748b15; border-radius: 5px; }
  .dislike-empty-state { min-height: 240px; }
 }
 
-/* 菜单评分项保留动作名称与分数，手机端也不折叠为单图标。 */
-.rating-chip.rating-menu-item:not(.rating-score-tag):not(#player-rating) { width: 100%; justify-content: flex-start; padding: 10px 12px; font-size: 14px; line-height: 1.5; text-shadow: none; gap: 6px; }
+/* Use the shared song-action grid rather than the mobile icon-only chip. */
+.queue-actions-menu > .rating-chip.rating-menu-item { text-shadow: none; }
 .rating-chip.rating-menu-item::before { content: none !important; }

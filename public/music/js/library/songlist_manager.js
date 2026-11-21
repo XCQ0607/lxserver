@@ -764,7 +764,7 @@ window.SongListManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- Actions -->
-                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                             title="播放"
                             onclick="event.stopPropagation(); window.SongListManager.playSong(${index})">
@@ -807,6 +807,17 @@ window.SongListManager = (function () {
             window.RatingManager?.attachTag(host, entry.item);
             const button = listContainer.querySelector(`[data-songlist-rating="${entry.originalIndex}"]`);
             window.RatingManager?.attach(button, entry.item);
+            const actions = listContainer.querySelector(`#sl-row-${entry.originalIndex} .song-row-actions`);
+            if (actions && window.createSongMoreMenu) {
+                const menu = window.createSongMoreMenu({ ...entry.item, source: entry.item.source || detailState.source });
+                const popup = menu.querySelector('.queue-actions-menu');
+                for (const action of [...actions.querySelectorAll('button')]) {
+                    if (!['下载', '评分', '不喜欢', '取消不喜欢'].includes(action.title)) continue;
+                    const label = document.createElement('span'); label.textContent = ' ' + action.title;
+                    action.appendChild(label); popup.appendChild(action);
+                }
+                actions.appendChild(menu);
+            }
         }
         window.ServerFileState?.paintBadges(listContainer);
     }

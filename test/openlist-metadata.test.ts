@@ -4,6 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { startMetadata, metadataStatus, metadataObservations, cancelMetadata } from '../src/server/openlist/openlistMetadata'
+import * as metadata from '../src/server/openlist/openlistMetadata'
 import { OpenListClient, OpenListNotFoundError } from '../src/server/openlist/openlistClient'
 
 test('metadata checks are read-only, scoped, durable and cancellable', async t => {
@@ -66,3 +67,84 @@ test('metadata checks are read-only, scoped, durable and cancellable', async t =
   assert.equal(attempts, 2)
 
 })
+
+function pendingMetadata(t: any) {
+  const previous = global.lx, dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-meta-debounce-'))
+  global.lx = { dataPath: dir } as any
+  const timers = new Map<any, () => void>()
+  t.mock.method(Date, 'now', () => 10000)
+  t.mock.method(global, 'setTimeout', ((callback: () => void) => {
+    const timer = { unref() {} }; timers.set(timer, callback); return timer
+  }) as any)
+  t.mock.method(global, 'clearTimeout', ((timer: any) => { timers.delete(timer) }) as any)
+  const runTimers = () => { for (const [timer, callback] of [...timers]) { timers.delete(timer); callback() } }
+  t.after(() => {
+    try { metadata.flushMetadata() } finally {
+      global.lx = previous
+      fs.rmSync(dir, { recursive: true, force: true })
+    }
+  })
+  const row = { id: 1, local_path: '/unused', remote_path: '/root/song.mp3', size: 5, local_hash: null, local_mtime: null, remote_mtime: null }
+  metadata.recordRemoteObservation('source', row, { size: 5 })
+  metadata.recordRemoteObservation('source', row, { size: 6 })
+  const file = path.join(dir, 'runtime/openlist-metadata.json')
+  const savedState = () => (Object.values(JSON.parse(fs.readFileSync(file, 'utf8')).observations)[0] as any).state
+  assert.equal(savedState(), 'same', 'the second observation is still pending in the debounce window')
+  assert.equal(timers.size, 1, 'one deferred save must be queued')
+  return { dir, file, savedState, runTimers, timers }
+}
+
+test('metadata teardown flush persists pending observations and cancels its deferred writer', t => {
+  const { dir, savedState, runTimers, timers } = pendingMetadata(t)
+  metadata.flushMetadata()
+  assert.equal(savedState(), 'changed')
+  assert.equal(timers.size, 0)
+  fs.rmSync(dir, { recursive: true, force: true })
+  runTimers()
+  assert.equal(fs.existsSync(dir), false, 'a flushed writer must not recreate a removed data directory')
+})
+
+for (const [name, runtime] of [['missing runtime', undefined], ['runtime without dataPath', { config: {} }]] as const) {
+  test(`a pending metadata timer safely discards work with ${name}`, t => {
+    const { dir, runTimers } = pendingMetadata(t)
+    fs.rmSync(dir, { recursive: true, force: true })
+    global.lx = runtime as any
+    assert.doesNotThrow(() => runTimers())
+    assert.equal(fs.existsSync(dir), false)
+  })
+}
+
+test('a deferred metadata save still persists observations in its active runtime', t => {
+  const { savedState, runTimers, timers } = pendingMetadata(t)
+  runTimers()
+  assert.equal(savedState(), 'changed')
+  assert.equal(timers.size, 0)
+})
+
+test('a pending metadata timer never writes old observations into another runtime root', t => {
+  const { dir, savedState, runTimers } = pendingMetadata(t)
+  const other = path.join(dir, 'another-runtime')
+  global.lx = { dataPath: other } as any
+  runTimers()
+  assert.equal(savedState(), 'same')
+  assert.equal(fs.existsSync(other), false)
+})
+
+for (const phase of ['writeFileSync', 'renameSync'] as const) {
+  test(`explicit metadata flush retries after a failed ${phase}`, t => {
+    const { savedState, timers, runTimers } = pendingMetadata(t)
+    const original = fs[phase]
+    let fail = true
+    t.mock.method(fs, phase, ((...args: any[]) => {
+      if (fail) { fail = false; throw Object.assign(new Error('No space left'), { code: 'ENOSPC' }) }
+      return (original as any)(...args)
+    }) as any)
+    assert.throws(() => metadata.flushMetadata(), { code: 'ENOSPC' })
+    assert.equal(savedState(), 'same')
+    assert.equal(timers.size, 0)
+    metadata.flushMetadata()
+    assert.equal(savedState(), 'changed', 'a failed save stays dirty without requiring another observation')
+    runTimers()
+    assert.equal(savedState(), 'changed')
+  })
+}

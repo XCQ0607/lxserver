@@ -12,8 +12,12 @@ window.RatingManager = (() => {
     }
     function paint(info) {
         if (controls.get(info.button) !== info) return;
-        if (info.button.classList?.contains('rating-menu-item')) info.button.textContent = info.rating ? `★ 评分 ${info.rating}` : '☆ 评分';
-        else info.button.textContent = info.tag || info.button.id === 'player-rating' ? (info.rating ? `★ ${info.rating}` : '☆') : (info.rating ? '★' : '☆');
+        if (info.button.classList?.contains('rating-menu-item')) {
+            const icon = el('span', 'song-action-icon', info.rating ? '★' : '☆');
+            icon.setAttribute('aria-hidden', 'true');
+            const label = el('span', '', info.rating ? `评分 ${info.rating}` : '评分');
+            info.button.replaceChildren(icon, label);
+        } else info.button.textContent = info.tag || info.button.id === 'player-rating' ? (info.rating ? `★ ${info.rating}` : '☆') : (info.rating ? '★' : '☆');
         info.button.classList?.toggle('is-rated', !!info.rating);
         info.button.setAttribute('data-score', String(info.rating || ''));
         if (info.tag) info.button.hidden = !info.rating;

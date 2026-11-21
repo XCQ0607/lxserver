@@ -3,6 +3,13 @@
 The player defaults to `/`, configurable with `PLAYER_PATH`. Player access authentication opens the player; personal login selects playlists, settings and directory permissions. A valid browser session normally avoids repeated access-password prompts.
 
 
+## Similar songs after Search
+
+Start a song from Search with **Continue with similar songs** enabled, in sequential or list-loop mode. If the search queue stays active, finishing the song or pressing the player’s **Next** button can insert recommendations ahead of the remaining search results. **Play next** on a specific track gives that track priority. If your settings switch playback back to the default list, it continues normally instead.
+
+The player prefers track-level recommendations. Matching a recording across catalogs uses title, artist credits and available album information, but cannot guarantee the exact edition. Only when there are no track-level matches does the player offer up to three songs by the same artist, labelled separately. An empty prefetch can be retried at track end; if nothing usable arrives in time, the normal queue continues.
+
+
 ## Playback sources and resolution order
 
 **Prefer existing server audio** (formerly prefer cached songs) includes both the current user's `music` downloads and `cache` playback files. Matching uses indexed platform, song ID and quality; scan/link manually copied files or play them directly from the local library. Users are isolated, with `_open` for public files.
