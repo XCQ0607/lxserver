@@ -25,7 +25,7 @@ function setup(cached, preferServerCache = true) {
 }
 
 const song = { id: '1', source: 'wy' };
-const online = { url: 'https://online/song', sourceType: 'normal', quality: 'flac', isPrefetch: true };
+const online = { url: 'https://online/song', sourceType: 'normal', quality: 'flac', isPrefetch: true, triedPlatforms: ['wy', 'tx'] };
 class FakeAudio {
     src = '';
     load() {}
@@ -44,6 +44,7 @@ test('playback rechecks completed cache and preserves switched song identity', a
     assert.equal(result.quality, '320k');
     assert.equal(result.folder, 'music');
     assert.equal(result.songInfo, switched);
+    assert.equal(result.triedPlatforms, undefined, 'replaced cache must not retain prefetch attempts');
     assert.equal(online.url, 'https://online/song');
 });
 

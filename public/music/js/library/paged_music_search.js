@@ -25,7 +25,8 @@
             song, rank, sourceIndex, relevance: relevance(song, keyword),
         }))).sort((a, b) => b.relevance - a.relevance || a.rank - b.rank || a.sourceIndex - b.sourceIndex).map(entry => entry.song);
     }
-    function create({ keyword, sources, limit = 30 }) {
+    // merge：把各平台上的同一首歌并成一条（聚合搜索用），见 song_merge.js
+    function create({ keyword, sources, limit = 30, merge = false }) {
         const state = {
             keyword, sources: sources.slice(), list: [], loading: false, rounds: 0,
             providers: sources.map(source => ({ source, page: 0, done: false, error: '', seen: new Set() })),
@@ -71,7 +72,8 @@
                         (Number.isFinite(data.allPage) && provider.page >= data.allPage);
                     return fresh;
                 });
-                state.list = state.list.concat(rankBatch(groups, keyword));
+                const ranked = rankBatch(groups, keyword);
+                state.list = merge && window.SongMerge ? window.SongMerge.mergeInto(state.list, ranked) : state.list.concat(ranked);
                 state.rounds++;
                 return state;
             })();

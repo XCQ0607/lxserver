@@ -30,6 +30,7 @@ test('no source stops playback recovery and clears pending skip without retrying
 test('global no-source bypasses fallback but cache success still returns normally', async () => {
     let result = { url: '/api/music/cache/file/song.mp3' };
     const context = load('resolveSongUrl', 'async function resolveDownloadSongUrl(', {
+        resolveCachedSongUrl: async () => null,
         fetchSongUrl: async () => { if (result) return result; throw noSource; },
     });
     assert.equal((await context.resolveSongUrl({}, 'flac')).url, result.url);
