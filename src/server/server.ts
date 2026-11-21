@@ -962,9 +962,10 @@ type ReadThroughOffer = {
   owner: string; url: string; song: any; expires: number; cacheDir?: string; stagingDir?: string
 }
 const readThroughOffers = new Map<string, ReadThroughOffer>()
-type ReadThroughDirectory = { cacheDir: string; stagingDir: string; expires: number; ready: boolean; preparing: boolean }
-const readThroughDirectories = new Map<string, ReadThroughDirectory>()
-const issueReadThroughOffer = (owner: string, audioUrl: string, song: any) => {
+// Keep a small ceiling on concurrent filesystem checks. Do not reuse a stale
+// "empty" verdict between songs, and do not hold playback for a slow NAS.
+const readThroughDirectoryChecks = new Set<string>()
+const issueReadThroughOffer = async (owner: string, audioUrl: string, song: any) => {
   if (process.platform === 'win32' || process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
     !owner || ['.', '..', 'open', '_open', 'default'].includes(owner) || /[\\/:\0]/.test(owner) ||
     !global.lx.config.users.some(user => user.name === owner && !user.disabled) || !song.name || !song.singer || !song.interval || !/^https?:\/\//i.test(audioUrl) || audioUrl.length > 4096 ||
@@ -978,40 +979,38 @@ const issueReadThroughOffer = (owner: string, audioUrl: string, song: any) => {
   if (metadata.source === 'tx' && (typeof rawMediaMid !== 'string' || !rawMediaMid || rawMediaMid.length > 512)) return undefined
   const now = Date.now()
   for (const [key, entry] of readThroughOffers) if (entry.expires <= now) readThroughOffers.delete(key)
-  for (const [key, entry] of readThroughDirectories) if (entry.expires <= now && !entry.preparing) readThroughDirectories.delete(key)
-  if (readThroughOffers.size >= 128) return undefined
+  if (readThroughOffers.size >= 128 || readThroughDirectoryChecks.size >= 16 ||
+    readThroughDirectoryChecks.has(owner) || Array.from(readThroughOffers.values()).some(entry => entry.owner === owner)) return undefined
   const cacheDir = fileCache.getCacheDir(owner, false, undefined, false)
-  let directory = readThroughDirectories.get(owner)
-  if (directory?.preparing && directory.cacheDir !== cacheDir) return undefined
-  if (!directory || directory.cacheDir !== cacheDir) {
-    if (readThroughDirectories.size >= 128) return undefined
-    directory = { cacheDir, stagingDir: path.join(cacheDir, fileCache.READ_THROUGH_STAGING_DIR), expires: now + 60_000, ready: false, preparing: true }
-    const preparing = directory
-    readThroughDirectories.set(owner, preparing)
-    // Warm the directory asynchronously; this request keeps ordinary playback
-    // and background-save behavior instead of advertising an unusable ticket.
-    setImmediate(async () => {
-      try {
-        await fs.promises.mkdir(cacheDir, { recursive: true })
-        if (!(await fs.promises.lstat(cacheDir)).isDirectory()) return
-        try { await fs.promises.mkdir(preparing.stagingDir, { mode: 0o700 }) }
-        catch (error: any) { if (error.code !== 'EEXIST') return }
-        const stage = await fs.promises.lstat(preparing.stagingDir)
-        if (!stage.isDirectory() || (stage.mode & 0o077) !== 0) return
-        const handle = await fs.promises.opendir(preparing.stagingDir)
-        try { if (await handle.read()) return }
-        finally { await handle.close() }
-        if (readThroughDirectories.get(owner) === preparing) preparing.ready = true
-      } catch { /* Read-through remains opportunistic. */ }
-      finally { preparing.preparing = false }
-    })
+  const stagingDir = path.join(cacheDir, fileCache.READ_THROUGH_STAGING_DIR)
+  readThroughDirectoryChecks.add(owner)
+  const checked = (async () => {
+    try {
+      await fs.promises.mkdir(cacheDir, { recursive: true })
+      if (!(await fs.promises.lstat(cacheDir)).isDirectory()) return false
+      try { await fs.promises.mkdir(stagingDir, { mode: 0o700 }) }
+      catch (error: any) { if (error.code !== 'EEXIST') return false }
+      const stage = await fs.promises.lstat(stagingDir)
+      if (!stage.isDirectory() || (stage.mode & 0o077) !== 0) return false
+      const handle = await fs.promises.opendir(stagingDir)
+      try { return !await handle.read() }
+      finally { await handle.close() }
+    } catch { return false }
+  })()
+  let checkTimer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const ready = await Promise.race([checked, new Promise<false>(resolve => {
+      checkTimer = setTimeout(() => resolve(false), 50)
+    })])
+    if (!ready || cacheDir !== fileCache.getCacheDir(owner, false, undefined, false)) return undefined
+  } finally {
+    clearTimeout(checkTimer)
+    // An outstanding filesystem operation still consumes its slot after timeout.
+    void checked.then(() => readThroughDirectoryChecks.delete(owner))
   }
-  if (!directory.ready) return undefined
-  // Recheck emptiness asynchronously before another offer for this owner.
-  readThroughDirectories.delete(owner)
   const key = crypto.randomBytes(16).toString('hex')
   readThroughOffers.set(key, {
-    owner, url: audioUrl, expires: now + 2 * 60_000, cacheDir, stagingDir: directory.stagingDir,
+    owner, url: audioUrl, expires: Date.now() + 2 * 60_000, cacheDir, stagingDir,
     song: { id: metadata.id, source: metadata.source, name: metadata.name, singer: metadata.singer,
       albumName: metadata.album, interval: metadata.interval, meta: nativeIds },
   })
@@ -7033,7 +7032,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               result.requestedSource = songInfo.source
               result.downloadSource = fileCache.detectDownloadSource(result.url, songInfo.source)
-              if (requestReadThrough === true) result.readThrough = issueReadThroughOffer(verifiedUsername, result.url, songInfo)
+              if (requestReadThrough === true) result.readThrough = await issueReadThroughOffer(verifiedUsername, result.url, songInfo)
             }
 
             res.writeHead(200, { 'Content-Type': 'application/json', ...(result.readThrough ? { 'Cache-Control': 'private, no-store' } : {}) })
