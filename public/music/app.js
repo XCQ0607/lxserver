@@ -8179,7 +8179,7 @@ function updatePlayerInfo(song, actualQuality) {
             e.stopPropagation();
             const singers = song.singer.split(/[、&,，]| \/ /).map(s => s.trim()).filter(s => s);
             if (singers.length > 1) {
-                const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers);
+                const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
                 if (selected) performSearch(selected, song.source);
             } else {
                 performSearch(song.singer, song.source);
@@ -8251,7 +8251,7 @@ function updatePlayerInfo(song, actualQuality) {
                 // 处理多个歌手的情况
                 const singers = song.singer.split(/[、&,，]| \/ /).map(s => s.trim()).filter(s => s);
                 if (singers.length > 1) {
-                    const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers);
+                    const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
                     if (selected) performSearch(selected, song.source);
                 } else {
                     performSearch(song.singer, song.source);
