@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v65';
-// Refresh cached assets after organizing JavaScript modules by feature.
+const CACHE_NAME = 'lx-music-web-v67';
+// Refresh touch song actions and compact landscape player layout.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -10,6 +10,7 @@ const ASSETS_TO_CACHE = [
     './css/utilities.css',
     './css/app.css',
     './js/library/search_requests.js',
+    './js/library/song_merge.js',
     './js/library/paged_music_search.js',
     './js/library/search_suggestions.js',
     './js/ui/ui_accessibility.js',
@@ -32,6 +33,7 @@ const ASSETS_TO_CACHE = [
     './js/core/pwa.js',
     './js/ui/theme_manager.js',
     './js/ui/log_viewer.js',
+    './js/ui/i18n.js',
     './js/player/ios-background-audio.js',
     './js/player/airplay.js',
     './js/player/playback.js',

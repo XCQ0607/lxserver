@@ -222,7 +222,7 @@ window.LeaderboardManager = (function () {
                     ` : `<span class="${rankClass}">${rank}</span>`}
                 </div>
                 <!-- 封面 + 歌名 -->
-                <div class="col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
+                <div class="lb-song-track col-span-7 sm:col-span-5 md:col-span-4 lg:col-span-4 flex items-center gap-3 min-w-0 pr-2">
                     <div class="w-10 h-10 md:w-12 md:h-12 flex-shrink-0 relative rounded-lg overflow-hidden shadow-sm border t-border-main group-hover:shadow-md transition-all group-hover:scale-105 duration-300">
                         <img data-src="${imgUrl}" src="/music/assets/logo.svg"
                              class="lazy-image w-full h-full object-cover dynamic-logo is-placeholder"
@@ -261,7 +261,7 @@ window.LeaderboardManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- 操作 -->
-                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                             title="播放"
                             onclick="event.stopPropagation(); window.LeaderboardManager.playSong(${index})">
@@ -273,6 +273,7 @@ window.LeaderboardManager = (function () {
                         <i class="fas fa-download w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-500 transition-colors inline-flex items-center justify-center"
+                            data-song-add-index="${index}"
                             title="添加到歌单"
                             onclick="event.stopPropagation(); window.LeaderboardManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
@@ -287,6 +288,13 @@ window.LeaderboardManager = (function () {
             </div>
             `;
         }).join('');
+
+        container.querySelectorAll('[data-song-add-index]').forEach(button => {
+            const song = state.songs[Number(button.dataset.songAddIndex)];
+            if (!song || typeof window.createSongAddMenu !== 'function') return;
+            const capturedSong = { ...song, source: song.source || state.source };
+            button.replaceWith(window.createSongAddMenu(capturedSong, () => window.openPlaylistAddModalForSongObject(capturedSong)));
+        });
 
         if (typeof window.lazyLoadImages === 'function') window.lazyLoadImages();
         if (typeof window.applyMarqueeChecks === 'function') window.applyMarqueeChecks();

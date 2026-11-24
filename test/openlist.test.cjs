@@ -9,6 +9,7 @@ const { once } = require('node:events')
 const { build } = require('esbuild')
 
 test('OpenList backup, restore and synchronization against an HTTP storage server', async t => {
+  const previousLx = global.lx
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-openlist-test-'))
   const root = path.resolve(__dirname, '..')
   const remote = new Map()
@@ -72,15 +73,18 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
   base = 'http://127.0.0.1:' + storage.address().port
   t.after(async () => {
     api.stopVerifyScheduler()
-    api.closeBackupDb()
-    storage.closeAllConnections()
-    await new Promise(resolve => storage.close(resolve))
-    fs.rmSync(temp, { recursive: true, force: true })
-    delete global.__openlistTest
+    try { api.flushMetadata() } finally {
+      api.closeBackupDb()
+      storage.closeAllConnections()
+      await new Promise(resolve => storage.close(resolve))
+      fs.rmSync(temp, { recursive: true, force: true })
+      delete global.__openlistTest
+      global.lx = previousLx
+    }
   })
   // Isolate the music SDK and user spaces; exercise the real manager, SQLite DB and HTTP client.
   await build({
-    stdin: { contents: "export * from './src/server/openlist/openlistBackup'; export * from './src/server/openlist/openlistBackupDb'; export * from './src/server/openlist/openlistClient'", resolveDir: root, loader: 'ts' },
+    stdin: { contents: "export * from './src/server/openlist/openlistBackup'; export * from './src/server/openlist/openlistBackupDb'; export * from './src/server/openlist/openlistClient'; export { flushMetadata } from './src/server/openlist/openlistMetadata'", resolveDir: root, loader: 'ts' },
     bundle: true, platform: 'node', format: 'cjs', outfile: path.join(temp, 'manager.cjs'),
     plugins: [{ name: 'application-boundaries', setup(b) {
       b.onResolve({ filter: /^@\/(server\/music\/fileCache|server\/sources\/userApi|user(\/data)?|constants)$/ }, a => ({ path: a.path, namespace: 'boundary' }))
@@ -802,6 +806,7 @@ test('OpenList backup, restore and synchronization against an HTTP storage serve
 })
 
 test('Subsonic OpenList delivery uses the production stream handler', async t => {
+  const previousLx = global.lx
   const vm = require('node:vm')
   const { transformSync } = require('esbuild')
   const sourceText = fs.readFileSync(path.join(__dirname, '../src/server/integrations/subsonic.ts'), 'utf8')
@@ -853,7 +858,9 @@ test('Subsonic OpenList delivery uses the production stream handler', async t =>
   global.lx = { config: { 'subsonic.playCacheFirstUseOpenlist': true, 'subsonic.playCacheFirst': true, 'subsonic.openlistDelivery': 'direct', 'subsonic.transcode.enabled': true } }
   const config = global.lx.config
   t.after(async () => {
-    for (const server of [app, upstream]) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
+    try {
+      for (const server of [app, upstream]) { server.closeAllConnections(); await new Promise(resolve => server.close(resolve)) }
+    } finally { global.lx = previousLx }
   })
   await t.test('requested format and time offset use transcoding even on a cloud hit', async () => {
     cloudQuality = 'flac'
