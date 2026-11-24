@@ -17879,20 +17879,42 @@ window.getCurrentActiveListId = function () {
 // ========================================
 
 // Mobile Sidebar Toggle
+let sidebarBackdropTimer = null;
+
 function toggleSidebar() {
     const sidebar = document.getElementById('main-sidebar');
     const backdrop = document.getElementById('mobile-sidebar-backdrop');
+    if (!sidebar) return;
+
+    if (sidebarBackdropTimer) {
+        clearTimeout(sidebarBackdropTimer);
+        sidebarBackdropTimer = null;
+    }
 
     if (sidebar.classList.contains('-translate-x-full')) {
-        // Open
+        // Open with smooth slide-in and backdrop fade-in
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            void backdrop.offsetWidth;
+            backdrop.classList.remove('opacity-0', 'pointer-events-none');
+            backdrop.classList.add('opacity-100', 'pointer-events-auto');
+        }
         sidebar.classList.remove('-translate-x-full');
         sidebar.classList.add('translate-x-0');
-        backdrop.classList.remove('hidden');
     } else {
-        // Close
+        // Close with smooth slide-out and backdrop fade-out
         sidebar.classList.remove('translate-x-0');
         sidebar.classList.add('-translate-x-full');
-        backdrop.classList.add('hidden');
+        if (backdrop) {
+            backdrop.classList.remove('opacity-100', 'pointer-events-auto');
+            backdrop.classList.add('opacity-0', 'pointer-events-none');
+            sidebarBackdropTimer = setTimeout(() => {
+                sidebarBackdropTimer = null;
+                if (sidebar.classList.contains('-translate-x-full')) {
+                    backdrop.classList.add('hidden');
+                }
+            }, 300);
+        }
     }
 }
 
@@ -17903,9 +17925,17 @@ window.addEventListener('resize', () => {
     const expandBtn = document.getElementById('sidebar-expand-btn');
 
     if (sidebar && window.innerWidth >= 1025) {
-        // Reset styles for desktop
+        // Reset styles for desktop; preserve saved desktop collapse preference
+        if (sidebarBackdropTimer) {
+            clearTimeout(sidebarBackdropTimer);
+            sidebarBackdropTimer = null;
+        }
         sidebar.classList.remove('-translate-x-full', 'translate-x-0');
-        if (backdrop) backdrop.classList.add('hidden');
+        try { sidebar.classList.toggle('desktop-collapsed', localStorage.getItem('desktop_sidebar_collapsed') === 'true'); } catch (_) {}
+        if (backdrop) {
+            backdrop.classList.remove('opacity-100', 'pointer-events-auto');
+            backdrop.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+        }
         if (expandBtn) {
             if (sidebar.classList.contains('desktop-collapsed')) {
                 expandBtn.classList.remove('hidden');
@@ -17916,7 +17946,8 @@ window.addEventListener('resize', () => {
             }
         }
     } else if (sidebar) {
-        // Ensure default closed state for mobile if not explicitly open
+        // Clear the desktop class without overwriting saved preference
+        sidebar.classList.remove('desktop-collapsed');
         if (!sidebar.classList.contains('translate-x-0')) {
             sidebar.classList.add('-translate-x-full');
         }
@@ -17932,6 +17963,7 @@ window.addEventListener('resize', () => {
 
 // Desktop Sidebar Collapse Toggle
 function toggleDesktopSidebar(expand) {
+    if (window.innerWidth < 1025) return;
     const sidebar = document.getElementById('main-sidebar');
     const expandBtn = document.getElementById('sidebar-expand-btn');
     if (!sidebar) return;
@@ -17974,7 +18006,7 @@ function toggleDesktopSidebar(expand) {
 function initDesktopSidebar() {
     try {
         const isCollapsed = localStorage.getItem('desktop_sidebar_collapsed') === 'true';
-        if (isCollapsed && window.innerWidth >= 768) {
+        if (isCollapsed && window.innerWidth >= 1025) {
             const sidebar = document.getElementById('main-sidebar');
             const expandBtn = document.getElementById('sidebar-expand-btn');
             if (sidebar) sidebar.classList.add('desktop-collapsed');

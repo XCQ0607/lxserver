@@ -26,40 +26,25 @@
 
     function adjustMobilePlayerActions() {
         if (innerWidth >= 1025) return;
-        const songInfo = document.getElementById('player-song-info');
         const actionsContainer = document.getElementById('player-mobile-actions');
         const menu = document.getElementById('player-mobile-overflow-menu');
         const menuContent = document.getElementById('player-mobile-overflow-content');
-        if (!songInfo || !actionsContainer || !menu || !menuContent) return;
+        if (!actionsContainer || !menu || !menuContent) return;
 
-        const cover = document.getElementById('player-cover-container');
-        const coverWidth = cover ? cover.offsetWidth : 48;
-        const totalWidth = songInfo.clientWidth;
-
-        // 给歌曲标题和作者留出舒适可读空间（最小 85px）
-        const minTitleWidth = 85;
-        // 播放器右上角悬浮的收起按钮 #btn-collapse-panel 占位安全边距（约 36px）
-        const collapseBtn = document.getElementById('btn-collapse-panel');
-        const rightMargin = (collapseBtn && collapseBtn.offsetParent !== null) ? 36 : 8;
-        const likeBtn = document.getElementById('player-like-btn');
-        const likeWidth = likeBtn ? likeBtn.offsetWidth || 28 : 28;
-
-        const availableWidth = totalWidth - coverWidth - minTitleWidth - rightMargin - likeWidth;
-        const btnWidth = 32; // 每个按钮占宽（含 gap）
-        const menuSummaryWidth = 32; // 三个点按钮占宽
-
+        const availableWidth = actionsContainer.clientWidth;
+        const btnWidth = 36;
+        const menuSummaryWidth = 32;
         const outerButtons = MOBILE_ACTION_DEFS.map(def => actionsContainer.querySelector(`[data-mobile-btn="${def.key}"]`)).filter(Boolean);
 
-        // 如果宽度足够放下所有 5 个按钮
-        if (availableWidth >= MOBILE_ACTION_DEFS.length * btnWidth) {
+        // Mobile renders #player-mobile-actions as a full-width second-row dock so all actions stay directly accessible.
+        if (!availableWidth || availableWidth >= MOBILE_ACTION_DEFS.length * btnWidth) {
             outerButtons.forEach(btn => btn.classList.remove('hidden'));
             menu.style.display = 'none';
             menu.open = false;
             menuContent.innerHTML = '';
         } else {
-            // 空间不足，优先保留前面重要按钮，放不下的移入三个点折叠菜单
             menu.style.display = '';
-            const remaining = availableWidth - menuSummaryWidth;
+            const remaining = availableWidth - menuSummaryWidth - 40;
             const fitCount = Math.max(0, Math.min(MOBILE_ACTION_DEFS.length - 1, Math.floor(remaining / btnWidth)));
 
             menuContent.innerHTML = '';
@@ -129,6 +114,8 @@
             while (branch.parentElement && branch.parentElement !== document.documentElement) {
                 for (const sibling of branch.parentElement.children) {
                     if (sibling === branch || ['SCRIPT', 'STYLE', 'LINK'].includes(sibling.tagName)) continue;
+                    // Keep the mobile sidebar backdrop clickable so tapping outside closes the drawer.
+                    if (top.id === 'main-sidebar' && sibling.id === 'mobile-sidebar-backdrop') continue;
                     background.set(sibling, sibling.inert);
                     sibling.inert = true;
                 }

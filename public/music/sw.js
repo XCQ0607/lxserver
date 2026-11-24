@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v68';
-// Refresh cached assets for accessible library and lyrics controls.
+const CACHE_NAME = 'lx-music-web-v69';
+// Refresh cached assets for smooth mobile sidebar transition and two-row player layout.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',

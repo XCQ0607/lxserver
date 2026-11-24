@@ -57,7 +57,7 @@
 
         <!-- Mobile Sidebar Backdrop -->
         <div id="mobile-sidebar-backdrop" onclick="toggleSidebar()"
-            class="fixed inset-0 bg-black/50 z-[55] hidden md:hidden glass"></div>
+            class="fixed inset-0 bg-black/50 z-[55] hidden opacity-0 pointer-events-none transition-opacity duration-300 md:hidden glass"></div>
 
         <!-- Sidebar -->
         <aside id="main-sidebar"
@@ -4314,7 +4314,7 @@
                 </div>
 
                 <!-- Secondary controls align to the right without shifting the transport. -->
-                <div class="flex items-center justify-end gap-1 md:gap-2 min-w-0">
+                <div class="player-secondary-controls flex items-center justify-end gap-1 md:gap-2 min-w-0">
                 <!-- Playback Rate Button -->
                 <div class="relative group">
                     <button id="playback-rate-btn" onclick="togglePlaybackRateMenu(event)"
@@ -4350,13 +4350,13 @@
                 </div>
                 <!-- Chromecast Button -->
                 <button id="btn-cast" type="button" hidden disabled aria-label="Chromecast" aria-pressed="false"
-                    title="Chromecast" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
-                    <i class="fab fa-chromecast" aria-hidden="true"></i>
+                    title="Chromecast" class="player-route-button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 8V4h17v14h-8"/><path d="M3 12a9 9 0 0 1 9 9M3 16a5 5 0 0 1 5 5"/><circle cx="3" cy="21" r="1" fill="currentColor" stroke="none"/></svg>
                 </button>
                 <!-- AirPlay Button -->
                 <button id="btn-airplay" type="button" hidden disabled aria-label="AirPlay" aria-pressed="false"
-                    title="AirPlay" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
-                    <i class="fas fa-tv" aria-hidden="true"></i>
+                    title="AirPlay" class="player-route-button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 17H3V4h18v13h-2"/><path d="m12 13 6 7H6l6-7Z"/></svg>
                 </button>
                 </div>
             </div>
