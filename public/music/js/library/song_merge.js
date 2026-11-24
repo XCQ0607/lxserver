@@ -35,9 +35,16 @@
     const sources = song => (song ? [song, ...(song._alternates || [])] : []);
 
     // 把 incoming 并入 list：同一首歌且该平台还没出现过的，挂到已有条目上；其余按原顺序追加。
-    // 已显示的条目不移动、不替换，只是多出备选平台。
-    function mergeInto(list, incoming) {
+    // 若提供 preferredSources，则同组内优先级更高的平台会成为主条目（行位置不变），其余按优先级排在 _alternates 中。
+    function mergeInto(list, incoming, options = {}) {
         const result = list.slice();
+        const preferred = Array.isArray(options?.preferredSources) && options.preferredSources.length
+            ? options.preferredSources : null;
+        const rankOf = source => {
+            if (!preferred) return Infinity;
+            const idx = preferred.indexOf(source);
+            return idx >= 0 ? idx : preferred.length;
+        };
         const byName = new Map();
         const index = entry => {
             const key = compact(entry.name);
@@ -46,10 +53,27 @@
         };
         result.forEach(index);
         for (const song of incoming) {
-            const host = (byName.get(compact(song.name)) || []).find(entry =>
+            const key = compact(song.name);
+            const bucket = byName.get(key) || [];
+            const host = bucket.find(entry =>
                 sources(entry).every(member => member.source !== song.source && sameSong(member, song)));
             if (host) {
-                host._alternates = [...(host._alternates || []), song];
+                if (preferred && rankOf(song.source) < rankOf(host.source)) {
+                    const oldAlternates = host._alternates || [];
+                    const demotedHost = { ...host };
+                    delete demotedHost._alternates;
+                    const mergedAlternates = [demotedHost, ...oldAlternates]
+                        .sort((a, b) => rankOf(a.source) - rankOf(b.source));
+                    const promoted = { ...song, _alternates: mergedAlternates };
+                    const resultIdx = result.indexOf(host);
+                    if (resultIdx >= 0) result[resultIdx] = promoted;
+                    const bucketIdx = bucket.indexOf(host);
+                    if (bucketIdx >= 0) bucket[bucketIdx] = promoted;
+                } else {
+                    const nextAlternates = [...(host._alternates || []), song];
+                    if (preferred) nextAlternates.sort((a, b) => rankOf(a.source) - rankOf(b.source));
+                    host._alternates = nextAlternates;
+                }
             } else {
                 result.push(song);
                 index(song);

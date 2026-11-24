@@ -133,6 +133,7 @@ const DEFAULT_SETTINGS = {
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
     mergeAggregatedSearch: true, // 聚合搜索合并各平台的同一首歌 (默认开启)
+    mergeSourcePriority: ['kw', 'kg', 'tx', 'wy', 'mg'], // 聚合搜索主平台显示优先级
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
@@ -2271,7 +2272,7 @@ function renderQueue() {
                 <div class="flex-1 min-w-0">
                     ${createMarqueeHtml(song.name, 'text-sm font-bold ' + (isActive ? 'text-emerald-500' : 't-text-main'))}
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
-                        ${getSourceTag(song.source)}
+                        ${getSourceTags(song, { compact: true, queueIndex: index })}
                         ${getQualityTags(song)}
                         ${createMarqueeHtml(song.singer, 'text-[10px] t-text-muted flex-1')}
                     </div>
@@ -2512,6 +2513,7 @@ async function searchNetworkSongs(keyword, source, headers, request, append = fa
     const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
         keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
         merge: source === 'all' && settings.mergeAggregatedSearch !== false,
+        preferredSources: typeof getMergeSourcePriority === 'function' ? getMergeSourcePriority() : undefined,
     });
     if (!append) window.networkSongSearch = search;
     const current = () => request.current() && window.networkSongSearch === search &&
@@ -2545,7 +2547,11 @@ async function searchNetworkSongs(keyword, source, headers, request, append = fa
     window.viewingPlaylist = state.list;
     if (append && window.ListSearch?.state.active) window.ListSearch.handleSearch();
     else renderResults(state.list);
-    if (!state.list.length && failed.length && container) container.textContent = '暂未获得结果，可点击下方按钮重试失败音源。';
+    if (!state.list.length && failed.length && container) {
+        const header = document.getElementById('search-results-header');
+        if (header) header.classList.add('hidden');
+        container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>暂未获得结果</p><small>部分音源加载失败，可点击下方按钮重试失败音源</small></div>';
+    }
     if (append && container) container.scrollTop = scrollTop;
     renderNetworkSearchFooter(true);
 }
@@ -3037,7 +3043,7 @@ function switchHotSearchTab(source) {
         renderHotSearch(data);
     }).catch(() => {
         if (request && !request.current()) return;
-        if (container) container.textContent = '热门搜索加载失败，请重试';
+        if (container) container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>热门搜索加载失败</p><small>请检查网络连接后重试</small></div>';
     });
 }
 window.switchHotSearchTab = switchHotSearchTab;
@@ -3166,18 +3172,181 @@ function getSourceTag(source) {
 }
 window.getSourceTag = getSourceTag;
 
-// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来
-function getSourceTags(song) {
+// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来，点击可查看全部平台版本
+function getSourceTags(song, options = {}) {
     const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
-    // 手机上一行放不下四五个平台标签（会把音质标签挤出屏幕）：只显示主平台，其余折叠成 +N
-    if (members.length > 2 && window.innerWidth < 768) {
-        const others = members.slice(1).map(member => getSourceName(member.source)).join('、');
-        return getSourceTag(members[0].source) +
-            `<span class="song-tag t-bg-main t-text-muted t-border-main" title="${others}">+${members.length - 1}</span>`;
-    }
-    return members.map(member => getSourceTag(member.source)).join('');
+    if (members.length <= 1) return getSourceTag(members[0]?.source);
+    const compact = !!options.compact || (members.length > 2 && window.innerWidth < 768);
+    const innerHtml = compact
+        ? getSourceTag(members[0].source) +
+            `<span class="song-tag t-bg-main t-text-muted t-border-main">+${members.length - 1}</span>`
+        : members.map(member => getSourceTag(member.source)).join('');
+    if (options.interactive === false) return innerHtml;
+    const names = members.map(member => getSourceName(member.source)).join('、');
+    const queueAttr = Number.isInteger(options.queueIndex)
+        ? ` onclick="event.stopPropagation(); openMergedSourcesModal(currentPlaylist[${options.queueIndex}], ${options.queueIndex}, { fromQueue: true })"`
+        : '';
+    return `<button type="button" class="merged-sources-trigger inline-flex items-center gap-1 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title="点击查看全部 ${members.length} 个平台：${names}"${queueAttr}>${innerHtml}</button>`;
 }
 window.getSourceTags = getSourceTags;
+
+const MERGE_SOURCE_DEFAULT_ORDER = ['kw', 'kg', 'tx', 'wy', 'mg'];
+function normalizeMergeSourcePriority(order) {
+    const valid = Array.isArray(order)
+        ? order.filter(s => MERGE_SOURCE_DEFAULT_ORDER.includes(s))
+        : [];
+    const result = [];
+    for (const source of [...valid, ...MERGE_SOURCE_DEFAULT_ORDER]) {
+        if (!result.includes(source)) result.push(source);
+    }
+    return result;
+}
+function getMergeSourcePriority() {
+    return normalizeMergeSourcePriority(settings.mergeSourcePriority);
+}
+function syncMergeSourcePriorityUI(enabled = settings.mergeAggregatedSearch !== false) {
+    const wrap = document.getElementById('setting-merge-source-priority-wrap');
+    if (wrap) wrap.classList.toggle('hidden', enabled === false);
+    if (enabled !== false) renderMergeSourcePriorityTags();
+}
+function renderMergeSourcePriorityTags() {
+    const container = document.getElementById('setting-merge-source-priority');
+    if (!container) return;
+    const colors = {
+        kw: 't-badge-yellow border-yellow-200 dark:border-yellow-500/30',
+        kg: 't-badge-blue border-blue-200 dark:border-blue-500/30',
+        tx: 't-badge-green border-green-200 dark:border-emerald-500/30',
+        wy: 't-badge-red border-red-200 dark:border-red-500/30',
+        mg: 't-badge-pink border-pink-200 dark:border-pink-500/30'
+    };
+    const names = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
+    const order = getMergeSourcePriority();
+    container.innerHTML = order.map((source, idx) => `
+        <div data-source="${source}" role="listitem"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-grab active:cursor-grabbing touch-none transition-transform ${colors[source] || 't-bg-main t-text-muted t-border-main'}">
+            <i class="fas fa-grip-vertical text-[10px] opacity-60" aria-hidden="true"></i>
+            <span class="opacity-70 font-mono text-[10px]">${idx + 1}.</span>
+            <span>${names[source] || source.toUpperCase()}</span>
+        </div>
+    `).join('');
+    if (typeof Sortable !== 'undefined') {
+        try {
+            const oldSortable = Sortable.get(container);
+            if (oldSortable) oldSortable.destroy();
+        } catch (e) { /* ignore */ }
+        Sortable.create(container, {
+            animation: 150,
+            ghostClass: 'opacity-40',
+            onEnd: () => {
+                const nextOrder = [...container.children].map(el => el.dataset.source).filter(Boolean);
+                updateSetting('mergeSourcePriority', normalizeMergeSourcePriority(nextOrder));
+            }
+        });
+    }
+}
+window.renderMergeSourcePriorityTags = renderMergeSourcePriorityTags;
+
+function closeMergedSourcesModal() {
+    const modal = document.getElementById('merged-sources-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+window.closeMergedSourcesModal = closeMergedSourcesModal;
+
+function openMergedSourcesModal(song, index = -1, options = {}) {
+    const modal = document.getElementById('merged-sources-modal');
+    const titleEl = document.getElementById('merged-sources-modal-title');
+    const subtitleEl = document.getElementById('merged-sources-modal-subtitle');
+    const listEl = document.getElementById('merged-sources-modal-list');
+    if (!modal || !listEl || !song) return;
+
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    if (titleEl) titleEl.textContent = song.name || '多平台版本';
+    if (subtitleEl) subtitleEl.textContent = `${song.singer || '未知歌手'} · 共 ${members.length} 个平台`;
+
+    listEl.innerHTML = '';
+    members.forEach((member, memberIdx) => {
+        const single = { ...member };
+        delete single._alternates;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3 p-2.5 sm:p-3 rounded-xl border t-border-main t-bg-main/40 hover:t-bg-item-hover transition-colors cursor-pointer';
+        const thumbUrl = escapeHtmlText(getThumbnailUrl(single));
+        const albumName = escapeHtmlText(getSongAlbumName(single) || '-');
+        const duration = escapeHtmlText(single.interval || '--:--');
+        const hostBadge = memberIdx === 0
+            ? '<span class="song-tag t-bg-main t-text-muted t-border-main">主显示</span>'
+            : '';
+
+        row.innerHTML = `
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-lg overflow-hidden flex-shrink-0">
+                <img src="${thumbUrl}" onerror="this.src='/music/assets/logo.svg'" class="w-full h-full object-cover" alt="">
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1 flex-wrap">
+                    ${getSourceTag(single.source)}
+                    ${hostBadge}
+                    ${getQualityTags(single)}
+                </div>
+                <div class="text-xs t-text-muted truncate mt-1">
+                    <span>${albumName}</span>
+                    <span class="mx-1 opacity-50">·</span>
+                    <span class="font-mono">${duration}</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+                <button type="button" data-action="play" title="播放此平台"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors">
+                    <i class="fas fa-play text-xs"></i>
+                </button>
+                <button type="button" data-action="download" title="下载此平台"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/15 transition-colors">
+                    <i class="fas fa-download text-xs"></i>
+                </button>
+                <button type="button" data-action="add" title="添加到歌单"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-500 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors">
+                    <i class="fas fa-plus text-xs"></i>
+                </button>
+            </div>
+        `;
+
+        const playThisPlatform = () => {
+            closeMergedSourcesModal();
+            if (!options.fromQueue && Array.isArray(viewingPlaylist) && index >= 0 && viewingPlaylist[index]) {
+                const nextList = viewingPlaylist.map((item, i) => (i === index ? single : item));
+                updatePlaylist(nextList, index, currentSearchScope);
+                return;
+            }
+            const targetIdx = options.fromQueue && index >= 0 ? index : (currentIndex >= 0 ? currentIndex : 0);
+            playSong(single, targetIdx);
+        };
+        row.addEventListener('click', playThisPlatform);
+        row.querySelector('[data-action="play"]').addEventListener('click', e => { e.stopPropagation(); playThisPlatform(); });
+        row.querySelector('[data-action="download"]').addEventListener('click', e => {
+            e.stopPropagation();
+            downloadSong(single);
+        });
+        row.querySelector('[data-action="add"]').addEventListener('click', e => {
+            e.stopPropagation();
+            closeMergedSourcesModal();
+            openPlaylistAddModalForSongObject(single);
+        });
+        listEl.appendChild(row);
+    });
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+window.openMergedSourcesModal = openMergedSourcesModal;
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('merged-sources-modal');
+            if (modal && !modal.classList.contains('hidden')) closeMergedSourcesModal();
+        }
+    });
+}
 
 
 
@@ -5262,7 +5431,10 @@ function renderResults(list) {
         if (emptyDislike) {
             if (header) header.classList.add('hidden');
             container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-music" aria-hidden="true"></i><p>还没有不喜欢任何歌曲</p><small>在歌曲操作菜单中点击“不喜欢”即可添加</small></div>';
-        } else container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
+        } else {
+            if (header) header.classList.add('hidden');
+            container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-search" aria-hidden="true"></i><p>未找到相关结果</p><small>试试更换关键词或切换其他音源</small></div>';
+        }
         updatePaginationInfo(0, 0, 0, 1, 1);
         return;
     }
@@ -5424,12 +5596,26 @@ function renderResults(list) {
             </div>
         `;
 
+        const mergedSourcesTrigger = row.querySelector('.merged-sources-trigger');
+        if (mergedSourcesTrigger) {
+            mergedSourcesTrigger.addEventListener('click', event => {
+                event.stopPropagation();
+                openMergedSourcesModal(item, actualIndexInOriginal);
+            });
+        }
+
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
             const menu = document.createElement('details');
             menu.className = 'queue-actions';
-            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            const mergedCount = Array.isArray(item._alternates) && item._alternates.length ? item._alternates.length + 1 : 0;
+            const mergedMenuBtn = mergedCount
+                ? `<button type="button" data-merged-sources>查看全部平台 (${mergedCount})</button>`
+                : '';
+            menu.innerHTML = `<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main">${mergedMenuBtn}<button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>`;
             menu.addEventListener('click', event => event.stopPropagation());
+            const mergedBtn = menu.querySelector('[data-merged-sources]');
+            if (mergedBtn) mergedBtn.onclick = () => { menu.open = false; openMergedSourcesModal(item, actualIndexInOriginal); };
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
             const rateButton = document.createElement('button');
@@ -9658,7 +9844,17 @@ const SETTINGS_UI_MAP = {
     // 逻辑 (Logic)
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
-    mergeAggregatedSearch: { id: 'setting-merge-aggregated-search', type: 'checkbox' },
+    mergeAggregatedSearch: {
+        id: 'setting-merge-aggregated-search',
+        type: 'checkbox',
+        action: (enabled) => syncMergeSourcePriorityUI(enabled)
+    },
+    mergeSourcePriority: {
+        id: 'setting-merge-source-priority',
+        type: 'custom',
+        normalize: normalizeMergeSourcePriority,
+        action: () => renderMergeSourcePriorityTags()
+    },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },

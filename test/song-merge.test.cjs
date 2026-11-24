@@ -155,3 +155,22 @@ test('stalled supported-platform query falls back to unknown support', async () 
     const result = await Promise.race([merge.candidates(original, '320k'), new Promise(resolve => setTimeout(() => resolve(null), 100))]);
     assert.equal(result?.[0], original);
 });
+
+test('preferredSources promotes the highest-priority platform to host without moving row position', () => {
+    const { merge } = load();
+    const first = merge.mergeInto([], [
+        song('kw', 1, '稻香', '周杰伦', '03:43'),
+        song('kw', 2, '晴天', '周杰伦', '04:29'),
+        song('tx', 3, '晴天', '周杰伦', '04:29'),
+    ], { preferredSources: ['wy', 'tx', 'kw', 'kg', 'mg'] });
+    assert.deepEqual(ids(first), ['kw_1', 'tx_3']);
+    assert.deepEqual(ids(first[1]._alternates), ['kw_2']);
+
+    const second = merge.mergeInto(first, [
+        song('wy', 4, '晴天', '周杰伦', '04:30'),
+        song('kg', 5, '晴天', '周杰伦', '04:29'),
+    ], { preferredSources: ['wy', 'tx', 'kw', 'kg', 'mg'] });
+    assert.deepEqual(ids(second), ['kw_1', 'wy_4']);
+    assert.deepEqual(ids(second[1]._alternates), ['tx_3', 'kw_2', 'kg_5']);
+    assert.equal(second[1]._alternates.every(m => m._alternates === undefined), true);
+});

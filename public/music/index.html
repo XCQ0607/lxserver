@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
@@ -3495,35 +3495,6 @@
                                                 </div>
                                             </div>
 
-                                            <!-- Merge Identical Songs in Aggregated Search -->
-                                            <div
-                                                class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
-                                                <div class="flex items-center justify-between">
-                                                    <div>
-                                                        <h4 class="text-sm font-bold t-text-main flex items-center">
-                                                            聚合搜索合并相同歌曲
-                                                            <span class="setting-tooltip-trigger">
-                                                                <i class="fas fa-question-circle"></i>
-                                                                <span class="setting-tooltip-content">
-                                                                    开启：聚合搜索时，各平台上的同一首歌（歌名、歌手、时长一致）合并为一条，音质取各平台的并集。<br>
-                                                                    播放或下载时，自动选用有所选音质、且历史解析最快的平台。<br>
-                                                                    关闭：每个平台的结果各占一条。
-                                                                </span>
-                                                            </span>
-                                                        </h4>
-                                                    </div>
-                                                    <label class="relative inline-flex items-center cursor-pointer">
-                                                        <input type="checkbox" id="setting-merge-aggregated-search"
-                                                            aria-label="聚合搜索合并相同歌曲"
-                                                            class="sr-only peer"
-                                                            onchange="updateSetting('mergeAggregatedSearch', this.checked)">
-                                                        <div
-                                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
-                                                        </div>
-                                                    </label>
-                                                </div>
-                                            </div>
-
                                             <!-- Deduplicate Playlist by Quality -->
                                             <div
                                                 class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
@@ -3602,6 +3573,46 @@
                                                             class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
                                                         </div>
                                                     </label>
+                                                </div>
+                                            </div>
+
+                                            <!-- Merge Identical Songs in Aggregated Search -->
+                                            <div
+                                                class="md:col-span-2 t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
+                                                <div class="flex items-center justify-between">
+                                                    <div>
+                                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                            聚合搜索合并相同歌曲
+                                                            <span class="setting-tooltip-trigger">
+                                                                <i class="fas fa-question-circle"></i>
+                                                                <span class="setting-tooltip-content">
+                                                                    开启：聚合搜索时，各平台上的同一首歌（歌名、歌手、时长一致）合并为一条，音质取各平台的并集。<br>
+                                                                    播放或下载时，自动选用有所选音质、且历史解析最快的平台。<br>
+                                                                    关闭：每个平台的结果各占一条。
+                                                                </span>
+                                                            </span>
+                                                        </h4>
+                                                    </div>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" id="setting-merge-aggregated-search"
+                                                            aria-label="聚合搜索合并相同歌曲"
+                                                            class="sr-only peer"
+                                                            onchange="updateSetting('mergeAggregatedSearch', this.checked)">
+                                                        <div
+                                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div id="setting-merge-source-priority-wrap"
+                                                    class="mt-3 pt-3 border-t t-border-main">
+                                                    <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
+                                                        <span class="text-xs font-semibold t-text-main">主平台显示优先级</span>
+                                                        <span class="text-[11px] t-text-muted">拖动标签调整优先显示的封面与信息</span>
+                                                    </div>
+                                                    <div id="setting-merge-source-priority"
+                                                        class="flex flex-wrap items-center gap-2 select-none"
+                                                        role="list"
+                                                        aria-label="聚合搜索主平台显示优先级"></div>
                                                 </div>
                                             </div>
                                         </div>
@@ -6305,6 +6316,27 @@
                     我已阅读并接受
                 </button>
             </div>
+        </div>
+    </div>
+
+    <!-- Merged Multi-Platform Sources Modal -->
+    <div id="merged-sources-modal"
+        class="fixed inset-0 z-[80] hidden items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+        onclick="if (event.target === this) closeMergedSourcesModal()">
+        <div
+            class="t-bg-panel border t-border-main w-full rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            style="max-width: 500px; max-height: 82vh;">
+            <div class="flex items-center justify-between gap-3 px-4 py-3.5 border-b t-border-main flex-shrink-0">
+                <div class="min-w-0">
+                    <h3 id="merged-sources-modal-title" class="text-sm sm:text-base font-bold t-text-main truncate">多平台版本</h3>
+                    <p id="merged-sources-modal-subtitle" class="text-xs t-text-muted truncate mt-0.5"></p>
+                </div>
+                <button type="button" onclick="closeMergedSourcesModal()" aria-label="关闭"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center t-text-muted hover:t-bg-item-hover transition-colors flex-shrink-0">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="merged-sources-modal-list" class="p-3 sm:p-4 space-y-2 overflow-y-auto flex-1"></div>
         </div>
     </div>
 
