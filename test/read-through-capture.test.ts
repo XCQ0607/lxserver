@@ -52,9 +52,11 @@ test('only a complete known-length MPEG response is eligible; Range, format and 
   assert.equal(canCaptureReadThrough(response(200, { 'content-encoding': 'gzip' })), false)
   assert.equal(canCaptureReadThrough(response(200, { 'content-length': '1e6' })), false)
   assert.equal(canCaptureReadThrough(response(200, { 'content-length': undefined })), false)
+  assert.equal(canCaptureReadThrough(response(200, { 'content-type': 'audio/flac' })), true)
+  assert.equal(canCaptureReadThrough(response(200, { 'content-type': 'audio/x-flac' })), true)
   assert.equal(canCaptureReadThrough(response(200, { 'content-type': 'application/octet-stream' })), false)
   assert.equal(canCaptureReadThrough(response(200, { 'transfer-encoding': 'chunked' })), false)
-  assert.equal(canCaptureReadThrough(response(200, { 'content-length': String(33 * 1024 ** 2) }), 64 * 1024 ** 2), false)
+  assert.equal(canCaptureReadThrough(response(200, { 'content-length': String(97 * 1024 ** 2) }), 128 * 1024 ** 2), false)
   assert.equal(canCaptureReadThrough(response(), audio.length - 1), false)
 })
 

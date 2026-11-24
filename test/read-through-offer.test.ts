@@ -65,9 +65,11 @@ test('a stalled spindle does not block ordinary playback or allow stacked checks
   unblock()
 })
 
-test('QQ native identity bounds and the Windows platform gate fail closed before preparing directories', async () => {
+test('QQ native identity bounds fail closed while Windows is supported', async () => {
+  const win = setup('win32')
+  assert.match(await win.issue(song), /^[a-f0-9]{32}$/)
   for (const [platform, track] of [
-    ['win32', song], ['linux', { ...song, meta: {} }],
+    ['linux', { ...song, meta: {} }],
     ['linux', { ...song, meta: { strMediaMid: 'x'.repeat(513) } }],
     ['linux', { ...song, meta: { strMediaMid: {} } }],
   ] as const) {

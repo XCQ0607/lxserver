@@ -256,7 +256,7 @@ export interface CacheItem {
 
 export type CacheFolder = 'cache' | 'music'
 
-export const READ_THROUGH_CACHE_FILENAME = /^lx-readthrough-[a-f0-9]{32}\.mp3$/
+export const READ_THROUGH_CACHE_FILENAME = /^lx-readthrough-[a-f0-9]{32}\.(?:mp3|flac)$/
 const CACHE_UPGRADE_FILENAME = /^lx-upgrade-[a-f0-9]{32}\.(?:mp3|flac)$/
 export const READ_THROUGH_STAGING_DIR = '.lx-read-through'
 

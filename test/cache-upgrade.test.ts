@@ -57,7 +57,7 @@ const fixtureResponse = (url: string, signal: AbortSignal) => new Promise<http.I
   })
   request.on('error', reject)
 })
-const unixStorage = { skip: process.platform === 'win32' }
+const unixStorage = {}
 
 test('checks every FLAC frame and samples instead of trusting stream metadata or the source label', async () => {
   const std = await inspectCompleteFlac(regular)

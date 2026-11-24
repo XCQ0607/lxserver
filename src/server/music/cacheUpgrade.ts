@@ -57,7 +57,7 @@ export function sanitizeCacheUpgradeSong(input: unknown) {
 }
 
 export function canUpgradeForAccount(username: string) {
-  return process.platform !== 'win32' && !!username && !['.', '..', 'open', '_open', 'default'].includes(username) && !/[\\/:\0]/.test(username) &&
+  return !!username && !['.', '..', 'open', '_open', 'default'].includes(username) && !/[\\/:\0]/.test(username) &&
     global.lx?.config?.users?.some(account => account.name === username && !account.disabled) === true
 }
 
@@ -186,7 +186,8 @@ export async function downloadCacheUpgrade(song: any, url: string, requestedQual
     if (!response.complete || !received || (total && total !== received)) throw new Error('Incomplete media download')
     cacheProgress.set(progressKey, { progress: 100, status: 'tagging', received, total: received, updatedAt: Date.now() })
 
-    const handle = await fs.promises.open(temporary, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK)
+    const openFlags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0) | (process.platform === 'win32' ? 0 : (fs.constants.O_NONBLOCK || 0))
+    const handle = await fs.promises.open(temporary, openFlags)
     try {
       const stat = await handle.stat()
       if (!stat.isFile() || stat.size !== received || stat.nlink !== 1) throw new Error('Unverifiable staged media')
@@ -201,7 +202,7 @@ export async function downloadCacheUpgrade(song: any, url: string, requestedQual
         throw new Error('Media quality, completeness or duration could not be verified')
       }
       if (!(await hasRoom(root, received))) throw new Error('Cache upgrade would exceed available space')
-      await handle.sync()
+      if (process.platform !== 'win32') await handle.sync()
 
       // Commit synchronously after the final abort/location/identity checks. Never rename over an earlier file.
       signal.throwIfAborted()

@@ -6,7 +6,8 @@ import path from 'node:path'
 
 // This trial allows one active capture and at most two unresolved finalization
 // reservations per process. It never owns or backpressures the media response.
-const MAX_CAPTURE_BYTES = 32 * 1024 * 1024
+const MAX_CAPTURE_BYTES = 96 * 1024 * 1024
+const SUPPORTED_CONTENT_TYPES = new Set(['audio/mpeg', 'audio/flac', 'audio/x-flac'])
 const MAX_PENDING_BYTES = 256 * 1024
 const IDLE_TIMEOUT_MS = 20_000
 const CAPTURE_TIMEOUT_MS = 120_000
@@ -38,7 +39,7 @@ function eligibleLength({ statusCode, headers }: ResponseMetadata, maxBytes = MA
   if (statusCode !== 200 && statusCode !== 206) return null
   if (headers['transfer-encoding']) return null
   if (headers['content-encoding'] && String(headers['content-encoding']).trim().toLowerCase() !== 'identity') return null
-  if (String(headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase() !== 'audio/mpeg') return null
+  if (!SUPPORTED_CONTENT_TYPES.has(String(headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase())) return null
   const length = headers['content-length']
   if (typeof length !== 'string' || !/^\d+$/.test(length)) return null
   const bytes = Number(length)
@@ -77,6 +78,10 @@ function makePrefixCheck(length: number) {
         collected += toCopy
         offset += toCopy
         if (collected < needed) break
+        if (allowTag && needed === 4 && prefix[0] === 0x66 && prefix[1] === 0x4c && prefix[2] === 0x61 && prefix[3] === 0x43) {
+          recognized = true
+          continue
+        }
         if (allowTag && needed === 4 && prefix[0] === 0x49 && prefix[1] === 0x44 && prefix[2] === 0x33) {
           needed = 10
           continue

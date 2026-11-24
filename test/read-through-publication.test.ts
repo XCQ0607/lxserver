@@ -5,7 +5,7 @@ import os from 'node:os'
 import path from 'node:path'
 import type { CacheItem } from '../src/server/music/fileCache'
 
-const test: typeof nodeTest = process.platform === 'win32' ? nodeTest.skip : nodeTest
+const test: typeof nodeTest = nodeTest
 const suiteRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-read-through-publish-'))
 process.once('exit', () => fs.rmSync(suiteRoot, { recursive: true, force: true }))
 // The server's user-data module dereferences dataPath on import.
@@ -146,18 +146,20 @@ test('keeps an existing variant and leaves the index/unrelated media intact when
   assert.equal(indexManager.get(username, 'tx_2', 'cache', '128k', true), undefined)
 })
 
-test('respects the pilot byte cap including disk orphans without adopting or evicting them', async t => {
+test('respects configured user.cacheSizeLimit including disk orphans without adopting or evicting them', async t => {
   const { stageMusic, publish, username, cacheDir, finalNames } = fixture(t)
   const audio = stageMusic()
+  global.lx.config['user.enableCacheSizeLimit'] = true
+  global.lx.config['user.cacheSizeLimit'] = 1
   const orphan = 'lx-readthrough-' + '2'.repeat(32) + '.mp3'
   const file = path.join(cacheDir, orphan)
   fs.writeFileSync(file, '')
-  fs.truncateSync(file, 256 * 1024 * 1024)
+  fs.truncateSync(file, 1024 * 1024)
   assert.equal(await publish(audio.length), false)
   assert.deepEqual(finalNames(), [orphan])
   await syncCacheIndex(username, ['cache'])
   assert.equal(indexManager.getAll(username, 'cache').length, 0)
-  assert.equal(fs.statSync(file).size, 256 * 1024 * 1024)
+  assert.equal(fs.statSync(file).size, 1024 * 1024)
 })
 
 test('rejects malformed artwork and oversized native IDs before touching the index or publishing media', async t => {
@@ -208,6 +210,15 @@ test('a complete capture atomically repairs a missing, empty or truncated same-k
   }
 })
 
-nodeTest('Windows publication fails closed until private ACL verification is supported', { skip: process.platform !== 'win32' }, async () => {
-  assert.equal(await publishReadThrough('unused', 2048, {}, 'user', 'unused'), false)
+nodeTest('publishes complete FLAC/Hi-Res captures and respects user.enableCacheSizeLimit', async t => {
+  const { stageMusic, publish, indexPath } = fixture(t)
+  const hiRes = fs.readFileSync(path.join(__dirname, 'fixtures/cache-upgrade/flac-24bit-96k.flac'))
+  global.lx.config['user.enableCacheSizeLimit'] = true
+  global.lx.config['user.cacheSizeLimit'] = 10
+  stageMusic(hiRes)
+  assert.equal(await publish(hiRes.length), true)
+  const saved = JSON.parse(fs.readFileSync(indexPath, 'utf8')).tx_1_hires
+  assert.equal(saved.ext, 'flac')
+  assert.equal(saved.quality, 'hires')
+  assert.equal(saved.bitDepth, 24)
 })

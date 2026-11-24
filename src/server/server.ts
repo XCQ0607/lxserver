@@ -966,8 +966,9 @@ const readThroughOffers = new Map<string, ReadThroughOffer>()
 // Keep a small ceiling on concurrent filesystem checks. Do not reuse a stale
 // "empty" verdict between songs, and do not hold playback for a slow NAS.
 const readThroughDirectoryChecks = new Set<string>()
+const readThroughEnabled = () => process.env.LX_READ_THROUGH_CACHE !== '0'
 const issueReadThroughOffer = async (owner: string, audioUrl: string, song: any) => {
-  if (process.platform === 'win32' || process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
+  if (!readThroughEnabled() ||
     !owner || ['.', '..', 'open', '_open', 'default'].includes(owner) || /[\\/:\0]/.test(owner) ||
     !global.lx.config.users.some(user => user.name === owner && !user.disabled) || !song.name || !song.singer || !song.interval || !/^https?:\/\//i.test(audioUrl) || audioUrl.length > 4096 ||
     !['tx', 'wy', 'kw', 'kg', 'mg'].includes(song.source)) return undefined
@@ -992,7 +993,7 @@ const issueReadThroughOffer = async (owner: string, audioUrl: string, song: any)
       try { await fs.promises.mkdir(stagingDir, { mode: 0o700 }) }
       catch (error: any) { if (error.code !== 'EEXIST') return false }
       const stage = await fs.promises.lstat(stagingDir)
-      if (!stage.isDirectory() || (stage.mode & 0o077) !== 0) return false
+      if (!stage.isDirectory() || (process.platform !== 'win32' && (stage.mode & 0o077) !== 0)) return false
       const handle = await fs.promises.opendir(stagingDir)
       try { return !await handle.read() }
       finally { await handle.close() }
@@ -6201,13 +6202,13 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                   res.writeHead(proxyRes.statusCode || 200, headers)
                   const offerId = urlObj.searchParams.get('capture')
                   const captureRange = req.headers.range
-                  if (process.env.LX_READ_THROUGH_CACHE === '1' && isInline && !isTaggingMode && !taskId &&
+                  if (readThroughEnabled() && isInline && !isTaggingMode && !taskId &&
                     req.method === 'GET' && req.headers['sec-fetch-dest'] === 'audio' &&
                     (!captureRange || captureRange === 'bytes=0-') &&
                     offerId && /^[a-f0-9]{32}$/.test(offerId) && canCaptureReadThrough(proxyRes)) {
                     const offer = readThroughOffers.get(offerId)
                     if (offer?.cacheDir && offer.stagingDir && offer.owner === proxyUser && offer.url === urlStr &&
-                      offer.expires > Date.now() && !global.lx.config['user.enableCacheSizeLimit']) {
+                      offer.expires > Date.now()) {
                       const controller = new AbortController()
                       const cancel = () => { if (!res.writableFinished) controller.abort() }
                       const detach = () => res.removeListener('close', cancel)
@@ -6218,7 +6219,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
                         signal: controller.signal,
                         async publish({ tempPath, bytes, signal }) {
                           try {
-                            if (process.env.LX_READ_THROUGH_CACHE !== '1' || global.lx.config['user.enableCacheSizeLimit'] ||
+                            if (!readThroughEnabled() ||
                               !global.lx.config.users.some(user => user.name === offer.owner && !user.disabled) ||
                               cacheDir !== fileCache.getCacheDir(offer.owner, false)) return
                             await publishReadThrough(tempPath, bytes, offer.song, offer.owner, cacheDir, signal)
