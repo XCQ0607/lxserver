@@ -630,7 +630,7 @@ export const requestMusicUrlHead = async (
                 url = new URL(response.headers.location, url).href
                 continue
             }
-            return { status, url, headers: { get: (name: string) => String(response.headers[name] || '') } }
+            return { status, url, headers: { get: (name: string) => String(response.headers[name.toLowerCase()] || '') } }
         }
         throw new Error('Too many music URL redirects')
     }
@@ -685,9 +685,7 @@ export const probeReturnedMusicUrl = async (
             }
         }
 
-        // 部分 CDN 不支持 HEAD (405/501)，此时仅根据 URL 特征判断有损降级，不误判为死链
-        const headerCt = status >= 200 && status < 300 ? ct : ''
-        if (isLossless && isLikelyLossyAudio(res.url || url, headerCt, cd)) {
+        if (isLossless && isLikelyLossyAudio(res.url || url, ct, cd)) {
             return {
                 ok: true,
                 isLossyDowngrade: true,
