@@ -1164,7 +1164,7 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
     source !== songInfo.source && isSourceSupported(source, username) && musicSdk[source]?.musicSearch?.search
   ))
   const query = `${songInfo.name} ${songInfo.singer}`
-  const promise = Promise.all(searchSources.map(async source => {
+  const search = Promise.all(searchSources.map(async source => {
     try {
       const searchData = await musicSdk[source].musicSearch.search(query, 1, 20)
       const list = Array.isArray(searchData?.list) ? searchData.list : []
@@ -1179,6 +1179,16 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
     .sort((a, b) => b.score - a.score)
     .map(item => item.candidate))
 
+  // SDK searches are not all abortable. Bound the shared cache promise and evict
+  // only this entry on timeout, so one stalled provider cannot poison later calls.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<any[]>(resolve => {
+    timer = setTimeout(() => {
+      if (sourceMatchCache.get(cacheKey)?.promise === promise) sourceMatchCache.delete(cacheKey)
+      resolve([])
+    }, 5000)
+  })
+  const promise = Promise.race([search, timeout]).finally(() => clearTimeout(timer))
   sourceMatchCache.set(cacheKey, { expiresAt: now + SOURCE_MATCH_CACHE_TTL, promise })
   return promise
 }
@@ -1205,17 +1215,37 @@ const resolveServerSong = async (
     ? getDownloadQualityCandidates(requestedQuality)
     : [requestedQuality]
   const errors: string[] = []
+  let downgradedFallback: ServerSongResolveResult | null = null
+  // Once the original attempt ends, all alternative search/resolution shares one budget.
+  let alternativeDeadline = 0
+  let alternativeExpired = false
+  const withinBudget = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (!alternativeDeadline) return work()
+    if (alternativeExpired || Date.now() >= alternativeDeadline) throw new Error('Alternative source deadline exceeded')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([work(), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          alternativeExpired = true
+          reject(new Error('Alternative source deadline exceeded'))
+        }, Math.max(0, alternativeDeadline - Date.now()))
+      })])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
   const tryCandidates = async (quality: string, rawCandidates: any[]) => {
     for (const rawCandidate of rawCandidates) {
+      if (alternativeExpired || (alternativeDeadline && Date.now() >= alternativeDeadline)) return null
       const candidate = normalizeSongInfo({ ...rawCandidate })
       const source = candidate?.source
       if (!source || !isSourceSupported(source, username)) continue
 
       try {
-        const result = await callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true)
+        const result = await withinBudget(() => callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true))
         if (!result?.url) throw new Error('audio source returned no URL')
-        return {
+        const resolved = {
           url: result.url,
           quality: result.type || quality,
           songInfo: candidate,
@@ -1223,6 +1253,11 @@ const resolveServerSong = async (
           downloadSource: fileCache.detectDownloadSource(result.url, source),
           sourceName: result.sourceName,
         }
+        if (result.isLossyDowngrade) {
+          downgradedFallback ??= resolved
+          continue
+        }
+        return resolved
       } catch (err: any) {
         errors.push(`${source}/${quality}: ${err?.message || 'resolve failed'}`)
       }
@@ -1233,7 +1268,13 @@ const resolveServerSong = async (
   const originalResult = await tryCandidates(requestedQuality, [originalSong])
   if (originalResult) return originalResult
 
-  const matches = await findServerSourceMatches(originalSong, username)
+  alternativeDeadline = Date.now() + 8000
+  let matches: any[] = []
+  try {
+    matches = await withinBudget(() => findServerSourceMatches(originalSong, username))
+  } catch (err: any) {
+    errors.push(err?.message || 'Alternative source search failed')
+  }
   const switchedResult = await tryCandidates(requestedQuality, matches)
   if (switchedResult) return switchedResult
 
@@ -1242,6 +1283,7 @@ const resolveServerSong = async (
     if (fallbackResult) return fallbackResult
   }
 
+  if (downgradedFallback) return downgradedFallback
   throw new Error(`No downloadable source found (${errors.join('; ')})`)
 }
 
@@ -4470,10 +4512,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
+        const interval = urlObj.searchParams.get('interval') || undefined
         const includeOpenlist = urlObj.searchParams.get('includeOpenlist') === '1'
         const openlistOnly = includeOpenlist && urlObj.searchParams.get('openlistOnly') === '1'
         let result: any = openlistOnly ? { exists: false } :
-          fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
+          fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality, interval }, username)
         if (!result.exists && includeOpenlist) {
           const id = fileCache.normalizeSongId({ source, songmid, id: songId })
           const song = { source, songmid, id, name, singer }
@@ -4484,7 +4527,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (hit) { result = { exists: true, url: hit.url, filename: hit.filename, quality: hit.quality, folder, origin: 'openlist' }; break }
           }
         }
-        if (result && result.exists && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
+        if (result && result.exists && result.url && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
           const token = req.headers['x-user-token']
           if (token) {
             result.url += `&token=${encodeURIComponent(token as string)}`

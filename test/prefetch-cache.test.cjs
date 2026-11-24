@@ -48,6 +48,7 @@ test('playback rechecks completed cache in a single authenticated batch', async 
     assert.equal(result.quality, '320k');
     assert.equal(result.folder, 'music');
     assert.equal(result.songInfo, switched);
+    assert.equal(result.triedPlatforms, undefined, 'replaced cache must not retain prefetch attempts');
     assert.equal(online.url, 'https://online/song');
 });
 

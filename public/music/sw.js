@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v67-cache-continuity';
-// Refresh cached assets after organizing JavaScript modules by feature.
+const CACHE_NAME = 'lx-music-web-v71-cache-continuity';
+// Refresh cached assets for continuity-first cache playback and UI updates.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -10,6 +10,7 @@ const ASSETS_TO_CACHE = [
     './css/utilities.css',
     './css/app.css',
     './js/library/search_requests.js',
+    './js/library/song_merge.js',
     './js/library/paged_music_search.js',
     './js/library/search_suggestions.js',
     './js/ui/ui_accessibility.js',

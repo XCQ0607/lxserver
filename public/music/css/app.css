@@ -878,9 +878,13 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
 .lc-layout-btn,
 .lc-color-btn,
 .lc-lines-btn {
+    position: relative;
     color: var(--text-muted, #6b7280);
-    border-color: var(--border-dim, #e5e7eb);
-    background: var(--bg-main, #f9fafb);
+    border-radius: 14px !important;
+    border: 1px solid rgba(255, 255, 255, .1) !important;
+    background: linear-gradient(180deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02)) !important;
+    backdrop-filter: blur(8px);
+    transition: transform .25s cubic-bezier(.16, 1, .3, 1), box-shadow .25s, border-color .25s, background .25s, color .25s;
 }
 
 .lc-layout-btn:hover,
@@ -889,13 +893,19 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
     border-color: var(--c-400);
     color: var(--c-500);
     background: color-mix(in srgb, var(--c-500) 10%, var(--bg-panel));
+    transform: translateY(-2px);
+    box-shadow: 0 8px 18px -8px rgba(0, 0, 0, .5);
 }
+
+.lc-layout-btn:active,
+.lc-color-btn:active,
+.lc-lines-btn:active { transform: scale(.96); }
 
 .lc-btn-active {
     border-color: var(--c-500) !important;
     color: var(--c-500) !important;
-    background: color-mix(in srgb, var(--c-500) 12%, var(--bg-panel)) !important;
-    box-shadow: 0 0 0 3px color-mix(in srgb, var(--c-500) 15%, transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--c-500) 28%, transparent), color-mix(in srgb, var(--c-500) 8%, transparent)) !important;
+    box-shadow: 0 0 0 1px var(--c-500), 0 8px 24px -8px color-mix(in srgb, var(--c-500) 70%, transparent) !important;
 }
 
 /* ===== Lyric Card Modern UI ===== */
@@ -919,32 +929,6 @@ input.peer[type="checkbox"]:checked + .peer[class~="peer-checked:bg-emerald-500"
 }
 #lyric-card-preview-wrapper:hover {
     box-shadow: 0 35px 80px -15px rgba(0, 0, 0, .7), 0 0 40px -10px color-mix(in srgb, var(--c-500) 40%, transparent);
-}
-
-/* 选项按钮：胶囊卡片 */
-.lc-layout-btn,
-.lc-color-btn,
-.lc-lines-btn {
-    position: relative;
-    border-radius: 14px !important;
-    border: 1px solid rgba(255, 255, 255, .1) !important;
-    background: linear-gradient(180deg, rgba(255, 255, 255, .06), rgba(255, 255, 255, .02)) !important;
-    backdrop-filter: blur(8px);
-    transition: transform .25s cubic-bezier(.16, 1, .3, 1), box-shadow .25s, border-color .25s, background .25s, color .25s;
-}
-.lc-layout-btn:hover,
-.lc-color-btn:hover,
-.lc-lines-btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 8px 18px -8px rgba(0, 0, 0, .5);
-}
-.lc-layout-btn:active,
-.lc-color-btn:active,
-.lc-lines-btn:active { transform: scale(.96); }
-
-.lc-btn-active {
-    background: linear-gradient(135deg, color-mix(in srgb, var(--c-500) 28%, transparent), color-mix(in srgb, var(--c-500) 8%, transparent)) !important;
-    box-shadow: 0 0 0 1px var(--c-500), 0 8px 24px -8px color-mix(in srgb, var(--c-500) 70%, transparent) !important;
 }
 
 /* 复选框 */
@@ -1186,28 +1170,132 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     }
     #main-sidebar {
         padding-bottom: var(--player-footer-inset, 11rem) !important;
+        transition: transform 0.3s cubic-bezier(0.22, 1, 0.36, 1), translate 0.3s cubic-bezier(0.22, 1, 0.36, 1) !important;
     }
     #main-sidebar > nav { min-height: 0; }
-    #player-footer { height: auto !important; flex-shrink: 0; }
+    #player-footer {
+        height: auto !important;
+        flex-shrink: 0;
+        gap: 4px;
+        padding-top: 6px;
+        padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
+    }
     #player-transport { flex: none; }
-    #visualizer-container { position: static !important; width: 100% !important; margin: 0; flex: none; }
-    #player-song-info { align-items: center; min-height: 48px; margin-bottom: 0; }
-    #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: wrap; gap: 2px; }
-    #player-title { width: 100%; max-width: 100%; }
-    #player-mobile-actions { max-width: none; flex-wrap: nowrap; }
+    #visualizer-container { position: static !important; width: 100% !important; height: 22px !important; margin: 0; flex: none; }
+    #player-progress-row { margin: 0; padding: 0; }
+    #player-progress-row .h-8 { height: 20px; }
+    /* Wide mobile / tablet (520px-1024px): keep cover, 2-line info and 6 action buttons on one compact row. */
+    #player-song-info {
+        flex-wrap: nowrap;
+        align-items: center;
+        gap: 6px 10px;
+        min-height: 48px;
+        margin-bottom: 0;
+        padding-right: 32px !important;
+    }
+    #player-lyrics-cover {
+        position: relative;
+        display: block !important;
+        width: 48px !important;
+        height: 48px !important;
+        padding: 0 !important;
+        border: 0 !important;
+        line-height: 0;
+        overflow: hidden;
+    }
+    #player-cover {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+        object-fit: cover !important;
+        object-position: center !important;
+    }
+    #player-song-info > .overflow-hidden { padding-right: 0; }
+    #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: nowrap; align-items: center; gap: 6px; }
+    #player-song-info > .overflow-hidden > .flex:nth-child(2) { flex-flow: row wrap; align-items: center; gap: 2px 8px; }
+    #player-title { width: auto; max-width: 100%; }
+    #player-mobile-actions {
+        flex: 0 0 auto;
+        width: auto;
+        max-width: none;
+        margin-left: auto !important;
+        padding-top: 0;
+        border-top: 0;
+        justify-content: flex-end;
+        gap: 6px;
+        flex-wrap: nowrap;
+    }
+    #player-mobile-actions #player-like-btn,
+    #player-mobile-actions .mobile-action-btn,
+    #player-mobile-actions .player-route-button,
+    #player-mobile-actions #btn-airplay {
+        flex: 0 0 auto;
+        width: 32px;
+        min-width: 32px;
+        height: 30px;
+        min-height: 30px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 8px;
+        border: 1px solid color-mix(in srgb, var(--border-main, #e5e7eb) 65%, transparent);
+        background: color-mix(in srgb, var(--bg-main, transparent) 55%, transparent);
+        font-size: 12px;
+        padding: 0;
+    }
+    #player-mobile-actions .mobile-action-btn i { font-size: 12px; }
+    #player-mobile-actions .player-route-button svg { width: 15px; height: 15px; }
     .mobile-player-menu { position: relative; }
-    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 6px; }
+    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 8px; }
     .mobile-player-menu > summary:hover { color: var(--c-500, #10b981); }
     .mobile-player-menu-content { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; min-width: 110px; background: var(--bg-panel, #fff); border: 1px solid var(--c-200, #e5e7eb); border-radius: 12px; box-shadow: 0 8px 24px #0003; padding: 6px; flex-direction: column; gap: 4px; }
     .mobile-player-menu[open] .mobile-player-menu-content { display: flex; }
     .mobile-player-menu-content .mobile-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--text-main, #374151); text-align: left; background: transparent; border: none; }
     .mobile-player-menu-content .mobile-menu-item:hover { background: var(--bg-item-hover, rgba(0, 0, 0, 0.05)); color: var(--c-500, #10b981); }
     .mobile-player-menu-content .mobile-menu-item i { width: 14px; text-align: center; }
-    #player-controls button { min-height: 44px; }
-    /* Match the touch minimum height so the play button stays circular. */
-    #player-controls #btn-play { min-width: 44px; flex-shrink: 0; }
+    #player-controls button { min-height: 36px; }
+    /* Compact circular play control and balanced prev/next touch targets. */
+    #player-footer #player-controls #btn-play { width: 40px; height: 40px; flex-shrink: 0; }
+    #player-footer #player-controls button:is([onclick="playPrev()"], [onclick="playNext()"]) {
+        width: 38px;
+        padding-inline: 0;
+        flex-shrink: 0;
+    }
     .song-row-actions button, .queue-actions > summary { min-width: 28px; min-height: 32px; }
-    #player-progress-row { margin: 0; padding: 0; }
+}
+
+/* Narrow phones (<=519px): wrap action buttons into a slim full-width second row so title/tags never squeeze. */
+@media (max-width: 519px) {
+    #player-lyrics-cover { width: 44px !important; height: 44px !important; }
+    #player-song-info {
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        min-height: 44px;
+        padding-right: 0 !important;
+    }
+    #player-song-info > .overflow-hidden { padding-right: 28px; }
+    #player-mobile-actions {
+        flex: 0 0 100%;
+        width: 100%;
+        margin-left: 0 !important;
+        padding-top: 5px;
+        border-top: 1px solid color-mix(in srgb, var(--border-main, #e5e7eb) 40%, transparent);
+        justify-content: space-between;
+    }
+    #player-mobile-actions #player-like-btn,
+    #player-mobile-actions .mobile-action-btn,
+    #player-mobile-actions .player-route-button,
+    #player-mobile-actions #btn-airplay {
+        flex: 1 1 0;
+        width: auto;
+        min-width: 30px;
+        max-width: 52px;
+        height: 28px;
+        min-height: 28px;
+    }
 }
 
 @media (min-width: 1025px) {
@@ -1707,7 +1795,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 /* ==========================================================================
    Desktop Sidebar Collapse / Expand (电脑版侧边栏折叠控制)
    ========================================================================== */
-@media (min-width: 768px) {
+@media (min-width: 1025px) {
     #main-sidebar {
         transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
                     min-width 0.3s cubic-bezier(0.4, 0, 0.2, 1), 
@@ -2246,6 +2334,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 
 #player-detail-navbar .detail-nav-right {
     justify-content: flex-end;
+    gap: 4px;
 }
 
 #player-detail-navbar .detail-nav-center {
@@ -2438,4 +2527,87 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     max-height: min(24rem, 45dvh);
     overflow-y: auto;
     overscroll-behavior: contain;
+}
+
+/* Equivalent named, keyboard-operable actions across desktop and touch layouts. */
+.detail-search-action {
+    pointer-events: auto;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    color: var(--text-main);
+    background: var(--bg-panel);
+}
+.detail-search-action:hover { color: var(--c-500, #10b981); }
+.detail-search-action:focus-visible,
+#player-lyrics-cover:focus-visible,
+#player-lyrics-button:focus-visible {
+    outline: 2px solid var(--c-500, #10b981);
+    outline-offset: 2px;
+}
+#btn-toggle-lyrics.faint:focus-visible {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: none !important;
+}
+
+@media (min-width: 768px) {
+    #footer-vu-narrow-notice { display: none; }
+}
+
+/* Distinct AirPlay and Chromecast route controls; native route handlers remain unchanged. */
+.player-route-button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 34px;
+    width: 34px;
+    min-width: 34px;
+    min-height: 36px;
+    padding: 5px;
+    border: 1px solid color-mix(in srgb, currentcolor 22%, transparent);
+    border-radius: 10px;
+    color: var(--text-muted, #6b7280);
+    background: color-mix(in srgb, currentcolor 6%, transparent);
+    transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+}
+.player-route-button[hidden] { display: none !important; }
+.player-route-button svg { display: block; width: 20px; height: 20px; flex: none; }
+.player-route-button:hover,
+.player-route-button[aria-pressed="true"] {
+    color: var(--c-500, #10b981);
+    border-color: currentcolor;
+    background: color-mix(in srgb, var(--c-500, #10b981) 12%, transparent);
+}
+.player-route-button[aria-pressed="true"]::after {
+    content: '';
+    position: absolute;
+    right: 3px;
+    top: 3px;
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentcolor;
+}
+.player-route-button:focus-visible {
+    outline: 2px solid var(--c-500, #10b981);
+    outline-offset: 2px;
+}
+.player-route-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+#btn-airplay {
+    flex-basis: 44px;
+    width: 44px;
+    min-width: 44px;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+}
+#btn-airplay[aria-pressed="true"]::after {
+    right: 7px;
+    top: 7px;
 }
