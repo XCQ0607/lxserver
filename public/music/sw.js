@@ -1,5 +1,5 @@
-const CACHE_NAME = 'lx-music-web-v65';
-// Refresh cached assets after organizing JavaScript modules by feature.
+const CACHE_NAME = 'lx-music-web-v68-song-radio-queue';
+// Refresh continuous song radio and shared song-menu actions.
 const ASSETS_TO_CACHE = [
     './',
     './index.html',
@@ -9,6 +9,9 @@ const ASSETS_TO_CACHE = [
     './css/theme_variables.css',
     './css/utilities.css',
     './css/app.css',
+    './css/dynamic-backgrounds.css',
+    './css/rating.css',
+    './js/ui/dynamic_backgrounds.js',
     './js/library/search_requests.js',
     './js/library/paged_music_search.js',
     './js/library/search_suggestions.js',
@@ -27,6 +30,11 @@ const ASSETS_TO_CACHE = [
     './js/library/leaderboard_manager.js',
     './js/library/dislike_manager.js',
     './js/local/local_music.js',
+    './js/local/server_file_state.js',
+    './js/local/auto_link.js',
+    './js/local/customDir.js',
+    './js/library/rating_manager.js',
+    './js/download/sync_download.js',
     './js/download/download_manager.js',
     './js/ui/common_ui.js',
     './js/core/pwa.js',

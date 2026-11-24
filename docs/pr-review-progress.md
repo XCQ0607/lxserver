@@ -1,0 +1,51 @@
+# Bot review repair progress
+
+## 2026-11-17 — search-radio review (#528, shared with #530/#531)
+
+- [x] Verified recommendation `_searchRadio` markers already persist; added a real save/JSON/restore queue regression and persisted explicit play-next markers too.
+- [x] Device disconnect and logout cancel pending recommendation continuation before pausing.
+- [x] Bound YouTube Music and QQ recommendation JSON body reads; streaming defaults unchanged.
+- [x] Preserve legitimate titles ending in Live; explicit version annotations remain filtered.
+- [x] Cache identities include provider/seed ID, with text fallback only when IDs are absent.
+- [x] Validation: 15 queue tests, 16 recommendation tests, TypeScript no-emit and diff checks pass.
+- [ ] Physical device pause/playback qualification (not claimed by these tests).
+
+Full branch validation: 216 TypeScript tests and 286 CJS tests passed before the final timeout regression; the CJS runner also reports one pre-existing OpenList asynchronous teardown failure. Reproduced that failure on the unchanged #531 head (same OpenList test). Final targeted run: 16 recommendation + 15 queue tests passed. No live deployment performed.
+
+
+## 2026-11-17 — follow-up bot review
+
+- [x] Browser recommendation fetch plus JSON body read share an 8-second abort deadline; timeout returns an empty list and clears only the matching cache request so normal queue fallback proceeds.
+- [x] Quality deduplication and start-position lookup use the same platform-qualified identity, preserving distinct songs with equal raw provider IDs and leaving unidentified songs unmerged.
+- Validation: 18/18 focused recommendation/queue tests pass, including stalled fetch/JSON and stale-request cache isolation. Full CJS: 289 passed, one pre-existing OpenList teardown failure; no-emit compilation and diff checks passed.
+
+These PR changes have not been deployed. The separate live marquee-only release is unchanged. The OpenList failure in #528/#530/#531 is the previously reproduced asynchronous teardown error, not a passing full-suite result.
+
+
+## 2026-11-17 — OpenList CI failure repaired
+
+The previously reported asynchronous OpenList teardown failure is now fixed. A pending metadata persistence timer outlived the test runtime; explicit flushing and runtime-root validation now prevent the late undefined-path exception. Both HTTP fixtures restore their previous global runtime. See `docs/openlist-ci-progress.md`.
+
+Final integrated local validation: **289/289 CJS and 222/222 TypeScript tests passed**, and `npm run build --ignore-scripts` passed. No test suppression or added waiting sleeps; no deployment. Node 22/24 GitHub Actions results will be recorded in the PR follow-up.
+
+
+## Additional bot review / cache-first synchronization
+
+- [x] Pending metadata state is independent of the debounce timer. Successful persistence clears it; failed write/rename remains explicitly flushable, including without another observation. Both ENOSPC paths have regressions.
+
+Validation: 289/289 CJS and 224/224 TypeScript tests passed; the production build and diff checks passed. No additional live deployment was made for this review pass.
+
+## Search radio: recording identity and handoff
+
+- [x] Prefer track-level relations; label the bounded same-artist fallback separately. Use lead and featured credits, edition, album and duration to disambiguate recordings.
+- [x] Bound provider lookups and reserve time for alternate catalogs. Retry deadline-truncated pools sooner, without throwing away an already prepared handoff for the current play.
+- [x] Only mark a recommendation prepared after the media URL passes the check and the requested quality is still current. Keep manual queue choices and logout/disconnect cancellation intact.
+- [x] On Node 22, all 306 JavaScript tests and 247 TypeScript tests passed and the production build succeeded. These checks cover provider, player and queue behavior, not listeners' subjective ratings of musical similarity.
+
+## Follow-up: radio playback, matching and review regressions
+
+- [x] Isolate lookup results by the full recording query. Keep a preloaded handoff only while its first eligible track, quality and cached URL still match.
+- [x] Preserve explicit play-next choices and a consistent queue snapshot. Returning to the default list or automatically skipping a failed track no longer starts a new radio batch.
+- [x] Reconcile ambiguous artist credits, reject the seed's provider recording ID, use available album evidence across catalogs, and share an in-flight lookup for the same recording.
+- [x] Cancel the proxy handshake as well as the outer request. Check both direct cancellation and a successful single tunnel using local network fixtures. Verify the offline player bundle includes its local styles and scripts.
+- [x] Full Node 22 verification: 333 JavaScript and 256 TypeScript tests passed with no skips or cancellations. Production build passed.

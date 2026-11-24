@@ -460,7 +460,7 @@ function appFunction(declaration) {
 test('actual playback saver reports write failure, success and empty state separately', () => {
     const context = {
         currentPlayingSong: { id: 'current' }, currentPlaylist: [{ id: 'current' }],
-        currentIndex: 0, audio: { currentTime: 37 }, currentPlayingScope: 'network',
+        currentIndex: 0, audio: { currentTime: 37 }, currentPlayingScope: 'network', searchRadioArmed: false,
         window: {}, playMode: 'list', currentQuality: '128k',
         console: { error() {} }, localStorage: { setItem() { throw new Error('Quota exceeded'); } }
     };
