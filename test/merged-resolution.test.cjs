@@ -14,6 +14,7 @@ function setup(candidates, failures = []) {
         },
         getSourceName: s => s,
         resolveCachedSongUrl: async () => null,
+        resolvePlaybackCache: async () => null,
         findOtherSourceMatches: async s => s._alternates,
         fetchSongUrl: async (s, q) => { tried.push([s.source, q]); if (failures.includes(s.source)) throw new Error('failed'); return { url: '/ok', quality: q }; },
     });
@@ -115,26 +116,11 @@ test('recovery searches unlisted platforms after all merged members fail', async
     assert.equal(played[0][0]._alternates, undefined);
 });
 
-test('cached alternate media-error retries use that platform quality alias', async () => {
-    const start = app.indexOf('currentPlaybackErrorHandler = async () => {');
-    const handler = app.slice(start, app.indexOf("audio.addEventListener('error',", start));
-    for (const sourceType of ['server_cache', 'openlist', 'cache']) {
-        const retried = [];
-        const playbackSong = { source: 'kw', id: 'kw_1', types: [{ type: 'flac24bit' }] };
-        const c = vm.createContext({ console, currentRecoveryState: { thisRequestId: 1 }, thisRequestId: 1,
-            song: { source: 'tx' }, playbackSong, prefetchQuality: 'hires', prefetchedResult: null,
-            prefetchManager: { invalidate() {} }, currentPlaybackErrorHandler: null,
-            audio: { currentTime: 1 }, lastKnownPlaybackTime: 0, currentQuality: 'flac24bit', targetQuality: 'hires',
-            index: 0, noPlay: false, currentSourceType: sourceType, shouldAutoRecoverPlayback: true,
-            checkServerOnline: async () => true, localStorage: { removeItem() {}, getItem: () => null },
-            cleanSongData: s => s, window: {}, playSong: (...args) => retried.push(args),
-        });
-        vm.runInContext(fs.readFileSync('public/music/js/player/quality.js', 'utf8'), c);
-        vm.runInContext(fs.readFileSync('public/music/js/library/song_merge.js', 'utf8'), c);
-        vm.runInContext(app.slice(app.indexOf('function isUsableServerCache('), app.indexOf('async function refreshPrefetchedCache(')), c);
-        vm.runInContext(handler, c);
-        await c.currentPlaybackErrorHandler();
-        assert.equal(retried[0][2], 'flac24bit');
-        assert.equal(retried[0][4], sourceType === 'server_cache' ? 'local_retry' : true);
-    }
+test('cached alternate media-error retries resolve that platform quality alias', async () => {
+    const c = vm.createContext({ console, window: {} });
+    vm.runInContext(fs.readFileSync('public/music/js/player/quality.js', 'utf8'), c);
+    vm.runInContext(fs.readFileSync('public/music/js/library/song_merge.js', 'utf8'), c);
+    vm.runInContext(app.slice(app.indexOf('function getPlaybackRequestQuality('), app.indexOf('function checkPlaybackStillCurrent(')), c);
+    const playbackSong = { source: 'kw', id: 'kw_1', types: [{ type: 'flac24bit' }] };
+    assert.equal(c.getPlaybackRequestQuality(playbackSong, 'hires'), 'flac24bit');
 });

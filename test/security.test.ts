@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { resolveCollectionUser } from '../src/server/auth/collectionAccess'
-import { normalizeSourceOwner, parseCookies, resolveContainedPath, resolvePublicUrl } from '../src/server/auth/security'
+import { normalizeSourceOwner, parseCookies, resolveContainedPath, resolveContainedPathAsync, resolvePublicUrl } from '../src/server/auth/security'
 
 test('collection ownership: ordinary users cannot impersonate another account', () => {
   assert.equal(resolveCollectionUser('bob', 'alice', false, true, false), null)
@@ -58,4 +58,21 @@ test('download upstream validation rejects private IPs and credentials without D
   await assert.rejects(resolvePublicUrl('file:///etc/passwd'), /Invalid upstream URL/)
   await assert.rejects(resolvePublicUrl('https://user:pass@8.8.8.8/song'), /Invalid upstream URL/)
   assert.equal((await resolvePublicUrl('https://8.8.8.8/song')).address, '8.8.8.8')
+})
+
+
+test('async media containment preserves traversal and symlink guards without synchronous filesystem calls', async t => {
+  const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'lx-security-async-'))
+  t.after(() => fs.rmSync(temp, { recursive: true, force: true }))
+  const root = path.join(temp, 'root')
+  const outside = path.join(temp, 'root-other')
+  fs.mkdirSync(root)
+  fs.mkdirSync(outside)
+  fs.writeFileSync(path.join(root, 'track.mp3'), 'audio')
+  fs.writeFileSync(path.join(outside, 'track.mp3'), 'other audio')
+  fs.symlinkSync(outside, path.join(root, 'link'), process.platform === 'win32' ? 'junction' : 'dir')
+  assert.equal(await resolveContainedPathAsync(root, 'track.mp3'), path.join(root, 'track.mp3'))
+  await assert.rejects(resolveContainedPathAsync(root, '../root-other/track.mp3'), /traversal/)
+  await assert.rejects(resolveContainedPathAsync(root, 'link/track.mp3'), /traversal/)
+  await assert.rejects(resolveContainedPathAsync(root, 'missing.mp3'), { code: 'ENOENT' })
 })

@@ -31,6 +31,18 @@ export const resolveContainedPath = (root: string, name: string): string => {
   return target
 }
 
+// Read-only counterpart for existing media: both lexical and resolved paths
+// must remain beneath the root. Missing paths reject and become cache misses.
+export const resolveContainedPathAsync = async (root: string, name: string): Promise<string> => {
+  const base = path.resolve(root)
+  const target = path.resolve(base, name)
+  const contains = (parent: string, child: string) => child === parent || child.startsWith(parent.endsWith(path.sep) ? parent : parent + path.sep)
+  if (!contains(base, target)) throw new Error('Path traversal detected')
+  const [realBase, realTarget] = await Promise.all([fs.promises.realpath(base), fs.promises.realpath(target)])
+  if (!contains(realBase, realTarget)) throw new Error('Path traversal detected')
+  return target
+}
+
 export const parseCookies = (header?: string): Record<string, string> => {
   const cookies: Record<string, string> = Object.create(null)
   for (const part of (header || '').split(';')) {

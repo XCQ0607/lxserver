@@ -289,6 +289,7 @@ GET /api/music/search?name=周杰伦&source=kw&page=2&limit=20
 | `POST /api/music/cache/mkdir`、`POST /api/music/cache/categorize` | 创建子目录、分类移动 |
 | `POST /api/music/cache/subdirs/rename`、`POST /api/music/cache/subdirs/delete` | 子目录重命名、删除 |
 | `POST /api/music/cache/rename`、`POST /api/music/cache/move`、`POST /api/music/cache/switch-base` | 文件重命名、移动与存储位置切换 |
+| `POST /api/music/cache/select` | 在当前认证用户范围内查找完整的本地音频，不访问音源或 OpenList。请求体最多 24 KiB，包含 1–8 个歌曲标识（`id`、`source`、`name`、`singer`、`interval`）。命中返回文件地址、实际音质、目录及从零开始的 `memberIndex`。 |
 | `GET /api/music/cache/check`、`GET /api/music/cache/cover` | 检查缓存、读取封面 |
 | `GET /api/music/cache/queue` | 获取服务端持久下载队列 |
 | `POST /api/music/cache/queue` | 入队：`tasks` 数组，可选 `concurrency,namingPattern`；全局命名修改需要管理员权限 |

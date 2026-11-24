@@ -18,12 +18,14 @@ The persistent per-user serverCacheLocation selects the base. A temporary local-
 
 Local-library entries directly use their file URL for music, cache or custom directories. Online songs resolve in this order:
 
-1. With prefer-existing-server-audio enabled, probe the user's music/cache. Exact-quality downloads precede cache; other qualities may be fallback candidates.
+1. With prefer-existing-server-audio enabled, one local selection checks the user's completed music/cache files before fetching an online audio URL. Exact-quality downloads precede cache; lower eligible tiers may be reused when automatic quality fallback is allowed. A local hit does not trigger an automatic quality upgrade.
 2. On a local miss, use registered OpenList user cache/download files if the backend playback-source master switch permits it.
 3. Reuse a browser-cached URL when enabled. URLs can expire and are not offline audio copies.
 4. Resolve an online source-script URL and deliver directly or through the configured proxy.
 
 Cache-song-files controls background writes; prefer-existing-server-audio controls existing-file reads. Disabling writes does not disable reads. Background writes pass the only-download-mode setting: enabled writes to music, otherwise cache, under the selected base. Foreground playback does not wait for the full background download.
+
+**Relay read-through cache:** Enabled by default (set `LX_READ_THROUGH_CACHE=0` to disable). When a signed-in user enables automatic server caching and plays eligible audio through the built-in inline proxy, the server can tee the forwarded bytes and atomically publish verified complete MP3, FLAC, or Hi-Res files (up to 96 MiB) across Windows, Linux, and macOS. An unready spool is prepared asynchronously while returning ordinary playback; short probes, seeks, direct playback, and Cast do not qualify. When `user.enableCacheSizeLimit` is enabled, publication checks the configured cache size limit (eviction remains handled by the unified cache cleanup task); otherwise it checks available disk free space (at least 128 MiB free). Playback never waits for saving, and manual downloads or existing files are untouched.
 
 ### Web lyrics
 
