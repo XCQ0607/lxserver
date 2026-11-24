@@ -25,18 +25,36 @@
     ];
 
     function adjustMobilePlayerActions() {
-        if (innerWidth >= 1025) return;
         const actionsContainer = document.getElementById('player-mobile-actions');
         const menu = document.getElementById('player-mobile-overflow-menu');
         const menuContent = document.getElementById('player-mobile-overflow-content');
+        const secondaryControls = document.querySelector('#player-controls .player-secondary-controls');
+        const isMobile = innerWidth <= 1024;
+
+        // Place wireless route buttons inside the mobile action dock on <=1024px so speed stays inline with transport.
+        for (const id of ['btn-cast', 'btn-airplay']) {
+            const routeBtn = document.getElementById(id);
+            if (!routeBtn) continue;
+            if (isMobile && actionsContainer) {
+                if (routeBtn.parentElement !== actionsContainer) {
+                    actionsContainer.insertBefore(routeBtn, menu || null);
+                }
+            } else if (!isMobile && secondaryControls) {
+                if (routeBtn.parentElement !== secondaryControls) {
+                    secondaryControls.appendChild(routeBtn);
+                }
+            }
+        }
+
+        if (!isMobile) return;
         if (!actionsContainer || !menu || !menuContent) return;
 
         const availableWidth = actionsContainer.clientWidth;
-        const btnWidth = 36;
+        const btnWidth = 34;
         const menuSummaryWidth = 32;
         const outerButtons = MOBILE_ACTION_DEFS.map(def => actionsContainer.querySelector(`[data-mobile-btn="${def.key}"]`)).filter(Boolean);
 
-        // Mobile renders #player-mobile-actions as a full-width second-row dock so all actions stay directly accessible.
+        // Mobile renders #player-mobile-actions as a sleek dock row so all actions stay directly accessible.
         if (!availableWidth || availableWidth >= MOBILE_ACTION_DEFS.length * btnWidth) {
             outerButtons.forEach(btn => btn.classList.remove('hidden'));
             menu.style.display = 'none';

@@ -1193,8 +1193,26 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
         margin-bottom: 0;
         padding-right: 32px !important;
     }
-    #player-lyrics-cover { width: 48px !important; height: 48px !important; display: block; padding: 0; border: 0; line-height: 0; }
-    #player-cover { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
+    #player-lyrics-cover {
+        position: relative;
+        display: block !important;
+        width: 48px !important;
+        height: 48px !important;
+        padding: 0 !important;
+        border: 0 !important;
+        line-height: 0;
+        overflow: hidden;
+    }
+    #player-cover {
+        position: absolute;
+        inset: 0;
+        display: block;
+        width: 100% !important;
+        height: 100% !important;
+        max-width: none !important;
+        object-fit: cover !important;
+        object-position: center !important;
+    }
     #player-song-info > .overflow-hidden { padding-right: 0; }
     #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: nowrap; align-items: center; gap: 6px; }
     #player-song-info > .overflow-hidden > .flex:nth-child(2) { flex-flow: row wrap; align-items: center; gap: 2px 8px; }
@@ -1211,11 +1229,14 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
         flex-wrap: nowrap;
     }
     #player-mobile-actions #player-like-btn,
-    #player-mobile-actions .mobile-action-btn {
+    #player-mobile-actions .mobile-action-btn,
+    #player-mobile-actions .player-route-button,
+    #player-mobile-actions #btn-airplay {
         flex: 0 0 auto;
         width: 32px;
         min-width: 32px;
         height: 30px;
+        min-height: 30px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1226,6 +1247,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
         padding: 0;
     }
     #player-mobile-actions .mobile-action-btn i { font-size: 12px; }
+    #player-mobile-actions .player-route-button svg { width: 15px; height: 15px; }
     .mobile-player-menu { position: relative; }
     .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 8px; }
     .mobile-player-menu > summary:hover { color: var(--c-500, #10b981); }
@@ -1264,23 +1286,15 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
         justify-content: space-between;
     }
     #player-mobile-actions #player-like-btn,
-    #player-mobile-actions .mobile-action-btn {
+    #player-mobile-actions .mobile-action-btn,
+    #player-mobile-actions .player-route-button,
+    #player-mobile-actions #btn-airplay {
         flex: 1 1 0;
         width: auto;
-        min-width: 34px;
+        min-width: 30px;
         max-width: 52px;
         height: 28px;
-    }
-}
-
-/* On narrow screens with wireless route controls visible, wrap secondary controls onto row 2 cleanly. */
-@media (max-width: 420px) {
-    #player-footer #player-controls:has(#btn-airplay:not([hidden]), #btn-cast:not([hidden])) > .player-secondary-controls {
-        grid-column: 1 / -1;
-        grid-row: 2;
-        justify-content: center;
-        gap: 12px;
-        padding-top: 2px;
+        min-height: 28px;
     }
 }
 
