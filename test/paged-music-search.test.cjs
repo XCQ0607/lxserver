@@ -99,16 +99,20 @@ test('adapter requests explicit pages, saves state and preserves scroll after ap
     const source = fs.readFileSync('public/music/app.js', 'utf8');
     const extract = name => { const start = source.indexOf(`function ${name}(`); return source.slice(start, source.indexOf('\n}', start) + 2); };
     const nodes = { 'search-results': { scrollTop: 234 } };
-    const context = vm.createContext({ window: { currentSearchScope: 'network' }, document: { getElementById: id => nodes[id] }, API_BASE: '/api/music', SOURCES: ['kw', 'kg'], currentPage: 1,
+    const context = vm.createContext({ settings: { mergeAggregatedSearch: false }, window: { currentSearchScope: 'network', settings: { mergeAggregatedSearch: true } }, document: { getElementById: id => nodes[id] }, API_BASE: '/api/music', SOURCES: ['kw', 'kg'], currentPage: 1,
         getSourceName: s => s, renderResults: list => { context.window.viewingPlaylist = list; nodes['search-results'].scrollTop = 0; }, renderNetworkSearchFooter() {},
     });
     vm.runInContext(fs.readFileSync('public/music/js/library/paged_music_search.js', 'utf8'), context);
     context.window.setSearchStatus = () => {};
     vm.runInContext(extract('isPagedNetworkResult') + '\nasync ' + extract('searchNetworkSongs'), context);
+    let mergeSetting;
+    const create = context.window.PagedMusicSearch.create;
+    context.window.PagedMusicSearch.create = options => { mergeSetting = options.merge; return create(options); };
     const urls = [];
     const request = { current: () => true, json: async url => { urls.push(url); const u = new URL(url, 'http://test'); return { list: [song(Number(u.searchParams.get('page')), u.searchParams.get('source'))], hasMore: true }; } };
     await context.searchNetworkSongs('发如雪', 'all', {}, request);
     assert.equal(urls.length, 2);
+    assert.equal(mergeSetting, false);
     assert.ok(urls.every(url => url.includes('limit=30') && url.includes('page=1')));
     nodes['search-results'].scrollTop = 234;
     context.currentPage = 2;

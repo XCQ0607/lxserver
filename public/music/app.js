@@ -132,6 +132,8 @@ const DEFAULT_SETTINGS = {
     lyricFontSize: 1.25, // 歌词字体大小 (rem)
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
+    mergeAggregatedSearch: true, // 聚合搜索合并各平台的同一首歌 (默认开启)
+    mergeSourcePriority: ['kw', 'kg', 'tx', 'wy', 'mg'], // 聚合搜索主平台显示优先级
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
@@ -2270,7 +2272,7 @@ function renderQueue() {
                 <div class="flex-1 min-w-0">
                     ${createMarqueeHtml(song.name, 'text-sm font-bold ' + (isActive ? 'text-emerald-500' : 't-text-main'))}
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
-                        ${getSourceTag(song.source)}
+                        ${getSourceTags(song, { compact: true, queueIndex: index })}
                         ${getQualityTags(song)}
                         ${createMarqueeHtml(song.singer, 'text-[10px] t-text-muted flex-1')}
                     </div>
@@ -2510,6 +2512,8 @@ function renderNetworkSearchFooter(visible) {
 async function searchNetworkSongs(keyword, source, headers, request, append = false) {
     const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
         keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
+        merge: source === 'all' && settings.mergeAggregatedSearch !== false,
+        preferredSources: typeof getMergeSourcePriority === 'function' ? getMergeSourcePriority() : undefined,
     });
     if (!append) window.networkSongSearch = search;
     const current = () => request.current() && window.networkSongSearch === search &&
@@ -2543,7 +2547,11 @@ async function searchNetworkSongs(keyword, source, headers, request, append = fa
     window.viewingPlaylist = state.list;
     if (append && window.ListSearch?.state.active) window.ListSearch.handleSearch();
     else renderResults(state.list);
-    if (!state.list.length && failed.length && container) container.textContent = '暂未获得结果，可点击下方按钮重试失败音源。';
+    if (!state.list.length && failed.length && container) {
+        const header = document.getElementById('search-results-header');
+        if (header) header.classList.add('hidden');
+        container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>暂未获得结果</p><small>部分音源加载失败，可点击下方按钮重试失败音源</small></div>';
+    }
     if (append && container) container.scrollTop = scrollTop;
     renderNetworkSearchFooter(true);
 }
@@ -3035,7 +3043,7 @@ function switchHotSearchTab(source) {
         renderHotSearch(data);
     }).catch(() => {
         if (request && !request.current()) return;
-        if (container) container.textContent = '热门搜索加载失败，请重试';
+        if (container) container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>热门搜索加载失败</p><small>请检查网络连接后重试</small></div>';
     });
 }
 window.switchHotSearchTab = switchHotSearchTab;
@@ -3099,7 +3107,10 @@ function getQualityTags(item) {
     // 1. types / _types (旧版/部分源)
     // 2. qualitys / _qualitys (新版/标准)
     // 3. meta.qualitys (收藏列表)
-    const rawTypes = item.types || item._types ||
+    // 聚合搜索合并出来的歌曲：取各平台音质的并集
+    const merged = Array.isArray(item._alternates) && item._alternates.length && window.QualityManager;
+    const rawTypes = merged ? window.QualityManager.getAvailableQualities(item).map(type => ({ type })) :
+        item.types || item._types ||
         item.qualitys || item._qualitys ||
         (item.meta && (item.meta.qualitys || item.meta._qualitys)) ||
         {};
@@ -3160,6 +3171,182 @@ function getSourceTag(source) {
     return `<span class="song-tag ${color}">${name}</span>`;
 }
 window.getSourceTag = getSourceTag;
+
+// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来，点击可查看全部平台版本
+function getSourceTags(song, options = {}) {
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    if (members.length <= 1) return getSourceTag(members[0]?.source);
+    const compact = !!options.compact || (members.length > 2 && window.innerWidth < 768);
+    const innerHtml = compact
+        ? getSourceTag(members[0].source) +
+            `<span class="song-tag t-bg-main t-text-muted t-border-main">+${members.length - 1}</span>`
+        : members.map(member => getSourceTag(member.source)).join('');
+    if (options.interactive === false) return innerHtml;
+    const names = members.map(member => getSourceName(member.source)).join('、');
+    const queueAttr = Number.isInteger(options.queueIndex)
+        ? ` onclick="event.stopPropagation(); openMergedSourcesModal(currentPlaylist[${options.queueIndex}], ${options.queueIndex}, { fromQueue: true })"`
+        : '';
+    return `<button type="button" class="merged-sources-trigger inline-flex items-center gap-1 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title="点击查看全部 ${members.length} 个平台：${names}"${queueAttr}>${innerHtml}</button>`;
+}
+window.getSourceTags = getSourceTags;
+
+const MERGE_SOURCE_DEFAULT_ORDER = ['kw', 'kg', 'tx', 'wy', 'mg'];
+function normalizeMergeSourcePriority(order) {
+    const valid = Array.isArray(order)
+        ? order.filter(s => MERGE_SOURCE_DEFAULT_ORDER.includes(s))
+        : [];
+    const result = [];
+    for (const source of [...valid, ...MERGE_SOURCE_DEFAULT_ORDER]) {
+        if (!result.includes(source)) result.push(source);
+    }
+    return result;
+}
+function getMergeSourcePriority() {
+    return normalizeMergeSourcePriority(settings.mergeSourcePriority);
+}
+function syncMergeSourcePriorityUI(enabled = settings.mergeAggregatedSearch !== false) {
+    const wrap = document.getElementById('setting-merge-source-priority-wrap');
+    if (wrap) wrap.classList.toggle('hidden', enabled === false);
+    if (enabled !== false) renderMergeSourcePriorityTags();
+}
+function renderMergeSourcePriorityTags() {
+    const container = document.getElementById('setting-merge-source-priority');
+    if (!container) return;
+    const colors = {
+        kw: 't-badge-yellow border-yellow-200 dark:border-yellow-500/30',
+        kg: 't-badge-blue border-blue-200 dark:border-blue-500/30',
+        tx: 't-badge-green border-green-200 dark:border-emerald-500/30',
+        wy: 't-badge-red border-red-200 dark:border-red-500/30',
+        mg: 't-badge-pink border-pink-200 dark:border-pink-500/30'
+    };
+    const names = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
+    const order = getMergeSourcePriority();
+    container.innerHTML = order.map((source, idx) => `
+        <div data-source="${source}" role="listitem"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-grab active:cursor-grabbing touch-none transition-transform ${colors[source] || 't-bg-main t-text-muted t-border-main'}">
+            <i class="fas fa-grip-vertical text-[10px] opacity-60" aria-hidden="true"></i>
+            <span class="opacity-70 font-mono text-[10px]">${idx + 1}.</span>
+            <span>${names[source] || source.toUpperCase()}</span>
+        </div>
+    `).join('');
+    if (typeof Sortable !== 'undefined') {
+        try {
+            const oldSortable = Sortable.get(container);
+            if (oldSortable) oldSortable.destroy();
+        } catch (e) { /* ignore */ }
+        Sortable.create(container, {
+            animation: 150,
+            ghostClass: 'opacity-40',
+            onEnd: () => {
+                const nextOrder = [...container.children].map(el => el.dataset.source).filter(Boolean);
+                updateSetting('mergeSourcePriority', normalizeMergeSourcePriority(nextOrder));
+            }
+        });
+    }
+}
+window.renderMergeSourcePriorityTags = renderMergeSourcePriorityTags;
+
+function closeMergedSourcesModal() {
+    const modal = document.getElementById('merged-sources-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+window.closeMergedSourcesModal = closeMergedSourcesModal;
+
+function openMergedSourcesModal(song, index = -1, options = {}) {
+    const modal = document.getElementById('merged-sources-modal');
+    const titleEl = document.getElementById('merged-sources-modal-title');
+    const subtitleEl = document.getElementById('merged-sources-modal-subtitle');
+    const listEl = document.getElementById('merged-sources-modal-list');
+    if (!modal || !listEl || !song) return;
+
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    if (titleEl) titleEl.textContent = song.name || '多平台版本';
+    if (subtitleEl) subtitleEl.textContent = `${song.singer || '未知歌手'} · 共 ${members.length} 个平台`;
+
+    listEl.innerHTML = '';
+    members.forEach((member, memberIdx) => {
+        const single = { ...member };
+        delete single._alternates;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3 p-2.5 sm:p-3 rounded-xl border t-border-main t-bg-main/40 hover:t-bg-item-hover transition-colors cursor-pointer';
+        const thumbUrl = escapeHtmlText(getThumbnailUrl(single));
+        const albumName = escapeHtmlText(getSongAlbumName(single) || '-');
+        const duration = escapeHtmlText(single.interval || '--:--');
+        const hostBadge = memberIdx === 0
+            ? '<span class="song-tag t-bg-main t-text-muted t-border-main">主显示</span>'
+            : '';
+
+        row.innerHTML = `
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-lg overflow-hidden flex-shrink-0">
+                <img src="${thumbUrl}" onerror="this.src='/music/assets/logo.svg'" class="w-full h-full object-cover" alt="">
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1 flex-wrap">
+                    ${getSourceTag(single.source)}
+                    ${hostBadge}
+                    ${getQualityTags(single)}
+                </div>
+                <div class="text-xs t-text-muted truncate mt-1">
+                    <span>${albumName}</span>
+                    <span class="mx-1 opacity-50">·</span>
+                    <span class="font-mono">${duration}</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+                <button type="button" data-action="play" title="播放此平台"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors">
+                    <i class="fas fa-play text-xs"></i>
+                </button>
+                <button type="button" data-action="download" title="下载此平台"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/15 transition-colors">
+                    <i class="fas fa-download text-xs"></i>
+                </button>
+                <button type="button" data-action="add" title="添加到歌单"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-500 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors">
+                    <i class="fas fa-plus text-xs"></i>
+                </button>
+            </div>
+        `;
+
+        const playThisPlatform = () => {
+            closeMergedSourcesModal();
+            if (!options.fromQueue && Array.isArray(viewingPlaylist) && index >= 0 && viewingPlaylist[index]) {
+                const nextList = viewingPlaylist.map((item, i) => (i === index ? single : item));
+                updatePlaylist(nextList, index, currentSearchScope);
+                return;
+            }
+            const targetIdx = options.fromQueue && index >= 0 ? index : (currentIndex >= 0 ? currentIndex : 0);
+            playSong(single, targetIdx);
+        };
+        row.addEventListener('click', playThisPlatform);
+        row.querySelector('[data-action="play"]').addEventListener('click', e => { e.stopPropagation(); playThisPlatform(); });
+        row.querySelector('[data-action="download"]').addEventListener('click', e => {
+            e.stopPropagation();
+            downloadSong(single);
+        });
+        row.querySelector('[data-action="add"]').addEventListener('click', e => {
+            e.stopPropagation();
+            closeMergedSourcesModal();
+            openPlaylistAddModalForSongObject(single);
+        });
+        listEl.appendChild(row);
+    });
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+window.openMergedSourcesModal = openMergedSourcesModal;
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('merged-sources-modal');
+            if (modal && !modal.classList.contains('hidden')) closeMergedSourcesModal();
+        }
+    });
+}
 
 
 
@@ -5244,7 +5431,10 @@ function renderResults(list) {
         if (emptyDislike) {
             if (header) header.classList.add('hidden');
             container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-music" aria-hidden="true"></i><p>还没有不喜欢任何歌曲</p><small>在歌曲操作菜单中点击“不喜欢”即可添加</small></div>';
-        } else container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
+        } else {
+            if (header) header.classList.add('hidden');
+            container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-search" aria-hidden="true"></i><p>未找到相关结果</p><small>试试更换关键词或切换其他音源</small></div>';
+        }
         updatePaginationInfo(0, 0, 0, 1, 1);
         return;
     }
@@ -5349,7 +5539,7 @@ function renderResults(list) {
                          ${createMarqueeHtml(item.name)}
                     </div>
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
-                         ${getSourceTag(item.source)}
+                         ${getSourceTags(item)}
                          ${getQualityTags(item)}
                          <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
@@ -5406,12 +5596,26 @@ function renderResults(list) {
             </div>
         `;
 
+        const mergedSourcesTrigger = row.querySelector('.merged-sources-trigger');
+        if (mergedSourcesTrigger) {
+            mergedSourcesTrigger.addEventListener('click', event => {
+                event.stopPropagation();
+                openMergedSourcesModal(item, actualIndexInOriginal);
+            });
+        }
+
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
             const menu = document.createElement('details');
             menu.className = 'queue-actions';
-            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            const mergedCount = Array.isArray(item._alternates) && item._alternates.length ? item._alternates.length + 1 : 0;
+            const mergedMenuBtn = mergedCount
+                ? `<button type="button" data-merged-sources>查看全部平台 (${mergedCount})</button>`
+                : '';
+            menu.innerHTML = `<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main">${mergedMenuBtn}<button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>`;
             menu.addEventListener('click', event => event.stopPropagation());
+            const mergedBtn = menu.querySelector('[data-merged-sources]');
+            if (mergedBtn) mergedBtn.onclick = () => { menu.open = false; openMergedSourcesModal(item, actualIndexInOriginal); };
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
             const rateButton = document.createElement('button');
@@ -5796,12 +6000,82 @@ const prefetchManager = {
 };
 prefetchManager.init(); // 立即初始化缓冲器
 
+// 服务器缓存是否可直接播放：本平台的缓存直接可用；别的平台缓存的同名同歌手文件（撞名），
+// 时长一致才当作同一首歌，这样原平台连不上时也能播放已缓存的文件
+function isUsableServerCache(song, cached) {
+    if (!cached || !cached.exists) return false;
+    if (!cached.isCollision) return true;
+    if (!cached.url) return false;
+    const seconds = value => {
+        const parts = String(value || '').split(':').map(Number);
+        return parts.length < 2 || parts.some(Number.isNaN) ? 0 : parts.reduce((total, part) => total * 60 + part, 0);
+    };
+    const wanted = seconds(song.interval), have = seconds(cached.interval);
+    return wanted > 0 && have > 0 && Math.abs(wanted - have) <= 3;
+}
+
+// Resolve platform-specific quality names even without the optional merge module.
+function getPlaybackRequestQuality(song, quality) {
+    if (window.SongMerge?.requestQuality) return window.SongMerge.requestQuality(song, quality);
+    if (!['hires', 'flac24bit'].includes(quality)) return quality;
+    const manager = window.QualityManager;
+    const own = manager?.getOwnQualities ? manager.getOwnQualities(song)
+        : manager?.getAvailableQualities?.({ ...song, _alternates: undefined });
+    return own && !own.includes(quality) ? own.find(q => ['hires', 'flac24bit'].includes(q)) || quality : quality;
+}
+
+// Local audio must be resolved before provider support/quality filtering. A merged
+// member may have a playable file even when it no longer advertises that quality.
+async function resolveCachedSongUrl(song, quality, isRetry = false) {
+    if (isRetry === 'local_retry' || isRetry === 'download') return null;
+    const directLocal = !isRetry && song.url && (song.isLocal || song.url.startsWith('/api/music/cache/file/'));
+    if (!directLocal && settings.preferServerCache === false) return null;
+
+    const merged = Array.isArray(song._alternates) && song._alternates.length > 0;
+    // Synchronous ordering only: do not start getSupportedPlatforms()/fetchCustomSources().
+    const merger = window.SongMerge;
+    const members = directLocal ? [song] : merged && merger?.order
+        ? merger.order(song, quality, { ownQualities: window.QualityManager?.getOwnQualities })
+        : [song, ...(merged ? song._alternates : [])];
+    // Prefer the requested tier across ALL members, then any completed cached tier.
+    // A recovery retry remains exact; explicit local/download bypasses stay above.
+    for (const exact of merged && !isRetry && !directLocal ? [true, false] : [!!isRetry]) {
+        const hits = await Promise.all(members.map(async member => {
+            const wanted = getPlaybackRequestQuality(member, quality);
+            if (directLocal) return { exists: true, url: song.url, quality: song.quality || quality,
+                folder: /folder=music/.test(song.url) ? 'music' : 'cache' };
+            try {
+                return await checkServerCache(cleanSongData(member), wanted, exact, false, AbortSignal.timeout(1500));
+            } catch (_) { return { exists: false }; }
+        }));
+        const usable = members.map((member, i) => ({ member, hit: hits[i] }))
+            .filter(({ member, hit }) => hit?.url && isUsableServerCache(member, hit));
+        if (!exact) {
+            const priority = window.QualityManager?.QUALITY_PRIORITY || [];
+            const rank = q => { const i = priority.indexOf(q === 'flac24bit' ? 'hires' : q); return i < 0 ? priority.length : i; };
+            usable.sort((a, b) => rank(a.hit.quality) - rank(b.hit.quality));
+        }
+        for (const { member, hit } of usable) {
+            const actualQuality = hit.quality || quality;
+            const url = await applyAutoProxy(hit.url, member);
+            checkAndTriggerBackgroundCacheUpgrade(cleanSongData(member), quality, actualQuality);
+            return { url, quality: actualQuality, sourceType: hit.origin === 'openlist' ? 'openlist' : 'server_cache',
+                folder: hit.folder, songInfo: member, switchedSource: member !== song, originalSource: song.source };
+        }
+    }
+    return null;
+}
+
 async function refreshPrefetchedCache(song, result) {
     if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
 
     // 预读解析后，后台下载可能已经完成；播放接管前重新检查文件缓存。
     const playbackSong = result.switchedSource && result.songInfo ? result.songInfo : song;
     try {
+        if (song._alternates?.length) {
+            const cached = await resolveCachedSongUrl(song, result.quality);
+            return cached ? { ...result, ...cached, triedPlatforms: undefined, sourceName: undefined, sourceId: undefined, hasMoreSources: false } : result;
+        }
         // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
         const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
         if (!cached.exists || cached.isCollision) return result;
@@ -5814,6 +6088,7 @@ async function refreshPrefetchedCache(song, result) {
             quality,
             sourceType: cached.origin === 'openlist' ? 'openlist' : 'server_cache',
             folder: cached.folder,
+            triedPlatforms: undefined,
             sourceName: undefined,
             sourceId: undefined,
             hasMoreSources: false
@@ -5831,11 +6106,38 @@ async function refreshPrefetchedCache(song, result) {
  * 包含：本地/服务器缓存检查、在线解析、自动降级逻辑
  */
 async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
+    const triedCandidates = new Set();
     try {
-        const result = await fetchSongUrl(song, quality, isRetry, isSilent);
-        if (result.errorMsg) throw new Error(result.errorMsg);
-        return result;
+        const cached = await resolveCachedSongUrl(song, quality, isRetry);
+        if (cached) return cached;
+        // 聚合搜索合并出来的歌曲：在各平台的条目里按「有该音质、可解析、历史最快」的顺序逐个尝试
+        const candidates = song._alternates?.length
+            ? await window.SongMerge.candidates(song, quality)
+            : [song];
+        let lastError = null;
+        for (const candidate of candidates) {
+            triedCandidates.add(candidate);
+            const startedAt = Date.now();
+            try {
+                // 同一档音质各平台叫法不同（hires / flac24bit），按该平台自己的叫法请求
+                const candidateQuality = song._alternates?.length ? window.SongMerge.requestQuality(candidate, quality) : quality;
+                const result = await fetchSongUrl(candidate, candidateQuality, isRetry, isSilent);
+                if (result.errorMsg) throw new Error(result.errorMsg);
+                // 只统计真正的在线解析，命中缓存的耗时不代表平台快慢
+                if (song._alternates?.length && result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
+                const triedPlatforms = [...new Set([...triedCandidates].map(member => member.source).filter(Boolean))];
+                return candidate === song ? { ...result, triedPlatforms } : { ...result, triedPlatforms, songInfo: candidate, switchedSource: true, originalSource: song.source };
+            } catch (candidateError) {
+                // 没有可用解析源时，单个条目直接报错；合并歌曲还要看其余平台的条目有没有缓存可用
+                if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE' && candidates.length < 2) throw candidateError;
+                if (song._alternates?.length) window.SongMerge.record(candidate.source, false, 0);
+                lastError = candidateError;
+            }
+        }
+        throw lastError || new Error('No playable candidate');
     } catch (error) {
+        // Carry local failures to the owning playback request; prefetch/download never mutate recovery state.
+        error.triedPlatforms = [...new Set([...triedCandidates].map(candidate => candidate.source).filter(Boolean))];
         if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
             throw error;
         }
@@ -5875,12 +6177,17 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                     return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
                 }
             } else if (step === 'switch_platform') {
+                // Requested-quality filtering can leave lower-quality alternatives untried.
+                const matches = await findOtherSourceMatches(song, isSilent, {
+                    excludePlatforms: [...new Set([...triedCandidates].map(candidate => candidate.source))],
+                });
+                const untried = matches.filter(candidate => !triedCandidates.has(candidate));
+                if (!untried.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
                     RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
                 }
-                const matchedSong = await findOtherSourceMatch(song, isSilent);
-                if (matchedSong) {
+                for (const matchedSong of untried) {
                     const targetPlatform = getSourceName(matchedSong.source);
                     if (!isSilent) {
                         RecoveryToast.show(matchedSong, `找到备选源，尝试从 [${targetPlatform}] 播放...`, {
@@ -5889,7 +6196,12 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                         });
                     }
                     const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
-                    const matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent);
+                    let matchedResult;
+                    try {
+                        triedCandidates.add(matchedSong);
+                        matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent);
+                        if (matchedResult.errorMsg) throw new Error(matchedResult.errorMsg);
+                    } catch (_) { continue; }
                     return {
                         ...matchedResult,
                         songInfo: matchedSong,
@@ -5930,6 +6242,15 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
             return null;
         }
     };
+
+    // 0. 聚合搜索合并出来的歌曲：先在各平台的条目里按「有该音质、可解析、历史最快」的顺序找所请求音质
+    if (song._alternates?.length) {
+        for (const candidate of await window.SongMerge.candidates(song, requestedQuality)) {
+            const mergedExact = await trySingle(candidate, window.SongMerge.requestQuality(candidate, requestedQuality));
+            if (!mergedExact) continue;
+            return candidate === song ? mergedExact : { ...mergedExact, songInfo: candidate, switchedSource: true, originalSource: song.source };
+        }
+    }
 
     // 1. 先在原平台尝试所请求音质
     const originalExact = await trySingle(song, requestedQuality);
@@ -6041,6 +6362,12 @@ async function findOtherSourceMatch(song, isSilent = false) {
 }
 
 async function findOtherSourceMatches(song, isSilent = false, options = {}) {
+    const excluded = new Set(options.excludePlatforms || []);
+    // Keep known untried members fast; only search other platforms once exhausted.
+    if (Array.isArray(song._alternates) && song._alternates.length) {
+        const remaining = [song, ...song._alternates].filter(member => !excluded.has(member.source));
+        if (remaining.length) return remaining;
+    }
     if (!song.name || !song.singer) return [];
 
     try {
@@ -6052,7 +6379,7 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
             list.forEach(src => {
                 if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
                     src.supportedSources.forEach(platform => {
-                        supportedPlatforms.add(platform);
+                        if (!(src.disabledSources || []).includes(platform)) supportedPlatforms.add(platform);
                     });
                 }
             });
@@ -6060,7 +6387,7 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
 
         // 2. 切换到和当前不同源，并且根据优先级排列 (网易、QQ、酷我、酷狗、咪咕)
         const baseOrder = ['wy', 'tx', 'kw', 'kg', 'mg'];
-        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source);
+        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source && !excluded.has(s));
 
         // 3. 过滤出自定义源支持解析的平台
         let searchSources = searchSourcesOrdered;
@@ -6224,8 +6551,9 @@ function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCach
     if (!song || !desiredQuality || !currentCachedQuality) return;
     if (!window.QualityManager) return;
     const priority = window.QualityManager.QUALITY_PRIORITY;
-    const desiredIndex = priority.indexOf(desiredQuality);
-    const currentIndex = priority.indexOf(currentCachedQuality);
+    const tier = quality => quality === 'flac24bit' ? 'hires' : quality;
+    const desiredIndex = priority.indexOf(tier(desiredQuality));
+    const currentIndex = priority.indexOf(tier(currentCachedQuality));
     // If desired quality is not higher rank (smaller index) than current cached quality, no upgrade needed
     if (desiredIndex === -1 || currentIndex === -1 || desiredIndex >= currentIndex) return;
 
@@ -6248,7 +6576,7 @@ function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCach
             const res = await resolver(song, desiredQuality, true);
             if (!res || !res.url) return;
             const resolvedQuality = res.quality || res.type || desiredQuality;
-            const resolvedIndex = priority.indexOf(resolvedQuality);
+            const resolvedIndex = priority.indexOf(tier(resolvedQuality));
             if (resolvedIndex === -1 || resolvedIndex >= currentIndex) return;
 
             console.log(`[CacheUpgrade] Upgraded version found for ${song.name}: ${resolvedQuality}. Downloading to server cache...`);
@@ -6302,7 +6630,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
     if (allowServerCache) {
         let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
-        if (cacheResult.exists && !cacheResult.isCollision) {
+        if (isUsableServerCache(song, cacheResult)) {
             const actualQuality = cacheResult.quality || quality;
             console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
             let serverCacheUrl = cacheResult.url;
@@ -6564,6 +6892,8 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
             quality: quality || '',
             includeOpenlist: includeOpenlist ? '1' : '0'
         });
+        // 时长用于在同名的缓存记录里挑出同一版
+        if (song.interval) params.append('interval', song.interval);
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
@@ -7364,15 +7694,18 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         }
     } else if (currentStep === 'switch_platform') {
         RecoveryToast.show(state.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
-        const matches = await findOtherSourceMatches(state.originalSong);
+        const matches = await findOtherSourceMatches(state.originalSong, false, { excludePlatforms: state.triedPlatforms });
 
         if (state !== currentRecoveryState) {
             console.log('[Recovery] Aborted because user played another song during findOtherSourceMatches.');
             return;
         }
 
-        const matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
+        let matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
         if (matchedSong) {
+            // Retry only this member, not the entire group (which could select a failed alternate again).
+            matchedSong = { ...matchedSong };
+            delete matchedSong._alternates;
             state.currentSong = matchedSong;
             state.triedPlatforms.push(matchedSong.source);
             if (!state.triedApiSourcesByPlatform[matchedSong.source]) {
@@ -7477,7 +7810,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             originalQuality: startQuality,
             currentQuality: startQuality,
             triedQualities: [startQuality],
-            triedPlatforms: [song.source],
+            triedPlatforms: [],
             triedApiSourcesByPlatform: { [song.source]: [] },
             currentApiSourceName: '',
             samePlatformExhausted: false,
@@ -7657,6 +7990,11 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         currentSourceType = urlResult.sourceType;
         currentCacheFolder = urlResult.folder || 'cache';
         const playbackSong = (urlResult.switchedSource && urlResult.songInfo) ? urlResult.songInfo : song;
+        if (currentRecoveryState?.thisRequestId === thisRequestId && !noPlay) {
+            for (const platform of [...(urlResult.triedPlatforms || []), playbackSong.source]) {
+                if (platform && !currentRecoveryState.triedPlatforms.includes(platform)) currentRecoveryState.triedPlatforms.push(platform);
+            }
+        }
         if (playbackSong !== song) {
             currentPlayingSong = playbackSong;
             window.currentPlayingSong = playbackSong;
@@ -7717,7 +8055,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 shouldAutoRecoverPlayback = false;
                 console.warn(`[Player] ${currentSourceType} link failed, retrying online...`);
                 if (currentSourceType === 'cache') localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
-                playSong(playbackSong, index, targetQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
+                const retryQuality = getPlaybackRequestQuality(playbackSong, targetQuality);
+                playSong(playbackSong, index, retryQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
                 return;
             }
 
@@ -7859,6 +8198,9 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
+            for (const platform of error.triedPlatforms || []) {
+                if (!currentRecoveryState.triedPlatforms.includes(platform)) currentRecoveryState.triedPlatforms.push(platform);
+            }
             // Before src is assigned the media element still belongs to the old song.
             const savedTime = sourceAssigned
                 ? Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0)
@@ -9504,6 +9846,17 @@ const SETTINGS_UI_MAP = {
     // 逻辑 (Logic)
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
+    mergeAggregatedSearch: {
+        id: 'setting-merge-aggregated-search',
+        type: 'checkbox',
+        action: (enabled) => syncMergeSourcePriorityUI(enabled)
+    },
+    mergeSourcePriority: {
+        id: 'setting-merge-source-priority',
+        type: 'custom',
+        normalize: normalizeMergeSourcePriority,
+        action: () => renderMergeSourcePriorityTags()
+    },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
@@ -15098,6 +15451,26 @@ async function loadCustomSources() {
 }
 
 // ========== 自定义源管理逻辑 ==========
+
+// 解析源支持的平台，供聚合搜索合并出来的歌曲挑选平台用；一分钟内复用上次的结果
+let supportedPlatformsCache = null;
+if (window.SongMerge) {
+    window.SongMerge.getSupportedPlatforms = async () => {
+        if (supportedPlatformsCache && Date.now() - supportedPlatformsCache.at < 60000) return supportedPlatformsCache.value;
+        const list = await fetchCustomSources();
+        let value = null;
+        if (Array.isArray(list)) {
+            value = new Set();
+            list.forEach(src => {
+                if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
+                    src.supportedSources.filter(platform => !(src.disabledSources || []).includes(platform)).forEach(platform => value.add(platform));
+                }
+            });
+        }
+        supportedPlatformsCache = { at: Date.now(), value };
+        return value;
+    };
+}
 
 async function fetchCustomSources() {
     try {
