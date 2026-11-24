@@ -1476,27 +1476,24 @@
                             <div class="flex md:hidden items-center justify-end gap-0.5 order-2">
                                 <button id="lm-filter-toggle-btn-mobile"
                                     onclick="window.LocalMusicManager.toggleFilterPanel()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-[var(--c-500)] hover:text-white transition-all relative">
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-[var(--c-500)] hover:text-white transition-all relative" aria-label="高级筛选" title="高级筛选">
                                     <i class="fas fa-filter text-[10px]"></i>
                                     <span id="lm-filter-active-dot"
                                         class="absolute top-1 right-1 w-1 h-1 bg-[var(--c-500)] rounded-full hidden"></span>
                                 </button>
                                 <button onclick="window.LocalMusicManager.refresh()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded"><i
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded" aria-label="刷新" title="刷新"><i
                                         class="fas fa-sync-alt text-[10px]"></i></button>
                                 <button onclick="window.LocalMusicManager.autoLinkAll()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded"
-                                    title="智能检测"><i class="fas fa-magic text-[10px]"></i></button>
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded" aria-label="智能检测" title="智能检测"><i class="fas fa-magic text-[10px]"></i></button>
                                 <button id="lm-remap-toggle-btn-mobile"
                                     onclick="window.LocalMusicManager.toggleReMapping()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-emerald-500 hover:text-white transition-all"
-                                    title="歌曲重映射"><i class="fas fa-link text-[10px]"></i></button>
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-emerald-500 hover:text-white transition-all" aria-label="歌曲重映射" title="歌曲重映射"><i class="fas fa-link text-[10px]"></i></button>
                                 <button id="lm-remaster-btn-mobile"
                                     onclick="window.LocalMusicManager.openRemasterModal()"
-                                    class="hidden w-6 h-6 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-red-500 hover:text-white transition-all"
-                                    title="歌曲洗版"><i class="fas fa-exchange-alt text-[10px]"></i></button>
+                                    class="hidden w-6 h-6 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-red-500 hover:text-white transition-all" aria-label="歌曲洗版" title="歌曲洗版"><i class="fas fa-exchange-alt text-[10px]"></i></button>
                                 <button onclick="window.LocalMusicManager.toggleBatchMode()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded"><i
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded" aria-label="批量操作" title="批量操作"><i
                                         class="fas fa-list-ul text-[10px]"></i></button>
                             </div>
 
@@ -1517,27 +1514,21 @@
 
                             <div class="hidden md:flex items-center gap-1 order-5 md:order-4">
                                 <button id="lm-filter-toggle-btn" onclick="window.LocalMusicManager.toggleFilterPanel()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all relative"
-                                    title="高级筛选">
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all relative" aria-label="高级筛选" title="高级筛选">
                                     <i class="fas fa-filter text-xs md:text-sm"></i>
                                     <span id="lm-filter-active-dot-desktop"
                                         class="absolute top-1 right-1 w-1.5 h-1.5 bg-[var(--c-500)] rounded-full hidden"></span>
                                 </button>
                                 <button onclick="window.LocalMusicManager.refresh()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all"
-                                    title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all" aria-label="刷新" title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
                                 <button onclick="window.LocalMusicManager.autoLinkAll()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-purple-500 hover:text-white transition-all"
-                                    title="智能检测"><i class="fas fa-magic text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-purple-500 hover:text-white transition-all" aria-label="智能检测" title="智能检测"><i class="fas fa-magic text-xs"></i></button>
                                 <button id="lm-remap-toggle-btn" onclick="window.LocalMusicManager.toggleReMapping()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
-                                    title="歌曲重映射"><i class="fas fa-link text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all" aria-label="歌曲重映射" title="歌曲重映射"><i class="fas fa-link text-xs"></i></button>
                                 <button id="lm-remaster-btn" onclick="window.LocalMusicManager.openRemasterModal()"
-                                    class="hidden w-7 h-7 md:w-8 md:h-8 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                                    title="歌曲洗版"><i class="fas fa-exchange-alt text-xs"></i></button>
+                                    class="hidden w-7 h-7 md:w-8 md:h-8 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-red-500 hover:text-white transition-all" aria-label="歌曲洗版" title="歌曲洗版"><i class="fas fa-exchange-alt text-xs"></i></button>
                                 <button onclick="window.LocalMusicManager.toggleBatchMode()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
-                                    title="批量操作"><i class="fas fa-list-ul text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-blue-500 hover:text-white transition-all" aria-label="批量操作" title="批量操作"><i class="fas fa-list-ul text-xs"></i></button>
                             </div>
                         </div>
                     </div>
@@ -3119,12 +3110,14 @@
                                             <span>提示：苹果手机开启后会显示正确波形。但受系统限制可能导致锁屏/后台暂停或 AirPlay 异常；建议开启【iOS 设备自适应】。</span>
                                         </p>
                                         <select id="setting-footer-visualizer-style"
+                                            aria-describedby="footer-vu-narrow-notice"
                                             onchange="updateSetting('footerVisualizerStyle', this.value)"
                                             class="lm-select !w-full !py-2">
                                             <option value="bars">条形阵列</option>
                                             <option value="wave">平滑波浪</option>
                                             <option value="vumeter">双表头</option>
                                         </select>
+                                        <p id="footer-vu-narrow-notice" class="text-[11px] t-text-muted">双表头在宽度不足 768px 时不显示；请选用条形阵列或平滑波浪。旋转或放大窗口可恢复双表头，原偏好会保留。</p>
                                     </div>
 
                                     <!-- Detail Visualizer -->
@@ -4080,7 +4073,7 @@
         <div id="player-detail-navbar" onclick="event.stopPropagation()"
             class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-4 md:px-6 h-16 md:h-20 pt-[env(safe-area-inset-top,0px)] pointer-events-none transition-all duration-300">
             <div class="detail-nav-left flex items-center justify-start flex-1 pointer-events-none">
-                <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
+                <button onclick="toggleLyrics()" id="btn-toggle-lyrics" aria-label="收起歌词 / 返回" title="收起歌词 / 返回"
                     class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all duration-300 shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
                     <i class="fas fa-chevron-down text-base"></i>
                 </button>
@@ -4089,7 +4082,15 @@
                 <h2 class="text-xs md:text-sm font-bold text-gray-400 tracking-widest uppercase">Now Playing</h2>
             </div>
             <div class="detail-nav-right flex items-center justify-end flex-1 pointer-events-none">
-                <!-- 右侧占位保持 Now Playing 绝对水平居中 -->
+                <!-- Explicit search actions preserve the cover-collapse gesture on touch screens. -->
+                <button type="button" id="detail-search-song" class="detail-search-action"
+                    onclick="searchLyricsMetadata('song')" aria-label="搜索歌曲" title="搜索歌曲">
+                    <i class="fas fa-music" aria-hidden="true"></i>
+                </button>
+                <button type="button" id="detail-search-artist" class="detail-search-action"
+                    onclick="searchLyricsMetadata('artist')" aria-label="搜索歌手" title="搜索歌手">
+                    <i class="fas fa-user" aria-hidden="true"></i>
+                </button>
             </div>
         </div>
 
@@ -4163,15 +4164,16 @@
         <!-- Song Info -->
         <div id="player-song-info"
             class="w-full md:w-1/4 flex items-start md:items-center gap-2 md:gap-4 mb-2 md:mb-0 pr-8 md:pr-0 transition-all duration-300">
-            <div onclick="toggleLyrics()"
+            <button type="button" id="player-lyrics-cover" onclick="toggleLyrics(false, this)"
+                aria-label="歌词" title="歌词" aria-controls="view-player-detail" aria-expanded="false"
                 class="w-12 h-12 md:w-14 md:h-14 bg-gray-200 rounded-md overflow-hidden shadow-sm relative group flex-shrink-0 cursor-pointer">
                 <img id="player-cover" src="/music/assets/logo.svg" loading="lazy" fetchpriority="low"
                     onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');"
                     class="w-full h-full object-cover dynamic-logo is-placeholder" alt="专辑封面">
-                <div class="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer">
+                <span class="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer">
                     <i class="fas fa-expand text-white"></i>
-                </div>
-            </div>
+                </span>
+            </button>
             <div class="overflow-hidden flex-1 flex flex-col justify-center">
                 <div class="flex items-center gap-2 min-w-0">
                     <div id="player-title"
@@ -4386,7 +4388,8 @@
                 onclick="toggleCommentModal()">评</button>
             <button
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5"
-                onclick="toggleLyrics()">词</button>
+                id="player-lyrics-button" type="button" aria-label="歌词" title="歌词"
+                aria-controls="view-player-detail" aria-expanded="false" onclick="toggleLyrics(false, this)">词</button>
             <button
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5"
                 onclick="toggleQueueDrawer()" title="当前播放队列">

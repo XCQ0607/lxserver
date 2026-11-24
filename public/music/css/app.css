@@ -2439,3 +2439,30 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     overflow-y: auto;
     overscroll-behavior: contain;
 }
+
+/* Equivalent named, keyboard-operable actions across desktop and touch layouts. */
+.detail-search-action {
+    pointer-events: auto;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    color: var(--text-main);
+    background: var(--bg-panel);
+}
+#player-detail-navbar .detail-nav-right { gap: 4px; }
+.detail-search-action:hover { color: var(--c-500, #10b981); }
+.detail-search-action:focus-visible,
+#player-lyrics-cover:focus-visible,
+#player-lyrics-button:focus-visible {
+    outline: 2px solid var(--c-500, #10b981);
+    outline-offset: 2px;
+}
+#btn-toggle-lyrics.faint:focus-visible {
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    transform: none !important;
+}
+@media (min-width: 768px) {
+    #footer-vu-narrow-notice { display: none; }
+}
