@@ -1176,43 +1176,45 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     #player-footer {
         height: auto !important;
         flex-shrink: 0;
-        gap: 6px;
-        padding-top: 8px;
-        padding-bottom: max(8px, env(safe-area-inset-bottom, 0px)) !important;
+        gap: 4px;
+        padding-top: 6px;
+        padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
     }
     #player-transport { flex: none; }
-    #visualizer-container { position: static !important; width: 100% !important; margin: 0; flex: none; }
-    /* Two-row song info header: Row 1 gives cover & title/artist full width; Row 2 is a balanced action dock. */
+    #visualizer-container { position: static !important; width: 100% !important; height: 22px; margin: 0; flex: none; }
+    #player-progress-row { margin: 0; padding: 0; }
+    #player-progress-row .h-8 { height: 20px; }
+    /* Wide mobile / tablet (520px-1024px): keep cover, 2-line info and 6 action buttons on one compact row. */
     #player-song-info {
-        flex-wrap: wrap;
+        flex-wrap: nowrap;
         align-items: center;
-        gap: 8px 10px;
+        gap: 6px 10px;
         min-height: 48px;
         margin-bottom: 0;
-        padding-right: 0 !important;
+        padding-right: 32px !important;
     }
-    #player-song-info > .overflow-hidden {
-        padding-right: 30px;
-    }
-    #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: wrap; gap: 4px; }
-    #player-title { width: 100%; max-width: 100%; }
+    #player-lyrics-cover { width: 48px; height: 48px; }
+    #player-song-info > .overflow-hidden { padding-right: 0; }
+    #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: nowrap; align-items: center; gap: 6px; }
+    #player-song-info > .overflow-hidden > .flex:nth-child(2) { flex-flow: row wrap; align-items: center; gap: 2px 8px; }
+    #player-title { width: auto; max-width: 100%; }
     #player-mobile-actions {
-        flex: 0 0 100%;
-        width: 100%;
+        flex: 0 0 auto;
+        width: auto;
         max-width: none;
-        margin-left: 0 !important;
-        padding-top: 6px;
-        border-top: 1px solid color-mix(in srgb, var(--border-main, #e5e7eb) 45%, transparent);
-        justify-content: space-between;
+        margin-left: auto !important;
+        padding-top: 0;
+        border-top: 0;
+        justify-content: flex-end;
         gap: 6px;
         flex-wrap: nowrap;
     }
     #player-mobile-actions #player-like-btn,
     #player-mobile-actions .mobile-action-btn {
-        flex: 1 1 0;
-        min-width: 36px;
-        max-width: 56px;
-        height: 32px;
+        flex: 0 0 auto;
+        width: 32px;
+        min-width: 32px;
+        height: 30px;
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -1224,23 +1226,50 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
     }
     #player-mobile-actions .mobile-action-btn i { font-size: 12px; }
     .mobile-player-menu { position: relative; }
-    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 8px; }
+    .mobile-player-menu > summary { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; list-style: none; cursor: pointer; color: var(--text-muted, #9ca3af); border-radius: 8px; }
     .mobile-player-menu > summary:hover { color: var(--c-500, #10b981); }
     .mobile-player-menu-content { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 80; min-width: 110px; background: var(--bg-panel, #fff); border: 1px solid var(--c-200, #e5e7eb); border-radius: 12px; box-shadow: 0 8px 24px #0003; padding: 6px; flex-direction: column; gap: 4px; }
     .mobile-player-menu[open] .mobile-player-menu-content { display: flex; }
     .mobile-player-menu-content .mobile-menu-item { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 32px; padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; color: var(--text-main, #374151); text-align: left; background: transparent; border: none; }
     .mobile-player-menu-content .mobile-menu-item:hover { background: var(--bg-item-hover, rgba(0, 0, 0, 0.05)); color: var(--c-500, #10b981); }
     .mobile-player-menu-content .mobile-menu-item i { width: 14px; text-align: center; }
-    #player-controls button { min-height: 44px; }
-    /* Keep desktop-sized expanded play control and clear prev/next targets. */
-    #player-footer #player-controls #btn-play { width: 48px; height: 48px; flex-shrink: 0; }
+    #player-controls button { min-height: 36px; }
+    /* Compact circular play control and balanced prev/next touch targets. */
+    #player-footer #player-controls #btn-play { width: 40px; height: 40px; flex-shrink: 0; }
     #player-footer #player-controls button:is([onclick="playPrev()"], [onclick="playNext()"]) {
-        width: 44px;
+        width: 38px;
         padding-inline: 0;
         flex-shrink: 0;
     }
     .song-row-actions button, .queue-actions > summary { min-width: 28px; min-height: 32px; }
-    #player-progress-row { margin: 0; padding: 0; }
+}
+
+/* Narrow phones (<=519px): wrap action buttons into a slim full-width second row so title/tags never squeeze. */
+@media (max-width: 519px) {
+    #player-lyrics-cover { width: 44px; height: 44px; }
+    #player-song-info {
+        flex-wrap: wrap;
+        gap: 6px 8px;
+        min-height: 44px;
+        padding-right: 0 !important;
+    }
+    #player-song-info > .overflow-hidden { padding-right: 28px; }
+    #player-mobile-actions {
+        flex: 0 0 100%;
+        width: 100%;
+        margin-left: 0 !important;
+        padding-top: 5px;
+        border-top: 1px solid color-mix(in srgb, var(--border-main, #e5e7eb) 40%, transparent);
+        justify-content: space-between;
+    }
+    #player-mobile-actions #player-like-btn,
+    #player-mobile-actions .mobile-action-btn {
+        flex: 1 1 0;
+        width: auto;
+        min-width: 34px;
+        max-width: 52px;
+        height: 28px;
+    }
 }
 
 /* On narrow screens with wireless route controls visible, wrap secondary controls onto row 2 cleanly. */
