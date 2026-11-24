@@ -1181,7 +1181,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
         padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
     }
     #player-transport { flex: none; }
-    #visualizer-container { position: static !important; width: 100% !important; height: 22px; margin: 0; flex: none; }
+    #visualizer-container { position: static !important; width: 100% !important; height: 22px !important; margin: 0; flex: none; }
     #player-progress-row { margin: 0; padding: 0; }
     #player-progress-row .h-8 { height: 20px; }
     /* Wide mobile / tablet (520px-1024px): keep cover, 2-line info and 6 action buttons on one compact row. */
@@ -1193,7 +1193,8 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
         margin-bottom: 0;
         padding-right: 32px !important;
     }
-    #player-lyrics-cover { width: 48px; height: 48px; }
+    #player-lyrics-cover { width: 48px !important; height: 48px !important; display: block; padding: 0; border: 0; line-height: 0; }
+    #player-cover { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center; }
     #player-song-info > .overflow-hidden { padding-right: 0; }
     #player-song-info > .overflow-hidden > .flex:first-child { flex-wrap: nowrap; align-items: center; gap: 6px; }
     #player-song-info > .overflow-hidden > .flex:nth-child(2) { flex-flow: row wrap; align-items: center; gap: 2px 8px; }
@@ -1246,7 +1247,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible { outline: 2px soli
 
 /* Narrow phones (<=519px): wrap action buttons into a slim full-width second row so title/tags never squeeze. */
 @media (max-width: 519px) {
-    #player-lyrics-cover { width: 44px; height: 44px; }
+    #player-lyrics-cover { width: 44px !important; height: 44px !important; }
     #player-song-info {
         flex-wrap: wrap;
         gap: 6px 8px;
