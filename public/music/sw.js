@@ -1,36 +1,123 @@
-/*
- * Service Worker — 仅负责清理历史缓存，不再拦截任何网络请求。
- *
- * 背景（2026-11-20 定位）：旧版本对同域所有 GET 做 Network First +
- * response.clone() + cache.put()。实测在部分网络环境下，clone 的响应体
- * 长期不被读取，会占住（泄漏）同域的 HTTP/1.1 连接；6 条连接被占满后，
- * 页面发出的所有请求（verify、封面、音频、CSS）都在浏览器侧排队 5~31 秒
- * 发不出去 —— 表现为「服务端连接中断，正在等待重连」、封面不显示、
- * 播放失败自动切歌。而服务器日志显示这些请求根本没到达 nginx。
- *
- * 因此这里彻底放弃 SW 缓存：静态资源交给浏览器 HTTP 缓存，API/音频直连。
- */
-const CACHE_NAME = 'lx-music-web-v72';
-const LEGACY_PREFIX = 'lx-music-web-';
+const CACHE_NAME = 'lx-music-web-v71-cache-continuity';
+// Refresh cached assets for continuity-first cache playback and UI updates.
+const ASSETS_TO_CACHE = [
+    './',
+    './index.html',
+    './login.html',
+    './app.js',
+    // CSS
+    './css/theme_variables.css',
+    './css/utilities.css',
+    './css/app.css',
+    './js/library/search_requests.js',
+    './js/library/song_merge.js',
+    './js/library/paged_music_search.js',
+    './js/library/search_suggestions.js',
+    './js/ui/ui_accessibility.js',
+    './assets/fontawesome/css/all.min.css',
+    // 核心 JS
+    './js/lyrics/lyric-parser.js',
+    './js/lyrics/lyric-utils.js',
+    './js/player/quality.js',
+    './js/core/idb_store.js',
+    './js/sync/user_sync.js',
+    './js/ui/batch_pagination.js',
+    './js/library/single_song_ops.js',
+    './js/library/songlist_manager.js',
+    './js/library/list_search.js',
+    './js/library/leaderboard_manager.js',
+    './js/library/dislike_manager.js',
+    './js/local/local_music.js',
+    './js/download/download_manager.js',
+    './js/ui/common_ui.js',
+    './js/core/pwa.js',
+    './js/ui/theme_manager.js',
+    './js/ui/log_viewer.js',
+    './js/player/ios-background-audio.js',
+    './js/player/airplay.js',
+    './js/player/playback.js',
+    './js/player/chromecast.js',
+    // 第三方库
+    './js/vendor/crypto-js.min.js',
+    './js/vendor/NoSleep.min.js',
+    './js/vendor/Sortable.min.js',
+    './js/vendor/marked.min.js',
+    // 音频效果
+    './js/player/sound-effects.js',
+    './js/player/visualizer.js',
+    './js/vendor/wave.js',
+    // 变调器
+    './js/player/pitch-shifter/fft.js',
+    './js/player/pitch-shifter/ola-processor.js',
+    './js/player/pitch-shifter/phase-vocoder.js',
+    // 静态资源
+    './assets/logo.svg',
+];
 
-self.addEventListener('install', () => {
+self.addEventListener('install', (event) => {
+    event.waitUntil(
+        caches.open(CACHE_NAME).then((cache) => {
+            return cache.addAll(ASSETS_TO_CACHE);
+        })
+    );
     self.skipWaiting();
 });
 
-self.addEventListener('activate', (event) => {
-    event.waitUntil((async () => {
-        try {
-            const names = await caches.keys();
-            await Promise.all(
-                names
-                    .filter((name) => name.startsWith(LEGACY_PREFIX) && name !== CACHE_NAME)
-                    .map((name) => caches.delete(name))
-            );
-        } catch (e) {
-            // 清理失败不影响后续流程
-        }
-        try { await self.clients.claim(); } catch (e) { /* ignore */ }
-    })());
+self.addEventListener('fetch', (event) => {
+    const url = new URL(event.request.url);
+
+    // 1. 过滤非 http(s) 协议 (如 chrome-extension://)，避免 cache.put 报错
+    if (!['http:', 'https:'].includes(url.protocol) || url.origin !== self.location.origin) return;
+
+    // 2. 忽略所有音频请求、下载请求、API 请求以及动态配置接口，让浏览器直接处理
+    // 拦截下载会导致大文件占用 Cache 且单个失败可能引起 SW state 不良
+    const isApiOrAudio = url.pathname.includes('/api/') ||
+        url.pathname === '/js/config.js' ||
+        url.pathname.endsWith('/manifest.json') ||
+        url.href.match(/\.(mp3|flac|m4a|ogg|aac)(\?.*)?$/i);
+
+    if (isApiOrAudio) {
+        return; // 直接 return 就不走 event.respondWith，相当于不拦截
+    }
+
+    // 3. 常规静态资源采用 Network First 策略
+    if (event.request.method !== 'GET') return;
+
+    event.respondWith(
+        fetch(event.request)
+            .then((response) => {
+                // 如果请求成功，更新缓存并返回
+                if (response && response.status === 200 && response.type === 'basic') {
+                    const responseToCache = response.clone();
+                    caches.open(CACHE_NAME).then((cache) => {
+                        cache.put(event.request, responseToCache).catch(err => {
+                            console.error('[SW] Cache put error:', err);
+                        });
+                    });
+                }
+                return response;
+            })
+            .catch(() => {
+                // 网络不可用时，尝试从缓存获取
+                return caches.open(CACHE_NAME).then(cache => cache.match(event.request)).then(response => response || new Response('Offline', { status: 503 }));
+            })
+    );
 });
 
-// 不注册 fetch 监听器：所有请求由浏览器直接走网络/HTTP 缓存，互不阻塞。
+const KNOWN_CACHES = [CACHE_NAME];
+
+self.addEventListener('activate', (event) => {
+    event.waitUntil(
+        caches.keys().then((cacheNames) => {
+            return Promise.all(
+                cacheNames.map((cacheName) => {
+                    if (cacheName.startsWith('lx-music-web-') && !KNOWN_CACHES.includes(cacheName)) {
+                        console.log('[SW] Deleting old cache:', cacheName);
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+        })
+    );
+    self.clients.claim();
+});

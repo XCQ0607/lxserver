@@ -132,6 +132,8 @@ const DEFAULT_SETTINGS = {
     lyricFontSize: 1.25, // 歌词字体大小 (rem)
     lyricFontFamily: '', // 词字体
     switchPlaylistOnSearchPlay: true, // 播放搜索歌曲时切换歌单 (默认开启)
+    mergeAggregatedSearch: true, // 聚合搜索合并各平台的同一首歌 (默认开启)
+    mergeSourcePriority: ['kw', 'kg', 'tx', 'wy', 'mg'], // 聚合搜索主平台显示优先级
     switchPlaylistOnSongListPlay: true, // 播放歌单/排行榜歌曲时切换歌单 (默认开启)
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
@@ -301,10 +303,6 @@ let serverReconnectTimer = null;
 let serverReconnectAbortCtrl = null;
 let playbackStallDetectionTimer = null;
 let lastKnownPlaybackTime = 0;
-// custom 目录歌曲只有本站一个音源，播放失败时原地重试需要有次数上限，避免坏文件无限重试。
-let customRetryState = { id: null, count: 0, at: 0 };
-const CUSTOM_RETRY_LIMIT = 2;
-const CUSTOM_RETRY_WINDOW = 60000;
 
 async function checkServerOnline() {
     try {
@@ -1207,7 +1205,8 @@ async function ensureUserAuthToken(options = {}) {
             const response = await fetch('/api/music/auth', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ username, password, mode: 'user' })
+                body: JSON.stringify({ username, password, mode: 'user' }),
+                signal: AbortSignal.timeout(5000)
             });
             if (!response.ok) return false;
 
@@ -2274,7 +2273,7 @@ function renderQueue() {
                 <div class="flex-1 min-w-0">
                     ${createMarqueeHtml(song.name, 'text-sm font-bold ' + (isActive ? 'text-emerald-500' : 't-text-main'))}
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 overflow-hidden whitespace-nowrap">
-                        ${getSourceTag(song.source)}
+                        ${getSourceTags(song, { compact: true, queueIndex: index })}
                         ${getQualityTags(song)}
                         ${createMarqueeHtml(song.singer, 'text-[10px] t-text-muted flex-1')}
                     </div>
@@ -2514,6 +2513,8 @@ function renderNetworkSearchFooter(visible) {
 async function searchNetworkSongs(keyword, source, headers, request, append = false) {
     const search = append ? window.networkSongSearch : window.PagedMusicSearch.create({
         keyword, sources: source === 'all' ? SOURCES : [source], limit: 30,
+        merge: source === 'all' && settings.mergeAggregatedSearch !== false,
+        preferredSources: typeof getMergeSourcePriority === 'function' ? getMergeSourcePriority() : undefined,
     });
     if (!append) window.networkSongSearch = search;
     const current = () => request.current() && window.networkSongSearch === search &&
@@ -2547,7 +2548,11 @@ async function searchNetworkSongs(keyword, source, headers, request, append = fa
     window.viewingPlaylist = state.list;
     if (append && window.ListSearch?.state.active) window.ListSearch.handleSearch();
     else renderResults(state.list);
-    if (!state.list.length && failed.length && container) container.textContent = '暂未获得结果，可点击下方按钮重试失败音源。';
+    if (!state.list.length && failed.length && container) {
+        const header = document.getElementById('search-results-header');
+        if (header) header.classList.add('hidden');
+        container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>暂未获得结果</p><small>部分音源加载失败，可点击下方按钮重试失败音源</small></div>';
+    }
     if (append && container) container.scrollTop = scrollTop;
     renderNetworkSearchFooter(true);
 }
@@ -3039,7 +3044,7 @@ function switchHotSearchTab(source) {
         renderHotSearch(data);
     }).catch(() => {
         if (request && !request.current()) return;
-        if (container) container.textContent = '热门搜索加载失败，请重试';
+        if (container) container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>热门搜索加载失败</p><small>请检查网络连接后重试</small></div>';
     });
 }
 window.switchHotSearchTab = switchHotSearchTab;
@@ -3103,7 +3108,10 @@ function getQualityTags(item) {
     // 1. types / _types (旧版/部分源)
     // 2. qualitys / _qualitys (新版/标准)
     // 3. meta.qualitys (收藏列表)
-    const rawTypes = item.types || item._types ||
+    // 聚合搜索合并出来的歌曲：取各平台音质的并集
+    const merged = Array.isArray(item._alternates) && item._alternates.length && window.QualityManager;
+    const rawTypes = merged ? window.QualityManager.getAvailableQualities(item).map(type => ({ type })) :
+        item.types || item._types ||
         item.qualitys || item._qualitys ||
         (item.meta && (item.meta.qualitys || item.meta._qualitys)) ||
         {};
@@ -3164,6 +3172,182 @@ function getSourceTag(source) {
     return `<span class="song-tag ${color}">${name}</span>`;
 }
 window.getSourceTag = getSourceTag;
+
+// 聚合搜索合并出来的歌曲在多个平台都有：把各平台的标签都列出来，点击可查看全部平台版本
+function getSourceTags(song, options = {}) {
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    if (members.length <= 1) return getSourceTag(members[0]?.source);
+    const compact = !!options.compact || (members.length > 2 && window.innerWidth < 768);
+    const innerHtml = compact
+        ? getSourceTag(members[0].source) +
+            `<span class="song-tag t-bg-main t-text-muted t-border-main">+${members.length - 1}</span>`
+        : members.map(member => getSourceTag(member.source)).join('');
+    if (options.interactive === false) return innerHtml;
+    const names = members.map(member => getSourceName(member.source)).join('、');
+    const queueAttr = Number.isInteger(options.queueIndex)
+        ? ` onclick="event.stopPropagation(); openMergedSourcesModal(currentPlaylist[${options.queueIndex}], ${options.queueIndex}, { fromQueue: true })"`
+        : '';
+    return `<button type="button" class="merged-sources-trigger inline-flex items-center gap-1 flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity" title="点击查看全部 ${members.length} 个平台：${names}"${queueAttr}>${innerHtml}</button>`;
+}
+window.getSourceTags = getSourceTags;
+
+const MERGE_SOURCE_DEFAULT_ORDER = ['kw', 'kg', 'tx', 'wy', 'mg'];
+function normalizeMergeSourcePriority(order) {
+    const valid = Array.isArray(order)
+        ? order.filter(s => MERGE_SOURCE_DEFAULT_ORDER.includes(s))
+        : [];
+    const result = [];
+    for (const source of [...valid, ...MERGE_SOURCE_DEFAULT_ORDER]) {
+        if (!result.includes(source)) result.push(source);
+    }
+    return result;
+}
+function getMergeSourcePriority() {
+    return normalizeMergeSourcePriority(settings.mergeSourcePriority);
+}
+function syncMergeSourcePriorityUI(enabled = settings.mergeAggregatedSearch !== false) {
+    const wrap = document.getElementById('setting-merge-source-priority-wrap');
+    if (wrap) wrap.classList.toggle('hidden', enabled === false);
+    if (enabled !== false) renderMergeSourcePriorityTags();
+}
+function renderMergeSourcePriorityTags() {
+    const container = document.getElementById('setting-merge-source-priority');
+    if (!container) return;
+    const colors = {
+        kw: 't-badge-yellow border-yellow-200 dark:border-yellow-500/30',
+        kg: 't-badge-blue border-blue-200 dark:border-blue-500/30',
+        tx: 't-badge-green border-green-200 dark:border-emerald-500/30',
+        wy: 't-badge-red border-red-200 dark:border-red-500/30',
+        mg: 't-badge-pink border-pink-200 dark:border-pink-500/30'
+    };
+    const names = { kw: '酷我', kg: '酷狗', tx: 'QQ', wy: '网易', mg: '咪咕' };
+    const order = getMergeSourcePriority();
+    container.innerHTML = order.map((source, idx) => `
+        <div data-source="${source}" role="listitem"
+            class="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-semibold cursor-grab active:cursor-grabbing touch-none transition-transform ${colors[source] || 't-bg-main t-text-muted t-border-main'}">
+            <i class="fas fa-grip-vertical text-[10px] opacity-60" aria-hidden="true"></i>
+            <span class="opacity-70 font-mono text-[10px]">${idx + 1}.</span>
+            <span>${names[source] || source.toUpperCase()}</span>
+        </div>
+    `).join('');
+    if (typeof Sortable !== 'undefined') {
+        try {
+            const oldSortable = Sortable.get(container);
+            if (oldSortable) oldSortable.destroy();
+        } catch (e) { /* ignore */ }
+        Sortable.create(container, {
+            animation: 150,
+            ghostClass: 'opacity-40',
+            onEnd: () => {
+                const nextOrder = [...container.children].map(el => el.dataset.source).filter(Boolean);
+                updateSetting('mergeSourcePriority', normalizeMergeSourcePriority(nextOrder));
+            }
+        });
+    }
+}
+window.renderMergeSourcePriorityTags = renderMergeSourcePriorityTags;
+
+function closeMergedSourcesModal() {
+    const modal = document.getElementById('merged-sources-modal');
+    if (!modal) return;
+    modal.classList.add('hidden');
+    modal.classList.remove('flex');
+}
+window.closeMergedSourcesModal = closeMergedSourcesModal;
+
+function openMergedSourcesModal(song, index = -1, options = {}) {
+    const modal = document.getElementById('merged-sources-modal');
+    const titleEl = document.getElementById('merged-sources-modal-title');
+    const subtitleEl = document.getElementById('merged-sources-modal-subtitle');
+    const listEl = document.getElementById('merged-sources-modal-list');
+    if (!modal || !listEl || !song) return;
+
+    const members = window.SongMerge ? window.SongMerge.sources(song) : [song];
+    if (titleEl) titleEl.textContent = song.name || '多平台版本';
+    if (subtitleEl) subtitleEl.textContent = `${song.singer || '未知歌手'} · 共 ${members.length} 个平台`;
+
+    listEl.innerHTML = '';
+    members.forEach((member, memberIdx) => {
+        const single = { ...member };
+        delete single._alternates;
+        const row = document.createElement('div');
+        row.className = 'flex items-center gap-3 p-2.5 sm:p-3 rounded-xl border t-border-main t-bg-main/40 hover:t-bg-item-hover transition-colors cursor-pointer';
+        const thumbUrl = escapeHtmlText(getThumbnailUrl(single));
+        const albumName = escapeHtmlText(getSongAlbumName(single) || '-');
+        const duration = escapeHtmlText(single.interval || '--:--');
+        const hostBadge = memberIdx === 0
+            ? '<span class="song-tag t-bg-main t-text-muted t-border-main">主显示</span>'
+            : '';
+
+        row.innerHTML = `
+            <div class="w-10 h-10 sm:w-11 sm:h-11 rounded-lg overflow-hidden flex-shrink-0">
+                <img src="${thumbUrl}" onerror="this.src='/music/assets/logo.svg'" class="w-full h-full object-cover" alt="">
+            </div>
+            <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-1 flex-wrap">
+                    ${getSourceTag(single.source)}
+                    ${hostBadge}
+                    ${getQualityTags(single)}
+                </div>
+                <div class="text-xs t-text-muted truncate mt-1">
+                    <span>${albumName}</span>
+                    <span class="mx-1 opacity-50">·</span>
+                    <span class="font-mono">${duration}</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-1 flex-shrink-0">
+                <button type="button" data-action="play" title="播放此平台"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors">
+                    <i class="fas fa-play text-xs"></i>
+                </button>
+                <button type="button" data-action="download" title="下载此平台"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/15 transition-colors">
+                    <i class="fas fa-download text-xs"></i>
+                </button>
+                <button type="button" data-action="add" title="添加到歌单"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-emerald-500 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 transition-colors">
+                    <i class="fas fa-plus text-xs"></i>
+                </button>
+            </div>
+        `;
+
+        const playThisPlatform = () => {
+            closeMergedSourcesModal();
+            if (!options.fromQueue && Array.isArray(viewingPlaylist) && index >= 0 && viewingPlaylist[index]) {
+                const nextList = viewingPlaylist.map((item, i) => (i === index ? single : item));
+                updatePlaylist(nextList, index, currentSearchScope);
+                return;
+            }
+            const targetIdx = options.fromQueue && index >= 0 ? index : (currentIndex >= 0 ? currentIndex : 0);
+            playSong(single, targetIdx);
+        };
+        row.addEventListener('click', playThisPlatform);
+        row.querySelector('[data-action="play"]').addEventListener('click', e => { e.stopPropagation(); playThisPlatform(); });
+        row.querySelector('[data-action="download"]').addEventListener('click', e => {
+            e.stopPropagation();
+            downloadSong(single);
+        });
+        row.querySelector('[data-action="add"]').addEventListener('click', e => {
+            e.stopPropagation();
+            closeMergedSourcesModal();
+            openPlaylistAddModalForSongObject(single);
+        });
+        listEl.appendChild(row);
+    });
+
+    modal.classList.remove('hidden');
+    modal.classList.add('flex');
+}
+window.openMergedSourcesModal = openMergedSourcesModal;
+
+if (typeof document !== 'undefined') {
+    document.addEventListener('keydown', e => {
+        if (e.key === 'Escape') {
+            const modal = document.getElementById('merged-sources-modal');
+            if (modal && !modal.classList.contains('hidden')) closeMergedSourcesModal();
+        }
+    });
+}
 
 
 
@@ -5248,7 +5432,10 @@ function renderResults(list) {
         if (emptyDislike) {
             if (header) header.classList.add('hidden');
             container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-music" aria-hidden="true"></i><p>还没有不喜欢任何歌曲</p><small>在歌曲操作菜单中点击“不喜欢”即可添加</small></div>';
-        } else container.innerHTML = '<div class="text-center t-text-muted p-8">未找到相关结果</div>';
+        } else {
+            if (header) header.classList.add('hidden');
+            container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-search" aria-hidden="true"></i><p>未找到相关结果</p><small>试试更换关键词或切换其他音源</small></div>';
+        }
         updatePaginationInfo(0, 0, 0, 1, 1);
         return;
     }
@@ -5353,7 +5540,7 @@ function renderResults(list) {
                          ${createMarqueeHtml(item.name)}
                     </div>
                     <div data-rating-badges class="flex items-center gap-1 mt-0.5 md:mt-1 pr-2 overflow-hidden whitespace-nowrap">
-                         ${getSourceTag(item.source)}
+                         ${getSourceTags(item)}
                          ${getQualityTags(item)}
                          <span class="flex-shrink-0 inline-flex items-center" data-server-badge="${window.ServerFileState ? window.ServerFileState.songKey(item) : ''}"></span>
                          <div class="sm:hidden flex-1 min-w-0">
@@ -5410,12 +5597,26 @@ function renderResults(list) {
             </div>
         `;
 
+        const mergedSourcesTrigger = row.querySelector('.merged-sources-trigger');
+        if (mergedSourcesTrigger) {
+            mergedSourcesTrigger.addEventListener('click', event => {
+                event.stopPropagation();
+                openMergedSourcesModal(item, actualIndexInOriginal);
+            });
+        }
+
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
             const menu = document.createElement('details');
             menu.className = 'queue-actions';
-            menu.innerHTML = '<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main"><button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>';
+            const mergedCount = Array.isArray(item._alternates) && item._alternates.length ? item._alternates.length + 1 : 0;
+            const mergedMenuBtn = mergedCount
+                ? `<button type="button" data-merged-sources>查看全部平台 (${mergedCount})</button>`
+                : '';
+            menu.innerHTML = `<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main">${mergedMenuBtn}<button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>`;
             menu.addEventListener('click', event => event.stopPropagation());
+            const mergedBtn = menu.querySelector('[data-merged-sources]');
+            if (mergedBtn) mergedBtn.onclick = () => { menu.open = false; openMergedSourcesModal(item, actualIndexInOriginal); };
             menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
             menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
             const rateButton = document.createElement('button');
@@ -5800,32 +6001,187 @@ const prefetchManager = {
 };
 prefetchManager.init(); // 立即初始化缓冲器
 
-async function refreshPrefetchedCache(song, result) {
-    if (settings.preferServerCache === false || result.sourceType === 'server_cache') return result;
-
-    // 预读解析后，后台下载可能已经完成；播放接管前重新检查文件缓存。
-    const playbackSong = result.switchedSource && result.songInfo ? result.songInfo : song;
+// Identify one song file during retries without retaining query credentials.
+function getPlaybackCacheFileKey(url, folderHint) {
+    if (typeof url !== 'string' || !url) return null;
     try {
-        // 这里只补查本地已完成的文件，不等待远端 OpenList 探测。
-        const cached = await checkServerCache(cleanSongData(playbackSong), result.quality, false, false, AbortSignal.timeout(1200));
-        if (!cached.exists || cached.isCollision) return result;
-        const url = await applyAutoProxy(cached.url, playbackSong);
-        const quality = cached.quality || result.quality;
-        checkAndTriggerBackgroundCacheUpgrade(cleanSongData(playbackSong), result.quality, quality);
-        return {
-            ...result,
-            url,
-            quality,
-            sourceType: cached.origin === 'openlist' ? 'openlist' : 'server_cache',
-            folder: cached.folder,
-            sourceName: undefined,
-            sourceId: undefined,
-            hasMoreSources: false
-        };
-    } catch (e) {
-        console.warn('[Prefetch] Cache refresh failed, keeping preloaded URL:', e);
-        return result;
+        const page = window.location.href;
+        const media = new URL(url, page);
+        const folder = media.searchParams.get('folder') || folderHint;
+        if (media.origin !== new URL(page).origin || !media.pathname.startsWith('/api/music/cache/file/') ||
+            (folder !== 'cache' && folder !== 'music')) return null;
+        const filename = decodeURIComponent(media.pathname.slice(media.pathname.lastIndexOf('/') + 1));
+        return filename ? JSON.stringify([folder, filename]) : null;
+    } catch (_) { return null; }
+}
+
+const samePlaybackQuality = (left, right) => {
+    const tier = quality => quality === 'flac24bit' ? 'hires' : quality;
+    return tier(left) === tier(right);
+};
+
+// Resolve platform-specific quality names even without the optional merge module.
+function getPlaybackRequestQuality(song, quality) {
+    if (window.SongMerge?.requestQuality) return window.SongMerge.requestQuality(song, quality);
+    if (!['hires', 'flac24bit'].includes(quality)) return quality;
+    const manager = window.QualityManager;
+    const own = manager?.getOwnQualities ? manager.getOwnQualities(song)
+        : manager?.getAvailableQualities?.({ ...song, _alternates: undefined });
+    return own && !own.includes(quality) ? own.find(q => ['hires', 'flac24bit'].includes(q)) || quality : quality;
+}
+
+function checkPlaybackStillCurrent(options) {
+    if (options.isCurrent?.() === false) {
+        throw Object.assign(new Error('Playback selection superseded'), { name: 'AbortError' });
     }
+}
+
+const completedPlaybackHints = new Map();
+const canonicalPlaybackTier = quality => quality === 'flac24bit' ? 'hires' : quality;
+const playbackAccount = () => {
+    const owner = getUserAuthHeaders()['x-user-name'];
+    return owner && !['default', '_open', 'open'].includes(owner) ? owner : '';
+};
+const cacheLookupUnavailable = () => Object.assign(new Error('服务器缓存暂时无法连接，请重试'), { code: 'CACHE_LOOKUP_UNAVAILABLE' });
+
+async function checkPlaybackCache(members, quality, exactQuality, signal, excludedFiles) {
+    const songs = members.map(member => {
+        const { id, source, name, singer, interval } = cleanSongData(member);
+        return { id, source, name, singer, interval };
+    });
+    const body = JSON.stringify({ songs, quality, exactQuality,
+        excludeFiles: excludedFiles ? [...excludedFiles].slice(0, 8) : undefined,
+        allowCrossSource: settings.enableAutoSwitchSource !== false });
+    const headers = getUserAuthHeaders();
+    const sameAccount = auth => auth['x-user-name'] === headers['x-user-name'];
+    const attempt = auth => fetch(`${API_BASE}/cache/select`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...auth }, body, signal,
+    });
+    const assertAccount = auth => {
+        if (!sameAccount(auth)) throw Object.assign(new Error('Playback account changed'), { name: 'AbortError' });
+    };
+    try {
+        let res = await attempt(headers);
+        if (res.status === 401 && !signal.aborted && headers['x-user-name']) {
+            // Bound this request even if the shared renewal finishes later.
+            let onAbort;
+            const stopped = new Promise(resolve => {
+                onAbort = () => resolve(false);
+                signal.addEventListener('abort', onAbort, { once: true });
+            });
+            try {
+                if (await Promise.race([ensureUserAuthToken({ force: true }), stopped]) && !signal.aborted) {
+                    const renewed = getUserAuthHeaders();
+                    assertAccount(renewed);
+                    res = await attempt(renewed);
+                }
+            } finally { signal.removeEventListener('abort', onAbort); }
+        }
+        // A renewal outliving this cache budget is neither a cache miss nor final auth denial.
+        if (res.status === 401 && signal.aborted) return { unavailable: true };
+        if (res.status === 401 || res.status === 403) {
+            throw Object.assign(new Error('登录已失效，请重新登录'), { status: res.status });
+        }
+        const result = res.ok ? await res.json() : null;
+        assertAccount(getUserAuthHeaders());
+        return res.ok ? result : { unavailable: true };
+    } catch (error) {
+        if (error?.status === 401 || error?.status === 403 || (error?.name === 'AbortError' && !signal.aborted)) throw error;
+        return { unavailable: true };
+    }
+}
+
+async function resolvePlaybackCache(song, quality, options = {}) {
+    checkPlaybackStillCurrent(options);
+    if (settings.preferServerCache === false) return null;
+    const alternates = settings.enableAutoSwitchSource === false || !Array.isArray(song._alternates) ? [] : song._alternates;
+    // A resolved prefetch track is the actual media identity, even when the
+    // provider matching step returned slightly different recording metadata.
+    const resolved = settings.enableAutoSwitchSource === false ? null : options.resolvedSong;
+    const primary = resolved || song;
+    const members = [primary];
+    const seen = new Set([cleanSongData(primary).id]);
+    for (const candidate of [...(resolved ? [song] : []), ...alternates]) {
+        try {
+            const identity = cleanSongData(candidate);
+            if (!identity || seen.has(identity.id) || typeof identity.id !== 'string' || !identity.id.trim() || identity.id.length > 384 || /[\x00-\x1f]/.test(identity.id) ||
+                !/^[a-z][a-z0-9]{0,15}$/.test(identity.source || '') ||
+                [identity.name, identity.singer].some(value => value !== undefined && (typeof value !== 'string' || value.length > 512))) continue;
+            seen.add(identity.id);
+            members.push(candidate);
+            if (members.length === 8) break;
+        } catch (_) { /* Invalid alternate metadata must not invalidate the primary. */ }
+    }
+    const exact = options.foregroundCache !== true && !!options.exactQuality;
+    const owner = playbackAccount();
+    const contextKey = () => JSON.stringify([playbackAccount(), settings.serverCacheLocation || '',
+        settings.enableAutoSwitchSource !== false, canonicalPlaybackTier(quality), members.map(member => {
+            const track = cleanSongData(member);
+            return [track.id, track.source, track.name, track.singer, track.interval];
+        })]);
+    const context = contextKey();
+    const known = () => {
+        const hint = completedPlaybackHints.get(context);
+        if (!hint || hint.expires <= Date.now() || options.excludedFiles?.has(hint.fileKey) ||
+            (exact && !samePlaybackQuality(hint.result.quality, quality))) return null;
+        return hint.result;
+    };
+    if (options.foregroundCache && !options.excludedFiles?.size) {
+        const ready = known();
+        if (ready && samePlaybackQuality(ready.quality, quality)) return ready;
+    }
+    const lookup = async ms => {
+        const signal = AbortSignal.timeout(ms);
+        const hit = await checkPlaybackCache(members, quality, exact, signal, options.excludedFiles);
+        checkPlaybackStillCurrent(options);
+        if (contextKey() !== context || settings.preferServerCache === false) {
+            throw Object.assign(new Error('Cache selection superseded'), { name: 'AbortError' });
+        }
+        return signal.aborted ? { unavailable: true } : hit;
+    };
+    let hit;
+    try {
+        hit = await lookup(1200);
+        if (hit?.unavailable && options.foregroundCache) {
+            const fallback = known();
+            if (fallback) return fallback;
+            hit = await lookup(2200);
+            if (hit?.unavailable) throw cacheLookupUnavailable();
+        }
+    } catch (error) {
+        if (error?.status === 401 || error?.status === 403) completedPlaybackHints.clear();
+        throw error;
+    }
+    if (hit?.unavailable) return null;
+    const key = getPlaybackCacheFileKey(hit?.url, hit?.folder);
+    const member = hit && members[hit.memberIndex];
+    if (!hit?.exists || !key || !Number.isInteger(hit.memberIndex) || !member || options.excludedFiles?.has(key) ||
+        !window.QualityManager.QUALITY_PRIORITY.includes(hit.quality) ||
+        (settings.enableAutoSwitchSource === false && (hit.isCollision || member !== song)) ||
+        (exact && !samePlaybackQuality(hit.quality, quality))) {
+        completedPlaybackHints.delete(context);
+        return null;
+    }
+    const result = { url: authorizeMediaUrl(hit.url), quality: hit.quality, sourceType: 'server_cache',
+        folder: hit.folder, songInfo: member, switchedSource: member !== song, originalSource: song.source, verifiedPlaybackCache: true };
+    if (owner) {
+        if (completedPlaybackHints.size >= 24) completedPlaybackHints.delete(completedPlaybackHints.keys().next().value);
+        completedPlaybackHints.set(context, { result, fileKey: key, expires: Date.now() + 30000 });
+    }
+    return result;
+}
+
+async function refreshPrefetchedCache(song, result, quality = result.quality, options = {}) {
+    // Explicit library files do not need a lookup.
+    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url) return result;
+    // A prefetched local result is a hint, not proof the same file still exists.
+    const cached = await resolvePlaybackCache(song, quality, { ...options, resolvedSong: result.songInfo });
+    if (cached) return { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false, triedPlatforms: undefined };
+    if (result.sourceType === 'server_cache' ||
+        (settings.preferServerCache === false && result.sourceType === 'openlist') ||
+        (settings.enableAutoSwitchSource === false && result.switchedSource) ||
+        (options.exactQuality && !samePlaybackQuality(result.quality, quality))) return null;
+    return result;
 }
 
 // --- URL Fetching Logic (Unified Resolution) ---
@@ -5834,13 +6190,44 @@ async function refreshPrefetchedCache(song, result) {
  * 统一的歌曲解析入口，支持播放和预读调用
  * 包含：本地/服务器缓存检查、在线解析、自动降级逻辑
  */
-async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false) {
+async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, disableFallback = false, options = {}) {
+    const triedCandidates = new Set();
     try {
-        const result = await fetchSongUrl(song, quality, isRetry, isSilent);
+        if (song._alternates?.length && window.SongMerge) {
+            if (settings.preferServerCache !== false && !options.skipPlaybackCache && isRetry !== 'local_retry' && isRetry !== 'download') {
+                const hit = await resolvePlaybackCache(song, options.cacheQuality || quality, {
+                    ...options, exactQuality: options.exactCacheQuality ?? options.exactQuality ?? !!isRetry,
+                });
+                if (hit) return hit;
+            }
+            const candidates = await window.SongMerge.candidates(song, quality);
+            let lastError = null;
+            for (const candidate of candidates) {
+                triedCandidates.add(candidate);
+                const startedAt = Date.now();
+                try {
+                    const candidateQuality = window.SongMerge.requestQuality(candidate, quality);
+                    const result = await fetchSongUrl(candidate, candidateQuality, isRetry, isSilent, { ...options, skipPlaybackCache: true });
+                    if (result.errorMsg) throw new Error(result.errorMsg);
+                    if (result.sourceType === 'normal') window.SongMerge.record(candidate.source, true, Date.now() - startedAt);
+                    const triedPlatforms = [...new Set([...triedCandidates].map(member => member.source).filter(Boolean))];
+                    return candidate === song ? { ...result, triedPlatforms } : { ...result, triedPlatforms, songInfo: candidate, switchedSource: true, originalSource: song.source };
+                } catch (candidateError) {
+                    if (candidateError.errorCode === 'NO_AVAILABLE_SOURCE' && candidates.length < 2) throw candidateError;
+                    window.SongMerge.record(candidate.source, false, 0);
+                    lastError = candidateError;
+                }
+            }
+            throw lastError || new Error('No playable candidate');
+        }
+        const result = await fetchSongUrl(song, quality, isRetry, isSilent, options);
         if (result.errorMsg) throw new Error(result.errorMsg);
         return result;
     } catch (error) {
-        if (disableFallback || error.errorCode === 'NO_AVAILABLE_SOURCE') {
+        if (triedCandidates.size) {
+            error.triedPlatforms = [...new Set([...triedCandidates].map(candidate => candidate.source).filter(Boolean))];
+        }
+        if (disableFallback || error.code === 'CACHE_LOOKUP_UNAVAILABLE' || error.errorCode === 'NO_AVAILABLE_SOURCE' || error.name === 'AbortError' || error.status === 401 || error.status === 403) {
             throw error;
         }
 
@@ -5854,7 +6241,7 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
         const order = (settings.playbackErrorPriority || 'platform,quality,next').split(',');
         const steps = [];
         for (const key of order) {
-            if (key === 'quality' && settings.enableAutoDegradeQuality !== false) {
+            if (key === 'quality' && !options.exactQuality && settings.enableAutoDegradeQuality !== false) {
                 steps.push('degrade');
             } else if (key === 'platform' && settings.enableAutoSwitchSource !== false) {
                 steps.push('switch_platform');
@@ -5876,15 +6263,20 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                             status: 'trying'
                         });
                     }
-                    return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false);
+                    return await resolveSongUrl(song, nextQuality, isSilent, fallbackRetryMode, false, { ...options, cacheQuality: nextQuality, exactCacheQuality: true, skipPlaybackCache: false });
                 }
             } else if (step === 'switch_platform') {
+                // Requested-quality filtering can leave lower-quality alternatives untried.
+                const matches = await findOtherSourceMatches(song, isSilent, {
+                    excludePlatforms: [...new Set([...triedCandidates].map(candidate => candidate.source))],
+                });
+                const untried = matches.filter(candidate => !triedCandidates.has(candidate));
+                if (!untried.length) continue;
                 if (!isSilent) {
                     console.log(`[AutoSource] 原始源解析失败，准备尝试全网匹配: ${song.name}`);
                     RecoveryToast.show(song, '原始源解析失败，正在全网搜索备选源...');
                 }
-                const matchedSong = await findOtherSourceMatch(song, isSilent);
-                if (matchedSong) {
+                for (const matchedSong of untried) {
                     const targetPlatform = getSourceName(matchedSong.source);
                     if (!isSilent) {
                         RecoveryToast.show(matchedSong, `找到备选源，尝试从 [${targetPlatform}] 播放...`, {
@@ -5892,8 +6284,13 @@ async function resolveSongUrl(song, quality, isSilent = false, isRetry = false, 
                             status: 'trying'
                         });
                     }
-                    const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
-                    const matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent);
+                    const bestNextQuality = options.exactQuality ? quality : window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
+                    let matchedResult;
+                    try {
+                        triedCandidates.add(matchedSong);
+                        matchedResult = await fetchSongUrl(matchedSong, bestNextQuality, fallbackRetryMode, isSilent, { ...options, skipPlaybackCache: false });
+                        if (matchedResult.errorMsg) throw new Error(matchedResult.errorMsg);
+                    } catch (_) { continue; }
                     return {
                         ...matchedResult,
                         songInfo: matchedSong,
@@ -5934,6 +6331,15 @@ async function resolveDownloadSongUrl(song, quality, isSilent = true) {
             return null;
         }
     };
+
+    // 0. 聚合搜索合并出来的歌曲：先在各平台的条目里按「有该音质、可解析、历史最快」的顺序找所请求音质
+    if (song._alternates?.length) {
+        for (const candidate of await window.SongMerge.candidates(song, requestedQuality)) {
+            const mergedExact = await trySingle(candidate, window.SongMerge.requestQuality(candidate, requestedQuality));
+            if (!mergedExact) continue;
+            return candidate === song ? mergedExact : { ...mergedExact, songInfo: candidate, switchedSource: true, originalSource: song.source };
+        }
+    }
 
     // 1. 先在原平台尝试所请求音质
     const originalExact = await trySingle(song, requestedQuality);
@@ -6045,6 +6451,12 @@ async function findOtherSourceMatch(song, isSilent = false) {
 }
 
 async function findOtherSourceMatches(song, isSilent = false, options = {}) {
+    const excluded = new Set(options.excludePlatforms || []);
+    // Keep known untried members fast; only search other platforms once exhausted.
+    if (Array.isArray(song._alternates) && song._alternates.length) {
+        const remaining = [song, ...song._alternates].filter(member => !excluded.has(member.source));
+        if (remaining.length) return remaining;
+    }
     if (!song.name || !song.singer) return [];
 
     try {
@@ -6056,7 +6468,7 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
             list.forEach(src => {
                 if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
                     src.supportedSources.forEach(platform => {
-                        supportedPlatforms.add(platform);
+                        if (!(src.disabledSources || []).includes(platform)) supportedPlatforms.add(platform);
                     });
                 }
             });
@@ -6064,7 +6476,7 @@ async function findOtherSourceMatches(song, isSilent = false, options = {}) {
 
         // 2. 切换到和当前不同源，并且根据优先级排列 (网易、QQ、酷我、酷狗、咪咕)
         const baseOrder = ['wy', 'tx', 'kw', 'kg', 'mg'];
-        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source);
+        const searchSourcesOrdered = baseOrder.filter(s => s !== song.source && !excluded.has(s));
 
         // 3. 过滤出自定义源支持解析的平台
         let searchSources = searchSourcesOrdered;
@@ -6222,70 +6634,16 @@ async function applyAutoProxy(url, song) {
     return authorizeMediaUrl(url);
 }
 
-const cacheUpgradeCooldown = new Map(); // songKey -> timestamp
-
-function checkAndTriggerBackgroundCacheUpgrade(song, desiredQuality, currentCachedQuality) {
-    if (!song || !desiredQuality || !currentCachedQuality) return;
-    if (!window.QualityManager) return;
-    const priority = window.QualityManager.QUALITY_PRIORITY;
-    const desiredIndex = priority.indexOf(desiredQuality);
-    const currentIndex = priority.indexOf(currentCachedQuality);
-    // If desired quality is not higher rank (smaller index) than current cached quality, no upgrade needed
-    if (desiredIndex === -1 || currentIndex === -1 || desiredIndex >= currentIndex) return;
-
-    if (settings.enableServerCache === false) return;
-
-    const songId = song.id || song.songmid || song.songId || '';
-    const key = `${song.source || ''}_${songId}_${desiredQuality}`;
-    const now = Date.now();
-    const lastAttempt = cacheUpgradeCooldown.get(key) || 0;
-    // 30-minute cooldown per song and quality target to avoid repeated API hits
-    if (now - lastAttempt < 30 * 60 * 1000) return;
-    cacheUpgradeCooldown.set(key, now);
-
-    console.log(`[CacheUpgrade] Cached quality (${currentCachedQuality}) < desired (${desiredQuality}) for ${song.name}, checking upgrade in background...`);
-
-    setTimeout(async () => {
-        try {
-            const resolver = window.resolveDownloadSongUrl || window.resolveSongUrl;
-            if (typeof resolver !== 'function') return;
-            const res = await resolver(song, desiredQuality, true);
-            if (!res || !res.url) return;
-            const resolvedQuality = res.quality || res.type || desiredQuality;
-            const resolvedIndex = priority.indexOf(resolvedQuality);
-            if (resolvedIndex === -1 || resolvedIndex >= currentIndex) return;
-
-            console.log(`[CacheUpgrade] Upgraded version found for ${song.name}: ${resolvedQuality}. Downloading to server cache...`);
-
-            const resolvedSong = res.songInfo || song;
-            const headers = { 'Content-Type': 'application/json', ...(window.getUserAuthHeaders ? window.getUserAuthHeaders() : {}) };
-            const payload = {
-                songInfo: (window.SystemDownloadManager && window.SystemDownloadManager.getSongInfoForServer)
-                    ? window.SystemDownloadManager.getSongInfoForServer(resolvedSong)
-                    : resolvedSong,
-                url: window.SystemDownloadManager ? window.SystemDownloadManager.extractRawDownloadUrl(res.url) : res.url,
-                quality: resolvedQuality,
-                requestedSource: song.source || '',
-                downloadSource: res.downloadSource || resolvedSong.source,
-                sourceName: res.sourceName || '',
-                enableOnlyDownloadMode: window.settings?.enableOnlyDownloadMode || false,
-                cacheLyric: window.settings?.enableServerLyricCache !== false,
-                embedLyric: !!(window.settings?.embedLyricToFile ?? true)
-            };
-
-            await fetch('/api/music/cache/download', {
-                method: 'POST',
-                headers,
-                body: JSON.stringify(payload)
-            });
-            console.log(`[CacheUpgrade] Background cache upgrade started for ${song.name} (${resolvedQuality})`);
-        } catch (e) {
-            console.warn(`[CacheUpgrade] Background upgrade failed for ${song.name}:`, e.message || e);
-        }
-    }, 2000);
+function addPlaybackCapture(url, originalUrl, offer) {
+    if (!/^[a-f0-9]{32}$/.test(offer || '') || !url.startsWith('/api/music/download?')) return null;
+    const relay = new URL(url, window.location.href);
+    if (relay.searchParams.get('inline') !== '1' || relay.searchParams.get('url') !== originalUrl) return null;
+    relay.searchParams.set('capture', offer);
+    return relay.pathname + relay.search;
 }
 
 async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, options = {}) {
+    checkPlaybackStillCurrent(options);
     const cleanedSong = cleanSongData(song);
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
 
@@ -6295,27 +6653,25 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
         let localUrl = await applyAutoProxy(song.url, song);
         const localFolder = /folder=music/.test(song.url) ? 'music' : 'cache';
         const actualQuality = song.quality || quality;
-        if (typeof checkAndTriggerBackgroundCacheUpgrade === 'function') {
-            checkAndTriggerBackgroundCacheUpgrade(cleanedSong, quality, actualQuality);
-        }
         return { url: localUrl, sourceType: 'server_cache', quality: actualQuality, folder: localFolder };
     }
 
     const shouldBypassServerCache = isRetry === 'local_retry' || isRetry === 'download';
 
-    const allowServerCache = settings.preferServerCache !== false && !shouldBypassServerCache;
-    if (allowServerCache) {
-        let cacheResult = await checkServerCache(cleanedSong, quality, !!isRetry, !isRetry);
-        if (cacheResult.exists && !cacheResult.isCollision) {
-            const actualQuality = cacheResult.quality || quality;
-            console.log(`[Cache] Server Hit: ${cleanedSong.name} (${actualQuality})`);
-            let serverCacheUrl = cacheResult.url;
-            // 应用代理逻辑 (以防服务器缓存返回的是原始 HTTP 链接)
-            serverCacheUrl = await applyAutoProxy(serverCacheUrl, song);
-            if (typeof checkAndTriggerBackgroundCacheUpgrade === 'function') {
-                checkAndTriggerBackgroundCacheUpgrade(cleanedSong, quality, actualQuality);
-            }
-            return { url: serverCacheUrl, sourceType: cacheResult.origin === 'openlist' ? 'openlist' : 'server_cache', quality: actualQuality, folder: cacheResult.folder };
+    if (settings.preferServerCache !== false && !shouldBypassServerCache && !options.skipPlaybackCache) {
+        const hit = await resolvePlaybackCache(song, options.cacheQuality || quality, {
+            ...options, exactQuality: options.exactCacheQuality ?? options.exactQuality ?? !!isRetry,
+        });
+        if (hit) return hit;
+    }
+
+    // OpenList remains an optional remote fallback, never part of local selection.
+    if (settings.preferServerCache !== false && !isRetry) {
+        const cached = await checkServerCache(cleanedSong, quality, !!options.exactQuality, true);
+        checkPlaybackStillCurrent(options);
+        if (cached.exists && !cached.isCollision && cached.origin === 'openlist' && cached.url) {
+            return { url: await applyAutoProxy(cached.url, song), sourceType: 'openlist',
+                quality: cached.quality || quality, folder: cached.folder };
         }
     }
 
@@ -6335,7 +6691,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     try {
         progressEs = new EventSource(`/api/music/progress?reqId=${reqId}`);
         progressEs.onmessage = (e) => {
-            if (isSilent) return;
+            if (isSilent || options.isCurrent?.() === false) return;
             try {
                 const attempt = JSON.parse(e.data);
                 const songNamePrefix = attempt.name || song.name || '';
@@ -6373,27 +6729,36 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     await new Promise(r => setTimeout(r, 50));
 
     try {
+        checkPlaybackStillCurrent(options);
         const currentPlatform = song.source;
         let excludeApiSources = options?.excludeApiSources;
         if (!excludeApiSources && currentRecoveryState && currentRecoveryState.currentSong?.source === currentPlatform) {
             excludeApiSources = currentRecoveryState.triedApiSourcesByPlatform?.[currentPlatform] || [];
         }
 
+        const requestReadThrough = options.requestReadThrough === true && !!headers['x-user-name'] &&
+            settings.enableServerCache === true && !settings.enableOnlyDownloadMode &&
+            (settings.enableProxyPlayback || settings.enableAutoProxy) && !(settings.enableCustomProxy && settings.customProxyUrl);
         const request = {
             method: 'POST',
             headers,
             body: JSON.stringify({
                 songInfo: song,
                 quality,
+                ...(requestReadThrough && { requestReadThrough }),
                 enableAutoSwitchApiSource: settings.enableAutoSwitchApiSource !== false,
                 excludeApiSources: Array.isArray(excludeApiSources) ? excludeApiSources : []
             })
         };
         let res = await fetch(`${API_BASE}/url`, request);
+        checkPlaybackStillCurrent(options);
         if (res.status === 401 && await ensureUserAuthToken({ force: true })) {
-            res = await fetch(`${API_BASE}/url`, {
-                ...request, headers: { ...headers, ...getUserAuthHeaders() }
-            });
+            checkPlaybackStillCurrent(options);
+            const renewed = getUserAuthHeaders();
+            if (renewed['x-user-name'] !== headers['x-user-name']) {
+                throw Object.assign(new Error('Playback account changed'), { name: 'AbortError' });
+            }
+            res = await fetch(`${API_BASE}/url`, { ...request, headers: { ...headers, ...renewed } });
         }
 
         if (!res.ok) {
@@ -6409,15 +6774,22 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
         const result = await res.json();
         if (result.url) {
             // 使用异步统一代理函数
-            const finalUrl = await applyAutoProxy(result.url, song);
+            const relay = await applyAutoProxy(result.url, song);
+            checkPlaybackStillCurrent(options);
+            if (getUserAuthHeaders()['x-user-name'] !== headers['x-user-name']) {
+                throw Object.assign(new Error('Playback account changed'), { name: 'AbortError' });
+            }
+            const captureUrl = requestReadThrough ? addPlaybackCapture(relay, result.url, result.readThrough) : null;
+            const finalUrl = captureUrl || relay;
 
-            if (settings.enableSongUrlCache !== false) {
+            // Never persist a short-lived capture offer or start its duplicate download.
+            if (!captureUrl && settings.enableSongUrlCache !== false) {
                 try {
                     localStorage.setItem(cacheKey, finalUrl);
                     updateStorageStatsUI();
                 } catch (e) { }
             }
-            if (settings.enableServerCache && isRetry !== 'download' && !finalUrl.includes('/api/music/cache/file/')) {
+            if (!captureUrl && settings.enableServerCache && isRetry !== 'download' && !finalUrl.includes('/api/music/cache/file/')) {
                 // [Fix] 传递原始 result.url 而非经过 applyAutoProxy 处理后的相对代理路径，
                 // 否则后端下载器会因无法识别相对路径而报 ERR_INVALID_URL 错误。
                 triggerServerCache(song, result.url, quality);
@@ -6425,6 +6797,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             console.log(`[Resolve] Online Success: ${song.name} via ${result.sourceName || 'Unknown'}`);
             return {
                 url: finalUrl,
+                ...(captureUrl && { relayUrl: relay }),
                 sourceType: 'normal',
                 quality: result.type || quality,
                 sourceName: result.sourceName,
@@ -6525,7 +6898,10 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
         }
 
         // 2. 复用统一解析逻辑 (resolveSongUrl)，且开启静默模式
-        result = await resolveSongUrl(nextSong, targetQual, true);
+        const exactQuality = settings.enableAutoDegradeQuality === false;
+        const cacheOptions = { isCurrent: canCommit, exactQuality,
+            cacheQuality: exactQuality ? targetQual : settings.preferredQuality || targetQual };
+        result = await resolveSongUrl(nextSong, targetQual, true, false, false, cacheOptions);
         if (!canCommit()) return;
 
         // 3. 探活获取到的链接
@@ -6533,7 +6909,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
         if (!canCommit()) return;
         if (!alive) {
             localStorage.removeItem(`lx_url_${cleanSongData(nextSong).id}_${targetQual}`);
-            result = await resolveSongUrl(nextSong, targetQual, true, true);
+            result = await resolveSongUrl(nextSong, targetQual, true, true, false, { ...cacheOptions, skipPlaybackCache: true });
             if (!canCommit()) return;
         }
 
@@ -6545,7 +6921,7 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
         if (!isCurrent()) return;
         // 预读失败可能只是临时断网，不能据此让前台播放永久跳过这首歌。
         console.warn(`[Prefetch] Could not preload [${nextSong.name}]:`, e.message);
-        if (e.errorCode === 'NO_AVAILABLE_SOURCE') return;
+        if (e.errorCode === 'NO_AVAILABLE_SOURCE' || e.name === 'AbortError' || e.status === 401 || e.status === 403) return;
 
         // 递归探测
         const followingIndex = (targetIndex + 1) >= currentPlaylist.length ? 0 : targetIndex + 1;
@@ -6558,7 +6934,6 @@ async function prefetchNextSong(startFromIndex = null, depth = 0, generation = n
 // --- Server Cache Helpers ---
 async function checkServerCache(song, quality, exactQuality = false, includeOpenlist = false, signal = undefined) {
     try {
-        const username = currentListData?.username || '';
         const params = new URLSearchParams({
             name: song.name,
             singer: song.singer,
@@ -6566,8 +6941,11 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
             songmid: song.songmid || (song.meta && (song.meta.songmid || song.meta.songId)) || '',
             songId: song.songId || (song.meta && song.meta.songId) || song.id,
             quality: quality || '',
-            includeOpenlist: includeOpenlist ? '1' : '0'
+            includeOpenlist: includeOpenlist ? '1' : '0',
+            openlistOnly: includeOpenlist ? '1' : '0'
         });
+        // 时长用于在同名的缓存记录里挑出同一版
+        if (song.interval) params.append('interval', song.interval);
         if (exactQuality) params.append('exactQuality', '1');
         const headers = {};
         Object.assign(headers, getUserAuthHeaders());
@@ -6826,6 +7204,174 @@ function updateAdminUI() {
             else btn.classList.remove('opacity-30', 'pointer-events-none', 'grayscale');
         }
     });
+}
+
+// A background upgrade is never part of URL selection and never owns the audio
+// element. Only a validated selector hit can arm it, and only moving playback
+// can submit it. The NAS queue independently enforces one automatic transfer.
+let playbackCacheUpgrade = null;
+let activeCacheUpgrade = null;
+const cacheUpgradeAttempts = new Map();
+const CACHE_UPGRADE_TIERS = ['hires', 'flac', '320k', '192k', '128k'];
+const cacheUpgradeContext = () => JSON.stringify([
+    playbackAccount(), settings.serverCacheLocation || '',
+    settings.enableAutoSwitchSource !== false, settings.enableAutoSwitchApiSource !== false,
+]);
+const cacheUpgradeEnabled = () => Boolean(playbackAccount() && settings.enableServerCache === true &&
+    settings.preferServerCache !== false);
+const cacheUpgradeContextCurrent = job => cacheUpgradeEnabled() && job.context === cacheUpgradeContext();
+
+function armPlaybackCacheUpgrade(song, result, quality, requestId, explicitQuality) {
+    playbackCacheUpgrade = null;
+    if (!cacheUpgradeEnabled() || audio.isRemote || !result.verifiedPlaybackCache || !song) return;
+    const target = canonicalPlaybackTier(quality);
+    const wanted = CACHE_UPGRADE_TIERS.indexOf(target);
+    const actual = CACHE_UPGRADE_TIERS.indexOf(canonicalPlaybackTier(result.quality));
+    if (wanted < 0 || actual <= wanted) return;
+    const { id, source, name, singer, interval, meta = {} } = cleanSongData(song);
+    if (!id || !source || target === '128k') return;
+    // Send provider identity only, not a media URL, auth query, local path, or
+    // user-controlled quality/URL claims from the selected cache result.
+    const songInfo = { id, source, name, singer, interval, meta: {
+        songId: meta.songId, id: meta.id, strMediaMid: meta.strMediaMid,
+        hash: meta.hash, copyrightId: meta.copyrightId, albumMid: meta.albumMid,
+        albumId: meta.albumId, albumName: meta.albumName,
+    } };
+    const context = cacheUpgradeContext();
+    const key = JSON.stringify([context, source, id, target]);
+    playbackCacheUpgrade = { requestId, context, key, songInfo, quality: target, explicitQuality,
+        crossSource: settings.enableAutoSwitchSource !== false, switchApi: settings.enableAutoSwitchApiSource !== false,
+        progressed: 0 };
+}
+
+async function cacheUpgradeQueueRequest(suffix, payload) {
+    const res = await fetch(`${API_BASE}/cache${suffix}`, {
+        method: payload ? 'POST' : 'GET',
+        headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
+        body: payload && JSON.stringify(payload),
+        signal: AbortSignal.timeout(5000),
+    });
+    if (!res.ok) throw new Error(`Background cache request failed (${res.status})`);
+    const response = await res.json();
+    if (response?.success === false) throw new Error('Background cache request failed');
+    return response.data;
+}
+
+function finishPlaybackCacheUpgrade(job, completed = false) {
+    if (activeCacheUpgrade !== job) return;
+    clearTimeout(job.pollTimer);
+    activeCacheUpgrade = null;
+    if (completed) window.ServerFileState?.repaintAll();
+}
+
+const terminalCacheUpgradeStatuses = ['finished', 'exists', 'error'];
+function observeCacheUpgrade(job, task) {
+    if (terminalCacheUpgradeStatuses.includes(task.status)) {
+        finishPlaybackCacheUpgrade(job, task.status !== 'error');
+    } else if (task.status === 'paused' && !job.pausedByPlayer) {
+        // Respect a manual pause; this client must not resume it.
+        finishPlaybackCacheUpgrade(job);
+    }
+}
+
+function pollPlaybackCacheUpgrade(job) {
+    if (activeCacheUpgrade !== job) return;
+    job.pollTimer = setTimeout(async () => {
+        if (activeCacheUpgrade !== job) return;
+        if (!cacheUpgradeContextCurrent(job) || Date.now() >= job.deadline) {
+            finishPlaybackCacheUpgrade(job);
+            return;
+        }
+        if (!job.control) {
+            try {
+                const tasks = await cacheUpgradeQueueRequest(`/queue?id=${encodeURIComponent(job.id)}`);
+                if (activeCacheUpgrade !== job || !cacheUpgradeContextCurrent(job)) return finishPlaybackCacheUpgrade(job);
+                if (!job.control && Array.isArray(tasks)) {
+                    const task = tasks.find(item => item.id === job.id && item.cacheUpgrade === true);
+                    if (!task) return finishPlaybackCacheUpgrade(job);
+                    observeCacheUpgrade(job, task);
+                }
+            } catch (_) { /* A transient status failure does not change playback. */ }
+        }
+        if (job.pauseRequested && !job.pausedByPlayer && job.pauseAttempts < 2) void pausePlaybackCacheUpgrade(job);
+        pollPlaybackCacheUpgrade(job);
+    }, 3000);
+}
+
+async function startPlaybackCacheUpgrade(candidate) {
+    if (activeCacheUpgrade || playbackCacheUpgrade !== candidate || !cacheUpgradeContextCurrent(candidate) ||
+        (!candidate.explicitQuality && canonicalPlaybackTier(settings.preferredQuality || 'flac') !== candidate.quality)) return;
+    const now = Date.now();
+    if ((cacheUpgradeAttempts.get(candidate.key) || 0) > now) return;
+    if (cacheUpgradeAttempts.size >= 24) cacheUpgradeAttempts.delete(cacheUpgradeAttempts.keys().next().value);
+    cacheUpgradeAttempts.set(candidate.key, now + 60000);
+    const job = activeCacheUpgrade = { ...candidate, pauseRequested: false, pausedByPlayer: false,
+        pauseAttempts: 0, stable: 0, deadline: now + 10 * 60 * 1000 };
+    try {
+        const tasks = await cacheUpgradeQueueRequest('/queue', { tasks: [{
+            cacheUpgrade: true, songInfo: job.songInfo, quality: job.quality,
+            enableAutoSwitchSource: job.crossSource, enableAutoSwitchApiSource: job.switchApi,
+        }] });
+        if (activeCacheUpgrade !== job || !cacheUpgradeContextCurrent(job)) return finishPlaybackCacheUpgrade(job);
+        const task = Array.isArray(tasks) && tasks.find(item => item.cacheUpgrade === true && /^lx_upgrade_[a-z0-9_-]+$/i.test(item.id));
+        if (!task) return finishPlaybackCacheUpgrade(job);
+        job.id = task.id;
+        observeCacheUpgrade(job, task);
+        if (job.pauseRequested) void pausePlaybackCacheUpgrade(job);
+        pollPlaybackCacheUpgrade(job);
+    } catch (_) {
+        finishPlaybackCacheUpgrade(job);
+    }
+}
+
+async function pausePlaybackCacheUpgrade(job = activeCacheUpgrade) {
+    if (!job || activeCacheUpgrade !== job || !cacheUpgradeContextCurrent(job)) return;
+    job.pauseRequested = true;
+    job.stable = 0;
+    if (!job.id || job.control || job.pausedByPlayer || job.pauseAttempts >= 2) return;
+    job.control = true;
+    job.pauseAttempts++;
+    try {
+        await cacheUpgradeQueueRequest('/stop', { queueId: job.id });
+        job.pausedByPlayer = true;
+        job.pauseRequested = false;
+    } catch (_) { /* Bounded retry on the next status poll. */ }
+    finally { job.control = false; }
+}
+
+async function resumePlaybackCacheUpgrade(job) {
+    if (activeCacheUpgrade !== job || !job.pausedByPlayer || job.control || job.resumed ||
+        !cacheUpgradeContextCurrent(job)) return;
+    job.resumed = true;
+    job.control = true;
+    try {
+        await cacheUpgradeQueueRequest('/queue/resume', { id: job.id });
+        job.pausedByPlayer = false;
+        job.pauseAttempts = 0;
+    } catch (_) { /* Do not repeatedly restart the transfer. */ }
+    finally {
+        job.control = false;
+        if (job.pauseRequested) void pausePlaybackCacheUpgrade(job);
+    }
+}
+
+let cacheUpgradePlayhead = null;
+function advancePlaybackCacheUpgrade() {
+    const position = audio.currentTime;
+    if (!Number.isFinite(position) || audio.isRemote || audio.paused || audio.ended || audio.seeking || audio.readyState < 3) {
+        cacheUpgradePlayhead = null;
+        return;
+    }
+    const delta = position - (cacheUpgradePlayhead ?? position);
+    cacheUpgradePlayhead = position;
+    // A seek or a single event fired on assigning src is not proof of playback.
+    if (delta <= 0 || delta > 1.5) return;
+    const job = activeCacheUpgrade;
+    if (job?.pausedByPlayer && !job.control && (job.stable += delta) >= 3) void resumePlaybackCacheUpgrade(job);
+    const candidate = playbackCacheUpgrade;
+    if (candidate?.requestId === currentRecoveryState?.thisRequestId && candidate && (candidate.progressed += delta) >= 0.35) {
+        void startPlaybackCacheUpgrade(candidate);
+    }
 }
 
 const watchedCacheSongKeys = new Set();
@@ -7193,7 +7739,47 @@ function playFromView(index) {
 }
 window.playFromView = playFromView;
 
-async function runRecoveryFlow(error, savedResumeTime, state = currentRecoveryState) {
+function canRetryCachedTransport(error, state, result) {
+    if (!state || state.cacheTransportRetried || !state.cacheMediaOwner ||
+        state.cacheMediaOwner !== playbackAccount() || state.cacheMediaScope !== cacheUpgradeContext() ||
+        (result?.switchedSource && settings.enableAutoSwitchSource === false) || !result?.verifiedPlaybackCache ||
+        result.sourceType !== 'server_cache') return false;
+    return error?.code === 2 || error?.name === 'NetworkError' || error?.code === 'PLAYBACK_CACHE_STALL';
+}
+
+async function retryCachedTransport(error, savedTime, state, result, isCurrent, signal) {
+    if (!canRetryCachedTransport(error, state, result)) return false;
+    state.cacheTransportRetried = true;
+    // A native MEDIA_ERR_NETWORK does not expose HTTP status. Ask the same
+    // same-origin file for two bytes, never ask a provider or follow a redirect.
+    try {
+        const timeout = AbortSignal.timeout(1500);
+        const response = await fetch(result.url, {
+            headers: { Range: 'bytes=0-1' }, cache: 'no-store', redirect: 'error',
+            signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+        });
+        const closing = response.body?.cancel();
+        closing?.catch(() => {});
+        if (!isCurrent() || state.cacheMediaScope !== cacheUpgradeContext()) return true;
+        if (response.status === 401 || response.status === 403) {
+            throw Object.assign(new Error('登录已失效，请重新登录'), { status: response.status });
+        }
+        // Definitively absent, invalid, or not audio: use ordinary recovery.
+        if ((!response.ok && response.status < 500 && ![408, 429].includes(response.status)) ||
+            (response.ok && !/^audio\//i.test(response.headers.get('content-type') || ''))) return false;
+    } catch (probeError) {
+        if (probeError?.status === 401 || probeError?.status === 403) throw probeError;
+        // A transport failure is inconclusive, not proof that the file vanished.
+    }
+    if (!isCurrent() || state.cacheMediaScope !== cacheUpgradeContext()) return true;
+    const song = state.currentSong || state.originalSong;
+    if (!song) return false;
+    if (savedTime > 0) window._resumeInfo = { time: savedTime, song };
+    void playSong(song, state.currentIndex, result.quality, false, 'cache_transport', false, { ...result, isPrefetch: false });
+    return true;
+}
+
+async function runRecoveryFlow(error, savedResumeTime, state = currentRecoveryState, failedResult = null) {
     if (!state) return;
 
     if (state !== currentRecoveryState) {
@@ -7201,29 +7787,80 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         return;
     }
 
+    const requestId = state.thisRequestId;
+    const recoveryEpoch = state.recoveryEpoch;
+    const isCurrent = () => state === currentRecoveryState &&
+        state.thisRequestId === requestId && state.recoveryEpoch === recoveryEpoch;
     const effectiveResumeTime = typeof savedResumeTime === 'number' ? savedResumeTime : (state.savedResumeTime || 0);
     state.savedResumeTime = effectiveResumeTime;
 
     // A lost login session affects every track. Repair it before excluding providers.
     try {
+        if (failedResult && state.cacheMediaOwner &&
+            await retryCachedTransport(error, effectiveResumeTime, state, failedResult, isCurrent)) return;
         if (error?.status === 401 || error?.status === 403) {
             throw Object.assign(new Error('登录已失效，请重新登录'), { status: 401 });
         }
         if (await restorePlaybackSession(!state.authRecoveryAttempted)) {
-            if (state !== currentRecoveryState) return;
+            if (!isCurrent()) return;
             state.authRecoveryAttempted = true;
             window._resumeInfo = { time: effectiveResumeTime, song: state.currentSong };
             playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
             return;
         }
     } catch (authError) {
-        if (state !== currentRecoveryState) return;
+        if (!isCurrent()) return;
         setPlayerStatus('请重新登录');
         RecoveryToast.error(authError.message || '登录已失效，请重新登录');
         updatePlayButton(false);
         return;
     }
-    if (state !== currentRecoveryState) return;
+    if (!isCurrent()) return;
+
+    // A completed local copy may have appeared since initial playback. Do not
+    // retry the same faulty file or hold up recovery with repeated local queries.
+    if (failedResult?.sourceType === 'server_cache') {
+        const key = getPlaybackCacheFileKey(failedResult.url, failedResult.folder);
+        if (key) {
+            if ((state.failedCacheFiles?.size || 0) < 8) (state.failedCacheFiles ||= new Set()).add(key);
+            if (typeof completedPlaybackHints !== 'undefined') {
+                for (const [context, hint] of completedPlaybackHints) {
+                    if (hint.fileKey === key) completedPlaybackHints.delete(context);
+                }
+            }
+        }
+    }
+    const wanted = state.cacheTargetQuality || state.originalQuality || state.currentQuality;
+    const original = state.originalSong || state.currentSong;
+    if (original && wanted && settings.preferServerCache !== false &&
+        state.cacheCheckedRequestId !== requestId && (!state.failedCacheFiles || state.failedCacheFiles.size < 8)) {
+        state.cacheCheckedRequestId = requestId;
+        let cached;
+        try {
+            cached = await resolvePlaybackCache(original, wanted, {
+                isCurrent, exactQuality: state.explicitQuality || settings.enableAutoDegradeQuality === false,
+                excludedFiles: state.failedCacheFiles,
+            });
+        } catch (cacheError) {
+            if (!isCurrent() || cacheError?.name === 'AbortError') return;
+            if (cacheError?.status === 401 || cacheError?.status === 403) {
+                setPlayerStatus('请重新登录');
+                showError('登录已失效，请重新登录');
+                RecoveryToast.error(cacheError.message);
+                updatePlayButton(false);
+                return;
+            }
+            console.warn('[Recovery] Local selection failed:', cacheError.message || cacheError);
+        }
+        if (!isCurrent()) return;
+        if (cached) {
+            const localSong = cached.songInfo || original;
+            if (effectiveResumeTime > 0) window._resumeInfo = { time: effectiveResumeTime, song: localSong };
+            state.currentSong = localSong;
+            playSong(localSong, state.currentIndex, cached.quality, false, true, false, cached);
+            return;
+        }
+    }
 
     // 无源是账号配置问题，换音质、换歌曲均无法修复；保留已完成的本地/缓存尝试。
     if (error?.errorCode === 'NO_AVAILABLE_SOURCE') {
@@ -7236,10 +7873,45 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         return;
     }
 
+    // custom 目录歌曲仅存在于本站，不走外部换源与自动跳歌，失败时按当前请求作用域原地重试。
+    const isCustomSourceSong = !!(state.currentSong && (
+        state.currentSong.source === 'custom' ||
+        state.currentSong._isCustomDir ||
+        state.currentSong.folder === 'custom'
+    ));
+    if (isCustomSourceSong) {
+        const retryCount = state.customRetryCount || 0;
+        if (retryCount < 2) {
+            state.customRetryCount = retryCount + 1;
+            console.warn(`[Player] custom 目录源播放失败，原地重试 ${state.customRetryCount}/2（不换源不切歌）`);
+            setPlayerStatus(`本地音频重试中 (${state.customRetryCount}/2)`, null, true);
+            if (effectiveResumeTime > 0) window._resumeInfo = { time: effectiveResumeTime, song: state.currentSong };
+            await new Promise(resolve => setTimeout(resolve, 800));
+            if (!isCurrent()) return;
+            playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
+            return;
+        }
+        shouldAutoRecoverPlayback = false;
+        if (window._autoSkipTimer) {
+            clearTimeout(window._autoSkipTimer);
+            window._autoSkipTimer = null;
+        }
+        setPlayerStatus('自定义目录音频播放失败');
+        RecoveryToast.error('自定义目录音频加载失败，请检查文件或网络后重试');
+        updatePlayButton(false);
+        return;
+    }
+
     if (error?.errorCode === 'PLATFORM_SOURCE_UNAVAILABLE') {
         state.samePlatformExhausted = true;
     }
 
+    // A failed local/OpenList file or cached URL has not tested a fresh URL
+    // for this track. Refresh it once before changing provider or quality,
+    // even if the user disabled switching between custom source scripts.
+    const refreshCachedTrack = !state.cachedMediaRetried && !!state.currentSong &&
+        error?.errorCode !== 'PLATFORM_SOURCE_UNAVAILABLE' &&
+        ['server_cache', 'cache', 'openlist'].includes(failedResult?.sourceType);
     const currentPlatform = state.currentSong?.source || state.originalSong?.source;
 
     // 1. 记录当前失败的音源脚本
@@ -7249,7 +7921,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     if (!state.triedApiSourcesByPlatform[currentPlatform]) {
         state.triedApiSourcesByPlatform[currentPlatform] = [];
     }
-    if (state.currentApiSourceName && !state.triedApiSourcesByPlatform[currentPlatform].includes(state.currentApiSourceName)) {
+    if (!refreshCachedTrack && state.currentApiSourceName && !state.triedApiSourcesByPlatform[currentPlatform].includes(state.currentApiSourceName)) {
         state.triedApiSourcesByPlatform[currentPlatform].push(state.currentApiSourceName);
     }
 
@@ -7269,25 +7941,36 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     }
 
     // 2. 优先尝试当前平台下的其它备选自定义源 (需开启「自动切换自定义源」设置)
-    if (settings.enableAutoSwitchApiSource !== false && !state.samePlatformExhausted) {
-        const triedSources = state.triedApiSourcesByPlatform[currentPlatform] || [];
+    if (refreshCachedTrack || (settings.enableAutoSwitchApiSource !== false && !state.samePlatformExhausted)) {
+        if (refreshCachedTrack) state.cachedMediaRetried = true;
+        const wantedQuality = refreshCachedTrack
+            ? (state.explicitQuality ? state.originalQuality : state.mediaRequestedQuality) || state.currentQuality
+            : state.currentQuality;
+        const triedSources = refreshCachedTrack ? [] : state.triedApiSourcesByPlatform[currentPlatform];
+        if (refreshCachedTrack && failedResult.sourceType === 'cache') {
+            try { localStorage.removeItem(`lx_url_${cleanSongData(state.currentSong).id}_${wantedQuality}`); } catch (_) { }
+        }
         const platformName = typeof getSourceName === 'function' ? getSourceName(currentPlatform) : currentPlatform.toUpperCase();
         const failedName = state.currentApiSourceName || '当前自定义源';
 
         console.log(`[Recovery] [${platformName}] 音源 [${failedName}] 播放失败，尝试同平台其他备选源... 已排除:`, triedSources);
         // 这里不再传入 details 参数，避免将 QQ 作为多余的一项强行加入轨迹
-        RecoveryToast.show(state.currentSong, `[${platformName}] ${failedName} 链接失效，正在尝试同平台其他备选源...`);
+        RecoveryToast.show(state.currentSong, refreshCachedTrack
+            ? `[${platformName}] 正在重新获取当前歌曲的播放链接...`
+            : `[${platformName}] ${failedName} 链接失效，正在尝试同平台其他备选源...`);
 
         try {
             const nextResult = await fetchSongUrl(
                 state.currentSong,
-                state.currentQuality,
-                true, // isRetry
+                wantedQuality,
+                true, // force a fresh URL; bypass stale link and OpenList caches
                 false, // isSilent
-                { excludeApiSources: triedSources }
+                { excludeApiSources: triedSources, isCurrent, skipPlaybackCache: true,
+                    exactQuality: state.explicitQuality || settings.enableAutoDegradeQuality === false,
+                    requestReadThrough: !audio.isRemote }
             );
 
-            if (state !== currentRecoveryState) {
+            if (!isCurrent()) {
                 console.log('[Recovery] Aborted because user played another song during fetchSongUrl.');
                 return;
             }
@@ -7300,7 +7983,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
 
                 RecoveryToast.show(state.currentSong, `已切换至备选源 [${nextResult.sourceName || '备选源'}]，重新缓冲播放...`, {
                     triedPlatform: currentPlatform,
-                    quality: state.currentQuality,
+                    quality: nextResult.quality || wantedQuality,
                     status: 'trying'
                 });
 
@@ -7311,10 +7994,27 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
                     };
                 }
 
-                playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
+                playSong(state.currentSong, state.currentIndex, nextResult.quality || wantedQuality, false, true, false, nextResult);
                 return;
             }
+            if (refreshCachedTrack) state.samePlatformExhausted = true;
         } catch (candidateErr) {
+            if (!isCurrent() || candidateErr?.name === 'AbortError') return;
+            if (candidateErr?.errorCode === 'NO_AVAILABLE_SOURCE') {
+                if (window._autoSkipTimer) clearTimeout(window._autoSkipTimer);
+                window._autoSkipTimer = null;
+                shouldAutoRecoverPlayback = false;
+                setPlayerStatus('暂无可用音源，请在设置中添加或启用');
+                RecoveryToast.error(candidateErr.message);
+                updatePlayButton(false);
+                return;
+            }
+            if (candidateErr?.status === 401 || candidateErr?.status === 403) {
+                setPlayerStatus('请重新登录');
+                RecoveryToast.error(candidateErr.message);
+                updatePlayButton(false);
+                return;
+            }
             console.warn(`[Recovery] [${platformName}] 所有备选自定义源均已尝试完毕:`, candidateErr.message || candidateErr);
             state.samePlatformExhausted = true;
         }
@@ -7368,15 +8068,18 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         }
     } else if (currentStep === 'switch_platform') {
         RecoveryToast.show(state.originalSong, '原平台所有音源均无法播放，正在全网搜索备选源...');
-        const matches = await findOtherSourceMatches(state.originalSong);
+        const matches = await findOtherSourceMatches(state.originalSong, false, { excludePlatforms: state.triedPlatforms });
 
-        if (state !== currentRecoveryState) {
+        if (!isCurrent()) {
             console.log('[Recovery] Aborted because user played another song during findOtherSourceMatches.');
             return;
         }
 
-        const matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
+        let matchedSong = matches.find(song => !state.triedPlatforms.includes(song.source));
         if (matchedSong) {
+            // Retry only this member, not the entire group (which could select a failed alternate again).
+            matchedSong = { ...matchedSong };
+            delete matchedSong._alternates;
             state.currentSong = matchedSong;
             state.triedPlatforms.push(matchedSong.source);
             if (!state.triedApiSourcesByPlatform[matchedSong.source]) {
@@ -7384,7 +8087,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
             }
             state.currentApiSourceName = '';
             state.samePlatformExhausted = false; // 新平台重置源耗尽状态
-            const bestNextQuality = window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
+            const bestNextQuality = state.explicitQuality ? state.originalQuality : window.QualityManager.getBestQuality(matchedSong, settings.preferredQuality || 'flac');
             state.currentQuality = bestNextQuality;
             state.triedQualities = [bestNextQuality];
 
@@ -7422,7 +8125,7 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
     }
 }
 
-async function playSong(song, index, forceQuality = null, noPlay = false, isRetry = false, shouldAddToDefault = null) {
+async function playSong(song, index, forceQuality = null, noPlay = false, isRetry = false, shouldAddToDefault = null, preparedResult = null) {
     // 1. Debounce / Lock: If already loading this song, ignore click
     // [Fix] Allow retry to bypass this check
     if (currentLoadingSongId === song.id && !isRetry) {
@@ -7447,6 +8150,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         }
     }
 
+    playbackCacheUpgrade = null;
+    cacheUpgradePlayhead = null;
     const thisRequestId = ++loadingRequestCounter;
     prefetchManager.stop();
     currentLoadingSongId = thisRequestSongId;
@@ -7463,7 +8168,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         const order = (settings.playbackErrorPriority || 'platform,quality,next').split(',');
         const steps = [];
         for (const key of order) {
-            if (key === 'quality' && settings.enableAutoDegradeQuality !== false) {
+            if (key === 'quality' && !forceQuality && settings.enableAutoDegradeQuality !== false) {
                 steps.push('degrade');
             } else if (key === 'platform' && settings.enableAutoSwitchSource !== false) {
                 steps.push('switch_platform');
@@ -7480,8 +8185,10 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             currentSong: song,
             originalQuality: startQuality,
             currentQuality: startQuality,
+            explicitQuality: !!forceQuality,
+            cacheTargetQuality: forceQuality || settings.preferredQuality || startQuality,
             triedQualities: [startQuality],
-            triedPlatforms: [song.source],
+            triedPlatforms: [],
             triedApiSourcesByPlatform: { [song.source]: [] },
             currentApiSourceName: '',
             samePlatformExhausted: false,
@@ -7566,8 +8273,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     setPlayerStatus('正在准备播放', null, true);
 
     let targetQuality = forceQuality;
-    let isPrefetchFound = false;
-    let urlResult = null;
+    let urlResult = preparedResult;
     let prefetchedResult = null;
     let prefetchQuality = null;
 
@@ -7578,7 +8284,6 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         prefetchedResult = urlResult;
         if (urlResult) {
             urlResult.isPrefetch = true;
-            isPrefetchFound = true;
 
             // [Optimize] 既然主播放器即将接管该 URL，立即清空缓冲器 src 以停止其后台加载
             // stop() 已在本次播放请求开始时停止预缓冲并作废旧任务。
@@ -7606,8 +8311,17 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
     let sourceAssigned = false;
     try {
-        if (urlResult) {
-            urlResult = await refreshPrefetchedCache(song, urlResult);
+        const exactQuality = currentRecoveryState?.explicitQuality || settings.enableAutoDegradeQuality === false;
+        const playbackOptions = {
+            isCurrent: () => currentLoadingRequestId === thisRequestId,
+            exactQuality,
+            cacheQuality: currentRecoveryState?.cacheTargetQuality,
+            excludedFiles: currentRecoveryState?.failedCacheFiles,
+            requestReadThrough: !noPlay && !audio.isRemote,
+            foregroundCache: !noPlay && !audio.isRemote && !isRetry,
+        };
+        if (prefetchedResult) {
+            urlResult = await refreshPrefetchedCache(song, prefetchedResult, playbackOptions.cacheQuality, playbackOptions);
             if (currentLoadingRequestId !== thisRequestId) return;
         }
 
@@ -7617,7 +8331,8 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 targetQuality = window.QualityManager.getBestQuality(song, settings.preferredQuality || 'flac');
             }
             setPlayerStatus('正在获取播放链接', null, true);
-            urlResult = await resolveSongUrl(song, targetQuality, false, isRetry, !noPlay);
+            const skipPlaybackCache = !!prefetchedResult || (playbackOptions.excludedFiles?.size || 0) >= 8;
+            urlResult = await resolveSongUrl(song, targetQuality, false, isRetry, !noPlay, { ...playbackOptions, skipPlaybackCache });
         }
 
         // 2. Stale Check
@@ -7627,6 +8342,11 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             currentRecoveryState.currentApiSourceName = urlResult.sourceName || '';
             currentRecoveryState.currentApiSourceId = urlResult.sourceId || '';
             currentRecoveryState.currentHasMoreSources = !!urlResult.hasMoreSources;
+            if (!(isRetry && preparedResult && ['server_cache', 'cache', 'openlist'].includes(urlResult.sourceType))) {
+                currentRecoveryState.mediaRequestedQuality = targetQuality || prefetchQuality || currentRecoveryState.currentQuality;
+            }
+            currentRecoveryState.currentQuality = urlResult.quality || targetQuality;
+            currentRecoveryState.mediaResult = urlResult;
         }
 
         // [Fix] 移除 dismissAllToasts()，允许成功/失败/尝试信息的 Toast 共存堆叠
@@ -7656,11 +8376,16 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
             showError(urlResult.errorMsg);
         }
 
-        let finalUrl = urlResult.url;
+        const finalUrl = audio.isRemote && urlResult.relayUrl ? urlResult.relayUrl : urlResult.url;
         currentQuality = urlResult.quality;
         currentSourceType = urlResult.sourceType;
         currentCacheFolder = urlResult.folder || 'cache';
         const playbackSong = (urlResult.switchedSource && urlResult.songInfo) ? urlResult.songInfo : song;
+        if (currentRecoveryState?.thisRequestId === thisRequestId && !noPlay) {
+            for (const platform of [...(urlResult.triedPlatforms || []), playbackSong.source]) {
+                if (platform && !currentRecoveryState.triedPlatforms.includes(platform)) currentRecoveryState.triedPlatforms.push(platform);
+            }
+        }
         if (playbackSong !== song) {
             currentPlayingSong = playbackSong;
             window.currentPlayingSong = playbackSong;
@@ -7698,60 +8423,46 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
         // [Removed] 这里的代理逻辑已统一移动至 fetchSongUrl 阶段处理，确保预加载地址一致性
 
-        // Media errors happen asynchronously after play() resolves, so every source
-        // needs an explicit recovery entry point.
-        currentPlaybackErrorHandler = async () => {
-            if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
+        // A native media event and play() rejection may report the same failure.
+        const claimMediaRecovery = () => {
+            if (currentRecoveryState?.thisRequestId !== thisRequestId ||
+                playbackRecoveryTriggeredForRequestId === thisRequestId) return false;
+            playbackRecoveryTriggeredForRequestId = thisRequestId;
+            shouldAutoRecoverPlayback = false;
+            return true;
+        };
+        currentPlaybackErrorHandler = async event => {
+            if (!shouldAutoRecoverPlayback || !claimMediaRecovery()) return;
             prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
             currentPlaybackErrorHandler = null;
-
             const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
-
-            // 首先探测是否因后端服务重启/网络断开导致音频流中断
+            const recoveryEpoch = currentRecoveryState?.recoveryEpoch;
+            const mediaError = audio.error || (event?.cacheTransportStall
+                ? Object.assign(new Error('音频缓冲超时停滞'), { code: 'PLAYBACK_CACHE_STALL' })
+                : new Error('媒体播放失败'));
+            if (canRetryCachedTransport(mediaError, currentRecoveryState, urlResult)) {
+                void runRecoveryFlow(mediaError, savedTime, currentRecoveryState, urlResult);
+                return;
+            }
             const isOnline = await checkServerOnline();
-            if (!currentRecoveryState || currentRecoveryState.thisRequestId !== thisRequestId) return;
+            if (currentRecoveryState?.thisRequestId !== thisRequestId || currentRecoveryState.recoveryEpoch !== recoveryEpoch) return;
             if (!isOnline) {
-                playbackRecoveryTriggeredForRequestId = thisRequestId;
-                shouldAutoRecoverPlayback = false;
                 reconnectServerAndResume(playbackSong, savedTime, currentQuality || targetQuality, index);
                 return;
             }
-
-            if (currentSourceType !== 'normal') {
-                shouldAutoRecoverPlayback = false;
-                console.warn(`[Player] ${currentSourceType} link failed, retrying online...`);
-                if (currentSourceType === 'cache') localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
-                playSong(playbackSong, index, targetQuality, noPlay, currentSourceType === 'server_cache' ? 'local_retry' : true);
-                return;
+            if (['normal', 'cache'].includes(urlResult.sourceType)) {
+                try { localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`); } catch (_) { }
             }
-
-            // custom 目录歌曲没有外部换源平台：换源必然 500，前端就会判定无解并自动切歌。
-            // 这里只做原地重试（重新解析本地直链），并设次数上限，绝不换源/切歌。
-            if (playbackSong?.source === 'custom' || playbackSong?._isCustomDir || playbackSong?.folder === 'custom') {
-                shouldAutoRecoverPlayback = false;
-                const customSongId = cleanSongData(playbackSong).id;
-                const retryExpired = Date.now() - customRetryState.at > CUSTOM_RETRY_WINDOW;
-                const customRetryCount = (!retryExpired && customRetryState.id === customSongId) ? customRetryState.count : 0;
-                if (customRetryCount < CUSTOM_RETRY_LIMIT) {
-                    customRetryState = { id: customSongId, count: customRetryCount + 1, at: Date.now() };
-                    console.warn(`[Player] custom 目录源播放失败，原地重试 ${customRetryCount + 1}/${CUSTOM_RETRY_LIMIT}（不换源不切歌）`);
-                    playSong(playbackSong, index, targetQuality, noPlay, true);
-                    return;
-                }
-                customRetryState = { id: null, count: 0, at: 0 };
-                console.warn('[Player] custom 目录源连续失败已达上限，交给默认恢复流程');
-            }
-
-            playbackRecoveryTriggeredForRequestId = thisRequestId;
-            shouldAutoRecoverPlayback = false;
-            try {
-                localStorage.removeItem(`lx_url_${cleanSongData(playbackSong).id}_${currentQuality || targetQuality}`);
-            } catch (e) { }
-            const mediaError = audio.error || new Error('媒体播放失败');
-            void runRecoveryFlow(mediaError, savedTime);
+            void runRecoveryFlow(mediaError, savedTime, currentRecoveryState, urlResult);
         };
         audio.addEventListener('error', currentPlaybackErrorHandler, { once: true });
 
+        if (currentRecoveryState) {
+            currentRecoveryState.cacheMediaOwner = urlResult.verifiedPlaybackCache ? playbackAccount() : '';
+            currentRecoveryState.cacheMediaScope = urlResult.verifiedPlaybackCache ? cacheUpgradeContext() : '';
+        }
+        if (!noPlay) armPlaybackCacheUpgrade(currentRecoveryState?.originalSong || song, urlResult,
+            currentRecoveryState?.cacheTargetQuality, thisRequestId, currentRecoveryState?.explicitQuality);
         audio.src = finalUrl;
         sourceAssigned = true;
 
@@ -7793,6 +8504,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
             shouldAutoRecoverPlayback = true;
             await audio.play();
+            if (currentLoadingRequestId !== thisRequestId) return;
 
             if (settings.enableCrossfade && !audio.isRemote) fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 1000);
 
@@ -7862,13 +8574,11 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
                 shouldAutoRecoverPlayback = false;
                 console.warn('[Player] Playback blocked by browser autoplay policy:', playError);
                 setPlayerStatus('请点击播放按钮');
-            } else if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId) {
+            } else if (claimMediaRecovery()) {
                 prefetchManager.invalidate(song, prefetchQuality, prefetchedResult);
-                shouldAutoRecoverPlayback = false;
-                playbackRecoveryTriggeredForRequestId = thisRequestId;
                 console.error('[Player] Playback failed:', playError);
                 const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
-                await runRecoveryFlow(playError, savedTime);
+                await runRecoveryFlow(audio.error || playError, savedTime, currentRecoveryState, urlResult);
             }
         }
 
@@ -7876,10 +8586,19 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         if (currentLoadingRequestId === thisRequestId) prefetchNextSong();
 
     } catch (error) {
-        if (currentLoadingRequestId !== thisRequestId) return;
+        if (currentLoadingRequestId !== thisRequestId || error?.name === 'AbortError') return;
+        if (error?.code === 'CACHE_LOOKUP_UNAVAILABLE') {
+            setPlayerStatus('服务器缓存暂时无法连接，请重试');
+            showError(error.message);
+            updatePlayButton(false);
+            return;
+        }
         console.error('[Player] Error:', error);
 
         if (currentRecoveryState && currentRecoveryState.thisRequestId === thisRequestId && !noPlay) {
+            for (const platform of error.triedPlatforms || []) {
+                if (!currentRecoveryState.triedPlatforms.includes(platform)) currentRecoveryState.triedPlatforms.push(platform);
+            }
             // Before src is assigned the media element still belongs to the old song.
             const savedTime = sourceAssigned
                 ? Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0)
@@ -8200,7 +8919,7 @@ function updatePlayerInfo(song, actualQuality) {
             e.stopPropagation();
             const singers = song.singer.split(/[、&,，]| \/ /).map(s => s.trim()).filter(s => s);
             if (singers.length > 1) {
-                const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers);
+                const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
                 if (selected) performSearch(selected, song.source);
             } else {
                 performSearch(song.singer, song.source);
@@ -8272,7 +8991,7 @@ function updatePlayerInfo(song, actualQuality) {
                 // 处理多个歌手的情况
                 const singers = song.singer.split(/[、&,，]| \/ /).map(s => s.trim()).filter(s => s);
                 if (singers.length > 1) {
-                    const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers);
+                    const selected = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
                     if (selected) performSearch(selected, song.source);
                 } else {
                     performSearch(song.singer, song.source);
@@ -8342,10 +9061,15 @@ async function togglePlay() {
                 fadeVolume(typeof currentVolume !== 'undefined' ? currentVolume : 1, 600);
             }
         } catch (e) {
-            shouldAutoRecoverPlayback = false;
             console.error("[Player] Play blocked:", e);
+            if (e?.name !== 'NotAllowedError' && e?.name !== 'AbortError' && currentPlaybackErrorHandler) {
+                await currentPlaybackErrorHandler();
+            } else {
+                shouldAutoRecoverPlayback = false;
+            }
         }
     } else {
+        if (currentRecoveryState) currentRecoveryState.recoveryEpoch = (currentRecoveryState.recoveryEpoch || 0) + 1;
         // [Crossfade] 如果开启了淡入淡出，先淡出再暂停
         if (settings.enableCrossfade && !audio.isRemote) {
             await fadeVolume(0, 600);
@@ -8431,7 +9155,7 @@ function fadeVolume(targetVolume, duration = 800) {
 // Audio Events
 audio.addEventListener('timeupdate', () => {
     if (audio.currentTime > 0) lastKnownPlaybackTime = audio.currentTime;
-    if (playbackStallDetectionTimer && audio.currentTime > 0) {
+    if (playbackStallDetectionTimer && audio.currentTime > (audio._lxStallPosition ?? 0) + 0.25) {
         clearTimeout(playbackStallDetectionTimer);
         playbackStallDetectionTimer = null;
     }
@@ -8523,7 +9247,6 @@ audio.addEventListener('play', () => {
 
 audio.addEventListener('playing', () => {
     // [Fix] 'playing' 事件表示音频真正开始震动输出，此时同步最准确
-    if (customRetryState.id) customRetryState = { id: null, count: 0, at: 0 }; // 播放成功，重置 custom 原地重试计数
     setPlayerStatus('', true); // 恢复正常播放状态
     if ('mediaSession' in navigator) {
         updatePositionState(); // 立即同步
@@ -8766,7 +9489,8 @@ audio.addEventListener('seeked', () => {
         }
     }
 });
-function handlePlaybackStallOrWait() {
+function handlePlaybackStallOrWait(event) {
+    if (event?.type === 'stalled' && !audio.isRemote && audio.readyState >= 3) return;
     setPlayerStatus('缓冲歌曲中', null, true);
     if (lyricPlayer) {
         lyricPlayer.pause();
@@ -8778,37 +9502,35 @@ function handlePlaybackStallOrWait() {
         const stallRequestId = currentRecoveryState?.thisRequestId;
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
         const stallWasRemote = !!audio.isRemote;
-        // 本地/自定义曲库通常是几十 MB 的无损原文件（WAV/FLAC），慢网下缓冲本身就要更久。
-        // 仍按 4 秒判死会反复误触发恢复（历史上还会连锁跳到下一首），这里单独放宽。
         const stallSong = currentPlayingSong || null;
         const stallIsLocalStream = !!(stallSong && (stallSong.isLocal || stallSong.source === 'local' ||
             stallSong.source === 'custom' || stallSong._isCustomDir || stallSong.folder === 'custom'));
         const stallTimeoutMs = stallIsLocalStream ? 15000 : 4000;
-
-        playbackStallDetectionTimer = setTimeout(async () => {
+        const playhead = audio.currentTime || 0;
+        audio._lxStallPosition = playhead;
+        playbackStallDetectionTimer = setTimeout(() => {
             playbackStallDetectionTimer = null;
             if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
             if (audio.paused || audio.ended || isServerReconnecting) return;
             if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
-
-            // 超过阈值一直处于卡顿状态，探测服务端连通性（本地/自定义流为 15 秒）
-            const isOnline = await checkServerOnline();
-            if (!!audio.isRemote !== stallWasRemote || (audio.isRemote && !audio.readyState)) return;
-            if (audio.paused || audio.ended || isServerReconnecting) return;
-            if (currentRecoveryState?.thisRequestId !== stallRequestId || cleanSongData(currentPlayingSong)?.id !== stallSongId) return;
-
-            const savedTime = Math.max(audio.currentTime || 0, lastKnownPlaybackTime || 0);
-            if (!isOnline && currentPlayingSong) {
-                console.warn('[Player] 缓冲超时且服务端失联，触发自动重连恢复');
-                shouldAutoRecoverPlayback = false;
-                reconnectServerAndResume(currentPlayingSong, savedTime, currentQuality, currentIndex);
-            } else if (isOnline && currentPlayingSong && shouldAutoRecoverPlayback) {
-                console.warn('[Player] 服务端在线但音频持续卡死超时，触发播放恢复重试');
-                shouldAutoRecoverPlayback = false;
-                void runRecoveryFlow(new Error('音频缓冲超时停滞'), savedTime);
+            // Use the same request-level claim as native errors and play rejection.
+            // The handler also performs server reachability and reconnect checks.
+            if (shouldAutoRecoverPlayback && currentPlaybackErrorHandler && (audio.currentTime || 0) <= playhead + 0.25) {
+                void currentPlaybackErrorHandler({ cacheTransportStall: true });
             }
         }, stallTimeoutMs);
     }
+}
+
+audio.addEventListener('timeupdate', advancePlaybackCacheUpgrade);
+audio.addEventListener('seeking', () => { cacheUpgradePlayhead = null; });
+for (const event of ['waiting', 'stalled']) {
+    audio.addEventListener(event, () => {
+        if (audio.isRemote || audio.paused || audio.ended || audio.readyState >= 3) return;
+        cacheUpgradePlayhead = null;
+        if (playbackCacheUpgrade) playbackCacheUpgrade.progressed = 0;
+        void pausePlaybackCacheUpgrade();
+    });
 }
 
 audio.addEventListener('waiting', handlePlaybackStallOrWait);
@@ -9344,6 +10066,8 @@ document.addEventListener('keydown', (e) => {
 
     switch (e.code) {
         case 'Space':
+            // Preserve Space activation for focused native and custom controls.
+            if (e.defaultPrevented || target.closest?.('button, summary, select, [role="button"], [role="checkbox"], [role="switch"]')) return;
             e.preventDefault();
             togglePlay();
             break;
@@ -9530,6 +10254,17 @@ const SETTINGS_UI_MAP = {
     // 逻辑 (Logic)
     defaultEntry: { id: 'setting-default-entry', type: 'value' },
     switchPlaylistOnSearchPlay: { id: 'setting-switch-playlist-search', type: 'checkbox' },
+    mergeAggregatedSearch: {
+        id: 'setting-merge-aggregated-search',
+        type: 'checkbox',
+        action: (enabled) => syncMergeSourcePriorityUI(enabled)
+    },
+    mergeSourcePriority: {
+        id: 'setting-merge-source-priority',
+        type: 'custom',
+        normalize: normalizeMergeSourcePriority,
+        action: () => renderMergeSourcePriorityTags()
+    },
     switchPlaylistOnSongListPlay: { id: 'setting-switch-playlist-songlist', type: 'checkbox' },
     autoFilterDislikedSongs: { id: 'setting-auto-filter-disliked', type: 'checkbox' },
     autoResume: { id: 'setting-auto-resume', type: 'checkbox' },
@@ -10509,6 +11244,7 @@ async function removeCacheItem(index) {
 
         const result = await res.json();
         if (res.ok && result.success) {
+            completedPlaybackHints.clear();
             showSuccess('已删除');
             refreshCacheList();
         } else {
@@ -10557,6 +11293,7 @@ async function batchDeleteCache() {
 
         const result = await res.json();
         if (result.deletedCount > 0) {
+            completedPlaybackHints.clear();
             exitCacheBatchMode();
             await refreshCacheList();
         }
@@ -10592,6 +11329,7 @@ async function clearServerCache() {
         const res = await fetch('/api/music/cache/clear', { method: 'POST', headers });
         if (res.ok) {
             const data = await res.json();
+            completedPlaybackHints.clear();
             showSuccess(`清理完成，释放 ${(data.data.freedSize / (1024 * 1024)).toFixed(2)} MB`);
             refreshCacheList();
             if (cacheBatchMode) exitCacheBatchMode();
@@ -10651,7 +11389,27 @@ let isProgrammaticScroll = false; // 标记是否为程序自动滚动
 const SCROLL_LOCK_DURATION = 5000; // 5秒后解除锁定
 
 let lyricHistoryClosing = false;
-function toggleLyrics(fromPopState = false) {
+let lyricReturnFocus = null;
+
+// Use the same query/source path as footer metadata on every viewport.
+// Keep the song identity and playback generation across an asynchronous multi-artist picker.
+async function searchLyricsMetadata(kind) {
+    const song = currentPlayingSong;
+    const requestId = loadingRequestCounter;
+    if (!song || !isLyricViewOpen || !['song', 'artist'].includes(kind)) return;
+    let query = kind === 'song' ? song.name : song.singer;
+    if (kind === 'artist') {
+        const singers = String(song.singer || '').split(/[、&,，]| \/ /).map(s => s.trim()).filter(Boolean);
+        if (singers.length > 1) {
+            query = await showOptions('搜索歌手', '识别到多个歌手，请选择要搜索的对象：', singers.map(escapeHtmlText));
+        }
+    }
+    if (!query || loadingRequestCounter !== requestId || currentPlayingSong !== song || !isLyricViewOpen) return;
+    toggleLyrics();
+    performSearch(query, song.source);
+}
+
+function toggleLyrics(fromPopState = false, trigger = null) {
     if (!fromPopState && isLyricViewOpen) {
         if (window.history.state && window.history.state.page === 'player-detail') {
             lyricHistoryClosing = true;
@@ -10663,6 +11421,9 @@ function toggleLyrics(fromPopState = false) {
     }
 
     isLyricViewOpen = !isLyricViewOpen;
+    for (const id of ['player-lyrics-cover', 'player-lyrics-button']) {
+        document.getElementById(id)?.setAttribute('aria-expanded', String(isLyricViewOpen));
+    }
     const view = document.getElementById('view-player-detail');
 
     if (isLyricViewOpen) {
@@ -10670,6 +11431,8 @@ function toggleLyrics(fromPopState = false) {
         // Trigger reflow
         void view.offsetWidth;
         view.classList.remove('translate-y-[100%]', 'opacity-0');
+        lyricReturnFocus = trigger || document.activeElement;
+        document.getElementById('btn-toggle-lyrics')?.focus({ preventScroll: true });
 
         // 开始歌词按钮淡化倒计时
         startToggleLyricsBtnTimer();
@@ -10713,6 +11476,8 @@ function toggleLyrics(fromPopState = false) {
         if (settings.autoCompactPlaybar !== false && window.innerWidth < 1025) {
             window.setCompactPlaybar(false);
         }
+        if (lyricReturnFocus?.isConnected) lyricReturnFocus.focus({ preventScroll: true });
+        lyricReturnFocus = null;
     }
 }
 
@@ -15098,6 +15863,26 @@ async function loadCustomSources() {
 
 // ========== 自定义源管理逻辑 ==========
 
+// 解析源支持的平台，供聚合搜索合并出来的歌曲挑选平台用；一分钟内复用上次的结果
+let supportedPlatformsCache = null;
+if (window.SongMerge) {
+    window.SongMerge.getSupportedPlatforms = async () => {
+        if (supportedPlatformsCache && Date.now() - supportedPlatformsCache.at < 60000) return supportedPlatformsCache.value;
+        const list = await fetchCustomSources();
+        let value = null;
+        if (Array.isArray(list)) {
+            value = new Set();
+            list.forEach(src => {
+                if (src.enabled && src.status === 'success' && Array.isArray(src.supportedSources)) {
+                    src.supportedSources.filter(platform => !(src.disabledSources || []).includes(platform)).forEach(platform => value.add(platform));
+                }
+            });
+        }
+        supportedPlatformsCache = { at: Date.now(), value };
+        return value;
+    };
+}
+
 async function fetchCustomSources() {
     try {
         const username = currentListData?.username || 'default';
@@ -17878,20 +18663,42 @@ window.getCurrentActiveListId = function () {
 // ========================================
 
 // Mobile Sidebar Toggle
+let sidebarBackdropTimer = null;
+
 function toggleSidebar() {
     const sidebar = document.getElementById('main-sidebar');
     const backdrop = document.getElementById('mobile-sidebar-backdrop');
+    if (!sidebar) return;
+
+    if (sidebarBackdropTimer) {
+        clearTimeout(sidebarBackdropTimer);
+        sidebarBackdropTimer = null;
+    }
 
     if (sidebar.classList.contains('-translate-x-full')) {
-        // Open
+        // Open with smooth slide-in and backdrop fade-in
+        if (backdrop) {
+            backdrop.classList.remove('hidden');
+            void backdrop.offsetWidth;
+            backdrop.classList.remove('opacity-0', 'pointer-events-none');
+            backdrop.classList.add('opacity-100', 'pointer-events-auto');
+        }
         sidebar.classList.remove('-translate-x-full');
         sidebar.classList.add('translate-x-0');
-        backdrop.classList.remove('hidden');
     } else {
-        // Close
+        // Close with smooth slide-out and backdrop fade-out
         sidebar.classList.remove('translate-x-0');
         sidebar.classList.add('-translate-x-full');
-        backdrop.classList.add('hidden');
+        if (backdrop) {
+            backdrop.classList.remove('opacity-100', 'pointer-events-auto');
+            backdrop.classList.add('opacity-0', 'pointer-events-none');
+            sidebarBackdropTimer = setTimeout(() => {
+                sidebarBackdropTimer = null;
+                if (sidebar.classList.contains('-translate-x-full')) {
+                    backdrop.classList.add('hidden');
+                }
+            }, 300);
+        }
     }
 }
 
@@ -17902,9 +18709,17 @@ window.addEventListener('resize', () => {
     const expandBtn = document.getElementById('sidebar-expand-btn');
 
     if (sidebar && window.innerWidth >= 1025) {
-        // Reset styles for desktop
+        // Reset styles for desktop; preserve saved desktop collapse preference
+        if (sidebarBackdropTimer) {
+            clearTimeout(sidebarBackdropTimer);
+            sidebarBackdropTimer = null;
+        }
         sidebar.classList.remove('-translate-x-full', 'translate-x-0');
-        if (backdrop) backdrop.classList.add('hidden');
+        try { sidebar.classList.toggle('desktop-collapsed', localStorage.getItem('desktop_sidebar_collapsed') === 'true'); } catch (_) {}
+        if (backdrop) {
+            backdrop.classList.remove('opacity-100', 'pointer-events-auto');
+            backdrop.classList.add('hidden', 'opacity-0', 'pointer-events-none');
+        }
         if (expandBtn) {
             if (sidebar.classList.contains('desktop-collapsed')) {
                 expandBtn.classList.remove('hidden');
@@ -17915,7 +18730,8 @@ window.addEventListener('resize', () => {
             }
         }
     } else if (sidebar) {
-        // Ensure default closed state for mobile if not explicitly open
+        // Clear the desktop class without overwriting saved preference
+        sidebar.classList.remove('desktop-collapsed');
         if (!sidebar.classList.contains('translate-x-0')) {
             sidebar.classList.add('-translate-x-full');
         }
@@ -17931,6 +18747,7 @@ window.addEventListener('resize', () => {
 
 // Desktop Sidebar Collapse Toggle
 function toggleDesktopSidebar(expand) {
+    if (window.innerWidth < 1025) return;
     const sidebar = document.getElementById('main-sidebar');
     const expandBtn = document.getElementById('sidebar-expand-btn');
     if (!sidebar) return;
@@ -17973,7 +18790,7 @@ function toggleDesktopSidebar(expand) {
 function initDesktopSidebar() {
     try {
         const isCollapsed = localStorage.getItem('desktop_sidebar_collapsed') === 'true';
-        if (isCollapsed && window.innerWidth >= 768) {
+        if (isCollapsed && window.innerWidth >= 1025) {
             const sidebar = document.getElementById('main-sidebar');
             const expandBtn = document.getElementById('sidebar-expand-btn');
             if (sidebar) sidebar.classList.add('desktop-collapsed');

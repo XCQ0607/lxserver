@@ -218,7 +218,8 @@ See [API reference](./reference.md). File operations are delegated to VueFinder 
 | POST | `/api/music/cache/subdirs/rename` | — |
 | POST | `/api/music/cache/subdirs/delete` | — |
 | POST | `/api/music/cache/rename` | — |
-| GET | `/api/music/cache/check` | `name`, `singer`, `source`, `songmid`, `songId`, `quality`, `exactQuality` |
+| GET | `/api/music/cache/check` | `name`, `singer`, `source`, `songmid`, `songId`, `quality`, `exactQuality`, `includeOpenlist`, `openlistOnly` |
+| POST | `/api/music/cache/select` | `songs` (1–8 playback identities), `quality`, `exactQuality`, `allowCrossSource`, `excludeFiles` (up to 8); completed local files only |
 | GET | `/api/music/cache/queue` | — |
 | POST | `/api/music/cache/queue` | — |
 | POST | `/api/music/cache/queue/concurrency` | — |
@@ -367,7 +368,7 @@ See [API reference](./reference.md). File operations are delegated to VueFinder 
 
 | Method | Path | Direct fields (partial) |
 | --- | --- | --- |
-| POST | `/api/music/url` | — |
+| POST | `/api/music/url` | `songInfo`, `quality`, `requestReadThrough` |
 
 ## music/quality
 

@@ -74,28 +74,32 @@ async function uploadJSON(cl: OpenListClient, relative: string, value: any) {
   } finally { fs.rmSync(temp, { force: true }) }
 }
 
-/** Cloud metadata is independent of local SQLite; immutable content objects make history restorable. */
-export async function publishRecoveryManifest(cl: OpenListClient): Promise<void> {
+/**
+ * 生成一份恢复清单（整体快照，不是逐条记录备份）。
+ *
+ * 资源约束（针对「歌单/数据库是累加型数据」的特点）：
+ * - 清单内容先在本地算指纹，与云端上一份相同则**零写入、零对象探测、零历史清理**；
+ * - 只有指纹变化时才补齐新增的内容对象（按 hash 内容寻址，同一内容只存一份），
+ *   写 history/<uuid>.json + latest.json 两个小文件，并在写新版本后做一次历史清理；
+ * - 音频是不可变独立文件，不因清单发布而重传；清单只是引用它们的 hash/相对路径。
+ *
+ * 发布时机由调用方决定：手动按钮、或低频的内容变化触发；不要在同步热路径里按次数调用。
+ */
+export async function publishRecoveryManifest(cl: OpenListClient, opts: { force?: boolean } = {}): Promise<void> {
   const files: RecoveryFile[] = [], cache: RecoveryCache[] = []
   const previous = await readRecoveryManifest(cl)
   const dataPrefix = cl.resolveRemotePath('_data/')
   const rows = listAllBackups().filter(r => ['completed', 'verified'].includes(r.status) && r.local_hash && !r.deleted_at)
   const types = getBackupTypes('openlist', global.lx.config as any)
+  const objectSources = new Map<string, { localPath: string; size: number; hash: string }>()
   for (const row of rows) {
     if (row.folder_type === 'data' && row.remote_path.startsWith(dataPrefix)) {
       const relative = row.remote_path.slice(dataPrefix.length)
       if (relative.split('/').some(segment => segment.toLowerCase() === 'test-evidence')) continue
       if (!backupType(relative) || !types.includes(backupType(relative)!)) continue
       const object = `_system/recovery/objects/${row.local_hash!.slice(0, 2)}/${row.local_hash}`
-      const target = cl.resolveRemotePath(object)
-      let exists = false
-      try { exists = (await cl.getFileInfo(target)).size === row.size } catch (e) { if (!(e instanceof OpenListNotFoundError)) throw e }
-      if (!exists) {
-        await cl.mkdir(path.posix.dirname(target))
-        if (fs.existsSync(row.local_path) && hashBackupFile(row.local_path) === row.local_hash) await cl.upload(row.local_path, target, undefined, row.local_hash!)
-        else throw new Error('历史内容对象缺失且本地版本不可用，未回读云端文件：' + relative)
-      }
       files.push({ relative, size: row.size!, hash: row.local_hash!, object })
+      objectSources.set(object, { localPath: row.local_path, size: row.size!, hash: row.local_hash! })
     } else if (['cache', 'music'].includes(row.folder_type)) {
       const prefix = cl.resolveRemotePath(row.user + '/' + row.folder_type + '/')
       if (!row.remote_path.startsWith(prefix)) continue
@@ -111,7 +115,20 @@ export async function publishRecoveryManifest(cl: OpenListClient): Promise<void>
   }
   files.sort((a, b) => a.relative.localeCompare(b.relative)); cache.sort((a, b) => (a.user + a.folder + a.relative).localeCompare(b.user + b.folder + b.relative))
   const fingerprint = crypto.createHash('sha256').update(JSON.stringify({ files, cache })).digest('hex')
-  if (previous?.fingerprint === fingerprint) { await pruneRecoveryHistory(cl, previous); return }
+  // 内容没变：不写新版本、不逐个探测对象、不遍历历史目录。这是最主要的省流点。
+  if (!opts.force && previous?.fingerprint === fingerprint) return
+
+  const known = new Set((previous?.files || []).map(f => f.object))
+  for (const [object, source] of objectSources) {
+    if (known.has(object)) continue
+    const target = cl.resolveRemotePath(object)
+    let exists = false
+    try { exists = (await cl.getFileInfo(target)).size === source.size } catch (e) { if (!(e instanceof OpenListNotFoundError)) throw e }
+    if (exists) continue
+    await cl.mkdir(path.posix.dirname(target))
+    if (fs.existsSync(source.localPath) && hashBackupFile(source.localPath) === source.hash) await cl.upload(source.localPath, target, undefined, source.hash)
+    else throw new Error('历史内容对象缺失且本地版本不可用，未回读云端文件：' + object)
+  }
   const manifest: RecoveryManifest = { schema: 1, fingerprint, createdAt: Date.now(), files, cache }
   await uploadJSON(cl, '_system/recovery/history/' + crypto.randomUUID() + '.json', manifest)
   await uploadJSON(cl, '_system/recovery/latest.json', manifest)

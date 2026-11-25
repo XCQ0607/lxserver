@@ -93,6 +93,7 @@ Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓�
 | `subsonic.localPlaylist` / `subsonic.customPlaylist` | 分别控制只读本地歌单和独立自定义目录歌单，后者依赖前者及账号目录启用 |
 | `subsonic.cachePlaylist` | 是否在本地歌单中包含缓存目录歌曲，默认 false；不缩减其他接口共用的完整曲库 |
 | `subsonic.cacheOnPlay` | 播放在线资源时触发落盘缓存，默认 false |
+| `subsonic.saveDownload` | 下载请求是否保存到服务器，**默认否**。识别为内建能力（标准 `/rest/download` 与裸 okhttp + gzip 的 stream 下载）；开启后落盘到 music 下载目录而非 cache。默认关闭时仅投递给客户端，服务器不落盘、不触发播放预缓存、不补传备份 |
 | `subsonic.playCacheFirst` | 优先通过服务器已有文件播放，默认 false；使用时服务器承担文件传输 |
 | `subsonic.quality.*` / `subsonic.source.*` | 控制候选音质和跨平台/脚本优选，不保证每首都有目标音质 |
 | `subsonic.transcode.enabled` | 播放时服务端转码，默认 false，需要可用 ffmpeg；与洗版下载替换不同 |
@@ -120,7 +121,47 @@ Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓�
 
 先在后台创建用户，再连接客户端。检查首次同步的合并/覆盖方向，已有歌单先备份。恢复快照时选择正确用户与时间，恢复后让客户端重新连接并检查列表；恢复歌单不会找回已经删除的音频。
 
+### 切换命名格式后同步存量文件名
+
+在「设置 → 歌曲命名方式」切换格式后，**只有新产生的文件会用新格式**，已有文件不会自动改名。后台「云端备份 → OpenList」提供两个手动入口，把存量文件一次性对齐到当前生效的命名格式：
+
+- **预览待改名清单（只读）**：`POST /api/openlist/cache/rename`，`mode: "preview"`（默认）。不改动任何内容，可反复调用。返回 `scanned` / `ready` / `unchanged` / `conflicts` / `missing` 统计，各用户实际生效的命名模式，以及逐条的旧名 → 新名。
+- **执行重命名**：`POST /api/openlist/cache/rename`，`mode: "apply"`。可选 `user` / `folder` / `limit`，`cloud: false` 可只改本地与备份库。
+
+执行时对每个文件同步四处，保证不产生重复上传或孤儿文件：
+
+| 位置 | 改动内容 |
+| --- | --- |
+| 本地磁盘 | 音频文件、同名的 `.lrc` 歌词、外部封面缓存（按新文件名重写哈希） |
+| 本地缓存索引 | `cache_index.json` / `music_index.json` 的 `filename`、`lyricFilename` |
+| OpenList 备份库 | `openlist_backup_files` 的 `local_path` / `remote_path` / `name` / `cache_metadata`，`openlist_local_files` 的路径与文件名，附件的本地与远端路径 |
+| 云端 | 调用 OpenList 原生重命名接口改文件名（含同 stem 附件），**只改元数据，不重新上传音频字节** |
+
+命名格式完全取自现有配置（用户级 `settings.json` 的 `serverCacheNamingPattern` 优先，其次全局 `cache.namingPattern`），复用 `getFileName` 的全部 5 种格式与冲突后缀规则，**不写死格式、不修改配置、不自动迁移**。目标名冲突一律跳过而不覆盖；执行逐项幂等，中途失败后重跑会自动收敛未完成的部分。云端同步未启用时，仍会改本地与备份库（含 `remote_path`），下次启用同步时会按新名上传，不会残留旧路径记录。
+
+执行期间的并发保护：改名会依次改云端 → 本地 → 备份库，中间存在「本地已是新名、备份库仍是旧名」的秒级窗口。若此时正好跑同步，新文件名会被当成新文件插入重复记录并再传一份。因此改名与同步、后台校验、上传队列**互斥串行**：有同步/校验/上传在跑时执行入口直接拒绝，改名期间也不会启动新的同步或校验。预览是只读的，不受影响。
+
+**范围只限音频及其同 stem 附件**。歌单、不喜欢、评分快照（`snapshot_*.json`、`snapshotInfo.json`）与用户设置等数据文件不改名——它们的文件名是结构化的（由用户与数据类型决定），不随歌曲命名格式变化，正文里存的是歌曲 ID 而非音频文件名。唯一会被连带更新的是 `music_index.json` / `cache_index.json`：改名时已改写其中的 `filename` / `lyricFilename` 并落盘，下一次同步按内容哈希发现变化后自动重传这一份数据文件；若该类型未纳入 `backup.openlist.types`，则云端本来就没有它。
+
+恢复清单 `_system/recovery/latest.json` 是**整体快照，不是逐条记录备份**：全量同步结束时先在本地算内容指纹，与云端上一份相同则零写入、零对象探测、零历史遍历；只有内容变化时才补齐新增的按 hash 内容寻址对象，并写 `history/` 与 `latest.json` 两个小文件。音频是不可变独立文件，一次上传永久有效；歌单、配置与数据库属于累加/可变数据，其历史版本按内容去重保存，并按「云端历史版本保留天数」清理。
+
 用户数据同步与自动下载分别配置。用户级自动下载开关、歌单选择和音质设置决定实际下载范围；仅打开 LX 同步不会下载整个歌单的音频。
+
+### 同步开销与调优
+
+同步开销主要来自「每轮对每个已登记记录做一次远端探测 + 本地全文件 SHA-256」，而不是上传字节。默认已按以下方式收敛：
+
+| 机制 | 默认行为 |
+| --- | --- |
+| 定时全量同步 | `openlist.syncInterval = 60` 分钟 |
+| 后台状态检查 | `openlist.verifyInterval = 5` 分钟 |
+| 事件驱动同步 | 配置保存、音频/快照落盘等事件只置脏标记并合并，两次事件同步之间至少 5 分钟；手动按钮与定时同步不受节流 |
+| 已验证记录 | 常态轮询不再逐行 `getFileInfo`；仅在基线变化、状态异常、`upload-delete` 待清理或每小时兜底核对时查询 |
+| 本地内容指纹 | 一轮同步内同一文件只算一次 SHA-256，跨轮一律重算，因此「同大小 + 恢复 mtime 的内容改写」仍能被检测 |
+
+`openlist-backup.db`（及其 WAL/SHM）属于运行态索引，**从不上传到 OpenList**；数据库丢失时依靠云端恢复清单与内容寻址对象重建。
+
+需要进一步降开销时，优先调整配置而不是改代码：调大 `openlist.verifyInterval` 与 `openlist.syncInterval`；收窄 `backup.openlist.types` 只保留必要的 `snapshots` / `system`；调小 `configBackup.retentionDays` 以缩小配置历史目录的列举规模。代价是云端可见性延迟变长。不建议改成「每加一条记录即时上传」，也没有必要降低恢复清单的发布频率——它内容未变时是零写入、零对象探测。
 
 ## 文件管理器
 

@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-CN">
 
 <head>
@@ -57,7 +57,7 @@
 
         <!-- Mobile Sidebar Backdrop -->
         <div id="mobile-sidebar-backdrop" onclick="toggleSidebar()"
-            class="fixed inset-0 bg-black/50 z-[55] hidden md:hidden glass"></div>
+            class="fixed inset-0 bg-black/50 z-[55] hidden opacity-0 pointer-events-none transition-opacity duration-300 md:hidden glass"></div>
 
         <!-- Sidebar -->
         <aside id="main-sidebar"
@@ -1476,27 +1476,24 @@
                             <div class="flex md:hidden items-center justify-end gap-0.5 order-2">
                                 <button id="lm-filter-toggle-btn-mobile"
                                     onclick="window.LocalMusicManager.toggleFilterPanel()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-[var(--c-500)] hover:text-white transition-all relative">
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-[var(--c-500)] hover:text-white transition-all relative" aria-label="高级筛选" title="高级筛选">
                                     <i class="fas fa-filter text-[10px]"></i>
                                     <span id="lm-filter-active-dot"
                                         class="absolute top-1 right-1 w-1 h-1 bg-[var(--c-500)] rounded-full hidden"></span>
                                 </button>
                                 <button onclick="window.LocalMusicManager.refresh()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded"><i
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded" aria-label="刷新" title="刷新"><i
                                         class="fas fa-sync-alt text-[10px]"></i></button>
                                 <button onclick="window.LocalMusicManager.autoLinkAll()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded"
-                                    title="智能检测"><i class="fas fa-magic text-[10px]"></i></button>
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded" aria-label="智能检测" title="智能检测"><i class="fas fa-magic text-[10px]"></i></button>
                                 <button id="lm-remap-toggle-btn-mobile"
                                     onclick="window.LocalMusicManager.toggleReMapping()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-emerald-500 hover:text-white transition-all"
-                                    title="歌曲重映射"><i class="fas fa-link text-[10px]"></i></button>
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-emerald-500 hover:text-white transition-all" aria-label="歌曲重映射" title="歌曲重映射"><i class="fas fa-link text-[10px]"></i></button>
                                 <button id="lm-remaster-btn-mobile"
                                     onclick="window.LocalMusicManager.openRemasterModal()"
-                                    class="hidden w-6 h-6 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-red-500 hover:text-white transition-all"
-                                    title="歌曲洗版"><i class="fas fa-exchange-alt text-[10px]"></i></button>
+                                    class="hidden w-6 h-6 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded hover:bg-red-500 hover:text-white transition-all" aria-label="歌曲洗版" title="歌曲洗版"><i class="fas fa-exchange-alt text-[10px]"></i></button>
                                 <button onclick="window.LocalMusicManager.toggleBatchMode()"
-                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded"><i
+                                    class="w-6 h-6 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded" aria-label="批量操作" title="批量操作"><i
                                         class="fas fa-list-ul text-[10px]"></i></button>
                             </div>
 
@@ -1517,27 +1514,21 @@
 
                             <div class="hidden md:flex items-center gap-1 order-5 md:order-4">
                                 <button id="lm-filter-toggle-btn" onclick="window.LocalMusicManager.toggleFilterPanel()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all relative"
-                                    title="高级筛选">
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all relative" aria-label="高级筛选" title="高级筛选">
                                     <i class="fas fa-filter text-xs md:text-sm"></i>
                                     <span id="lm-filter-active-dot-desktop"
                                         class="absolute top-1 right-1 w-1.5 h-1.5 bg-[var(--c-500)] rounded-full hidden"></span>
                                 </button>
                                 <button onclick="window.LocalMusicManager.refresh()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all"
-                                    title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-[var(--c-500)] hover:text-white transition-all" aria-label="刷新" title="刷新"><i class="fas fa-sync-alt text-xs"></i></button>
                                 <button onclick="window.LocalMusicManager.autoLinkAll()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-purple-500 hover:text-white transition-all"
-                                    title="智能检测"><i class="fas fa-magic text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-purple-500 hover:text-white transition-all" aria-label="智能检测" title="智能检测"><i class="fas fa-magic text-xs"></i></button>
                                 <button id="lm-remap-toggle-btn" onclick="window.LocalMusicManager.toggleReMapping()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all"
-                                    title="歌曲重映射"><i class="fas fa-link text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-emerald-500 hover:text-white transition-all" aria-label="歌曲重映射" title="歌曲重映射"><i class="fas fa-link text-xs"></i></button>
                                 <button id="lm-remaster-btn" onclick="window.LocalMusicManager.openRemasterModal()"
-                                    class="hidden w-7 h-7 md:w-8 md:h-8 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-red-500 hover:text-white transition-all"
-                                    title="歌曲洗版"><i class="fas fa-exchange-alt text-xs"></i></button>
+                                    class="hidden w-7 h-7 md:w-8 md:h-8 items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-red-500 hover:text-white transition-all" aria-label="歌曲洗版" title="歌曲洗版"><i class="fas fa-exchange-alt text-xs"></i></button>
                                 <button onclick="window.LocalMusicManager.toggleBatchMode()"
-                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-blue-500 hover:text-white transition-all"
-                                    title="批量操作"><i class="fas fa-list-ul text-xs"></i></button>
+                                    class="w-7 h-7 md:w-8 md:h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-700/50 rounded-lg hover:bg-blue-500 hover:text-white transition-all" aria-label="批量操作" title="批量操作"><i class="fas fa-list-ul text-xs"></i></button>
                             </div>
                         </div>
                     </div>
@@ -3119,12 +3110,14 @@
                                             <span>提示：苹果手机开启后会显示正确波形。但受系统限制可能导致锁屏/后台暂停或 AirPlay 异常；建议开启【iOS 设备自适应】。</span>
                                         </p>
                                         <select id="setting-footer-visualizer-style"
+                                            aria-describedby="footer-vu-narrow-notice"
                                             onchange="updateSetting('footerVisualizerStyle', this.value)"
                                             class="lm-select !w-full !py-2">
                                             <option value="bars">条形阵列</option>
                                             <option value="wave">平滑波浪</option>
                                             <option value="vumeter">双表头</option>
                                         </select>
+                                        <p id="footer-vu-narrow-notice" class="text-[11px] t-text-muted">双表头在宽度不足 768px 时不显示；请选用条形阵列或平滑波浪。旋转或放大窗口可恢复双表头，原偏好会保留。</p>
                                     </div>
 
                                     <!-- Detail Visualizer -->
@@ -3573,6 +3566,46 @@
                                                             class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
                                                         </div>
                                                     </label>
+                                                </div>
+                                            </div>
+
+                                            <!-- Merge Identical Songs in Aggregated Search -->
+                                            <div
+                                                class="md:col-span-2 t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
+                                                <div class="flex items-center justify-between">
+                                                    <div>
+                                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                            聚合搜索合并相同歌曲
+                                                            <span class="setting-tooltip-trigger">
+                                                                <i class="fas fa-question-circle"></i>
+                                                                <span class="setting-tooltip-content">
+                                                                    开启：聚合搜索时，各平台上的同一首歌（歌名、歌手、时长一致）合并为一条，音质取各平台的并集。<br>
+                                                                    播放或下载时，自动选用有所选音质、且历史解析最快的平台。<br>
+                                                                    关闭：每个平台的结果各占一条。
+                                                                </span>
+                                                            </span>
+                                                        </h4>
+                                                    </div>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" id="setting-merge-aggregated-search"
+                                                            aria-label="聚合搜索合并相同歌曲"
+                                                            class="sr-only peer"
+                                                            onchange="updateSetting('mergeAggregatedSearch', this.checked)">
+                                                        <div
+                                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                <div id="setting-merge-source-priority-wrap"
+                                                    class="mt-3 pt-3 border-t t-border-main">
+                                                    <div class="flex flex-wrap items-center justify-between gap-1 mb-2">
+                                                        <span class="text-xs font-semibold t-text-main">主平台显示优先级</span>
+                                                        <span class="text-[11px] t-text-muted">拖动标签调整优先显示的封面与信息</span>
+                                                    </div>
+                                                    <div id="setting-merge-source-priority"
+                                                        class="flex flex-wrap items-center gap-2 select-none"
+                                                        role="list"
+                                                        aria-label="聚合搜索主平台显示优先级"></div>
                                                 </div>
                                             </div>
                                         </div>
@@ -4080,7 +4113,7 @@
         <div id="player-detail-navbar" onclick="event.stopPropagation()"
             class="absolute top-0 inset-x-0 z-30 flex items-center justify-between px-4 md:px-6 h-16 md:h-20 pt-[env(safe-area-inset-top,0px)] pointer-events-none transition-all duration-300">
             <div class="detail-nav-left flex items-center justify-start flex-1 pointer-events-none">
-                <button onclick="toggleLyrics()" id="btn-toggle-lyrics" title="收起歌词 / 返回"
+                <button onclick="toggleLyrics()" id="btn-toggle-lyrics" aria-label="收起歌词 / 返回" title="收起歌词 / 返回"
                     class="pointer-events-auto t-text-muted hover:text-emerald-600 t-bg-panel/80 hover:t-bg-panel rounded-full w-10 h-10 flex items-center justify-center transition-all duration-300 shadow-md backdrop-blur-md border border-white/20 active:scale-95 cursor-pointer">
                     <i class="fas fa-chevron-down text-base"></i>
                 </button>
@@ -4089,7 +4122,15 @@
                 <h2 class="text-xs md:text-sm font-bold text-gray-400 tracking-widest uppercase">Now Playing</h2>
             </div>
             <div class="detail-nav-right flex items-center justify-end flex-1 pointer-events-none">
-                <!-- 右侧占位保持 Now Playing 绝对水平居中 -->
+                <!-- Explicit search actions preserve the cover-collapse gesture on touch screens. -->
+                <button type="button" id="detail-search-song" class="detail-search-action"
+                    onclick="searchLyricsMetadata('song')" aria-label="搜索歌曲" title="搜索歌曲">
+                    <i class="fas fa-music" aria-hidden="true"></i>
+                </button>
+                <button type="button" id="detail-search-artist" class="detail-search-action"
+                    onclick="searchLyricsMetadata('artist')" aria-label="搜索歌手" title="搜索歌手">
+                    <i class="fas fa-user" aria-hidden="true"></i>
+                </button>
             </div>
         </div>
 
@@ -4163,15 +4204,16 @@
         <!-- Song Info -->
         <div id="player-song-info"
             class="w-full md:w-1/4 flex items-start md:items-center gap-2 md:gap-4 mb-2 md:mb-0 pr-8 md:pr-0 transition-all duration-300">
-            <div onclick="toggleLyrics()"
+            <button type="button" id="player-lyrics-cover" onclick="toggleLyrics(false, this)"
+                aria-label="歌词" title="歌词" aria-controls="view-player-detail" aria-expanded="false"
                 class="w-12 h-12 md:w-14 md:h-14 bg-gray-200 rounded-md overflow-hidden shadow-sm relative group flex-shrink-0 cursor-pointer">
                 <img id="player-cover" src="/music/assets/logo.svg" loading="lazy" fetchpriority="low"
                     onerror="this.src='/music/assets/logo.svg'; this.classList.add('is-placeholder');"
                     class="w-full h-full object-cover dynamic-logo is-placeholder" alt="专辑封面">
-                <div class="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer">
+                <span class="absolute inset-0 bg-black/30 hidden group-hover:flex items-center justify-center cursor-pointer">
                     <i class="fas fa-expand text-white"></i>
-                </div>
-            </div>
+                </span>
+            </button>
             <div class="overflow-hidden flex-1 flex flex-col justify-center">
                 <div class="flex items-center gap-2 min-w-0">
                     <div id="player-title"
@@ -4312,7 +4354,7 @@
                 </div>
 
                 <!-- Secondary controls align to the right without shifting the transport. -->
-                <div class="flex items-center justify-end gap-1 md:gap-2 min-w-0">
+                <div class="player-secondary-controls flex items-center justify-end gap-1 md:gap-2 min-w-0">
                 <!-- Playback Rate Button -->
                 <div class="relative group">
                     <button id="playback-rate-btn" onclick="togglePlaybackRateMenu(event)"
@@ -4348,13 +4390,13 @@
                 </div>
                 <!-- Chromecast Button -->
                 <button id="btn-cast" type="button" hidden disabled aria-label="Chromecast" aria-pressed="false"
-                    title="Chromecast" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
-                    <i class="fab fa-chromecast" aria-hidden="true"></i>
+                    title="Chromecast" class="player-route-button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 8V4h17v14h-8"/><path d="M3 12a9 9 0 0 1 9 9M3 16a5 5 0 0 1 5 5"/><circle cx="3" cy="21" r="1" fill="currentColor" stroke="none"/></svg>
                 </button>
                 <!-- AirPlay Button -->
                 <button id="btn-airplay" type="button" hidden disabled aria-label="AirPlay" aria-pressed="false"
-                    title="AirPlay" class="p-2 rounded-lg t-text-muted hover:text-emerald-500">
-                    <i class="fas fa-tv" aria-hidden="true"></i>
+                    title="AirPlay" class="player-route-button">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 17H3V4h18v13h-2"/><path d="m12 13 6 7H6l6-7Z"/></svg>
                 </button>
                 </div>
             </div>
@@ -4386,7 +4428,8 @@
                 onclick="toggleCommentModal()">评</button>
             <button
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5"
-                onclick="toggleLyrics()">词</button>
+                id="player-lyrics-button" type="button" aria-label="歌词" title="歌词"
+                aria-controls="view-player-detail" aria-expanded="false" onclick="toggleLyrics(false, this)">词</button>
             <button
                 class="text-gray-500 hover:text-emerald-600 text-sm font-bold border border-gray-300 rounded px-2 py-0.5"
                 onclick="toggleQueueDrawer()" title="当前播放队列">
@@ -6279,6 +6322,27 @@
         </div>
     </div>
 
+    <!-- Merged Multi-Platform Sources Modal -->
+    <div id="merged-sources-modal"
+        class="fixed inset-0 z-[80] hidden items-end sm:items-center justify-center bg-black/50 backdrop-blur-sm p-0 sm:p-4"
+        onclick="if (event.target === this) closeMergedSourcesModal()">
+        <div
+            class="t-bg-panel border t-border-main w-full rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+            style="max-width: 500px; max-height: 82vh;">
+            <div class="flex items-center justify-between gap-3 px-4 py-3.5 border-b t-border-main flex-shrink-0">
+                <div class="min-w-0">
+                    <h3 id="merged-sources-modal-title" class="text-sm sm:text-base font-bold t-text-main truncate">多平台版本</h3>
+                    <p id="merged-sources-modal-subtitle" class="text-xs t-text-muted truncate mt-0.5"></p>
+                </div>
+                <button type="button" onclick="closeMergedSourcesModal()" aria-label="关闭"
+                    class="w-8 h-8 rounded-lg flex items-center justify-center t-text-muted hover:t-bg-item-hover transition-colors flex-shrink-0">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div id="merged-sources-modal-list" class="p-3 sm:p-4 space-y-2 overflow-y-auto flex-1"></div>
+        </div>
+    </div>
+
     <!-- Audio Element -->
     <audio id="audio-player" playsinline webkit-playsinline x-webkit-airplay="allow" crossorigin="anonymous"></audio>
 
@@ -6312,6 +6376,7 @@
     <script src="js/local/auto_link.js"></script>
     <script src="js/local/customDir.js"></script>
     <script src="js/ui/common_ui.js"></script>
+    <script src="js/library/song_merge.js"></script>
     <script src="js/library/paged_music_search.js"></script>
     <script src="js/library/search_suggestions.js"></script>
     <script src="js/download/sync_download.js"></script>

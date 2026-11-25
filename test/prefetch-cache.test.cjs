@@ -4,68 +4,85 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 
 const source = fs.readFileSync('public/music/app.js', 'utf8');
-const start = source.indexOf('async function refreshPrefetchedCache(');
-const end = source.indexOf('\n/**', start);
+const start = source.indexOf('function getPlaybackCacheFileKey(');
+const end = source.indexOf('// --- URL Fetching Logic', start);
+const front = { href: 'https://lx.example/player/', origin: 'https://lx.example' };
+const song = { id: '1', source: 'wy' };
+const saved = { exists: true, url: '/api/music/cache/file/example/song.mp3?folder=music', folder: 'music', quality: '320k', memberIndex: 0 };
+const online = { url: 'https://online/song', sourceType: 'normal', quality: 'flac', isPrefetch: true };
 
 function setup(cached, preferServerCache = true) {
     const calls = [];
     const context = vm.createContext({
-        settings: { preferServerCache }, console, AbortSignal,
-        cleanSongData: song => song,
-        checkServerCache: async (...args) => {
-            calls.push(args);
+        API_BASE: '/api/music', URL, AbortSignal, settings: { preferServerCache },
+        window: { location: front, QualityManager: { QUALITY_PRIORITY: ['flac', '320k', '128k'] } },
+        cleanSongData: s => s,
+        getUserAuthHeaders: () => ({}), authorizeMediaUrl: url => url,
+        fetch: async (url, options) => {
+            calls.push({ url, ...options, body: JSON.parse(options.body) });
             if (cached instanceof Error) throw cached;
-            return cached;
+            return { ok: true, json: async () => cached };
         },
-        applyAutoProxy: async url => `proxy:${url}`,
-        checkAndTriggerBackgroundCacheUpgrade() {}
     });
     vm.runInContext(source.slice(start, end), context);
     return { refresh: context.refreshPrefetchedCache, calls };
 }
 
-const song = { id: '1', source: 'wy' };
-const online = { url: 'https://online/song', sourceType: 'normal', quality: 'flac', isPrefetch: true };
 class FakeAudio {
     src = '';
     load() {}
     removeAttribute() { this.src = ''; }
 }
 
-test('playback rechecks completed cache and preserves switched song identity', async () => {
-    const { refresh, calls } = setup({ exists: true, url: '/cached', quality: '320k', folder: 'music' });
+test('playback rechecks completed cache in a single authenticated batch', async () => {
+    const { refresh, calls } = setup({ ...saved, memberIndex: 1 });
     const switched = { id: '2', source: 'tx' };
-    const result = await refresh(song, { ...online, switchedSource: true, songInfo: switched });
-    assert.equal(calls[0][0], switched);
-    assert.equal(calls[0][3], false);
-    assert.ok(calls[0][4] instanceof AbortSignal);
-    assert.equal(result.url, 'proxy:/cached');
+    const result = await refresh({ ...song, _alternates: [switched] }, online);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, '/api/music/cache/select');
+    assert.equal(calls[0].method, 'POST');
+    assert.deepEqual(calls[0].body.songs, [song, switched]);
+    assert.ok(calls[0].signal instanceof AbortSignal);
+    assert.equal(result.url, saved.url);
     assert.equal(result.sourceType, 'server_cache');
     assert.equal(result.quality, '320k');
     assert.equal(result.folder, 'music');
     assert.equal(result.songInfo, switched);
+    assert.equal(result.triedPlatforms, undefined, 'replaced cache must not retain prefetch attempts');
     assert.equal(online.url, 'https://online/song');
 });
 
-test('missing, colliding or failed cache keeps preloaded URL', async () => {
-    for (const cached of [{ exists: false }, { exists: true, isCollision: true }, new Error('offline')]) {
+test('missing, invalid or failed cache keeps valid online preloaded URL', async () => {
+    for (const cached of [{ exists: false }, { ...saved, url: 'https://other.invalid/api/music/cache/file/song.mp3' },
+        { ...saved, memberIndex: 8 }, new Error('offline')]) {
         assert.equal(await setup(cached).refresh(song, online), online);
     }
 });
 
-test('cache preference off and existing local cache skip lookup', async () => {
+test('cache preference off and explicit local file skip lookup', async () => {
     const disabled = setup({}, false);
     assert.equal(await disabled.refresh(song, online), online);
-    assert.equal(disabled.calls.length, 0);
     const local = { ...online, sourceType: 'server_cache' };
+    assert.equal(await disabled.refresh(song, local), null);
+    assert.equal(disabled.calls.length, 0);
     const enabled = setup({});
-    assert.equal(await enabled.refresh(song, local), local);
+    assert.equal(await enabled.refresh({ ...song, url: saved.url }, local), local);
     assert.equal(enabled.calls.length, 0);
 });
 
-test('OpenList hit retains source type', async () => {
-    const { refresh } = setup({ exists: true, url: '/openlist', origin: 'openlist' });
-    assert.equal((await refresh(song, online)).sourceType, 'openlist');
+test('prefetched local copies are rechecked and never reused after a miss', async () => {
+    const local = { ...online, ...saved, sourceType: 'server_cache' };
+    assert.equal(await setup(null).refresh(song, local), null);
+    const newer = { ...saved, quality: 'flac' };
+    assert.equal((await setup(newer).refresh(song, local, 'flac')).quality, 'flac');
+});
+
+test('OpenList-prefetched URL is preserved on local miss but is never resolved by the local request', async () => {
+    const remote = { ...online, url: '/openlist', sourceType: 'openlist' };
+    const { refresh, calls } = setup({ exists: false });
+    assert.equal(await refresh(song, remote), remote);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, '/api/music/cache/select');
 });
 
 test('prefetch separates platforms and requested qualities using normalized identity', () => {
@@ -74,7 +91,7 @@ test('prefetch separates platforms and requested qualities using normalized iden
         cleanSongData: s => ({ ...s, id: `${s.source}_${String(s.id).replace(`${s.source}_`, '')}` })
     });
     const from = source.indexOf('const prefetchManager =');
-    const to = source.indexOf('async function refreshPrefetchedCache(', from);
+    const to = source.indexOf('function getPlaybackCacheFileKey(', from);
     vm.runInContext(source.slice(from, to) + '\nthis.manager = prefetchManager;', context);
     const manager = context.manager;
     // Requested flac may have resolved to 320k; reuse under the original request only.
@@ -92,7 +109,7 @@ test('preference changes reject cached prefetches but preserve explicit local pl
     const settings = { preferServerCache: true };
     const context = vm.createContext({ Audio: FakeAudio, console, settings, cleanSongData: s => s });
     const from = source.indexOf('const prefetchManager =');
-    const to = source.indexOf('async function refreshPrefetchedCache(', from);
+    const to = source.indexOf('function getPlaybackCacheFileKey(', from);
     vm.runInContext(source.slice(from, to) + '\nthis.manager = prefetchManager;', context);
     const manager = context.manager;
     for (const sourceType of ['server_cache', 'openlist']) {
@@ -111,7 +128,7 @@ test('preference changes reject cached prefetches but preserve explicit local pl
 test('failed playback evicts the consumed entry without deleting newer prefetches', () => {
     const context = vm.createContext({ Audio: FakeAudio, console, settings: {}, cleanSongData: s => s });
     const from = source.indexOf('const prefetchManager =');
-    const to = source.indexOf('async function refreshPrefetchedCache(', from);
+    const to = source.indexOf('function getPlaybackCacheFileKey(', from);
     vm.runInContext(source.slice(from, to) + '\nthis.manager = prefetchManager;', context);
     const manager = context.manager;
     manager.set(song, 'flac', online);
@@ -129,9 +146,8 @@ test('slow local cache lookup aborts and retains preloaded URL', async () => {
     let timeoutMs;
     let aborted = false;
     const context = vm.createContext({
-        settings: {}, console: { error() {}, warn() {} },
-        cleanSongData: s => s, currentListData: null,
-        URLSearchParams, getUserAuthHeaders: () => ({}),
+        API_BASE: '/api/music', URL, settings: {}, window: { location: front },
+        cleanSongData: s => s, getUserAuthHeaders: () => ({}),
         AbortSignal: { timeout(ms) {
             timeoutMs = ms;
             const controller = new AbortController();
@@ -139,16 +155,14 @@ test('slow local cache lookup aborts and retains preloaded URL', async () => {
             return controller.signal;
         } },
         fetch: async (url, { signal }) => new Promise((resolve, reject) => {
-            assert.equal(new URL(url, 'http://localhost').searchParams.get('includeOpenlist'), '0');
+            assert.equal(url, '/api/music/cache/select');
             signal.addEventListener('abort', () => {
                 aborted = true;
                 reject(new Error('timeout'));
             }, { once: true });
         })
     });
-    const checkStart = source.indexOf('async function checkServerCache(');
-    const checkEnd = source.indexOf('\n/**', checkStart);
-    vm.runInContext(source.slice(checkStart, checkEnd) + source.slice(start, end), context);
+    vm.runInContext(source.slice(start, end), context);
     assert.equal(await context.refreshPrefetchedCache(song, online), online);
     assert.equal(timeoutMs, 1200);
     assert.equal(aborted, true);
@@ -168,7 +182,7 @@ function prefetchSetup() {
         getSourceTypeText: () => '', localStorage: { removeItem() {} }
     });
     const from = source.indexOf('const prefetchManager =');
-    const to = source.indexOf('async function refreshPrefetchedCache(', from);
+    const to = source.indexOf('function getPlaybackCacheFileKey(', from);
     const taskFrom = source.indexOf('async function prefetchNextSong(');
     const taskTo = source.indexOf('// --- Server Cache Helpers ---', taskFrom);
     vm.runInContext(source.slice(from, to) + source.slice(taskFrom, taskTo) + '\nthis.manager = prefetchManager;', context);
@@ -221,4 +235,25 @@ test('cache hit restarts buffering after the previous buffer was stopped', async
     assert.equal(pending.length, 0);
     manager.clear();
     assert.equal(manager.bufferer.src, '');
+});
+
+test('malformed alternates cannot invalidate the primary cache lookup or consume valid slots', async () => {
+    const { refresh, calls } = setup(saved);
+    const valid = { ...song, id: 'valid', source: 'kw', singer: 'Artist' };
+    const malformed = { ...valid, id: 'bad', singer: 'x'.repeat(513) };
+    const result = await refresh({ ...song, _alternates: [null, malformed, valid] }, online);
+    assert.equal(result.url, saved.url);
+    assert.deepEqual(calls[0].body.songs.map(s => s.id), ['1', 'valid']);
+});
+
+test('the actual resolved prefetch identity is primary, deduplicated and included within eight members', async () => {
+    const { refresh, calls } = setup(saved);
+    const resolved = { ...song, id: 'resolved', source: 'kw', name: 'Different provider title', singer: 'Artist' };
+    const alternates = Array.from({ length: 10 }, (_, i) => ({ id: String(i + 2), source: 'tx' }));
+    const result = await refresh({ ...song, _alternates: [resolved, ...alternates] }, { ...online, songInfo: resolved, switchedSource: true });
+    assert.equal(result.songInfo, resolved);
+    assert.equal(result.switchedSource, true);
+    assert.equal(calls[0].body.songs[0].id, 'resolved');
+    assert.equal(calls[0].body.songs.length, 8);
+    assert.equal(calls[0].body.songs.filter(s => s.id === 'resolved').length, 1);
 });

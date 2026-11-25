@@ -12,23 +12,26 @@ type Store = { observations: Record<string, Observation>; job?: Job }
 let controller: AbortController | undefined
 let cachedFile = '', cachedStore: Store | undefined
 let lastWrite = 0
+let dirty = false
 let saveTimer: ReturnType<typeof setTimeout> | undefined
-const location = () => path.join(global.lx.dataPath, 'runtime', 'openlist-metadata.json')
+// 防抖写入可能在 dataPath 变化/缺省后触发，兜底到工作目录，避免定时器里抛未捕获异常。
+const location = () => path.join(global.lx?.dataPath || path.join(process.cwd(), 'data'), 'runtime', 'openlist-metadata.json')
 const key = (source: string, remote: string, side: string) => crypto.createHash('sha256').update(JSON.stringify([source, remote, side])).digest('hex')
 export const metadataBaseline = (row: Row) => JSON.stringify([row.size, row.local_hash, row.remote_mtime])
 function read(): Store {
   const file = location()
   if (cachedFile === file && cachedStore) return cachedStore
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
-  cachedFile = file; cachedStore = undefined; lastWrite = 0
+  cachedFile = file; cachedStore = undefined; lastWrite = 0; dirty = false
   try { cachedStore = JSON.parse(fs.readFileSync(file, 'utf8')) }
   catch (error: any) { if (error.code === 'ENOENT') cachedStore = { observations: {} }; else throw error }
   return cachedStore!
 }
 function write(store: Store, force = false) {
   cachedStore = store
+  dirty = true
   if (!force && Date.now() - lastWrite < 500) {
-    if (!saveTimer) saveTimer = setTimeout(() => { saveTimer = undefined; if (cachedFile !== location()) return; try { write(store, true) } catch (error) { console.error('[OpenList] 保存检查结果失败', error) } }, 500)
+    if (!saveTimer) saveTimer = setTimeout(() => { try { flushMetadata() } catch (error) { console.error('[OpenList] 保存检查结果失败', error) } }, 500)
     saveTimer?.unref()
     return
   }
@@ -36,6 +39,16 @@ function write(store: Store, force = false) {
   const file = location(); fs.mkdirSync(path.dirname(file), { recursive: true })
   fs.writeFileSync(file + '.tmp', JSON.stringify(store), { mode: 0o600 }); fs.renameSync(file + '.tmp', file)
   lastWrite = Date.now()
+  dirty = false
+}
+/** Persist pending observations before the owning runtime is torn down. */
+export function flushMetadata(): void {
+  if (!dirty) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = undefined
+  // A delayed writer must not follow a replaced/missing runtime into another root.
+  if (!cachedStore || typeof global.lx?.dataPath !== 'string' || !global.lx.dataPath || cachedFile !== location()) { dirty = false; return }
+  write(cachedStore, true)
 }
 export function metadataObservations(source: string) {
   const store = read()

@@ -6,6 +6,9 @@ import { lookupLocalLyrics } from './music/localLyrics'
 import { resolveDownloadLyrics, resolveSongLyricData } from './music/downloadLyrics'
 import { getVerifiedAudioSize } from './music/audioProbe'
 import { downloadInRanges } from './music/parallelDownload'
+import { selectPlaybackCache } from './music/playbackCacheSelection'
+import { attachReadThroughCapture, canCaptureReadThrough } from './music/readThroughCapture'
+import { publishReadThrough } from './music/publishReadThrough'
 import { buildLyrics } from '../utils/lrcTool'
 import { resolveOpenlistCacheEntry } from './openlist/openlistBackup'
 import http, { type IncomingMessage } from 'node:http'
@@ -29,7 +32,7 @@ import { scopeDislikeRules, parseDislikeRules, splitSingers } from '@/modules/di
 import { encodeAlbumRule } from '@/modules/dislike/utils'
 import { normalizeText } from '@/server/utils/songVersion'
 import { invalidateDislikeCache } from '@/server/utils/dislikeCache'
-import { invalidateSubsonicPlaylistCache, syncRatingsToDislike, syncDislikesToRating, readSubsonicMeta } from '@/server/integrations/subsonic'
+import { invalidateSubsonicPlaylistCache, syncRatingsToDislike, syncDislikesToRating, readSubsonicMeta, readScrobbles } from '@/server/integrations/subsonic'
 import { exportRatingBackup, createRatingSnapshot, saveRatingImport, listRatingSnapshots, readRatingSnapshot, restoreRatingSnapshot, deleteRatingSnapshot, normalizeRatingMeta, isValidSnapshotId } from './rating/ratingSnapshot'
 import { createMsg2call } from 'message2call'
 import { handleFileManager } from './integrations/fileManager'
@@ -38,8 +41,9 @@ import formidable from 'formidable'
 import musicSdkRaw from '@/modules/utils/musicSdk/index.js'
 const musicSdk = musicSdkRaw as any
 import { initUserApis, unloadUserApis, callUserApiGetMusicUrl, isSourceSupported, getLoadedApis, getLoadedApisCount } from './sources/userApi'
-import { startVerifyScheduler, runSyncNow, listBackups, startOpenlistMetadata, openlistMetadataStatus, cancelMetadata, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete } from '@/server/openlist/openlistBackup'
+import { startVerifyScheduler, runSyncNow, listBackups, startOpenlistMetadata, openlistMetadataStatus, cancelMetadata, retryBackup, deleteOpenlistBackups, registerFileCacheSyncHook, restoreOpenlistData, triggerBackfillUploadDelete, requestEventSync } from '@/server/openlist/openlistBackup'
 import { getOpenlistRecoveryHistory, startOpenlistRestore, listRestoreTasks, cancelRestoreTask, rollbackRestoreTask, deleteRestoreTask } from '@/server/openlist/openlistBackup'
+import { planCacheRename, applyCacheRename } from '@/server/openlist/openlistRenameSync'
 import { prepareOpenlistIntegrity, startOpenlistIntegrity, integrityStatus, cancelIntegrity } from '@/server/openlist/openlistBackup'
 import { BACKUP_TYPE_INFO, getBackupTypes, normalizeBackupTypes, isCloudBackupRunning } from '@/utils/backupPolicy'
 import { OpenListClient } from '@/server/openlist/openlistClient'
@@ -106,10 +110,8 @@ function scheduleOpenlistSync(): void {
   if (pendingOpenlistSyncTimer) clearTimeout(pendingOpenlistSyncTimer)
   pendingOpenlistSyncTimer = setTimeout(() => {
     pendingOpenlistSyncTimer = null
-    if (!global.lx.config['openlist.enable']) return
-    void runSyncNow({}).catch((e: any) => {
-      console.warn('[OpenList] 自动同步失败:', e?.message || e)
-    })
+    // 事件同步带最小间隔与脏标记合并；手动按钮与定时同步直接走 runSyncNow，不受节流。
+    requestEventSync()
   }, 8000)
 }
 import * as customSourceHandlers from './sources/customSourceHandlers'
@@ -119,6 +121,7 @@ import { withCacheBrowseLocation } from './music/cacheBrowseLocation'
 import { remasterStaging } from './task/remasterStaging'
 import * as customMusicManager from './music/customMusicManager'
 import * as serverDownloadQueue from './task/serverDownloadQueue'
+import { canUpgradeForAccount, isSameUpgradeTier, requestedProviderQuality } from './music/cacheUpgrade'
 import * as remasterQueue from './task/remasterQueue'
 import { AutoLinkQueue } from './task/autoLinkQueue'
 import { identifyLocalSong } from './utils/identify'
@@ -935,14 +938,85 @@ const checkAndCreateDir = (p: string) => {
   }
 }
 
-const readBody = async (req: IncomingMessage) => await new Promise<string>((resolve, reject) => {
+const readBody = async (req: IncomingMessage, maxBytes = Infinity) => await new Promise<string>((resolve, reject) => {
   const chunks: any[] = []
-  req.on('data', chunk => { chunks.push(chunk) })
+  let bytes = 0
+  req.on('data', chunk => {
+    bytes += Buffer.byteLength(chunk)
+    if (bytes <= maxBytes) chunks.push(chunk)
+    else if (chunks.length || bytes - Buffer.byteLength(chunk) <= maxBytes) {
+      chunks.length = 0
+      reject(Object.assign(new Error('Request body too large'), { status: 413 }))
+    }
+  })
   req.on('end', () => {
     resolve(Buffer.concat(chunks).toString('utf-8'))
   })
   req.on('error', reject)
 })
+
+// Opaque, short-lived capture intent, not a media authorization credential.
+// Only a resolved named-account URL can request writes; allowlists and media
+// auth are unchanged. Keep it in memory and never persist provider URLs.
+type ReadThroughOffer = {
+  owner: string; url: string; song: any; expires: number; cacheDir?: string; stagingDir?: string
+}
+const readThroughOffers = new Map<string, ReadThroughOffer>()
+// Keep a small ceiling on concurrent filesystem checks. Do not reuse a stale
+// "empty" verdict between songs, and do not hold playback for a slow NAS.
+const readThroughDirectoryChecks = new Set<string>()
+const readThroughEnabled = () => process.env.LX_READ_THROUGH_CACHE !== '0'
+const issueReadThroughOffer = async (owner: string, audioUrl: string, song: any) => {
+  if (!readThroughEnabled() ||
+    !owner || ['.', '..', 'open', '_open', 'default'].includes(owner) || /[\\/:\0]/.test(owner) ||
+    !global.lx.config.users.some(user => user.name === owner && !user.disabled) || !song.name || !song.singer || !song.interval || !/^https?:\/\//i.test(audioUrl) || audioUrl.length > 4096 ||
+    !['tx', 'wy', 'kw', 'kg', 'mg'].includes(song.source)) return undefined
+  const metadata = fileCache.extractSongMetadata(song)
+  if (!metadata.id || metadata.id.length > 200 || [metadata.name, metadata.singer, metadata.album, metadata.interval]
+    .some(value => typeof value !== 'string' || value.length > 512)) return undefined
+  const nativeIds = fileCache.extractNativeIds(song)
+  if (nativeIds && Object.values(nativeIds).some(value => value.length > 512)) return undefined
+  const rawMediaMid = song.strMediaMid ?? song.meta?.strMediaMid
+  if (metadata.source === 'tx' && (typeof rawMediaMid !== 'string' || !rawMediaMid || rawMediaMid.length > 512)) return undefined
+  const now = Date.now()
+  for (const [key, entry] of readThroughOffers) if (entry.expires <= now) readThroughOffers.delete(key)
+  if (readThroughOffers.size >= 128 || readThroughDirectoryChecks.size >= 16 ||
+    readThroughDirectoryChecks.has(owner) || Array.from(readThroughOffers.values()).some(entry => entry.owner === owner)) return undefined
+  const cacheDir = fileCache.getCacheDir(owner, false, undefined, false)
+  const stagingDir = path.join(cacheDir, fileCache.READ_THROUGH_STAGING_DIR)
+  readThroughDirectoryChecks.add(owner)
+  const checked = (async () => {
+    try {
+      await fs.promises.mkdir(cacheDir, { recursive: true })
+      if (!(await fs.promises.lstat(cacheDir)).isDirectory()) return false
+      try { await fs.promises.mkdir(stagingDir, { mode: 0o700 }) }
+      catch (error: any) { if (error.code !== 'EEXIST') return false }
+      const stage = await fs.promises.lstat(stagingDir)
+      if (!stage.isDirectory() || (process.platform !== 'win32' && (stage.mode & 0o077) !== 0)) return false
+      const handle = await fs.promises.opendir(stagingDir)
+      try { return !await handle.read() }
+      finally { await handle.close() }
+    } catch { return false }
+  })()
+  let checkTimer: ReturnType<typeof setTimeout> | undefined
+  try {
+    const ready = await Promise.race([checked, new Promise<false>(resolve => {
+      checkTimer = setTimeout(() => resolve(false), 50)
+    })])
+    if (!ready || cacheDir !== fileCache.getCacheDir(owner, false, undefined, false)) return undefined
+  } finally {
+    clearTimeout(checkTimer)
+    // An outstanding filesystem operation still consumes its slot after timeout.
+    void checked.then(() => readThroughDirectoryChecks.delete(owner))
+  }
+  const key = crypto.randomBytes(16).toString('hex')
+  readThroughOffers.set(key, {
+    owner, url: audioUrl, expires: Date.now() + 2 * 60_000, cacheDir, stagingDir,
+    song: { id: metadata.id, source: metadata.source, name: metadata.name, singer: metadata.singer,
+      albumName: metadata.album, interval: metadata.interval, meta: nativeIds },
+  })
+  return key
+}
 
 const formatBytes = (bytes: number): string => {
   if (!Number.isFinite(bytes) || bytes <= 0) return ''
@@ -1089,7 +1163,7 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
     source !== songInfo.source && isSourceSupported(source, username) && musicSdk[source]?.musicSearch?.search
   ))
   const query = `${songInfo.name} ${songInfo.singer}`
-  const promise = Promise.all(searchSources.map(async source => {
+  const search = Promise.all(searchSources.map(async source => {
     try {
       const searchData = await musicSdk[source].musicSearch.search(query, 1, 20)
       const list = Array.isArray(searchData?.list) ? searchData.list : []
@@ -1104,6 +1178,16 @@ const findServerSourceMatches = async (songInfo: any, username: string) => {
     .sort((a, b) => b.score - a.score)
     .map(item => item.candidate))
 
+  // SDK searches are not all abortable. Bound the shared cache promise and evict
+  // only this entry on timeout, so one stalled provider cannot poison later calls.
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<any[]>(resolve => {
+    timer = setTimeout(() => {
+      if (sourceMatchCache.get(cacheKey)?.promise === promise) sourceMatchCache.delete(cacheKey)
+      resolve([])
+    }, 5000)
+  })
+  const promise = Promise.race([search, timeout]).finally(() => clearTimeout(timer))
   sourceMatchCache.set(cacheKey, { expiresAt: now + SOURCE_MATCH_CACHE_TTL, promise })
   return promise
 }
@@ -1130,17 +1214,37 @@ const resolveServerSong = async (
     ? getDownloadQualityCandidates(requestedQuality)
     : [requestedQuality]
   const errors: string[] = []
+  let downgradedFallback: ServerSongResolveResult | null = null
+  // Once the original attempt ends, all alternative search/resolution shares one budget.
+  let alternativeDeadline = 0
+  let alternativeExpired = false
+  const withinBudget = async <T>(work: () => Promise<T>): Promise<T> => {
+    if (!alternativeDeadline) return work()
+    if (alternativeExpired || Date.now() >= alternativeDeadline) throw new Error('Alternative source deadline exceeded')
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      return await Promise.race([work(), new Promise<never>((_, reject) => {
+        timer = setTimeout(() => {
+          alternativeExpired = true
+          reject(new Error('Alternative source deadline exceeded'))
+        }, Math.max(0, alternativeDeadline - Date.now()))
+      })])
+    } finally {
+      clearTimeout(timer)
+    }
+  }
 
   const tryCandidates = async (quality: string, rawCandidates: any[]) => {
     for (const rawCandidate of rawCandidates) {
+      if (alternativeExpired || (alternativeDeadline && Date.now() >= alternativeDeadline)) return null
       const candidate = normalizeSongInfo({ ...rawCandidate })
       const source = candidate?.source
       if (!source || !isSourceSupported(source, username)) continue
 
       try {
-        const result = await callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true)
+        const result = await withinBudget(() => callUserApiGetMusicUrl(source, candidate, quality, username, undefined, true))
         if (!result?.url) throw new Error('audio source returned no URL')
-        return {
+        const resolved = {
           url: result.url,
           quality: result.type || quality,
           songInfo: candidate,
@@ -1148,6 +1252,11 @@ const resolveServerSong = async (
           downloadSource: fileCache.detectDownloadSource(result.url, source),
           sourceName: result.sourceName,
         }
+        if (result.isLossyDowngrade) {
+          downgradedFallback ??= resolved
+          continue
+        }
+        return resolved
       } catch (err: any) {
         errors.push(`${source}/${quality}: ${err?.message || 'resolve failed'}`)
       }
@@ -1158,7 +1267,13 @@ const resolveServerSong = async (
   const originalResult = await tryCandidates(requestedQuality, [originalSong])
   if (originalResult) return originalResult
 
-  const matches = await findServerSourceMatches(originalSong, username)
+  alternativeDeadline = Date.now() + 8000
+  let matches: any[] = []
+  try {
+    matches = await withinBudget(() => findServerSourceMatches(originalSong, username))
+  } catch (err: any) {
+    errors.push(err?.message || 'Alternative source search failed')
+  }
   const switchedResult = await tryCandidates(requestedQuality, matches)
   if (switchedResult) return switchedResult
 
@@ -1167,6 +1282,7 @@ const resolveServerSong = async (
     if (fallbackResult) return fallbackResult
   }
 
+  if (downgradedFallback) return downgradedFallback
   throw new Error(`No downloadable source found (${errors.join('; ')})`)
 }
 
@@ -4320,12 +4436,60 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
 
         try {
-          const result = await fileCache.batchRenameCacheFiles(username)
+          let result: any
+          if (global.lx.config['openlist.enable']) {
+            const r = await applyCacheRename({ user: username })
+            result = {
+              success: true,
+              successCount: r.renamed,
+              skipCount: r.skipped,
+              failCount: r.failed + r.conflicts,
+              cloudRenamed: r.cloudRenamed,
+              dbUpdated: r.dbUpdated,
+            }
+          } else {
+            result = await fileCache.batchRenameCacheFiles(username)
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (e) {
           res.writeHead(500, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify({ success: false, message: 'Rename failed: ' + (e as any).message }))
+        }
+        return
+      }
+
+      // One authenticated, local-only decision for a bounded set of recording IDs.
+      if (pathname === '/api/music/cache/select' && req.method === 'POST') {
+        const requestedOwner = req.headers['x-user-name']
+        const verified = verifyUserAuth(req)
+        const named = requestedOwner && !['open', '_open', 'default'].includes(String(requestedOwner))
+        if (((req.headers['x-user-token'] || named) && !verified) || (named && requestedOwner !== verified) ||
+          (verified && (verified === '.' || verified === '..' || /[\\/:\0]/.test(verified) ||
+            !global.lx.config.users.some(user => user.name === verified && !user.disabled))) ||
+          (!verified && !checkPlayerAuth(req))) {
+          res.writeHead(401, { 'Cache-Control': 'no-store' }); res.end(); return
+        }
+        const owner = verified || '_open'
+        if (!verified && global.lx.config['user.enablePublicRestriction'] &&
+          !global.lx.config['user.enablePublicNonAdminLocalMusic'] &&
+          !(req.headers['x-frontend-auth'] && req.headers['x-frontend-auth'] === global.lx.config['admin.password'])) {
+          // This visitor may still play public streams. Do not expose indexed files.
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' })
+          res.end(JSON.stringify({ exists: false })); return
+        }
+        try {
+          const body = await readBody(req, 24 * 1024)
+          if (res.destroyed || res.writableEnded) return
+          const result = await selectPlaybackCache(JSON.parse(body), owner)
+          if (res.destroyed || res.writableEnded) return
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'private, no-store' })
+          res.end(JSON.stringify(result))
+        } catch (error: any) {
+          if (!res.destroyed && !res.writableEnded) {
+            const status = error.status === 413 ? 413 : error instanceof TypeError || error instanceof SyntaxError ? 400 : 500
+            res.writeHead(status, { 'Cache-Control': 'no-store' }); res.end()
+          }
         }
         return
       }
@@ -4360,8 +4524,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           username = verified
         }
 
-        let result: any = fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality }, username)
-        if (!result.exists && urlObj.searchParams.get('includeOpenlist') === '1') {
+        const interval = urlObj.searchParams.get('interval') || undefined
+        const includeOpenlist = urlObj.searchParams.get('includeOpenlist') === '1'
+        const openlistOnly = includeOpenlist && urlObj.searchParams.get('openlistOnly') === '1'
+        let result: any = openlistOnly ? { exists: false } :
+          fileCache.checkCache({ name, singer, source, songmid, songId, quality, exactQuality, interval }, username)
+        if (!result.exists && includeOpenlist) {
           const id = fileCache.normalizeSongId({ source, songmid, id: songId })
           const song = { source, songmid, id, name, singer }
           const q = quality || '128k'
@@ -4371,7 +4539,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             if (hit) { result = { exists: true, url: hit.url, filename: hit.filename, quality: hit.quality, folder, origin: 'openlist' }; break }
           }
         }
-        if (result && result.exists && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
+        if (result && result.exists && result.url && result.origin !== 'openlist' && username !== '_open' && username !== 'default') {
           const token = req.headers['x-user-token']
           if (token) {
             result.url += `&token=${encodeURIComponent(token as string)}`
@@ -4391,7 +4559,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
         res.writeHead(200, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ success: true, data: serverDownloadQueue.list(username) }))
+        const id = urlObj.searchParams.get('id') || undefined
+        res.end(JSON.stringify({ success: true, data: serverDownloadQueue.list(username, { id, includeUpgrades: false }) }))
         return
       }
 
@@ -4414,10 +4583,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           return
         }
 
-        void readBody(req).then(body => {
+        void readBody(req, 2 * 1024 * 1024).then(body => {
           try {
             const { tasks, namingPattern, concurrency } = JSON.parse(body)
             if (!Array.isArray(tasks) || tasks.length === 0) throw new Error('Missing tasks')
+            if (tasks.some(task => task?.cacheUpgrade === true)) {
+              if (isPublic || !canUpgradeForAccount(username)) {
+                res.writeHead(403, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({ success: false, message: 'Cache upgrades require a supported authenticated account' }))
+                return
+              }
+              if (tasks.length !== 1 || concurrency !== undefined || namingPattern !== undefined) {
+                throw new Error('Invalid cache upgrade request')
+              }
+            }
             if (concurrency !== undefined) serverDownloadQueue.setConcurrency(username, concurrency)
             if (namingPattern) {
               const auth = req.headers['x-frontend-auth']
@@ -4433,6 +4612,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.writeHead(400, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: err.message || 'Invalid queue request' }))
           }
+        }, (err: any) => {
+          res.writeHead(err?.status === 413 ? 413 : 400, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify({ success: false, message: 'Invalid queue request body' }))
         })
         return
       }
@@ -6073,6 +6255,36 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
                 if (!res.headersSent) {
                   res.writeHead(proxyRes.statusCode || 200, headers)
+                  const offerId = urlObj.searchParams.get('capture')
+                  const captureRange = req.headers.range
+                  if (readThroughEnabled() && isInline && !isTaggingMode && !taskId &&
+                    req.method === 'GET' && req.headers['sec-fetch-dest'] === 'audio' &&
+                    (!captureRange || captureRange === 'bytes=0-') &&
+                    offerId && /^[a-f0-9]{32}$/.test(offerId) && canCaptureReadThrough(proxyRes)) {
+                    const offer = readThroughOffers.get(offerId)
+                    if (offer?.cacheDir && offer.stagingDir && offer.owner === proxyUser && offer.url === urlStr &&
+                      offer.expires > Date.now()) {
+                      const controller = new AbortController()
+                      const cancel = () => { if (!res.writableFinished) controller.abort() }
+                      const detach = () => res.removeListener('close', cancel)
+                      res.once('close', cancel)
+                      const cacheDir = offer.cacheDir
+                      const capturing = attachReadThroughCapture(proxyRes, {
+                        stagingDir: offer.stagingDir,
+                        signal: controller.signal,
+                        async publish({ tempPath, bytes, signal }) {
+                          try {
+                            if (!readThroughEnabled() ||
+                              !global.lx.config.users.some(user => user.name === offer.owner && !user.disabled) ||
+                              cacheDir !== fileCache.getCacheDir(offer.owner, false)) return
+                            await publishReadThrough(tempPath, bytes, offer.song, offer.owner, cacheDir, signal)
+                          } finally { detach() }
+                        },
+                      })
+                      if (capturing) readThroughOffers.delete(offerId)
+                      else detach()
+                    }
+                  }
                   proxyRes.pipe(res)
                 }
               }
@@ -6779,7 +6991,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           }
 
           try {
-            let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources } = JSON.parse(body)
+            let { songInfo, quality, enableAutoSwitchApiSource, excludeApiSources, requestReadThrough } = JSON.parse(body)
             songInfo = normalizeSongInfo(songInfo)
             // console.log('[歌曲播放] 歌曲信息:', JSON.stringify(songInfo, null, 2))
             if (!songInfo || !songInfo.source) {
@@ -6904,9 +7116,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
               result.requestedSource = songInfo.source
               result.downloadSource = fileCache.detectDownloadSource(result.url, songInfo.source)
+              if (requestReadThrough === true) result.readThrough = await issueReadThroughOffer(verifiedUsername, result.url, songInfo)
             }
 
-            res.writeHead(200, { 'Content-Type': 'application/json' })
+            res.writeHead(200, { 'Content-Type': 'application/json', ...(result.readThrough ? { 'Cache-Control': 'private, no-store' } : {}) })
             res.end(JSON.stringify(result))
           } catch (err: any) {
             console.error('[歌曲播放] 音频地址解析失败:', err.message)
@@ -7537,6 +7750,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.enableCacheSizeLimit': global.lx.config['user.enableCacheSizeLimit'],
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
             'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
+            'cache.unplayedMaxAgeDays': typeof global.lx.config['cache.unplayedMaxAgeDays'] !== 'undefined' ? global.lx.config['cache.unplayedMaxAgeDays'] : 7,
+            'cache.namingPattern': global.lx.config['cache.namingPattern'] || 'simple',
             'admin.password': global.lx.config['admin.password'],
             'player.name': global.lx.config['player.name'] || 'LX Music Web',
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
@@ -7595,6 +7810,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'] ?? true,
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
+            // 未显式配置时默认否：下载只投递给客户端，服务器不落盘、不占缓存、不触发备份。
+            'subsonic.saveDownload': global.lx.config['subsonic.saveDownload'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? false,
             'subsonic.playCacheFirstUseOpenlist': global.lx.config['subsonic.playCacheFirstUseOpenlist'] ?? false,
             'subsonic.openlistDelivery': global.lx.config['subsonic.openlistDelivery'] || 'direct',
@@ -7625,7 +7842,10 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'openlist.historyRetentionDays': global.lx.config['openlist.historyRetentionDays'] || 7,
             'openlist.userBackups': global.lx.config['openlist.userBackups'] || '[]',
             'openlist.includeNonAudio': global.lx.config['openlist.includeNonAudio'] === true,
+            'openlist.onlyPlayed': global.lx.config['openlist.onlyPlayed'] === true,
+            'openlist.onlyPlayedCompleted': global.lx.config['openlist.onlyPlayedCompleted'] === true,
             'openlist.externalUrl': global.lx.config['openlist.externalUrl'] || global.lx.config['openlist.endpoint'] || '',
+            'openlist.signExpireHours': global.lx.config['openlist.signExpireHours'] ?? 6,
             'openlist.backupSystemConfig': global.lx.config['openlist.backupSystemConfig'] === true,
             subsonicPortConflict: global.lx.subsonicPortConflict || null,
             restoreMaintenance: global.lx.restoreMaintenance === true,
@@ -7674,6 +7894,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['user.enableCacheSizeLimit'] !== undefined) global.lx.config['user.enableCacheSizeLimit'] = newConfig['user.enableCacheSizeLimit']
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
               if (newConfig['cache.maxAgeDays'] !== undefined) global.lx.config['cache.maxAgeDays'] = Math.max(0, parseInt(newConfig['cache.maxAgeDays']) || 0)
+              if (newConfig['cache.unplayedMaxAgeDays'] !== undefined) global.lx.config['cache.unplayedMaxAgeDays'] = Math.max(0, parseInt(newConfig['cache.unplayedMaxAgeDays']) || 0)
+              if (newConfig['cache.namingPattern'] !== undefined) global.lx.config['cache.namingPattern'] = fileCache.setNamingPattern(newConfig['cache.namingPattern'])
               if (newConfig['system.allowUnsafeVM'] !== undefined) global.lx.config['system.allowUnsafeVM'] = newConfig['system.allowUnsafeVM']
 
               let warning = ''
@@ -7822,7 +8044,11 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['openlist.historyRetentionDays'] !== undefined) global.lx.config['openlist.historyRetentionDays'] = Math.min(3650, Math.max(1, Math.floor(Number(newConfig['openlist.historyRetentionDays']) || 7)))
               if (newConfig['openlist.userBackups'] !== undefined) global.lx.config['openlist.userBackups'] = newConfig['openlist.userBackups']
               if (newConfig['openlist.includeNonAudio'] !== undefined) global.lx.config['openlist.includeNonAudio'] = newConfig['openlist.includeNonAudio']
+              if (newConfig['openlist.onlyPlayed'] !== undefined) global.lx.config['openlist.onlyPlayed'] = newConfig['openlist.onlyPlayed'] === true
+              if (newConfig['openlist.onlyPlayedCompleted'] !== undefined) global.lx.config['openlist.onlyPlayedCompleted'] = newConfig['openlist.onlyPlayedCompleted'] === true
               if (newConfig['openlist.externalUrl'] !== undefined) global.lx.config['openlist.externalUrl'] = String(newConfig['openlist.externalUrl']).replace(/[\\/]+$/, '')
+              // 0 允许（=不过期），上限 30 天，避免误填永久凭据
+              if (newConfig['openlist.signExpireHours'] !== undefined) global.lx.config['openlist.signExpireHours'] = Math.min(720, Math.max(0, Math.floor(Number(newConfig['openlist.signExpireHours']) || 0)))
               if (newConfig['openlist.backupSystemConfig'] !== undefined) global.lx.config['openlist.backupSystemConfig'] = newConfig['openlist.backupSystemConfig']
 
               if (newConfig['snapshot.backupPath'] !== undefined) {
@@ -7899,6 +8125,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
+              if (newConfig['subsonic.saveDownload'] !== undefined) global.lx.config['subsonic.saveDownload'] = newConfig['subsonic.saveDownload'] === true
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
               if (newConfig['subsonic.playCacheFirstUseOpenlist'] !== undefined) global.lx.config['subsonic.playCacheFirstUseOpenlist'] = newConfig['subsonic.playCacheFirstUseOpenlist']
               if (newConfig['subsonic.openlistDelivery'] !== undefined) global.lx.config['subsonic.openlistDelivery'] = newConfig['subsonic.openlistDelivery']
@@ -7952,7 +8179,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (typeof global.lx?.saveConfig === 'function') {
                 global.lx.saveConfig()
               }
-              if (['user.enableCacheSizeLimit', 'user.cacheSizeLimit', 'cache.maxAgeDays'].some(key => newConfig[key] !== undefined)) {
+              if (['user.enableCacheSizeLimit', 'user.cacheSizeLimit', 'cache.maxAgeDays', 'cache.unplayedMaxAgeDays'].some(key => newConfig[key] !== undefined)) {
                 setImmediate(() => void fileCache.cleanupAllCaches())
               }
 
@@ -8124,6 +8351,34 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             res.end(JSON.stringify({ success: false, ok: false, error: e?.message || String(e) }))
           }
         })
+        return
+      }
+
+      // [切换命名格式后同步存量文件名] preview=只读预览，apply=手动执行
+      if (pathname === '/api/openlist/cache/rename' && req.method === 'POST') {
+        if (req.headers['x-frontend-auth'] !== global.lx.config['admin.password']) {
+          res.writeHead(401, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: 'Unauthorized' })); return
+        }
+        void (async () => {
+          try {
+            const body = JSON.parse(await readBody(req) || '{}')
+            const options = {
+              user: typeof body.user === 'string' && body.user ? body.user : undefined,
+              folder: body.folder === 'cache' || body.folder === 'music' ? body.folder : undefined,
+              limit: body.limit === undefined ? undefined : Number(body.limit),
+              cloud: body.cloud === false ? false : undefined,
+            }
+            if (body.mode === 'apply') {
+              const result = await applyCacheRename(options)
+              res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+            } else {
+              const result = await planCacheRename(options)
+              res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: true, ...result }))
+            }
+          } catch (e: any) {
+            res.writeHead(400, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ success: false, error: e?.message || String(e) }))
+          }
+        })()
         return
       }
 
@@ -9653,9 +9908,27 @@ export const startServer = async (port: number, ip: string) => {
     console.warn('[缓存] 恢复缓存设置失败:', err.message)
   }
 
-  serverDownloadQueue.initialize(async task => {
-    const songInfo = normalizeSongInfo(task.songInfo)
+  serverDownloadQueue.initialize(async (task, signal) => {
     const apiUsername = task.username === '_open' ? 'open' : task.username
+    if (task.cacheUpgrade) {
+      signal.throwIfAborted()
+      // Use only the provider and identity chosen by the foreground player.
+      // The normal queue stays free to switch sources or fall back in quality.
+      const songInfo = normalizeSongInfo({ ...task.songInfo })
+      if (!canUpgradeForAccount(task.username) || !isSourceSupported(songInfo.source, apiUsername)) {
+        throw new Error('Selected catalog is not available for this account')
+      }
+      const quality = requestedProviderQuality(songInfo.source, task.requestedQuality)
+      const resolved = await callUserApiGetMusicUrl(songInfo.source, songInfo, quality,
+        apiUsername, undefined, task.enableAutoSwitchApiSource !== false)
+      signal.throwIfAborted()
+      if (!resolved?.url || !isSameUpgradeTier(resolved.type, task.requestedQuality)) {
+        throw new Error('Provider did not return the requested upgrade profile')
+      }
+      return { url: resolved.url, quality: resolved.type, requestedSource: songInfo.source,
+        downloadSource: fileCache.detectDownloadSource(resolved.url, songInfo.source), sourceName: resolved.sourceName }
+    }
+    const songInfo = normalizeSongInfo(task.songInfo)
     const resolved = await resolveServerSong(songInfo, task.requestedQuality, apiUsername, true)
     return {
       url: resolved.url,
@@ -9734,6 +10007,19 @@ export const removeDevice = async (userName: string, clientId: string) => {
   }
   const userSpace = getUserSpace(userName)
   await userSpace.removeDevice(clientId)
+}
+
+// 缓存滚动清理需要知道哪些播放缓存「从未播放」，据此提前淘汰预加载/试听文件。
+// 由 subsonic 播放历史提供（起播与完成都算播放过，避免误删听了半首的歌），fileCache 侧通过钩子读取，避免循环依赖。
+;(global.lx as any).getPlayedSongIds = (username: string) => {
+  try {
+    const list = readScrobbles(username)
+    // 没有任何播放记录时返回 null：说明该用户不走 Subsonic 播放上报，不据此加速清理
+    if (!list.length) return null
+    return new Set(list.map(entry => entry.id))
+  } catch {
+    return null
+  }
 }
 
 // Cache-only expiration and size sweeps share backup and index protection.

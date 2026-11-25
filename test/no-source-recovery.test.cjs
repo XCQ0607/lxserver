@@ -30,6 +30,7 @@ test('no source stops playback recovery and clears pending skip without retrying
 test('global no-source bypasses fallback but cache success still returns normally', async () => {
     let result = { url: '/api/music/cache/file/song.mp3' };
     const context = load('resolveSongUrl', 'async function resolveDownloadSongUrl(', {
+        resolveCachedSongUrl: async () => null,
         fetchSongUrl: async () => { if (result) return result; throw noSource; },
     });
     assert.equal((await context.resolveSongUrl({}, 'flac')).url, result.url);
@@ -74,4 +75,32 @@ test('download stops immediately on global no-source', async () => {
     });
     await assert.rejects(context.resolveDownloadSongUrl({ id: '1', source: 'wy' }, 'flac'), err => err === noSource);
     assert.equal(calls, 1);
+});
+
+test('global no-source from fresh cached-media refresh or same-platform retry stops all recovery steps', async () => {
+    for (const failedResult of [null, { sourceType: 'cache' }]) {
+        const song = { id: 'wy_1', source: 'wy' };
+        const state = { originalSong: song, currentSong: song, currentQuality: 'flac', thisRequestId: 1,
+            triedPlatforms: ['wy'], steps: ['degrade', 'switch_platform', 'next'], currentStepIndex: 0 };
+        const errors = [];
+        let requests = 0, cleared;
+        const context = load('runRecoveryFlow', 'async function playSong(', {
+            currentRecoveryState: state, restorePlaybackSession: async () => false,
+            window: { _autoSkipTimer: 42, QualityManager: { getNextLowerQuality: () => assert.fail('must not degrade') } },
+            clearTimeout: id => { cleared = id; }, settings: {}, audio: { isRemote: false },
+            shouldAutoRecoverPlayback: true, setPlayerStatus() {}, updatePlayButton() {},
+            cleanSongData: s => s, localStorage: { removeItem() {} },
+            resolvePlaybackCache: async () => null,
+            RecoveryToast: { show() {}, markStepFailed() {}, error: msg => errors.push(msg) },
+            fetchSongUrl: async () => { requests++; throw noSource; },
+            findOtherSourceMatches: () => assert.fail('must not switch platforms'),
+        });
+        await context.runRecoveryFlow(new Error('media failed'), 10, state, failedResult);
+        assert.equal(requests, 1);
+        assert.equal(state.currentStepIndex, 0);
+        assert.equal(cleared, 42);
+        assert.equal(context.window._autoSkipTimer, null);
+        assert.equal(context.shouldAutoRecoverPlayback, false);
+        assert.deepEqual(errors, [noSource.message]);
+    }
 });
