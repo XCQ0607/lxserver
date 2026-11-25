@@ -3758,6 +3758,9 @@ class App {
             if (form.elements['subsonic.cacheOnPlay']) {
                 form.elements['subsonic.cacheOnPlay'].checked = config['subsonic.cacheOnPlay'] === true;
             }
+            if (form.elements['subsonic.addToDefaultList']) {
+                form.elements['subsonic.addToDefaultList'].checked = config['subsonic.addToDefaultList'] !== false;
+            }
             if (form.elements['subsonic.saveDownload']) {
                 form.elements['subsonic.saveDownload'].checked = config['subsonic.saveDownload'] === true;
             }
@@ -3856,6 +3859,7 @@ class App {
             'subsonic.sharedListSort': (formData.get('subsonic.sharedListSort') || '').trim() || 'hot',
             'subsonic.lyricTranslation': formData.get('subsonic.lyricTranslation') === 'on',
             'subsonic.cacheOnPlay': formData.get('subsonic.cacheOnPlay') === 'on',
+            'subsonic.addToDefaultList': formData.get('subsonic.addToDefaultList') === 'on',
             'subsonic.saveDownload': formData.get('subsonic.saveDownload') === 'on',
             'subsonic.playCacheFirst': formData.get('subsonic.playCacheFirst') === 'on',
             'subsonic.playCacheFirstUseOpenlist': formData.get('subsonic.playCacheFirstUseOpenlist') === 'on',

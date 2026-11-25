@@ -199,3 +199,7 @@ Identical scores keep their origin and timestamp while allowing available metada
 My ratings and admin Ratings show pending work with Retry failed items. The user's `rating/sync-status.json` tracks backfill writes, catalog writes, unresolved metadata and snapshot failures. Retries preserve newer scores; metadata resolution still depends on provider availability. Corrupt primary rating files block writes and exports without replacing the original. Corrupt status files request manual inspection instead of being cleared.
 
 Admin previews separate additions, already-rated skips, duplicate linked identities and resolution failures. Saved scores with failed snapshots report partial completion. Version checks avoid unnecessary full refreshes. The Web collection average follows the current selection; the distribution follows the other filters, so users can switch score levels.
+
+### Per-user Subsonic playback auto-add to default list
+
+The admin permission switch (`subsonic.addToDefaultList`, default `true`) controls whether "Subsonic 播放加入默认列表" is shown under Web Settings → Logic → Playback Queue & Lists. When enabled, logged-in users can toggle it per account (stored in `subsonic-preferences.json`, default `false`). When both the admin permission and user toggle are enabled, valid Subsonic play reports (`scrobble` or `reportPlayback` with `state=stopped`) add the track metadata to the user's default list without downloading or caching audio, deduplicating existing tracks and capping the list at 200 items.

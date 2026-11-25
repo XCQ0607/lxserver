@@ -584,6 +584,9 @@ if (envParams.SUBSONIC_LYRIC_TRANSLATION !== undefined) {
 if (envParams.SUBSONIC_CACHE_ON_PLAY !== undefined) {
   setBoolConfig('subsonic.cacheOnPlay', envParams.SUBSONIC_CACHE_ON_PLAY)
 }
+if (envParams.SUBSONIC_ADD_TO_DEFAULT_LIST !== undefined) {
+  setBoolConfig('subsonic.addToDefaultList', envParams.SUBSONIC_ADD_TO_DEFAULT_LIST)
+}
 if (envParams.SUBSONIC_PLAY_CACHE_FIRST !== undefined) {
   setBoolConfig('subsonic.playCacheFirst', envParams.SUBSONIC_PLAY_CACHE_FIRST)
 }

@@ -1323,6 +1323,9 @@ function updateUserUI() {
     if (typeof checkAndUpdateCustomDirUI === 'function') {
         checkAndUpdateCustomDirUI();
     }
+    if (typeof loadSubsonicAddToDefaultPreference === 'function') {
+        void loadSubsonicAddToDefaultPreference();
+    }
 }
 window.updateUserUI = updateUserUI;
 
@@ -1502,6 +1505,9 @@ window.handleHeaderLogout = handleHeaderLogout;
 
         // 更新自定义目录开关显示状态
         await checkAndUpdateCustomDirUI();
+        if (typeof loadSubsonicAddToDefaultPreference === 'function') {
+            await loadSubsonicAddToDefaultPreference();
+        }
 
         // [新增] 公开受限用户自动尝试从服务器拉取配置 (_open)
         if (config['user.enablePublicRestriction'] && !localStorage.getItem('lx_sync_user')) {
@@ -10257,6 +10263,96 @@ async function toggleRemasterFeature(enabled) {
 
 window.getRemasterStorageUsername = getRemasterStorageUsername;
 window.toggleRemasterFeature = toggleRemasterFeature;
+
+let subsonicPrefSequence = 0;
+async function loadSubsonicAddToDefaultPreference() {
+    const seq = ++subsonicPrefSequence;
+    const card = document.getElementById('setting-subsonic-add-to-default-card');
+    const toggle = document.getElementById('setting-subsonic-add-to-default');
+    const status = document.getElementById('subsonic-add-to-default-status');
+    if (!card || !toggle) return;
+
+    const permissionEnabled = window.lx_config?.['subsonic.addToDefaultList'] !== false;
+    if (!window.lx_config || !permissionEnabled) {
+        card.classList.add('hidden');
+        toggle.checked = false;
+        toggle.disabled = true;
+        if (status) status.classList.add('hidden');
+        return;
+    }
+
+    card.classList.remove('hidden');
+    toggle.checked = false;
+    toggle.disabled = true;
+    const user = localStorage.getItem('lx_sync_user');
+    if (!user || !isUserLoggedIn()) {
+        if (status) {
+            status.textContent = '登录本地账号后可设置';
+            status.classList.remove('hidden');
+        }
+        return;
+    }
+
+    if (status) status.classList.add('hidden');
+    try {
+        if (typeof ensureUserAuthToken === 'function') await ensureUserAuthToken();
+        if (seq !== subsonicPrefSequence || localStorage.getItem('lx_sync_user') !== user) return;
+        const headers = typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {};
+        const res = await fetch('/api/music/subsonic-preferences', { headers });
+        const data = await res.json();
+        if (seq !== subsonicPrefSequence || localStorage.getItem('lx_sync_user') !== user) return;
+        if (!res.ok) throw new Error(data.error || '读取失败');
+        if (data.permissionEnabled === false) {
+            card.classList.add('hidden');
+            return;
+        }
+        toggle.checked = data.addToDefaultList === true;
+        toggle.disabled = false;
+    } catch (e) {
+        if (seq === subsonicPrefSequence && localStorage.getItem('lx_sync_user') === user && status) {
+            status.textContent = '读取失败：' + (e.message || e);
+            status.classList.remove('hidden');
+        }
+    }
+}
+
+async function setSubsonicAddToDefaultList(enabled) {
+    const seq = ++subsonicPrefSequence;
+    const user = localStorage.getItem('lx_sync_user');
+    const toggle = document.getElementById('setting-subsonic-add-to-default');
+    if (toggle) toggle.disabled = true;
+    try {
+        if (typeof ensureUserAuthToken === 'function') await ensureUserAuthToken();
+        if (seq !== subsonicPrefSequence || localStorage.getItem('lx_sync_user') !== user) return;
+        const headers = {
+            ...(typeof getUserAuthHeaders === 'function' ? getUserAuthHeaders() : {}),
+            'Content-Type': 'application/json',
+        };
+        const res = await fetch('/api/music/subsonic-preferences', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ addToDefaultList: !!enabled }),
+        });
+        const data = await res.json();
+        if (seq !== subsonicPrefSequence || localStorage.getItem('lx_sync_user') !== user) return;
+        if (!res.ok) throw new Error(data.error || '保存失败');
+        if (toggle) toggle.checked = data.addToDefaultList === true;
+        if (typeof showSuccess === 'function') {
+            showSuccess(enabled ? '已开启 Subsonic 播放加入默认列表（仅当前账号）' : '已关闭 Subsonic 播放加入默认列表');
+        }
+    } catch (e) {
+        if (seq === subsonicPrefSequence && localStorage.getItem('lx_sync_user') === user) {
+            if (toggle) toggle.checked = !enabled;
+            if (typeof showError === 'function') showError(e.message || '保存失败');
+        }
+    } finally {
+        if (toggle && seq === subsonicPrefSequence && localStorage.getItem('lx_sync_user') === user) {
+            toggle.disabled = false;
+        }
+    }
+}
+window.loadSubsonicAddToDefaultPreference = loadSubsonicAddToDefaultPreference;
+window.setSubsonicAddToDefaultList = setSubsonicAddToDefaultList;
 
 async function updateSetting(key, value) {
     if (SETTINGS_UI_MAP[key]?.normalize) {

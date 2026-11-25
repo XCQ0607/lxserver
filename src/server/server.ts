@@ -1,4 +1,5 @@
 import { readRatingPreferences, saveRatingPreferences } from './rating/ratingPreferences'
+import { readSubsonicPreferences, saveSubsonicPreferences } from './music/subsonicPreferences'
 import { ratingVersion, readRatingTasks, retryRatingTasks, ratingIdentityDetails, listRatingItems, readRatings, resolveRatingId, resolveStoredRatingId, writeRating } from './rating/ratingService'
 import { getOpenlistRuntimeStatus, getOpenlistConnection, probeOpenlistConnection, verifyPending } from './openlist/openlistBackup'
 import * as webdavRestoreTasks from './backup/webdavRestoreTasks'
@@ -6569,7 +6570,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           'user.enablePublicNonAdminAccess': global.lx.config['user.enablePublicNonAdminAccess'] || false,
           'user.enablePublicNonAdminLocalMusic': global.lx.config['user.enablePublicNonAdminLocalMusic'] || false,
           'user.enablePublicNonAdminBrowserDownload': global.lx.config['user.enablePublicNonAdminBrowserDownload'] ?? true,
-          'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false
+          'user.enablePublicNonAdminServerCache': global.lx.config['user.enablePublicNonAdminServerCache'] ?? false,
+          'subsonic.addToDefaultList': global.lx.config['subsonic.addToDefaultList'] ?? true
         }))
         return
       }
@@ -7462,6 +7464,25 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         return
       }
 
+      if (pathname === '/api/music/subsonic-preferences' && (req.method === 'GET' || req.method === 'POST')) {
+        const user = verifyUserAuth(req)
+        res.setHeader('Content-Type', 'application/json'); res.setHeader('Cache-Control', 'no-store')
+        if (!user) { res.writeHead(401); res.end(JSON.stringify({ error: '请先登录本地账号' })); return }
+        const permissionEnabled = global.lx.config['subsonic.addToDefaultList'] !== false
+        if (req.method === 'POST' && !permissionEnabled) {
+          res.writeHead(403)
+          res.end(JSON.stringify({ error: '管理员未开启播放加入列表权限' }))
+          return
+        }
+        try {
+          const preference = req.method === 'GET'
+            ? readSubsonicPreferences(user)
+            : saveSubsonicPreferences(user, JSON.parse(await readBody(req)).addToDefaultList)
+          res.end(JSON.stringify({ ...preference, permissionEnabled }))
+        } catch (e: any) { res.writeHead(400); res.end(JSON.stringify({ error: e.message })) }
+        return
+      }
+
       if (pathname === '/api/music/ratings' && (req.method === 'GET' || req.method === 'POST')) {
         const user = verifyUserAuth(req)
         if (!user) { res.writeHead(401); res.end(JSON.stringify({ error: '请先登录本地账号' })); return }
@@ -7810,6 +7831,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'subsonic.dislikeRequireSinger': global.lx.config['subsonic.dislikeRequireSinger'] ?? true,
             'subsonic.lyricTranslation': global.lx.config['subsonic.lyricTranslation'] ?? true,
             'subsonic.cacheOnPlay': global.lx.config['subsonic.cacheOnPlay'] ?? false,
+            'subsonic.addToDefaultList': global.lx.config['subsonic.addToDefaultList'] ?? true,
             // 未显式配置时默认否：下载只投递给客户端，服务器不落盘、不占缓存、不触发备份。
             'subsonic.saveDownload': global.lx.config['subsonic.saveDownload'] ?? false,
             'subsonic.playCacheFirst': global.lx.config['subsonic.playCacheFirst'] ?? false,
@@ -8125,6 +8147,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['subsonic.recommendPoolSize'] !== undefined) global.lx.config['subsonic.recommendPoolSize'] = Number(newConfig['subsonic.recommendPoolSize'])
               if (newConfig['subsonic.lyricTranslation'] !== undefined) global.lx.config['subsonic.lyricTranslation'] = newConfig['subsonic.lyricTranslation']
               if (newConfig['subsonic.cacheOnPlay'] !== undefined) global.lx.config['subsonic.cacheOnPlay'] = newConfig['subsonic.cacheOnPlay']
+              if (newConfig['subsonic.addToDefaultList'] !== undefined) global.lx.config['subsonic.addToDefaultList'] = newConfig['subsonic.addToDefaultList'] === true
               if (newConfig['subsonic.saveDownload'] !== undefined) global.lx.config['subsonic.saveDownload'] = newConfig['subsonic.saveDownload'] === true
               if (newConfig['subsonic.playCacheFirst'] !== undefined) global.lx.config['subsonic.playCacheFirst'] = newConfig['subsonic.playCacheFirst']
               if (newConfig['subsonic.playCacheFirstUseOpenlist'] !== undefined) global.lx.config['subsonic.playCacheFirstUseOpenlist'] = newConfig['subsonic.playCacheFirstUseOpenlist']

@@ -345,6 +345,8 @@ GET /api/music/search?name=周杰伦&source=kw&page=2&limit=20
 | `POST /api/music/ratings` | 用户认证 | 默认写入 `song` 与整数 `rating`（0–5，0 清除）；返回保存结果，可带 `warning`，警告不代表评分未保存 |
 | `GET /api/music/rating-preferences` | 用户认证 | 返回 `dislikeAutoRating`，默认 false |
 | `POST /api/music/rating-preferences` | 用户认证 | JSON `dislikeAutoRating` 必须是布尔值；保存后返回设置 |
+| `GET /api/music/subsonic-preferences` | 用户认证 | 返回当前账号的 `addToDefaultList`（默认 false）与后端权限 `permissionEnabled` |
+| `POST /api/music/subsonic-preferences` | 用户认证 | JSON `addToDefaultList` 必须是布尔值；后台未开启 `subsonic.addToDefaultList` 时返回 403 |
 | `GET /api/data/rating-sync?user=<账号>` | 管理员认证 | 返回该账号的 `pending,version` |
 | `POST /api/data/rating-sync?user=<账号>` | 管理员认证 | 重试该账号待处理的评分同步任务 |
 | `POST /api/subsonic/sync-link` | 管理员认证 | JSON `user,direction,preview,reconcile`，执行或预览评分与不喜欢规则同步 |

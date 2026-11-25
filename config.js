@@ -276,6 +276,10 @@ module.exports = {
   // 环境变量: SUBSONIC_CACHE_ON_PLAY (true/false)
   "subsonic.cacheOnPlay": false,
 
+  // 是否开启 Subsonic 播放加入默认列表权限 (默认开启；关闭后用户前端隐藏该设置且 Subsonic 播放不自动收录)
+  // 环境变量: SUBSONIC_ADD_TO_DEFAULT_LIST (true/false)
+  "subsonic.addToDefaultList": true,
+
   // 是否在 Subsonic 播放音乐时优先使用本地缓存/下载文件直接流式传输 (默认开启)
   // 环境变量: SUBSONIC_PLAY_CACHE_FIRST (true/false)
   "subsonic.playCacheFirst": false,

@@ -66,6 +66,7 @@ For scripts, use the personal Token management UI to create, name, expire, disab
 | `subsonic.localPlaylist` / `subsonic.customPlaylist` | Read-only local and separate custom-directory playlists; custom depends on the local switch and account directory enablement |
 | `subsonic.cachePlaylist` | Include cache-directory tracks in the local playlist, default false; does not shrink the complete library used by other endpoints |
 | `subsonic.cacheOnPlay` | Save online audio during playback, default false |
+| `subsonic.addToDefaultList` | Allow users to enable Subsonic playback auto-add to default list, default true; per-user toggle defaults to false and is hidden when disabled |
 | `subsonic.saveDownload` | Whether downloads are saved on the server, **default off**. Download detection is built in (standard `/rest/download` plus bare okhttp + gzip stream downloads); when enabled, detected files go to the music download dir instead of cache. When off, audio is still delivered to the client but the server keeps no file, no play-prefetch and no backup upload |
 | `subsonic.playCacheFirst` | Prefer an existing server file, default false; server carries the file traffic |
 | `subsonic.quality.*` / `subsonic.source.*` | Quality and platform/script candidate selection, not guaranteed availability |

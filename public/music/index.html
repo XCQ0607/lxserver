@@ -3621,6 +3621,34 @@
                                                 </div>
                                             </div>
 
+                                            <!-- Subsonic Add To Default List -->
+                                            <div id="setting-subsonic-add-to-default-card"
+                                                class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow hidden">
+                                                <div class="flex items-center justify-between">
+                                                    <div>
+                                                        <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                            Subsonic 播放加入默认列表
+                                                            <span class="setting-tooltip-trigger">
+                                                                <i class="fas fa-question-circle"></i>
+                                                                <span class="setting-tooltip-content">
+                                                                    仅对当前账号生效，默认关闭，设置保存在服务器。<br>
+                                                                    开启后，通过 Subsonic 客户端播放歌曲并收到有效播放上报时，将歌曲资料自动加入当前用户的「默认列表」（不下载或缓存音频文件）。
+                                                                </span>
+                                                            </span>
+                                                        </h4>
+                                                        <p id="subsonic-add-to-default-status" class="text-xs t-text-muted mt-1 hidden" role="status"></p>
+                                                    </div>
+                                                    <label class="relative inline-flex items-center cursor-pointer">
+                                                        <input type="checkbox" id="setting-subsonic-add-to-default" disabled
+                                                            class="sr-only peer"
+                                                            onchange="setSubsonicAddToDefaultList(this.checked)">
+                                                        <div
+                                                            class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                            </div>
+
                                             <!-- Merge Identical Songs in Aggregated Search -->
                                             <div
                                                 class="md:col-span-2 t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">

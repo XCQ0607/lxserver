@@ -480,6 +480,13 @@ declare namespace LX {
     'subsonic.cacheOnPlay'?: boolean
 
     /**
+     * 是否开启 Subsonic 播放加入默认列表权限 (默认 true)
+     * 开启后，用户可在 Web 前端「设置 → 逻辑」中自主开关「Subsonic 播放加入默认列表」（用户侧默认关闭）。
+     * 关闭后，用户前端隐藏该设置，且 Subsonic 播放上报不会自动加入默认列表。
+     */
+    'subsonic.addToDefaultList'?: boolean
+
+    /**
      * Subsonic 下载请求是否保存到服务器 (默认 false)
      * 下载请求的识别是内建能力：标准 /rest/download，以及部分客户端（如 Substreamer）
      * 不走标准下载接口、而用裸 OkHttp 拉 stream（UA=okhttp/x.y.z + Accept-Encoding: gzip）。

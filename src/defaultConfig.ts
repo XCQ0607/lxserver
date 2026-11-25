@@ -122,6 +122,7 @@ const config: LX.Config = {
   'subsonic.recommendPoolSize': 100, // 推荐池容量: 专辑列表可翻页数 ≈ 容量 / size
   'subsonic.lyricTranslation': true, // 是否在 Subsonic 歌词中包含翻译
   'subsonic.cacheOnPlay': false, // 是否在 Subsonic 播放时触发服务器缓存保存（落盘）
+  'subsonic.addToDefaultList': true, // 是否开启 Subsonic 播放加入默认列表权限（默认开启；关闭后前端隐藏对应开关且不自动收录）
   'subsonic.saveDownload': false, // Subsonic 下载请求是否保存到服务器 music 下载目录（默认否：仅投递给客户端，服务器不留档、不占缓存、不触发备份；识别能力内建，不受此开关影响）
   'subsonic.playCacheFirst': false, // 是否在 Subsonic 播放时优先使用服务器已有的本地缓存/下载文件直接传输(默认关闭:避免服务器自担出向流量/代理字节)
   'subsonic.playCacheFirstUseOpenlist': false, // 在「缓存优先」开启时，是否优先使用 OpenList 备份并以直链交付客户端

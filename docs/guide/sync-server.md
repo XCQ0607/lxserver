@@ -93,6 +93,7 @@ Subsonic 本地曲库按当前账号的持久化存储设置读取音乐和缓�
 | `subsonic.localPlaylist` / `subsonic.customPlaylist` | 分别控制只读本地歌单和独立自定义目录歌单，后者依赖前者及账号目录启用 |
 | `subsonic.cachePlaylist` | 是否在本地歌单中包含缓存目录歌曲，默认 false；不缩减其他接口共用的完整曲库 |
 | `subsonic.cacheOnPlay` | 播放在线资源时触发落盘缓存，默认 false |
+| `subsonic.addToDefaultList` | 开启「Subsonic 播放加入默认列表」权限，默认 true；开启后用户可在 Web 端自主开关（用户侧默认 false），关闭则隐藏前端开关且不再自动收录 |
 | `subsonic.saveDownload` | 下载请求是否保存到服务器，**默认否**。识别为内建能力（标准 `/rest/download` 与裸 okhttp + gzip 的 stream 下载）；开启后落盘到 music 下载目录而非 cache。默认关闭时仅投递给客户端，服务器不落盘、不触发播放预缓存、不补传备份 |
 | `subsonic.playCacheFirst` | 优先通过服务器已有文件播放，默认 false；使用时服务器承担文件传输 |
 | `subsonic.quality.*` / `subsonic.source.*` | 控制候选音质和跨平台/脚本优选，不保证每首都有目标音质 |

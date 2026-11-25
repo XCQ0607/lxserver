@@ -28,6 +28,7 @@ import { fetchGenres, fetchRadios, fetchPlaylistsByGenre, fetchRadioSongs, fetch
 import { listRadioStations, getRadioStation, addRadioStation, updateRadioStation, removeRadioStation } from '@/server/music/radioStations'
 import { getLocalTracks, localRatingId, findLocalTrack, localMusic, localSong, localAlbums, localArtists, localFile, localCover, localLyrics, serveLocalTrack, isLocalSong, isLocalEntity, getLocalScanStatus, readLocalState, editLocalState, mergeLocalPlaylist } from '@/server/music/subsonicLocal'
 import { getCustomMusicDir } from '@/server/music/customMusicManager'
+import { readSubsonicPreferences } from '@/server/music/subsonicPreferences'
 import { checkLyricCache } from '@/server/music/fileCache'
 import { parseLyrics } from '@/utils/lrcTool'
 import type { LocalTrack } from '@/server/music/subsonicLocal'
@@ -7365,6 +7366,11 @@ class SubsonicHandler {
             const list = readScrobbles(username)
             list.push({ id: mediaId, time: Date.now() })
             writeScrobbles(username, list)
+            try {
+                await this.addPlayedSongsToDefaultList(username, [mediaId])
+            } catch (e: any) {
+                subsonicLog.warn('[Subsonic] reportPlayback 自动加入默认列表失败:', e?.message || e)
+            }
         }
 
         subsonicLog.debug(`[Subsonic] reportPlayback: state=${state} mediaId=${mediaId} pos=${positionMs}ms rate=${playbackRate} ignore=${ignoreScrobble} (user=${username})`)
@@ -7452,8 +7458,75 @@ class SubsonicHandler {
             subsonicLog.warn('[Subsonic] 播放后触发 OpenList 补传失败:', e?.message || e)
         }
 
+        // [addToDefaultList] 收到有效播放上报后，将歌曲资料加入当前用户的默认列表（与 Web 端逻辑一致）
+        try {
+            await this.addPlayedSongsToDefaultList(username, ids)
+        } catch (e: any) {
+            subsonicLog.warn('[Subsonic] scrobble 自动加入默认列表失败:', e?.message || e)
+        }
+
         subsonicLog.debug(`[Subsonic] scrobble: ${ids.length} 首 (${ids.slice(0, 3).join(', ')}) time=${new Date(eventTime).toISOString()} (user=${username})`)
         return this.sendResponse(res, {}, format)
+    }
+
+    /**
+     * 将 Subsonic 有效播放上报的歌曲资料自动加入当前用户的默认列表（与 Web 端 addToDefaultList 逻辑一致）：
+     * - 仅保存歌曲元数据，不下载/缓存音频文件（不依赖 cacheOnPlay）
+     * - 跳过本地曲库歌曲（local_*）
+     * - 同一歌曲不重复添加；若已存在但不在目标插入端，则移至 top/bottom（遵循 list.addMusicLocationType）
+     * - 默认列表最多保留 200 首
+     */
+    private async addPlayedSongsToDefaultList(username: string, ids: string[]): Promise<void> {
+        if (global.lx.config['subsonic.addToDefaultList'] === false || !username || !ids.length) return
+        if (!readSubsonicPreferences(username).addToDefaultList) return
+        const userSpace = getUserSpace(username)
+        const addMusicLocationType: LX.AddMusicLocationType =
+            getUserConfig(username)['list.addMusicLocationType'] === 'bottom' ? 'bottom' : 'top'
+        const DEFAULT_LIST_MAX_SIZE = 200
+        let changed = false
+
+        for (const rawId of ids) {
+            const id = String(rawId || '').trim()
+            if (!id || isLocalSong(id)) continue
+
+            const currentList = await userSpace.listManage.listDataManage.getListMusics('default')
+            const existingIdx = currentList.findIndex(m => m.id === id)
+            if (existingIdx !== -1) {
+                const alreadyAtTarget =
+                    (addMusicLocationType === 'top' && existingIdx === 0) ||
+                    (addMusicLocationType === 'bottom' && existingIdx === currentList.length - 1)
+                if (alreadyAtTarget) continue
+                const existingMusic = currentList[existingIdx]
+                await userSpace.listManage.listDataManage.listMusicRemove('default', [id])
+                await userSpace.listManage.listDataManage.listMusicAdd('default', [existingMusic], addMusicLocationType)
+                changed = true
+                continue
+            }
+
+            const hit = await this.resolveSongMeta(username, id)
+            if (!hit?.music) {
+                subsonicLog.debug(`[Subsonic] addToDefaultList skipped: metadata not found for ${id} (user=${username})`)
+                continue
+            }
+            await userSpace.listManage.listDataManage.listMusicAdd('default', [hit.music], addMusicLocationType)
+            changed = true
+        }
+
+        if (!changed) return
+
+        const updatedList = await userSpace.listManage.listDataManage.getListMusics('default')
+        if (updatedList.length > DEFAULT_LIST_MAX_SIZE) {
+            const overflow = updatedList.length - DEFAULT_LIST_MAX_SIZE
+            const removeIds = addMusicLocationType === 'bottom'
+                ? updatedList.slice(0, overflow).map(m => m.id)
+                : updatedList.slice(DEFAULT_LIST_MAX_SIZE).map(m => m.id)
+            if (removeIds.length) {
+                await userSpace.listManage.listDataManage.listMusicRemove('default', removeIds)
+            }
+        }
+
+        await userSpace.listManage.createSnapshot()
+        subsonicLog.debug(`[Subsonic] addToDefaultList: updated default list for ${username} (location=${addMusicLocationType})`)
     }
 
     /**

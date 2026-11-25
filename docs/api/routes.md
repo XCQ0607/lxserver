@@ -29,6 +29,7 @@
 | POST | `/api/subsonic/sync-link` | `user`, `direction`, `preview`, `reconcile` |
 | GET / POST | `/api/data/rating-sync` | 查询参数 `user` |
 | GET / POST | `/api/music/rating-preferences` | `dislikeAutoRating` |
+| GET / POST | `/api/music/subsonic-preferences` | `addToDefaultList` |
 | GET / POST | `/api/music/ratings` | `operation`, `songs`, `includeDetails`, `song`, `rating` |
 
 ## openlist/connection
