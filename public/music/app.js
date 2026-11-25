@@ -7873,6 +7873,35 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         return;
     }
 
+    // custom 目录歌曲仅存在于本站，不走外部换源与自动跳歌，失败时按当前请求作用域原地重试。
+    const isCustomSourceSong = !!(state.currentSong && (
+        state.currentSong.source === 'custom' ||
+        state.currentSong._isCustomDir ||
+        state.currentSong.folder === 'custom'
+    ));
+    if (isCustomSourceSong) {
+        const retryCount = state.customRetryCount || 0;
+        if (retryCount < 2) {
+            state.customRetryCount = retryCount + 1;
+            console.warn(`[Player] custom 目录源播放失败，原地重试 ${state.customRetryCount}/2（不换源不切歌）`);
+            setPlayerStatus(`本地音频重试中 (${state.customRetryCount}/2)`, null, true);
+            if (effectiveResumeTime > 0) window._resumeInfo = { time: effectiveResumeTime, song: state.currentSong };
+            await new Promise(resolve => setTimeout(resolve, 800));
+            if (!isCurrent()) return;
+            playSong(state.currentSong, state.currentIndex, state.currentQuality, false, true);
+            return;
+        }
+        shouldAutoRecoverPlayback = false;
+        if (window._autoSkipTimer) {
+            clearTimeout(window._autoSkipTimer);
+            window._autoSkipTimer = null;
+        }
+        setPlayerStatus('自定义目录音频播放失败');
+        RecoveryToast.error('自定义目录音频加载失败，请检查文件或网络后重试');
+        updatePlayButton(false);
+        return;
+    }
+
     if (error?.errorCode === 'PLATFORM_SOURCE_UNAVAILABLE') {
         state.samePlatformExhausted = true;
     }
@@ -9473,6 +9502,10 @@ function handlePlaybackStallOrWait(event) {
         const stallRequestId = currentRecoveryState?.thisRequestId;
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
         const stallWasRemote = !!audio.isRemote;
+        const stallSong = currentPlayingSong || null;
+        const stallIsLocalStream = !!(stallSong && (stallSong.isLocal || stallSong.source === 'local' ||
+            stallSong.source === 'custom' || stallSong._isCustomDir || stallSong.folder === 'custom'));
+        const stallTimeoutMs = stallIsLocalStream ? 15000 : 4000;
         const playhead = audio.currentTime || 0;
         audio._lxStallPosition = playhead;
         playbackStallDetectionTimer = setTimeout(() => {
@@ -9485,7 +9518,7 @@ function handlePlaybackStallOrWait(event) {
             if (shouldAutoRecoverPlayback && currentPlaybackErrorHandler && (audio.currentTime || 0) <= playhead + 0.25) {
                 void currentPlaybackErrorHandler({ cacheTransportStall: true });
             }
-        }, 4000);
+        }, stallTimeoutMs);
     }
 }
 

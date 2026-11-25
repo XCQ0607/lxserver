@@ -99,7 +99,8 @@ export function getLocalTracks(user: string, force = false, browseLocation?: str
     const custom = getCustomMusicDir(user)
     const key = JSON.stringify([catalogRevisions.get(user) || 0, location, custom, getCacheDir(user, false, location), getCacheDir(user, true, location)])
     const cached = catalogs.get(user)
-    if (!force && cached?.key === key && Date.now() - cached.at < 30_000) return Promise.resolve(cached.tracks)
+    // 30 秒过期太短：重建要扫全库，属于纯重复劳动，放宽到 60 秒减半重建次数。
+    if (!force && cached?.key === key && Date.now() - cached.at < 60_000) return Promise.resolve(cached.tracks)
     const pendingKey = `${user}:${key}`
     const existing = pending.get(pendingKey)
     if (existing) return existing
@@ -124,8 +125,19 @@ export function getLocalTracks(user: string, force = false, browseLocation?: str
         const registry = read<Registry>(file, { tracks: {} })
         const tracks: LocalTrack[] = []
         const seen = new Set<string>()
+        // 曲库缓存每 30 秒过期重建一次，而上一版对每个文件都做 realpathSync×2 + statSync，
+        // 5000+ 首时是数百毫秒的同步阻塞（期间所有请求都被卡住）。这里按 (root, filename)
+        // 复用上次解析出的真实路径：元数据未变化时完全跳过系统调用。
+        const resolvedByPath = new Map<string, string>()
+        for (const [resolvedPath, known] of Object.entries(registry.tracks)) {
+          resolvedByPath.set(`${known.root}\u0000${known.filename}`, resolvedPath)
+        }
+        let dirty = false
         for (const { item, root } of items) {
-          const resolved = localFile({ root, filename: item.filename })
+          const knownResolved = resolvedByPath.get(`${root}\u0000${item.filename}`)
+          const known = knownResolved ? registry.tracks[knownResolved] : undefined
+          const reusable = !!knownResolved && !!known && known.mtime === item.mtime && known.size === item.size
+          const resolved = reusable ? knownResolved : localFile({ root, filename: item.filename })
           if (!resolved || seen.has(resolved)) continue
           seen.add(resolved)
           const old = registry.tracks[resolved]
@@ -133,8 +145,10 @@ export function getLocalTracks(user: string, force = false, browseLocation?: str
           const rawPlatformId = item.source === 'tx' ? item.songmid || item.id : item.id || item.songmid
           const platformId = ['wy', 'tx', 'kw', 'kg', 'mg', 'bd'].includes(item.source) && rawPlatformId ? (String(rawPlatformId).startsWith(item.source + '_') ? String(rawPlatformId) : `${item.source}_${rawPlatformId}`) : undefined
           if (old && old.mtime === item.mtime && old.size === item.size) {
+            if (old.root !== root || old.filename !== item.filename || old.platformId !== platformId) dirty = true
             track = { ...old, root, filename: item.filename, platformId }
           } else {
+            dirty = true
             track = {
               id: old?.id || `local_${crypto.randomUUID()}`, root, filename: item.filename,
               size: item.size, mtime: item.mtime, title: item.name, artist: item.singer || '未知歌手',
@@ -170,7 +184,8 @@ export function getLocalTracks(user: string, force = false, browseLocation?: str
           tracks.push(track)
         }
         require('../rating/ratingService').migrateLinkedRatings(user, undefined, tracks)
-        write(file, registry)
+        // 没有元数据变化就不要每 30 秒重写 3MB+ 的 registry（序列化 + 落盘同样是同步开销）。
+        if (dirty) write(file, registry)
         catalogs.set(user, { key, tracks, at: Date.now() })
         scans.set(user, { scanning: false, count: tracks.length })
         return tracks
