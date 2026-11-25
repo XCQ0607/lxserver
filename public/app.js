@@ -1096,13 +1096,19 @@ class App {
                 ${this.allUsers.map(user => {
             const isPublic = user.name === '_open';
             const displayName = isPublic ? '公开用户 (_open)' : this.escapeHtml(user.name);
-            const roleText = isPublic ? '公共数据与歌单' : '用户数据';
+            const roleText = isPublic ? '公共数据与歌单' : (type === 'data' ? '个人歌单与评分数据' : '个人快照与备份');
             const avatarHtml = isPublic ? '🌐' : this.escapeHtml(user.name.charAt(0).toUpperCase());
+            const avatarStyle = isPublic ? '' : `style="background: ${stringToColor(user.name)};"`;
             return `
                     <div class="user-select-card" onclick="app.selectUser('${type}', '${this.escapeHtml(user.name)}')">
-                        <div class="avatar${isPublic ? ' avatar-public' : ''}">${avatarHtml}</div>
-                        <div class="name">${displayName}</div>
-                        <div class="role">${roleText}</div>
+                        <div class="avatar${isPublic ? ' avatar-public' : ''}" ${avatarStyle}>${avatarHtml}</div>
+                        <div class="user-select-meta">
+                            <div class="name">${displayName}</div>
+                            <div class="role">${roleText}</div>
+                        </div>
+                        <svg class="user-select-arrow" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="9 18 15 12 9 6"></polyline>
+                        </svg>
                     </div>
                 `}).join('')}
             </div>
@@ -1245,9 +1251,16 @@ class App {
     }
     renderUsers() {
         const container = document.getElementById('users-list');
+        const totalEl = document.getElementById('users-stat-total');
+        const onlineEl = document.getElementById('users-stat-online');
+        const activeEl = document.getElementById('users-stat-active');
+        if (totalEl) totalEl.textContent = String(this.users.length);
+        if (onlineEl) onlineEl.textContent = String(this.users.filter(u => u.online).length);
+        if (activeEl) activeEl.textContent = String(this.users.filter(u => !u.disabled).length);
+
         if (!this.users.length) {
             container.innerHTML = `
-                <div class="glass" style="padding: 3rem; text-align: center; width: 100%;">
+                <div style="padding: 3rem; text-align: center; width: 100%;">
                     <p class="tone-secondary">暂无用户，点击上方按钮添加用户</p>
                 </div>
             `;
@@ -1255,37 +1268,48 @@ class App {
         }
 
         container.innerHTML = this.users.map((user, index) => `
-            <div class="user-row glass">
+            <div class="user-row">
                 <div class="col-checkbox">
                     <input type="checkbox" class="user-checkbox" data-index="${index}" onchange="app.updateUserBatchBtn()">
                 </div>
                 <div class="col-name">
-                    <span class="user-online-dot ${user.online ? 'online' : 'offline'}" title="${user.online ? `同步连接：在线 (${user.onlineDevices} 台设备)` : '同步连接：离线'}"></span>
-                    <div class="user-avatar" style="background-color: ${stringToColor(user.name)}">
-                        <span>${this.escapeHtml(user.name.charAt(0).toUpperCase())}</span>
+                    <div class="user-avatar-wrap">
+                        <div class="user-avatar" style="background-color: ${stringToColor(user.name)}">
+                            <span>${this.escapeHtml(user.name.charAt(0).toUpperCase())}</span>
+                        </div>
+                        <span class="user-online-dot ${user.online ? 'online' : 'offline'}" title="${user.online ? `同步连接：在线 (${user.onlineDevices} 台设备)` : '同步连接：离线'}"></span>
                     </div>
-                    <span class="user-name-text">${this.escapeHtml(user.name)}</span>
-                    <button class="btn-icon" onclick="app.showRenameUserModal(${index})" title="重命名用户" style="margin-left: 8px;">
-                        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                        </svg>
-                    </button>
+                    <div class="user-name-meta">
+                        <div class="user-name-line">
+                            <span class="user-name-text">${this.escapeHtml(user.name)}</span>
+                            <button class="btn-icon user-inline-btn" onclick="app.showRenameUserModal(${index})" title="重命名用户">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <span class="user-sub-meta">${user.online ? `在线 · ${user.onlineDevices || 1} 台设备` : '当前离线'}</span>
+                    </div>
                 </div>
                 <div class="col-password">
-                    <span class="password-text" id="pwd-text-${index}">******</span>
-                    <button class="btn-icon" onclick="app.togglePasswordVisibility(${index})" title="显示/隐藏">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                            <circle cx="12" cy="12" r="3"/>
-                        </svg>
-                    </button>
-                    <button class="btn-icon" onclick="app.showEditPasswordModal(${index})" title="修改密码">
-                        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
-                        </svg>
-                    </button>
+                    <div class="user-password-pill">
+                        <span class="password-text" id="pwd-text-${index}">******</span>
+                        <div class="user-password-btns">
+                            <button class="btn-icon" onclick="app.togglePasswordVisibility(${index})" title="显示/隐藏">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                            </button>
+                            <button class="btn-icon" onclick="app.showEditPasswordModal(${index})" title="修改密码">
+                                <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
                 </div>
                 <div class="col-status">
                     <span class="status-badge ${user.disabled ? 'disabled' : 'active'}">${user.disabled ? '已禁用' : '活跃'}</span>
@@ -3425,6 +3449,34 @@ class App {
         }
     }
 
+    switchConfigSection(section = 'all') {
+        const view = document.getElementById('view-config');
+        if (!view) return;
+        view.querySelectorAll('.subsonic-nav-btn').forEach(btn => {
+            const active = btn.getAttribute('data-config-tab') === section;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        view.querySelectorAll('.config-section-card').forEach(card => {
+            const match = section === 'all' || card.getAttribute('data-config-section') === section;
+            card.classList.toggle('subsonic-section-hidden', !match);
+        });
+    }
+
+    switchSubsonicSection(section = 'all') {
+        const view = document.getElementById('view-subsonic');
+        if (!view) return;
+        view.querySelectorAll('.subsonic-nav-btn').forEach(btn => {
+            const active = btn.getAttribute('data-subsonic-tab') === section;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+        });
+        view.querySelectorAll('.subsonic-section-card').forEach(card => {
+            const match = section === 'all' || card.getAttribute('data-subsonic-section') === section;
+            card.classList.toggle('subsonic-section-hidden', !match);
+        });
+    }
+
     toggleHelp(el) {
         const text = el.getAttribute('data-help') || ''
         const existing = document.querySelector('.help-pop')
@@ -3442,7 +3494,10 @@ class App {
         pop.style.top = (window.scrollY + r.bottom + 6) + 'px'
         pop.style.left = (window.scrollX + r.left) + 'px'
         const pr = pop.getBoundingClientRect()
-        if (pr.right > window.innerWidth - 8) pop.style.left = (window.scrollX + r.left - pr.width + r.width) + 'px'
+        if (pr.right > window.innerWidth - 8) {
+            const clampedLeft = Math.max(8, window.innerWidth - pr.width - 8)
+            pop.style.left = (window.scrollX + clampedLeft) + 'px'
+        }
         if (pr.bottom > window.innerHeight - 8) pop.style.top = (window.scrollY + r.top - pr.height - 6) + 'px'
         setTimeout(() => {
             const onDocClick = (e) => {

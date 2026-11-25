@@ -304,20 +304,17 @@
                     </div>
                 </div>
                 <div class="top-bar-actions">
-                    <button id="install-pwa-btn" class="btn-secondary" title="安装 PWA 应用"
-                        style="display: none; margin-right: 1rem; padding: 0.5rem 1rem; font-size: 0.875rem;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            style="width: 16px; height: 16px; margin-right: 4px;">
+                    <button id="install-pwa-btn" class="btn-secondary top-bar-btn" title="安装 PWA 应用"
+                        style="display: none;">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
                             <polyline points="7 10 12 15 17 10" />
                             <line x1="12" y1="15" x2="12" y2="3" />
                         </svg>
                         <span>安装应用</span>
                     </button>
-                    <button id="restart-server-btn" class="btn-secondary" title="重启服务器"
-                        style="padding: 0.5rem 1rem; font-size: 0.875rem;">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                            style="width: 16px; height: 16px;">
+                    <button id="restart-server-btn" class="btn-secondary top-bar-btn" title="重启服务器">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <polyline points="23 4 23 10 17 10" />
                             <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
                         </svg>
@@ -332,14 +329,13 @@
                             <path
                                 d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" />
                         </svg></button>
-                    <div class="status-indicator" style="margin-left: 1rem;">
+                    <div class="status-indicator">
                         <span class="status-dot"></span>
                         <span id="server-status">服务器运行中</span>
                     </div>
-                    <a href="https://github.com/XCQ0607/lxserver" target="_blank" class="btn-secondary"
-                        title="查看 GitHub 项目"
-                        style="margin-left: 1rem; padding: 0.5rem 1rem; font-size: 0.875rem; text-decoration: none; display: flex; align-items: center; color: inherit;">
-                        <svg viewBox="0 0 24 24" fill="currentColor" style="width: 16px; height: 16px;">
+                    <a href="https://github.com/XCQ0607/lxserver" target="_blank" class="btn-secondary top-bar-btn top-bar-github-btn"
+                        title="查看 GitHub 项目">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
                             <path
                                 d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z" />
                         </svg>
@@ -668,7 +664,23 @@
                             </button>
                         </div>
                     </div>
-                    <div class="users-list-wrapper">
+                    <div class="users-summary-bar" id="users-summary-bar">
+                        <div class="users-summary-pill">
+                            <span class="users-summary-label">全部用户</span>
+                            <strong class="users-summary-val" id="users-stat-total">0</strong>
+                        </div>
+                        <div class="users-summary-pill">
+                            <span class="users-summary-dot online"></span>
+                            <span class="users-summary-label">同步在线</span>
+                            <strong class="users-summary-val" id="users-stat-online">0</strong>
+                        </div>
+                        <div class="users-summary-pill">
+                            <span class="users-summary-dot active"></span>
+                            <span class="users-summary-label">活跃账号</span>
+                            <strong class="users-summary-val" id="users-stat-active">0</strong>
+                        </div>
+                    </div>
+                    <div class="users-list-wrapper glass">
                         <div class="users-table-header">
                             <div class="col-checkbox">
                                 <input type="checkbox" id="select-all-users">
@@ -768,518 +780,529 @@
 
                 <!-- 系统配置视图 -->
                 <div id="view-config" class="view">
-                    <form id="config-form" class="config-panels-layout" autocomplete="off">
-
-                        <!-- 基本配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-info config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <circle cx="12" cy="12" r="3" />
-                                        <path
-                                            d="M19.07 4.93a10 10 0 0 1 0 14.14M12 2v2M12 20v2M4.93 4.93a10 10 0 0 0 0 14.14M2 12h2M20 12h2" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="config-card-title">基本配置</h3>
-                                    <p class="config-card-desc">服务器核心参数设置</p>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-field">
-                                    <label class="config-label">服务器名称</label>
-                                    <input type="text" name="serverName" class="form-input config-input"
-                                        placeholder="LX Sync Server" />
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">添加歌曲位置</label>
-                                    <select name="list.addMusicLocationType" class="form-input config-input">
-                                        <option value="top">顶部</option>
-                                        <option value="bottom">底部</option>
-                                    </select>
-                                </div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 DEBUG 模式</span>
-                                        <span class="config-toggle-desc">开发人员使用（输出音源详细日志与调试信息）</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="debug.enabled" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                            </div>
+                    <form id="config-form" class="config-panels-layout config-modern-form" autocomplete="off">
+                        <!-- 分区筛选导航栏（桌面端自适应，手机端横向滚动） -->
+                        <div class="subsonic-nav-bar glass" role="tablist" aria-label="系统配置分区">
+                            <button type="button" class="subsonic-nav-btn active" data-config-tab="all" role="tab" aria-selected="true" onclick="app.switchConfigSection('all')">全部配置</button>
+                            <button type="button" class="subsonic-nav-btn" data-config-tab="basic" role="tab" aria-selected="false" onclick="app.switchConfigSection('basic')">基本与路径</button>
+                            <button type="button" class="subsonic-nav-btn" data-config-tab="proxy" role="tab" aria-selected="false" onclick="app.switchConfigSection('proxy')">代理网络</button>
+                            <button type="button" class="subsonic-nav-btn" data-config-tab="access" role="tab" aria-selected="false" onclick="app.switchConfigSection('access')">前端与鉴权</button>
+                            <button type="button" class="subsonic-nav-btn" data-config-tab="permission" role="tab" aria-selected="false" onclick="app.switchConfigSection('permission')">权限与安全</button>
+                            <button type="button" class="subsonic-nav-btn" data-config-tab="storage" role="tab" aria-selected="false" onclick="app.switchConfigSection('storage')">存储与缓存</button>
                         </div>
 
-                        <!-- 代理配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-accent config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path
-                                            d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                                    </svg>
+                        <div class="subsonic-cards-stack">
+                            <!-- 1. 基本配置与访问路径 -->
+                            <div class="config-card glass config-section-card" data-config-section="basic">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-info config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="12" cy="12" r="3" />
+                                            <path d="M19.07 4.93a10 10 0 0 1 0 14.14M12 2v2M12 20v2M4.93 4.93a10 10 0 0 0 0 14.14M2 12h2M20 12h2" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="config-card-title">基本配置与访问路径</h3>
+                                        <p class="config-card-desc">服务器核心参数、调试开关及管理后台与播放器 URL 路由</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 class="config-card-title">代理配置</h3>
-                                    <p class="config-card-desc">反向代理与出站代理设置</p>
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">服务器名称 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="用于展示在管理后台标题、客户端连接信息与欢迎页中的服务器名称。">?</button></label>
+                                            <span class="config-field-desc">显示在后台与客户端的服务器标识名称</span>
+                                            <input type="text" name="serverName" class="form-input config-input"
+                                                placeholder="LX Sync Server" />
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">添加歌曲位置 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="控制新歌曲添加到歌单时的默认插入位置：顶部（最新添加排最前）或底部（按添加顺序追加）。">?</button></label>
+                                            <span class="config-field-desc">新歌曲加入歌单时的默认排序位置</span>
+                                            <select name="list.addMusicLocationType" class="form-input config-input">
+                                                <option value="top">顶部</option>
+                                                <option value="bottom">底部</option>
+                                            </select>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card subsonic-span-2">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用 DEBUG 模式 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后将在服务器控制台输出音源解析、同步调度与接口请求的详细调试日志，适合排查异常问题，日常使用建议关闭。">?</button></span>
+                                                <span class="config-toggle-desc">开发人员使用（输出音源详细日志与调试信息）</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="debug.enabled" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">后台管理路径 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="自定义管理控制台的访问路径，必须以 / 开头（留空表示根路径 /）。保存后立刻生效，不能与播放器路径相同，且不能以 /api 开头。">?</button></label>
+                                            <span class="config-field-desc">以 / 开头，留空表示根路径，保存后立刻生效</span>
+                                            <input type="text" name="admin.path" id="admin-path-input"
+                                                class="form-input config-input" placeholder="留空表示根路径 /" />
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">播放器路径 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="自定义 Web 播放器的访问路径，必须以 / 开头（留空或输入 / 表示根路径）。保存后立刻生效，不能与后台路径相同，且不能以 /api 开头。">?</button></label>
+                                            <span class="config-field-desc">以 / 开头，留空或 / 表示根路径，保存后立刻生效</span>
+                                            <input type="text" name="player.path" id="player-path-input"
+                                                class="form-input config-input" placeholder="/music" />
+                                        </div>
+                                    </div>
+                                    <div class="tone-danger-soft" id="path-conflict-error"
+                                        style="display:none;font-size: 0.85rem;padding: 8px 12px;border-radius: 8px">
+                                        ⚠️ 路径配置有误，请检查后重试
+                                    </div>
                                 </div>
                             </div>
-                            <div class="config-card-body">
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用反向代理支持</span>
-                                        <span class="config-toggle-desc">Forwarded Headers</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="proxy.enabled" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">反代请求头</label>
-                                    <input type="text" name="proxy.header" class="form-input config-input"
-                                        placeholder="如 x-real-ip" />
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 API 服务端代理</span>
-                                        <span class="config-toggle-desc">服务端获取歌词/热搜/歌单等将通过此代理发出</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="proxy.all.enabled" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="config-field" id="proxy-all-address-field">
-                                    <label class="config-label">代理地址</label>
-                                    <div class="config-input-group">
-                                        <input type="text" name="proxy.all.address" class="form-input config-input"
-                                            placeholder="http://127.0.0.1:7890" />
-                                        <button type="button" id="test-proxy-btn"
-                                            class="btn-secondary config-inline-btn">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                                                style="width:14px;height:14px;">
-                                                <polyline points="9 12 12 15 16 10" />
-                                                <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0" />
-                                            </svg>
-                                            测试
-                                        </button>
-                                    </div>
-                                    <small class="config-hint">支持 http:// 或 socks5://</small>
-                                </div>
 
-                                <!-- 细分代理：音乐平台 / 自定义音源 / 应用 各自独立 -->
-                                <div class="config-divider"></div>
-                                <div class="config-field">
-                                    <label class="config-label">音乐平台（内置音源 tx / wy / kg 等）</label>
-                                    <select name="proxy.music.mode" class="form-input config-input">
-                                        <option value="inherit">沿用统一代理</option>
-                                        <option value="off">直连（不走代理）</option>
-                                        <option value="on">使用下方地址</option>
-                                    </select>
-                                </div>
-                                <div class="config-field" id="proxy-music-address-field">
-                                    <label class="config-label">代理地址</label>
-                                    <div class="config-input-group">
-                                        <input type="text" name="proxy.music.address" class="form-input config-input"
-                                            placeholder="http://127.0.0.1:7890" />
-                                        <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
-                                            data-target="proxy.music.address">测试</button>
+                            <!-- 2. 代理配置 -->
+                            <div class="config-card glass config-section-card" data-config-section="proxy">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-accent config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="config-card-title">代理配置</h3>
+                                        <p class="config-card-desc">反向代理真实 IP 识别与服务端出站网络代理设置</p>
                                     </div>
                                 </div>
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用反向代理支持 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="当服务部署在 Nginx、Caddy、Cloudflare 等反向代理之后时开启，用于正确识别客户端真实 IP 与协议头（Forwarded Headers）。">?</button></span>
+                                                <span class="config-toggle-desc">从反代请求头解析客户端真实 IP</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="proxy.enabled" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">反代请求头 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="反向代理传递客户端真实 IP 的 HTTP 请求头名称，常见如 x-real-ip 或 x-forwarded-for。">?</button></label>
+                                            <span class="config-field-desc">用于读取客户端真实 IP 的请求头字段名</span>
+                                            <input type="text" name="proxy.header" class="form-input config-input"
+                                                placeholder="如 x-real-ip" />
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用 API 服务端代理 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后，服务端对外请求歌词、热搜、歌单、封面及音源接口时默认通过下方统一出站代理发出。">?</button></span>
+                                                <span class="config-toggle-desc">服务端获取歌词/热搜/歌单等通过此代理发出</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="proxy.all.enabled" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card" id="proxy-all-address-field">
+                                            <label class="config-label">统一代理地址 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="填写出站代理地址，支持 http://、https:// 或 socks5:// 协议。可点击右侧测试按钮检查代理连通性。">?</button></label>
+                                            <span class="config-field-desc">支持 http:// 或 socks5://，未单独覆盖时全局生效</span>
+                                            <div class="config-input-group">
+                                                <input type="text" name="proxy.all.address" class="form-input config-input"
+                                                    placeholder="http://127.0.0.1:7890" />
+                                                <button type="button" id="test-proxy-btn"
+                                                    class="btn-secondary config-inline-btn">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                                                        style="width:14px;height:14px;">
+                                                        <polyline points="9 12 12 15 16 10" />
+                                                        <path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0" />
+                                                    </svg>
+                                                    测试
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
 
-                                <div class="config-divider"></div>
-                                <div class="config-field">
-                                    <label class="config-label">自定义音源（导入的第三方脚本）</label>
-                                    <select name="proxy.customSource.mode" class="form-input config-input">
-                                        <option value="inherit">沿用统一代理</option>
-                                        <option value="off">直连（不走代理）</option>
-                                        <option value="on">使用下方地址</option>
-                                    </select>
-                                </div>
-                                <div class="config-field" id="proxy-customSource-address-field">
-                                    <label class="config-label">代理地址</label>
-                                    <div class="config-input-group">
-                                        <input type="text" name="proxy.customSource.address"
-                                            class="form-input config-input" placeholder="http://127.0.0.1:7890" />
-                                        <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
-                                            data-target="proxy.customSource.address">测试</button>
+                                    <div class="config-section-title" style="margin: 4px 0 0;">细分出站代理策略</div>
+                                    <div class="config-grid-2">
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">音乐平台（内置音源 tx / wy / kg 等） <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="控制内置音乐平台（QQ、网易云、酷狗、酷我、咪咕等）API 请求是否走代理。选择「沿用统一代理」将继承上方开关与地址。">?</button></label>
+                                            <span class="config-field-desc">内置音乐平台 API 的出站代理模式</span>
+                                            <select name="proxy.music.mode" class="form-input config-input">
+                                                <option value="inherit">沿用统一代理</option>
+                                                <option value="off">直连（不走代理）</option>
+                                                <option value="on">使用下方地址</option>
+                                            </select>
+                                            <div id="proxy-music-address-field" style="margin-top: 6px;">
+                                                <div class="config-input-group">
+                                                    <input type="text" name="proxy.music.address" class="form-input config-input"
+                                                        placeholder="http://127.0.0.1:7890" />
+                                                    <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
+                                                        data-target="proxy.music.address">测试</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">自定义音源（导入的第三方脚本） <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="控制导入的第三方自定义音源脚本在沙盒或 VM 中发起网络请求时的代理策略。">?</button></label>
+                                            <span class="config-field-desc">第三方自定义音源脚本的出站代理模式</span>
+                                            <select name="proxy.customSource.mode" class="form-input config-input">
+                                                <option value="inherit">沿用统一代理</option>
+                                                <option value="off">直连（不走代理）</option>
+                                                <option value="on">使用下方地址</option>
+                                            </select>
+                                            <div id="proxy-customSource-address-field" style="margin-top: 6px;">
+                                                <div class="config-input-group">
+                                                    <input type="text" name="proxy.customSource.address"
+                                                        class="form-input config-input" placeholder="http://127.0.0.1:7890" />
+                                                    <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
+                                                        data-target="proxy.customSource.address">测试</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div class="config-field subsonic-item-card subsonic-span-2">
+                                            <label class="config-label">应用（封面代理 / 识别 / 远程导入音源） <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="控制封面图片代理、音频识别、远程脚本导入等应用级出站请求的代理策略；未单独配置时沿用上方统一代理。">?</button></label>
+                                            <span class="config-field-desc">封面代理、识别与远程导入等应用级请求的代理模式</span>
+                                            <select name="proxy.app.mode" class="form-input config-input">
+                                                <option value="inherit">沿用统一代理</option>
+                                                <option value="off">直连（不走代理）</option>
+                                                <option value="on">使用下方地址</option>
+                                            </select>
+                                            <div id="proxy-app-address-field" style="margin-top: 6px;">
+                                                <div class="config-input-group">
+                                                    <input type="text" name="proxy.app.address" class="form-input config-input"
+                                                        placeholder="http://127.0.0.1:7890" />
+                                                    <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
+                                                        data-target="proxy.app.address">测试</button>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 </div>
+                            </div>
 
-                                <div class="config-divider"></div>
-                                <div class="config-field">
-                                    <label class="config-label">应用（封面代理 / 识别 / 远程导入音源）</label>
-                                    <select name="proxy.app.mode" class="form-input config-input">
-                                        <option value="inherit">沿用统一代理</option>
-                                        <option value="off">直连（不走代理）</option>
-                                        <option value="on">使用下方地址</option>
-                                    </select>
-                                </div>
-                                <div class="config-field" id="proxy-app-address-field">
-                                    <label class="config-label">代理地址</label>
-                                    <div class="config-input-group">
-                                        <input type="text" name="proxy.app.address" class="form-input config-input"
-                                            placeholder="http://127.0.0.1:7890" />
-                                        <button type="button" class="btn-secondary config-inline-btn test-proxy-btn-cat"
-                                            data-target="proxy.app.address">测试</button>
+                            <!-- 3. 前端访问与用户路径 -->
+                            <div class="config-card glass config-section-card" data-config-section="access">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-success config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                                            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                                        </svg>
                                     </div>
-                                    <small class="config-hint">未单独配置时，三类都沿用上面的统一代理</small>
+                                    <div>
+                                        <h3 class="config-card-title">前端访问与用户路径</h3>
+                                        <p class="config-card-desc">管理控制台密码、Web 播放器密码及客户端连接鉴权模式</p>
+                                    </div>
+                                </div>
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">播放器名称 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="显示在 Web 播放器页面标题、导航栏及 PWA 应用名称中的自定义名称。">?</button></label>
+                                            <span class="config-field-desc">Web 播放器的展示标题与 PWA 名称</span>
+                                            <input type="text" name="player.name" class="form-input config-input"
+                                                placeholder="LX Music Web" />
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">管理员密码 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="用于登录本管理控制台以及在 Web 播放器中解锁管理员权限的密码。留空则不修改现有密码。">?</button></label>
+                                            <span class="config-field-desc">用于登录管理后台与解锁播放器管理员权限</span>
+                                            <input type="password" name="admin.password" class="form-input config-input"
+                                                placeholder="用于登录控制台和播放器管理员" autocomplete="new-password" />
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用 Web 播放器密码 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后，打开 Web 播放器页面需先输入下方「Web 播放器访问密码」或用户密码验证后才能进入。">?</button></span>
+                                                <span class="config-toggle-desc">开启后访问 Web 播放器需要验证密码</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="player.enableAuth" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">Web 播放器访问密码 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="当启用「Web 播放器密码」时生效，访客可使用此公共密码进入播放器。">?</button></label>
+                                            <span class="config-field-desc">Web 播放器访客统一使用的访问密码</span>
+                                            <input type="password" name="player.password" class="form-input config-input"
+                                                placeholder="播放器专属密码" autocomplete="new-password" />
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用根路径 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="LX Music 客户端直接连接服务器根 URL，仅凭密码区分用户，因此不允许不同用户使用相同密码。">?</button></span>
+                                                <span class="config-toggle-desc">连接 URL 即为根路径，不允许不同用户使用相同密码</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="user.enableRoot" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用用户路径 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="LX Music 客户端连接 URL 需包含 /用户名 路径，通过路径识别用户身份，允许不同用户设置相同密码。">?</button></span>
+                                                <span class="config-toggle-desc">连接 URL 需包含 /用户名 路径，允许不同用户使用相同密码</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="user.enablePath" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
-                        </div>
 
-                        <!-- 前端配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-success config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-                                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="config-card-title">前端访问配置</h3>
-                                    <p class="config-card-desc">管理控制台与播放器密码</p>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-field">
-                                    <label class="config-label">播放器名称</label>
-                                    <input type="text" name="player.name" class="form-input config-input"
-                                        placeholder="LX Music Web" />
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">管理员密码</label>
-                                    <input type="password" name="admin.password" class="form-input config-input"
-                                        placeholder="用于登录控制台和播放器管理员" autocomplete="new-password" />
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 Web 播放器密码</span>
-                                        <span class="config-toggle-desc">开启后访问播放器需要验证密码</span>
+                            <!-- 4. 用户权限与安全限制 -->
+                            <div class="config-card glass config-section-card" data-config-section="permission">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-accent config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
+                                        </svg>
                                     </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="player.enableAuth" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">Web 播放器访问密码</label>
-                                    <input type="password" name="player.password" class="form-input config-input"
-                                        placeholder="播放器专属密码" autocomplete="new-password" />
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 自定义歌曲目录卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-danger config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path
-                                            d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z">
-                                        </path>
-                                        <path d="M9 14l2 2 4-4"></path>
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="config-card-title">自定义歌曲目录</h3>
-                                    <p class="config-card-desc">配置服务器存放本地音频文件的目录</p>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用自定义歌曲目录</span>
-                                        <span class="config-toggle-desc">开启后将优先使用自定义目录加载与存放歌曲</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enableCustomMusicDir" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="tone-secondary" style="font-size: 0.825rem;line-height: 1.6">
-                                    <div class="tone-text" style="font-weight: 600;margin-bottom: 0.35rem">
-                                        💡 目录配置说明</div>
-                                    <p style="margin: 0 0 0.5rem 0;">不同系统路径结构参考：</p>
-                                    <ul style="margin: 0 0 0.75rem 1.2rem; padding: 0;">
-                                        <li><b>Windows:</b> <code>D:/Music</code> 或 <code>C:\Users\Username\Music</code>
-                                        </li>
-                                        <li><b>Linux / macOS:</b> <code>/home/user/music</code> 或
-                                            <code>/var/music</code>
-                                        </li>
-                                        <li><b>Docker:</b> 需先挂载容器目录，如 <code>/app/music</code></li>
-                                    </ul>
-                                    <div class="tone-inset-dashed"
-                                        style="padding: 0.5rem 0.75rem;border-radius: 8px;word-break: break-all">
-                                        配置文件参考路径 (config.js): <br />
-                                        <code class="tone-info" id="config-js-path-ref">--</code>
+                                    <div>
+                                        <h3 class="config-card-title">用户权限与安全限制</h3>
+                                        <p class="config-card-desc">针对公开用户、普通登录用户的权限边界与脚本运行安全控制</p>
                                     </div>
                                 </div>
-                            </div>
-                        </div>
-
-                        <!-- 备份相关设置已迁移到「备份管理」页面 -->
-                        <div class="config-card glass">
-                            <div class="config-card-body">
-                                <p class="config-hint">最大快照数、本地配置备份、歌单快照路径、WebDAV、OpenList 与云端备份范围已统一迁移到 <a href="#"
-                                        onclick="app.openBackupCenter('local');return false;">备份管理</a>，请在那里编辑与保存。</p>
-                            </div>
-                        </div>
-
-                        <!-- 用户路径配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-danger config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                                        <circle cx="9" cy="7" r="4" />
-                                        <path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="config-card-title">用户路径配置</h3>
-                                    <p class="config-card-desc">连接 URL 与鉴权模式</p>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用根路径</span>
-                                        <span class="config-toggle-desc">连接 URL 即为根路径，不允许不同用户使用相同密码</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enableRoot" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用用户路径</span>
-                                        <span class="config-toggle-desc">连接 URL 需包含 /用户名 路径，允许不同用户使用相同密码</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enablePath" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- URL路径配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-success config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                                        <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="config-card-title">访问路径配置</h3>
-                                    <p class="config-card-desc">自定义管理界面与播放器的 URL 路径，保存后立刻生效</p>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-field">
-                                    <label class="config-label">后台管理路径</label>
-                                    <input type="text" name="admin.path" id="admin-path-input"
-                                        class="form-input config-input" placeholder="留空表示根路径 /" />
-                                    <small class="config-hint">以 / 开头，留空表示根路径。不能和播放器路径相同，不能以 /api 开头。</small>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">播放器路径</label>
-                                    <input type="text" name="player.path" id="player-path-input"
-                                        class="form-input config-input" placeholder="/music" />
-                                    <small class="config-hint">以 / 开头，留空或输入 / 表示根路径。不能和后台路径相同，不能以 /api 开头。</small>
-                                </div>
-                                <div class="tone-danger-soft" id="path-conflict-error"
-                                    style="display:none;font-size: 0.85rem;margin-top: 4px;padding: 6px 10px;border-radius: 6px">
-                                    ⚠️ 路径配置有误，请检查后重试
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- 用户权限限制配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-accent config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
-                                    </svg>
-                                </div>
-                                <div>
-                                    <h3 class="config-card-title">权限与缓存限制</h3>
-                                    <p class="config-card-desc">针对公开用户与普通登录用户的权限管控</p>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启公开用户限制</span>
-                                        <span class="config-toggle-desc">开启后，未验证的公开用户将被限制核心缓存设置与公开音源查看管理</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enablePublicRestriction" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="tone-accent-rule" id="public-non-admin-local-music-wrapper"
-                                    style="display: none;margin-left: 20px;padding-left: 12px;margin-top: 8px">
-                                    <div class="config-divider" style="margin: 8px 0;"></div>
-                                    <div class="config-toggle-row">
+                                <div class="config-card-body">
+                                    <div class="config-toggle-row subsonic-item-card">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启非管理员访问本地音乐</span>
-                                            <span class="config-toggle-desc">允许未登录管理员的公开账号访问本地音乐</span>
+                                            <span class="config-toggle-label">开启公开用户限制 <button type="button"
+                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="开启后，未验证管理员身份的公开用户将被限制修改核心缓存设置与查看/管理公开音源，并可通过下方子开关细粒度控制本地音乐、下载与缓存权限。">?</button></span>
+                                            <span class="config-toggle-desc">限制未验证的公开用户修改核心缓存设置与查看公开音源</span>
                                         </div>
                                         <label class="toggle-switch">
-                                            <input type="checkbox" name="user.enablePublicNonAdminLocalMusic" />
+                                            <input type="checkbox" name="user.enablePublicRestriction" />
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
-                                    <div class="config-divider" style="margin: 8px 0;"></div>
-                                    <div class="config-toggle-row">
+                                    <div class="config-subpanel" id="public-non-admin-local-music-wrapper" style="display: none;">
+                                        <div class="config-grid-2">
+                                            <div class="config-toggle-row subsonic-item-card">
+                                                <div class="config-toggle-info">
+                                                    <span class="config-toggle-label">开启非管理员访问本地音乐 <button type="button"
+                                                            class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                            data-help="开启后，未登录管理员的公开账号也可浏览并播放服务器上的本地音乐目录。">?</button></span>
+                                                    <span class="config-toggle-desc">允许公开账号访问本地音乐</span>
+                                                </div>
+                                                <label class="toggle-switch">
+                                                    <input type="checkbox" name="user.enablePublicNonAdminLocalMusic" />
+                                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                                </label>
+                                            </div>
+                                            <div class="config-toggle-row subsonic-item-card">
+                                                <div class="config-toggle-info">
+                                                    <span class="config-toggle-label">开启非管理员浏览器下载 <button type="button"
+                                                            class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                            data-help="开启后，未登录管理员的公开账号可以使用浏览器的歌曲下载功能。">?</button></span>
+                                                    <span class="config-toggle-desc">允许公开账号通过浏览器下载歌曲</span>
+                                                </div>
+                                                <label class="toggle-switch">
+                                                    <input type="checkbox" name="user.enablePublicNonAdminBrowserDownload" />
+                                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                                </label>
+                                            </div>
+                                            <div class="config-toggle-row subsonic-item-card subsonic-span-2">
+                                                <div class="config-toggle-info">
+                                                    <span class="config-toggle-label">开启非管理员服务器缓存 <button type="button"
+                                                            class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                            data-help="开启后，未登录管理员的公开账号听歌或下载时允许将歌曲缓存/写入服务器存储。">?</button></span>
+                                                    <span class="config-toggle-desc">允许公开账号将歌曲缓存或写入服务器存储</span>
+                                                </div>
+                                                <label class="toggle-switch">
+                                                    <input type="checkbox" name="user.enablePublicNonAdminServerCache" />
+                                                    <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                                </label>
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div class="config-toggle-row subsonic-item-card">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启非管理员浏览器下载</span>
-                                            <span class="config-toggle-desc">允许未登录管理员的公开账号使用浏览器下载歌曲</span>
+                                            <span class="config-toggle-label">开启公开收藏和歌曲 <button type="button"
+                                                    class="help-icon" aria-label="查看公开收藏说明" onclick="app.toggleHelp(this)"
+                                                    data-help="开启后允许在登录管理员时为公开用户创建公开收藏与本地音乐歌单文件；只有登录管理员后才可以管理收藏歌单和本地歌单。">?</button></span>
+                                            <span class="config-toggle-desc">允许管理员为公开用户创建并管理公开歌单</span>
                                         </div>
                                         <label class="toggle-switch">
-                                            <input type="checkbox" name="user.enablePublicNonAdminBrowserDownload" />
+                                            <input type="checkbox" name="user.enablePublicFavorites" />
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
-                                    <div class="config-divider" style="margin: 8px 0;"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启非管理员服务器缓存</span>
-                                            <span class="config-toggle-desc">允许未登录管理员的公开账号将歌曲缓存或写入服务器存储</span>
+                                    <div class="config-subpanel" id="public-non-admin-access-wrapper" style="display: none;">
+                                        <div class="config-toggle-row">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">开启非管理员访问 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后，未登录管理员的公开账号可以只读查看公开收藏歌单和歌曲。">?</button></span>
+                                                <span class="config-toggle-desc">允许未登录管理员的公开账号查看公开收藏和歌曲</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="user.enablePublicNonAdminAccess" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
                                         </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="user.enablePublicNonAdminServerCache" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
                                     </div>
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启公开收藏和歌曲 <button type="button"
-                                                class="help-icon" aria-label="查看公开收藏说明" onclick="app.toggleHelp(this)"
-                                                data-help="开启后允许在登录管理员时为公开用户创建公开收藏与本地音乐歌单文件；只有登录管理员后才可以管理收藏歌单和本地歌单。">?</button></span>
-                                        <span class="config-toggle-desc">允许管理员为公开用户创建并管理公开歌单。</span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enablePublicFavorites" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="tone-accent-rule" id="public-non-admin-access-wrapper"
-                                    style="display: none;margin-left: 20px;padding-left: 12px;margin-top: 8px">
-                                    <div class="config-divider" style="margin: 8px 0;"></div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启非管理员访问</span>
-                                            <span class="config-toggle-desc">允许未登录管理员的公开账号查看公开收藏和歌曲</span>
+
+                                    <div class="config-grid-2">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">开启登录用户缓存限制 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="限制非管理员登录用户在 Web 播放器中修改核心缓存设置（不影响音源管理功能）。">?</button></span>
+                                                <span class="config-toggle-desc">限制普通登录用户修改核心缓存设置</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="user.enableLoginCacheRestriction" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
                                         </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="user.enablePublicNonAdminAccess" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">允许 VM 模式运行脚本 <button type="button"
+                                                        class="help-icon" aria-label="查看 VM 模式风险说明"
+                                                        onclick="app.toggleHelp(this)"
+                                                        data-help="允许部分需要原生 VM 模式突破沙盒限制的自定义音源脚本（如部分混淆脚本）。警告：原生 VM 模式不具备沙盒安全性，可能导致服务器被执行任意系统命令，请仅在信任脚本来源时开启。">?</button></span>
+                                                <span class="config-toggle-desc"><strong
+                                                        class="tone-danger">高风险：非沙盒运行自定义脚本，仅对信任来源开启</strong></span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="system.allowUnsafeVM" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启登录用户缓存限制</span>
-                                        <span class="config-toggle-desc">限制非管理员登录用户的核心缓存设置（不影响音源管理）。</span>
+                            </div>
+
+                            <!-- 5. 存储目录与缓存策略 -->
+                            <div class="config-card glass config-section-card" data-config-section="storage">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-danger config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                                            <path d="M9 14l2 2 4-4"></path>
+                                        </svg>
                                     </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enableLoginCacheRestriction" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">开启缓存空间限制 <button type="button"
-                                                class="help-icon" aria-label="查看缓存空间限制说明" onclick="app.toggleHelp(this)"
-                                                data-help="仅清理 cache 目录，不影响 music 下载目录。根目录与数据目录中的每个用户分别计算额度，超限时按最近访问或修改时间清理最旧缓存。">?</button></span>
-                                        <span class="config-toggle-desc">按用户限制 cache 容量，超限时自动清理最旧缓存。</span>
+                                    <div>
+                                        <h3 class="config-card-title">存储目录与缓存策略</h3>
+                                        <p class="config-card-desc">配置自定义歌曲目录、cache 容量配额、过期自动清理与默认命名规则</p>
                                     </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="user.enableCacheSizeLimit" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
                                 </div>
-                                <div class="config-field">
-                                    <label class="config-label">空间限制大小 (MB)</label>
-                                    <input type="number" name="user.cacheSizeLimit" class="form-input config-input"
-                                        placeholder="默认 2000" min="10" />
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">缓存文件自动保留时间 (天) <button type="button" class="help-icon"
-                                            aria-label="查看按天清理说明" onclick="app.toggleHelp(this)"
-                                            data-help="启动、保存清理设置后及每 12 小时检查根目录与数据目录的 cache（含子目录），不清理 music 下载目录；音频与同名歌词一起处理，正在备份的文件跳过。设为 0 仅关闭按天清理，空间限制仍可清理缓存。">?</button></label>
-                                    <input type="number" name="cache.maxAgeDays" class="form-input config-input"
-                                        placeholder="默认 14" min="0" />
-                                    <span class="tone-secondary config-field-desc"
-                                        style="display:block;margin-top:4px;font-size:12px">
-                                        定期清理过期 cache（含歌词），设为 0 关闭按天清理。
-                                    </span>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">从未播放的缓存保留时间 (天) <button type="button" class="help-icon"
-                                            aria-label="查看未播放缓存说明" onclick="app.toggleHelp(this)"
-                                            data-help="预加载、探测、只拉流从未播放的缓存按此天数优先淘汰，容量超限时也优先删除；听过半首的歌不算从未播放，不会被提前清理。需同时开启上面的按天清理；设为 0 关闭该加速清理。">?</button></label>
-                                    <input type="number" name="cache.unplayedMaxAgeDays" class="form-input config-input"
-                                        placeholder="默认 7" min="0" />
-                                    <span class="tone-secondary config-field-desc"
-                                        style="display:block;margin-top:4px;font-size:12px">
-                                        优先淘汰未播放的预加载缓存；设为 0 关闭加速清理。
-                                    </span>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label" for="config-cache-naming-pattern">系统默认缓存命名方式 <button
-                                            type="button" class="help-icon" aria-label="查看默认命名方式说明"
-                                            onclick="app.toggleHelp(this)"
-                                            data-help="仅作为用户未单独设定时的系统默认值；若用户在 Web 播放器「设置 → 歌曲命名方式」中单独设置过，则优先以用户个人设置为准。修改后对新缓存生效，已有文件可到「备份管理 → OpenList 备份」手动同步改名。">?</button></label>
-                                    <select id="config-cache-naming-pattern" name="cache.namingPattern"
-                                        class="form-input config-input">
-                                        <option value="simple">歌名 - 歌手 - 音质 - 专辑（默认）</option>
-                                        <option value="standard">歌名_-_歌手_-_音源_-_ID_-_音质（标准，含 ID）</option>
-                                        <option value="singer_name_quality_album">歌手 - 歌名 - 音质 - 专辑</option>
-                                        <option value="singer_name">歌手 - 歌名</option>
-                                        <option value="name_singer">歌名 - 歌手</option>
-                                    </select>
-                                    <span class="tone-secondary config-field-desc"
-                                        style="display:block;margin-top:4px;font-size:12px">
-                                        <strong>用户未单独设置时的系统默认值</strong>；用户级设置优先生效。
-                                    </span>
-                                </div>
-                                <div class="config-divider"></div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">允许 VM 模式运行脚本 <button type="button"
-                                                class="help-icon" aria-label="查看 VM 模式风险说明"
-                                                onclick="app.toggleHelp(this)"
-                                                data-help="允许部分需要原生 VM 模式突破沙盒限制的自定义音源脚本（如部分混淆脚本）。警告：原生 VM 模式不具备沙盒安全性，可能导致服务器被执行任意系统命令，请仅在信任脚本来源时开启。">?</button></span>
-                                        <span class="config-toggle-desc"><strong
-                                                class="tone-danger">高风险：非沙盒运行自定义脚本，仅对信任来源开启。</strong></span>
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用自定义歌曲目录 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后将优先使用在配置文件（config.js）或用户设置中指定的自定义目录加载与存放歌曲。">?</button></span>
+                                                <span class="config-toggle-desc">优先使用自定义目录加载与存放本地歌曲</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="user.enableCustomMusicDir" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">开启缓存空间限制 <button type="button"
+                                                        class="help-icon" aria-label="查看缓存空间限制说明" onclick="app.toggleHelp(this)"
+                                                        data-help="仅清理 cache 目录，不影响 music 下载目录。根目录与数据目录中的每个用户分别计算额度，超限时按最近访问或修改时间清理最旧缓存。">?</button></span>
+                                                <span class="config-toggle-desc">按用户限制 cache 容量，超限时自动清理最旧缓存</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="user.enableCacheSizeLimit" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">空间限制大小 (MB) <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="单个用户的 cache 缓存目录最大容量（单位 MB），最小 10 MB，默认 2000 MB。超过后自动淘汰最旧缓存文件。">?</button></label>
+                                            <span class="config-field-desc">单用户 cache 目录最大占用上限（默认 2000 MB）</span>
+                                            <input type="number" name="user.cacheSizeLimit" class="form-input config-input"
+                                                placeholder="默认 2000" min="10" />
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label" for="config-cache-naming-pattern">系统默认缓存命名方式 <button
+                                                    type="button" class="help-icon" aria-label="查看默认命名方式说明"
+                                                    onclick="app.toggleHelp(this)"
+                                                    data-help="仅作为用户未单独设定时的系统默认值；若用户在 Web 播放器「设置 → 歌曲命名方式」中单独设置过，则优先以用户个人设置为准。修改后对新缓存生效，已有文件可到「备份管理 → OpenList 备份」手动同步改名。">?</button></label>
+                                            <span class="config-field-desc">用户未单独设置时的系统默认文件名格式</span>
+                                            <select id="config-cache-naming-pattern" name="cache.namingPattern"
+                                                class="form-input config-input">
+                                                <option value="simple">歌名 - 歌手 - 音质 - 专辑（默认）</option>
+                                                <option value="standard">歌名_-_歌手_-_音源_-_ID_-_音质（标准，含 ID）</option>
+                                                <option value="singer_name_quality_album">歌手 - 歌名 - 音质 - 专辑</option>
+                                                <option value="singer_name">歌手 - 歌名</option>
+                                                <option value="name_singer">歌名 - 歌手</option>
+                                            </select>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">缓存文件自动保留时间 (天) <button type="button" class="help-icon"
+                                                    aria-label="查看按天清理说明" onclick="app.toggleHelp(this)"
+                                                    data-help="启动、保存清理设置后及每 12 小时检查根目录与数据目录的 cache（含子目录），不清理 music 下载目录；音频与同名歌词一起处理，正在备份的文件跳过。设为 0 仅关闭按天清理，空间限制仍可清理缓存。">?</button></label>
+                                            <span class="config-field-desc">定期清理过期 cache（含歌词），设为 0 关闭按天清理</span>
+                                            <input type="number" name="cache.maxAgeDays" class="form-input config-input"
+                                                placeholder="默认 14" min="0" />
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">从未播放的缓存保留时间 (天) <button type="button" class="help-icon"
+                                                    aria-label="查看未播放缓存说明" onclick="app.toggleHelp(this)"
+                                                    data-help="预加载、探测、只拉流从未播放的缓存按此天数优先淘汰，容量超限时也优先删除；听过半首的歌不算从未播放，不会被提前清理。需同时开启上面的按天清理；设为 0 关闭该加速清理。">?</button></label>
+                                            <span class="config-field-desc">优先淘汰未播放的预加载缓存；设为 0 关闭加速清理</span>
+                                            <input type="number" name="cache.unplayedMaxAgeDays" class="form-input config-input"
+                                                placeholder="默认 7" min="0" />
+                                        </div>
                                     </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="system.allowUnsafeVM" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
+
+                                    <details class="subsonic-details-note">
+                                        <summary>💡 目录配置参考路径与 config.js 位置（点击展开）</summary>
+                                        <div class="subsonic-details-body">
+                                            <p>不同系统路径结构参考：</p>
+                                            <ul>
+                                                <li><b>Windows:</b> <code>D:/Music</code> 或 <code>C:\Users\Username\Music</code></li>
+                                                <li><b>Linux / macOS:</b> <code>/home/user/music</code> 或 <code>/var/music</code></li>
+                                                <li><b>Docker:</b> 需先挂载容器目录，如 <code>/app/music</code></li>
+                                            </ul>
+                                            <div class="tone-inset-dashed"
+                                                style="padding: 0.5rem 0.75rem;border-radius: 8px;word-break: break-all">
+                                                配置文件参考路径 (config.js): <br />
+                                                <code class="tone-info" id="config-js-path-ref">--</code>
+                                            </div>
+                                        </div>
+                                    </details>
+
+                                    <div class="subsonic-cache-help-row">
+                                        <span>最大快照数、本地配置备份、WebDAV、OpenList 与云端备份范围已统一迁移至备份中心</span>
+                                        <a href="#" onclick="app.openBackupCenter('local');return false;">前往备份管理 ↗</a>
+                                    </div>
                                 </div>
                             </div>
                         </div>
-
 
                         <!-- 保存操作栏 -->
                         <div class="config-actions-bar glass">
@@ -1319,73 +1342,91 @@
 
                 <!-- Subsonic 配置独立视图 -->
                 <div id="view-subsonic" class="view">
-                    <form id="subsonic-form" class="config-form">
-                        <!-- Subsonic 协议配置卡片 -->
-                        <div class="config-card glass">
-                            <div class="config-card-header">
-                                <div class="tone-fill-danger config-card-icon">
-                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                        <path d="M9 18V5l12-2v13"></path>
-                                        <circle cx="6" cy="18" r="3"></circle>
-                                        <circle cx="18" cy="16" r="3"></circle>
-                                    </svg>
+                    <form id="subsonic-form" class="config-form subsonic-form">
+                        <!-- 分区筛选导航栏（桌面端自适应，手机端横向滚动） -->
+                        <div class="subsonic-nav-bar glass" role="tablist" aria-label="Subsonic 配置分区">
+                            <button type="button" class="subsonic-nav-btn active" data-subsonic-tab="all" role="tab" aria-selected="true" onclick="app.switchSubsonicSection('all')">全部配置</button>
+                            <button type="button" class="subsonic-nav-btn" data-subsonic-tab="service" role="tab" aria-selected="false" onclick="app.switchSubsonicSection('service')">基础与接入</button>
+                            <button type="button" class="subsonic-nav-btn" data-subsonic-tab="cache" role="tab" aria-selected="false" onclick="app.switchSubsonicSection('cache')">播放与缓存</button>
+                            <button type="button" class="subsonic-nav-btn" data-subsonic-tab="quality" role="tab" aria-selected="false" onclick="app.switchSubsonicSection('quality')">音质与音源</button>
+                            <button type="button" class="subsonic-nav-btn" data-subsonic-tab="library" role="tab" aria-selected="false" onclick="app.switchSubsonicSection('library')">曲库与歌单</button>
+                            <button type="button" class="subsonic-nav-btn" data-subsonic-tab="search" role="tab" aria-selected="false" onclick="app.switchSubsonicSection('search')">搜索与歌词</button>
+                            <button type="button" class="subsonic-nav-btn" data-subsonic-tab="rating" role="tab" aria-selected="false" onclick="app.switchSubsonicSection('rating')">评分与联动</button>
+                        </div>
+
+                        <div class="subsonic-cards-stack">
+                            <!-- 1. 基础服务与网络接入 -->
+                            <div class="config-card glass subsonic-section-card" data-subsonic-section="service">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-danger config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <path d="M9 18V5l12-2v13"></path>
+                                            <circle cx="6" cy="18" r="3"></circle>
+                                            <circle cx="18" cy="16" r="3"></circle>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="config-card-title">基础服务与网络接入 <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                data-help="启用后支持第三方 Subsonic 客户端（如音流、PlaySub、Symfonium、Feishin）连接并同步歌单与媒体流。">?</button></h3>
+                                        <p class="config-card-desc">控制 Subsonic 协议开关、API 路径、独立监听端口与调试日志</p>
+                                    </div>
                                 </div>
-                                <div>
-                                    <h3 class="config-card-title">Subsonic 协议配置 <button type="button" class="help-icon"
-                                            aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                            data-help="启用后支持第三方 Subsonic 客户端（如 PlaySub, Symfonium）">?</button></h3>
-                                </div>
-                            </div>
-                            <div class="config-card-body">
-                                <div class="config-section-title">基础服务</div>
-                                <div class="config-grid-2">
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">启用 Subsonic 服务 <button type="button"
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">启用 Subsonic 服务 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="总开关：允许第三方 Subsonic 客户端通过 /rest 接口连接、验证账号并同步歌单、歌曲与歌词。修改后需重启服务器生效。">?</button></span>
+                                                <span class="config-toggle-desc">允许第三方 Subsonic 客户端连接服务器</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.enable" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">Subsonic 调试日志模式 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后将在服务器控制台实时打印所有客户端发起的 Subsonic API 请求参数、响应耗时与未实现接口提示，排查客户端兼容问题时使用。">?</button></span>
+                                                <span class="config-toggle-desc">在控制台输出客户端请求详情，便于排障</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.enableDebug" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">Subsonic 访问路径 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="允许 Subsonic 客户端连接并同步歌单">?</button></span>
+                                                    data-help="Subsonic API 默认挂载路径为 /rest。如果通过反向代理或自定义前缀访问，修改此处后需在客户端同步更新服务器地址。">?</button></label>
+                                            <span class="config-field-desc">API 挂载路由前缀，默认 /rest</span>
+                                            <input type="text" name="subsonic.path" class="form-input config-input"
+                                                placeholder="/rest" />
                                         </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.enable" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">Subsonic 调试日志模式 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="开启后将在服务器控制台中实时打印所有客户端发起的 Subsonic 请求与缺失接口提示">?</button></span>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label" id="lbl-subsonic-standalone">启用 Subsonic
+                                                    独立监听端口 <button type="button" class="help-icon" aria-label="查看帮助说明"
+                                                        onclick="app.toggleHelp(this)"
+                                                        data-help="与主端口同时生效。主端口用于网页端与管理后台，独立端口仅暴露纯净 Subsonic API（严格鉴权且非 API 请求返回空 404），适合反代、公网穿透或防火墙单独放行。注意：开启或关闭后均需重启服务。">?</button></span>
+                                                <span class="config-toggle-desc">单独开放纯净 API 端口，与主后台隔离</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" id="subsonic-standalone-toggle"
+                                                    aria-labelledby="lbl-subsonic-standalone" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
                                         </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.enableDebug" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
                                     </div>
-                                    <div class="config-field">
-                                        <label class="config-label">Subsonic 访问路径 <button type="button"
-                                                class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="Subsonic API 默认路径为 /rest。修改后需在客户端同步更新 URL">?</button></label>
-                                        <input type="text" name="subsonic.path" class="form-input config-input"
-                                            placeholder="/rest" />
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label" id="lbl-subsonic-standalone">启用 Subsonic
-                                                独立监听端口 <button type="button" class="help-icon" aria-label="查看帮助说明"
-                                                    onclick="app.toggleHelp(this)"
-                                                    data-help="与主端口同时生效。主端口用于网页端与管理后台，此端口仅暴露纯净 Subsonic API（严格鉴权且非 API 请求返回空 404），适合反代、公网穿透或防火墙单独放行。注意：关闭后需重启服务，已在监听的端口才会停止。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" id="subsonic-standalone-toggle"
-                                                aria-labelledby="lbl-subsonic-standalone" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div id="subsonic-standalone-fields" class="hidden">
+                                    <div id="subsonic-standalone-fields" class="config-subpanel hidden">
                                         <div class="config-field">
                                             <label class="config-label">Subsonic 独立监听端口 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="开启后两端口均可访问 Subsonic；此独立端口对爬虫与探测完全静默。关闭只需关闭上方开关，端口值会保留，重新开启无需重填">?</button></label>
+                                                    data-help="开启后主端口与独立端口均可访问 Subsonic；此独立端口对爬虫与探测完全静默。关闭上方开关后端口值仍会保留，重新开启无需重填。">?</button></label>
+                                            <span class="config-field-desc">填写 1–65535 的未占用端口号（默认 4050），保存并重启生效</span>
                                             <input type="number" name="subsonic.port" class="form-input config-input"
                                                 min="1" max="65535" placeholder="4050" />
                                             <small id="subsonic-port-error" class="tone-danger config-hint"
@@ -1395,473 +1436,618 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div class="config-section-title">本地歌曲歌单</div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">返回本地歌曲歌单 <button type="button"
-                                                class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="在歌单列表首位返回“本地歌曲(用户名)”只读歌单，汇总该账号当前存储目录中的歌曲。自定义目录歌曲由下方开关单独控制。客户端自行排序时以客户端设置为准。">?</button></span>
+                            </div>
+
+                            <!-- 2. 播放、缓存与云端交付 -->
+                            <div class="config-card glass subsonic-section-card" data-subsonic-section="cache">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-info config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                                            <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"></path>
+                                            <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"></path>
+                                        </svg>
                                     </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="subsonic.localPlaylist" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
+                                    <div>
+                                        <h3 class="config-card-title">播放、缓存与云端交付</h3>
+                                        <p class="config-card-desc">管理服务器音频缓存落盘、下载保存策略及 OpenList 云端回源方式</p>
+                                    </div>
                                 </div>
-                                <div id="subsonic-custom-playlist-options" class="config-subpanel"
-                                    style="display: none;">
-                                    <div class="config-toggle-row">
+                                <div class="config-card-body">
+                                    <div class="config-toggle-grid subsonic-cache-settings">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">播放时触发服务器缓存 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="通过 Subsonic 播放的在线曲目在后台自动落盘到该用户 cache 目录，已缓存则自动跳过。只影响后台写入，不决定是否优先读取已有缓存（注意可能产生较大服务端流量）。">?</button></span>
+                                                <span class="config-toggle-desc">听歌时后台自动缓存音频到用户 cache 目录</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.cacheOnPlay" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">下载歌曲保存到服务器 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="默认关闭：下载只投递到客户端，服务器不占空间、不写缓存、不补传备份。开启后，服务器会自动识别下载请求（标准 /rest/download 及部分客户端裸拉 stream 的下载），并将文件存入 music 下载目录而非 cache 缓存：不受缓存滚动清理影响，备份时也不受「仅播放过」限制。">?</button></span>
+                                                <span class="config-toggle-desc">客户端下载时同步保留一份到服务器 music 目录</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.saveDownload" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">服务器存在缓存优先播放 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="在线歌曲播放顺序：当前认证用户 music/cache（按音质及码率上限匹配）→ 允许时 OpenList → 在线音源。关闭后在线 ID 跳过本地及 OpenList，直接拉取在线音源；local_ 本地曲库 ID 仍正常读取本地文件。">?</button></span>
+                                                <span class="config-toggle-desc">优先读取服务器已缓存/下载的音频文件</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.playCacheFirst" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">缓存优先时优先使用 OpenList <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="仅控制 Subsonic。需同时开启「服务器存在缓存优先播放」，以及「备份管理 → OpenList 播放缓存」中的“允许作为播放来源”总开关；本地 music/cache 未命中后查询已登记云端文件，再回退在线音源。不会每次遍历网盘。">?</button></span>
+                                                <span class="config-toggle-desc">本地无缓存时回源已备份的 OpenList 云端文件</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.playCacheFirstUseOpenlist" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card subsonic-span-2">
+                                            <label class="config-label" for="subsonic-openlist-delivery">OpenList 交付方式
+                                                <button type="button" class="help-icon" aria-label="OpenList 交付方式说明"
+                                                    onclick="app.toggleHelp(this)"
+                                                    data-help="直链跳转（302）：客户端直接访问网盘或 OpenList，节省服务器带宽。服务器代理：由服务端中转音频流，适合不支持 302 跳转的客户端。签名直链：为无网盘直链的驱动（如 Local/WebDAV）生成带 HMAC 签名的 /d/ 直链（需配置 openlist.token），交付前先预检，不可读时自动降级代理。">?</button></label>
+                                            <span class="config-field-desc">决定客户端如何从 OpenList 获取云端音频流</span>
+                                            <select id="subsonic-openlist-delivery" name="subsonic.openlistDelivery"
+                                                class="form-input config-input">
+                                                <option value="direct">直链跳转（302）</option>
+                                                <option value="proxy">服务器代理</option>
+                                                <option value="sign">签名直链（/d/ 签名 + 预检降级代理）</option>
+                                            </select>
+                                        </div>
+                                        <div class="subsonic-cache-help-row">
+                                            <span>播放顺序与歌词机制 <button type="button" class="help-icon" aria-label="播放顺序与歌词说明"
+                                                    onclick="app.toggleHelp(this)"
+                                                    data-help="按用户隔离：本地 music/cache → 可选 OpenList → 在线音源，并匹配客户端音质与码率要求。local_ 本地曲库直接读取本地文件（含自定义目录）。歌词优先本地 LRC，再查询在线平台；本地曲库也支持内嵌歌词。OpenList 作为播放来源的总开关在「备份管理」中设置。">?</button></span>
+                                            <a href="#"
+                                                onclick="app.openBackupCenter('cloud', 'playcache');return false;">OpenList
+                                                播放缓存设置 ↗</a>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 3. 音质与音源优选 -->
+                            <div class="config-card glass subsonic-section-card" data-subsonic-section="quality">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-accent config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="4" y1="21" x2="4" y2="14"></line>
+                                            <line x1="4" y1="10" x2="4" y2="3"></line>
+                                            <line x1="12" y1="21" x2="12" y2="12"></line>
+                                            <line x1="12" y1="8" x2="12" y2="3"></line>
+                                            <line x1="20" y1="21" x2="20" y2="16"></line>
+                                            <line x1="20" y1="12" x2="20" y2="3"></line>
+                                            <line x1="1" y1="14" x2="7" y2="14"></line>
+                                            <line x1="9" y1="8" x2="15" y2="8"></line>
+                                            <line x1="17" y1="16" x2="23" y2="16"></line>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="config-card-title">音质与音源优选</h3>
+                                        <p class="config-card-desc">配置音质降级顺序、跨平台替身搜索与歌手元数据来源</p>
+                                    </div>
+                                </div>
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">音质优选总开关 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="开启后按下方「音质优先级」主动尝试获取最优可用音质，高音质失败时自动降级；关闭则 stream 仅按默认音质单次解析。">?</button></span>
+                                                <span class="config-toggle-desc">自动按优先级尝试并降级匹配最优音质</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.quality.enabled" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">歌手信息源优先级 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="设置 Subsonic 客户端请求歌手详情、头像及简介时的在线元数据获取优先级。">?</button></label>
+                                            <span class="config-field-desc">控制歌手头像与简介的获取顺序</span>
+                                            <select name="singer.sourcePriority" class="form-input config-input">
+                                                <option value="tx,wy">TX 优先</option>
+                                                <option value="wy,tx">WY 优先</option>
+                                                <option value="tx">仅 TX</option>
+                                                <option value="wy">仅 WY</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <div class="config-field subsonic-item-card">
+                                        <label class="config-label">音质优先级（高→低） <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                data-help="拖拽标签可调整音质尝试的先后顺序；点击标签右侧 ✕ 可停用并置底变灰，再次点击即可重新启用。">?</button></label>
+                                        <span class="config-field-desc">拖拽调整顺序，点击 ✕ 可停用或恢复对应音质</span>
+                                        <input type="hidden" name="subsonic.quality.priority" value="flac,320k,128k" />
+                                        <div class="tag-sortable-group" id="tag-group-quality-priority"></div>
+                                    </div>
+
+                                    <div class="config-toggle-grid">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">允许跨平台优选 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="当原平台歌曲无法播放或音质不足时，自动按歌名 + 歌手在其它已启用平台中搜索可用替身播放。">?</button></span>
+                                                <span class="config-toggle-desc">原平台失效时自动跨平台匹配同曲替身</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.source.crossPlatform" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">同源切换其它自定义源 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="解析失败时在 callUserApiGetMusicUrl 内部自动循环尝试同平台的其它候选自定义音源脚本。">?</button></span>
+                                                <span class="config-toggle-desc">同平台解析失败时轮询备用自定义脚本</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.source.autoSwitchCustom" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="config-field subsonic-item-card">
+                                        <label class="config-label">跨平台源优选顺序 <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                data-help="拖拽标签可调整跨平台替身搜索的平台先后顺序；点击 ✕ 可停用并置底变灰（客户端当前所选平台始终最优先）。">?</button></label>
+                                        <span class="config-field-desc">拖拽排序跨平台替身搜索顺序，点击 ✕ 停用/恢复</span>
+                                        <input type="hidden" name="subsonic.source.priority" value="kw,tx,wy,mg,kg" />
+                                        <div class="tag-sortable-group" id="tag-group-source-priority"></div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 4. 曲库、歌单与排行榜 -->
+                            <div class="config-card glass subsonic-section-card" data-subsonic-section="library">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-success config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <line x1="8" y1="6" x2="21" y2="6"></line>
+                                            <line x1="8" y1="12" x2="21" y2="12"></line>
+                                            <line x1="8" y1="18" x2="21" y2="18"></line>
+                                            <line x1="3" y1="6" x2="3.01" y2="6"></line>
+                                            <line x1="3" y1="12" x2="3.01" y2="12"></line>
+                                            <line x1="3" y1="18" x2="3.01" y2="18"></line>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="config-card-title">曲库、歌单与排行榜</h3>
+                                        <p class="config-card-desc">配置本地歌曲虚拟歌单、自定义目录与公开排行榜映射</p>
+                                    </div>
+                                </div>
+                                <div class="config-card-body">
+                                    <div class="config-toggle-row subsonic-item-card">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">返回缓存目录歌曲 <button type="button"
+                                            <span class="config-toggle-label">返回本地歌曲歌单 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="默认关闭，本地歌曲歌单仅返回当前账号所选存储位置 music 目录中的歌曲。开启后将 cache 目录歌曲一并加入本地歌曲歌单。">?</button></span>
+                                                    data-help="在歌单列表首位返回“本地歌曲(用户名)”只读歌单，汇总该账号当前存储目录中的歌曲。自定义目录歌曲由下方开关单独控制。客户端自行排序时以客户端设置为准。">?</button></span>
+                                            <span class="config-toggle-desc">在客户端歌单列表展示当前用户的本地音乐</span>
                                         </div>
                                         <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.cachePlaylist" />
+                                            <input type="checkbox" name="subsonic.localPlaylist" />
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
-                                    <div class="config-toggle-row">
+                                    <div id="subsonic-custom-playlist-options" class="config-subpanel"
+                                        style="display: none;">
+                                        <div class="config-toggle-row">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">返回缓存目录歌曲 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="默认关闭，本地歌曲歌单仅返回当前账号所选存储位置 music 目录中的歌曲。开启后将 cache 播放缓存目录歌曲一并加入本地歌曲歌单。">?</button></span>
+                                                <span class="config-toggle-desc">将 cache 缓存目录歌曲一并纳入本地歌单</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.cachePlaylist" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">返回自定义目录歌曲 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="单独返回“自定义目录(用户名)”只读歌单，放在本地歌曲歌单之后。仅收录该账号已启用的自定义音乐目录。关闭后不返回此歌单。">?</button></span>
+                                                <span class="config-toggle-desc">单独返回已启用的自定义音乐目录只读歌单</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.customPlaylist" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="config-divider"></div>
+
+                                    <div class="config-toggle-row subsonic-item-card">
                                         <div class="config-toggle-info">
-                                            <span class="config-toggle-label">返回自定义目录歌曲 <button type="button"
+                                            <span class="config-toggle-label">启用 Subsonic 公开排行榜歌单 <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="单独返回“自定义目录(用户名)”只读歌单，放在本地歌曲歌单之后。仅收录该账号已启用的自定义音乐目录。关闭后不返回此歌单。">?</button></span>
+                                                    data-help="将在线排行榜（如飙升榜、热歌榜、新歌榜）或平台热门歌单映射为系统虚拟用户 lxserver 的公开只读歌单。在音流等客户端的歌单页选择「全部歌单」/「公开歌单」即可查看播放。">?</button></span>
+                                            <span class="config-toggle-desc">将在线榜单与热门歌单映射为公开只读歌单</span>
                                         </div>
                                         <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.customPlaylist" />
+                                            <input type="checkbox" name="subsonic.publicLeaderboards" />
                                             <span class="toggle-track"><span class="toggle-thumb"></span></span>
                                         </label>
                                     </div>
-                                </div>
-                                <div class="config-section-title">排行榜与共享歌单</div>
-                                <div class="config-toggle-row">
-                                    <div class="config-toggle-info">
-                                        <span class="config-toggle-label">启用 Subsonic 公开排行榜歌单 <button type="button"
-                                                class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="将在线排行榜（如飙升榜、热歌榜、新歌榜等）映射为 Subsonic 只读虚拟歌单">?</button></span>
-                                    </div>
-                                    <label class="toggle-switch">
-                                        <input type="checkbox" name="subsonic.publicLeaderboards" />
-                                        <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                    </label>
-                                </div>
-                                <div id="subsonic-leaderboard-options" class="config-subpanel" style="display: none;">
-                                    <div class="config-field">
-                                        <label class="config-label">排行榜音源平台（单选）</label>
-                                        <input type="hidden" name="subsonic.leaderboardSource" value="tx" />
-                                        <div class="tag-select-group" id="tag-group-leaderboard-source">
-                                            <span class="tag-select-item active" data-value="tx">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                                    stroke-width="2">
-                                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                                </svg>
-                                                QQ 音乐 (tx)
-                                            </span>
-                                            <span class="tag-select-item" data-value="wy">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                                    stroke-width="2">
-                                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                                </svg>
-                                                网易云 (wy)
-                                            </span>
-                                            <span class="tag-select-item" data-value="kg">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                                    stroke-width="2">
-                                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                                </svg>
-                                                酷狗音乐 (kg)
-                                            </span>
-                                            <span class="tag-select-item" data-value="kw">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                                    stroke-width="2">
-                                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                                </svg>
-                                                酷我音乐 (kw)
-                                            </span>
-                                            <span class="tag-select-item" data-value="mg">
-                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                                                    stroke-width="2">
-                                                    <polyline points="20 6 9 17 4 12"></polyline>
-                                                </svg>
-                                                咪咕音乐 (mg)
-                                            </span>
-                                        </div>
-                                        <small class="tone-secondary config-hint"
-                                            style="margin-top: 8px;display: block;line-height: 1.5">
-                                            💡 说明：排行榜歌单归属于系统虚拟用户 <code>lxserver</code>
-                                            的公开歌单（只读）。在音流等客户端中，请在歌单页选择<strong>「全部歌单」/「公开歌单」</strong>分类即可查看并播放。
-                                        </small>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label">共享歌单内容（三态）</label>
-                                        <input type="hidden" name="subsonic.sharedListMode" value="leaderboard" />
-                                        <div class="tag-select-group" id="tag-group-shared-mode">
-                                            <span class="tag-select-item active" data-value="leaderboard">排行榜</span>
-                                            <span class="tag-select-item" data-value="playlist">歌单</span>
-                                            <span class="tag-select-item" data-value="both">两者</span>
-                                        </div>
-                                        <small class="tone-secondary config-hint"
-                                            style="margin-top: 8px;display: block;line-height: 1.5">
-                                            选择「排行榜」仅暴露榜单；「歌单」仅暴露平台热门/最新歌单；「两者」同时暴露两者。
-                                        </small>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label">共享歌单排序</label>
-                                        <input type="hidden" name="subsonic.sharedListSort" value="hot" />
-                                        <div class="tag-select-group" id="tag-group-shared-sort">
-                                            <span class="tag-select-item active" data-value="hot">热门</span>
-                                            <span class="tag-select-item" data-value="new">最新</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div class="config-section-title">在线搜索与歌词</div>
-                                <div class="config-grid-2">
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启全网在线搜索 <button type="button"
+                                    <div id="subsonic-leaderboard-options" class="config-subpanel" style="display: none;">
+                                        <div class="config-field">
+                                            <label class="config-label">排行榜音源平台（单选） <button type="button"
                                                     class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="允许 Subsonic 客户端在搜索歌曲时检索全网音乐 API">?</button></span>
+                                                    data-help="排行榜与共享歌单归属于系统虚拟用户 lxserver 的公开歌单（只读）。在音流等客户端中，请在歌单页选择「全部歌单」/「公开歌单」分类即可查看并播放。">?</button></label>
+                                            <span class="config-field-desc">选择用于拉取榜单与共享歌单的音乐平台</span>
+                                            <input type="hidden" name="subsonic.leaderboardSource" value="tx" />
+                                            <div class="tag-select-group" id="tag-group-leaderboard-source">
+                                                <span class="tag-select-item active" data-value="tx">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                        stroke-width="2">
+                                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                                    </svg>
+                                                    QQ 音乐 (tx)
+                                                </span>
+                                                <span class="tag-select-item" data-value="wy">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                        stroke-width="2">
+                                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                                    </svg>
+                                                    网易云 (wy)
+                                                </span>
+                                                <span class="tag-select-item" data-value="kg">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                        stroke-width="2">
+                                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                                    </svg>
+                                                    酷狗音乐 (kg)
+                                                </span>
+                                                <span class="tag-select-item" data-value="kw">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                        stroke-width="2">
+                                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                                    </svg>
+                                                    酷我音乐 (kw)
+                                                </span>
+                                                <span class="tag-select-item" data-value="mg">
+                                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                                        stroke-width="2">
+                                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                                    </svg>
+                                                    咪咕音乐 (mg)
+                                                </span>
+                                            </div>
                                         </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.onlineSearch" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
+                                        <div class="config-grid-2" style="margin-top: 14px;">
+                                            <div class="config-field">
+                                                <label class="config-label">共享歌单内容（三态） <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="选择「排行榜」仅暴露平台榜单；「歌单」仅暴露平台热门/最新歌单；「两者」同时暴露榜单与平台歌单。">?</button></label>
+                                                <span class="config-field-desc">控制公开歌单中展示榜单还是平台歌单</span>
+                                                <input type="hidden" name="subsonic.sharedListMode" value="leaderboard" />
+                                                <div class="tag-select-group" id="tag-group-shared-mode">
+                                                    <span class="tag-select-item active" data-value="leaderboard">排行榜</span>
+                                                    <span class="tag-select-item" data-value="playlist">歌单</span>
+                                                    <span class="tag-select-item" data-value="both">两者</span>
+                                                </div>
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-label">共享歌单排序 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="当共享歌单内容包含「歌单」时，决定从平台拉取最热歌单还是最新歌单。">?</button></label>
+                                                <span class="config-field-desc">拉取平台歌单时的排序方式</span>
+                                                <input type="hidden" name="subsonic.sharedListSort" value="hot" />
+                                                <div class="tag-select-group" id="tag-group-shared-sort">
+                                                    <span class="tag-select-item active" data-value="hot">热门</span>
+                                                    <span class="tag-select-item" data-value="new">最新</span>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
-                                    <div class="config-field">
-                                        <label class="config-label">默认在线搜索模式</label>
+                                </div>
+                            </div>
+
+                            <!-- 5. 在线搜索与歌词 -->
+                            <div class="config-card glass subsonic-section-card" data-subsonic-section="search">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-info config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <circle cx="11" cy="11" r="8"></circle>
+                                            <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="config-card-title">在线搜索与歌词</h3>
+                                        <p class="config-card-desc">设置客户端搜索策略、启用平台及歌词翻译展示格式</p>
+                                    </div>
+                                </div>
+                                <div class="config-card-body">
+                                    <div class="config-grid-2">
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">开启全网在线搜索 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="允许 Subsonic 客户端在搜索歌曲、歌手或专辑时检索已启用的全网在线音乐平台 API。">?</button></span>
+                                                <span class="config-toggle-desc">允许客户端直接搜索在线音乐平台曲库</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.onlineSearch" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">开启歌词翻译支持 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="允许在 Subsonic 歌词响应中附带翻译文本。同时间戳歌词将按「原文在上，翻译在下」的顺序输出。">?</button></span>
+                                                <span class="config-toggle-desc">在歌词响应中附带翻译行（原文在上）</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.lyricTranslation" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="config-field subsonic-item-card">
+                                        <label class="config-label">默认在线搜索模式 <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                data-help="决定客户端直接输入歌名搜索时的默认行为：自动兜底（本地未命中或数量不足时再搜在线）、融合搜索（本地置顶，在线追加）或仅搜本地歌单。">?</button></label>
+                                        <span class="config-field-desc">无前缀关键词搜索时本地与在线结果的组合策略</span>
                                         <select name="subsonic.onlineSearchMode" class="form-input config-input">
                                             <option value="fallback">自动兜底（本地未命中或数量不足时搜在线）</option>
                                             <option value="merge">本地与在线融合搜索（本地置顶，在线追加）</option>
                                             <option value="local_only">仅搜索本地歌单</option>
                                         </select>
                                     </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">开启歌词翻译支持 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="允许在 Subsonic 歌词响应中包含翻译文本（原文在上，翻译在下）">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.lyricTranslation" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">默认在线搜索平台（多选） <button type="button" class="help-icon"
-                                            aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                            data-help="点击标签快速启用/停用对应平台搜索">?</button></label>
-                                    <input type="hidden" name="subsonic.onlineSearchSources" value="wy,tx,kw,kg,mg" />
-                                    <div class="tag-select-group" id="tag-group-search-sources">
-                                        <span class="tag-select-item active" data-value="wy">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <polyline points="20 6 9 17 4 12"></polyline>
-                                            </svg>
-                                            网易云 (wy)
-                                        </span>
-                                        <span class="tag-select-item active" data-value="tx">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <polyline points="20 6 9 17 4 12"></polyline>
-                                            </svg>
-                                            QQ 音乐 (tx)
-                                        </span>
-                                        <span class="tag-select-item active" data-value="kw">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <polyline points="20 6 9 17 4 12"></polyline>
-                                            </svg>
-                                            酷我音乐 (kw)
-                                        </span>
-                                        <span class="tag-select-item active" data-value="kg">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <polyline points="20 6 9 17 4 12"></polyline>
-                                            </svg>
-                                            酷狗音乐 (kg)
-                                        </span>
-                                        <span class="tag-select-item active" data-value="mg">
-                                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                                <polyline points="20 6 9 17 4 12"></polyline>
-                                            </svg>
-                                            咪咕音乐 (mg)
-                                        </span>
-                                    </div>
-                                </div>
-                                <div class="config-section-title">播放与缓存</div>
-                                <div class="config-toggle-grid subsonic-cache-settings">
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">播放时触发服务器缓存 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="通过 Subsonic 播放的曲目在后台自动落盘到该用户缓存目录，已缓存自动跳过（注意可能产生较大流量）">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.cacheOnPlay" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">下载歌曲保存到服务器 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="默认关闭：下载只投递到客户端，服务器不占空间、不写缓存、不补传备份。开启后，服务器会自动识别下载请求（标准 /rest/download，以及部分客户端用裸 OkHttp 拉 stream 的下载），并把文件存入 music 下载目录而非 cache 播放缓存：不受缓存滚动清理影响，备份时也不受「仅播放过」限制。播放请求不会被误判为下载。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.saveDownload" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">服务器存在缓存优先播放 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="在线歌曲：当前认证用户 music/cache（按音质及码率上限）→ 允许时 OpenList → 在线音源。关闭后在线 ID 跳过本地及 OpenList，但 local_ 本地曲库 ID 仍读取其文件。与播放时后台写入缓存独立。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.playCacheFirst" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">缓存优先时优先使用 OpenList <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="仅控制 Subsonic。需同时开启缓存优先，以及「备份管理 → OpenList 播放缓存」中的“允许作为播放来源”总开关；本地 music/cache 未命中后查询已登记云端文件，再回退在线音源。直链/代理由下方交付方式决定，不会每次遍历网盘。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.playCacheFirstUseOpenlist" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label" for="subsonic-openlist-delivery">OpenList 交付方式
-                                            <button type="button" class="help-icon" aria-label="OpenList 交付方式说明"
-                                                onclick="app.toggleHelp(this)"
-                                                data-help="直链：302 跳转，客户端直接访问网盘或 OpenList，节省服务器流量。代理：由服务器转发，适合不支持跳转的客户端。签名直链：为无网盘直链的驱动（如 Local/WebDAV）生成带 HMAC 签名的 /d/ 直链（需配置 openlist.token），交付前先预检，不可读时自动降级代理。">?</button></label>
-                                        <select id="subsonic-openlist-delivery" name="subsonic.openlistDelivery"
-                                            class="form-input config-input">
-                                            <option value="direct">直链跳转（302）</option>
-                                            <option value="proxy">服务器代理</option>
-                                            <option value="sign">签名直链（/d/ 签名 + 预检降级代理）</option>
-                                        </select>
-                                    </div>
-                                    <div class="subsonic-cache-help-row">
-                                        <span>播放顺序与歌词 <button type="button" class="help-icon" aria-label="播放顺序与歌词说明"
-                                                onclick="app.toggleHelp(this)"
-                                                data-help="按用户隔离：本地 music/cache → 可选 OpenList → 在线音源，并匹配客户端音质与码率要求。local_ 本地曲库直接读取本地文件（含自定义目录）。歌词优先本地 LRC，再查询在线平台；本地曲库也支持内嵌歌词。播放时缓存只控制后台写入 cache，不决定是否优先读取已有文件；在线 download 分支仍会后台缓存。OpenList 作为播放来源的总开关在备份管理中设置。">?</button></span>
-                                        <a href="#"
-                                            onclick="app.openBackupCenter('cloud', 'playcache');return false;">OpenList
-                                            播放缓存设置 ↗</a>
-                                    </div>
-                                </div>
-                                <div class="tone-danger-note config-hint"
-                                    style="padding: 8px 12px;border-radius: 6px;line-height: 1.5">
-                                    💡 <strong>Subsonic 客户端搜索：</strong>直接输入歌曲名时使用上方“默认在线搜索模式”。也可在搜索框中使用以下前缀：<br />
-                                    • <code>all:歌名</code> / <code>online:歌名</code>：搜索全部已启用在线平台<br />
-                                    • <code>local:歌名</code>：只搜索本地歌单<br />
-                                    •
-                                    <code>wy:歌名</code>、<code>tx:歌名</code>、<code>kw:歌名</code>、<code>kg:歌名</code>、<code>mg:歌名</code>：指定网易、QQ、酷我、酷狗或咪咕<br />
-                                    客户端支持音乐目录时，也可选择“全部在线平台”或单个平台目录后再搜索。同时间戳歌词顺序为<strong>原文在上，翻译在下</strong>。
-                                </div>
-                                <!-- 不喜欢 / 评分联动 -->
-                                <div class="config-section-title">评分与不喜欢（Subsonic）</div>
-                                <div class="config-grid-2">
-                                    <div class="config-field">
-                                        <label class="config-label">低分阈值 <button type="button" class="help-icon"
-                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="评分大于0且不超过此值时，正向联动才补不喜欢。0暂停两个方向的联动，不删除评分或已有规则。更改阈值不会重算历史；调高后可手动补数据，调低后原规则仍保留。">?</button></label>
-                                        <select name="subsonic.dislikeRating" class="form-input config-input">
-                                            <option value="0">0（暂停评分与不喜欢联动）</option>
-                                            <option value="1">1（≤1 星视为不喜欢）</option>
-                                            <option value="2">2（≤2 星视为不喜欢）</option>
-                                            <option value="3">3（≤3 星视为不喜欢）</option>
-                                            <option value="4">4（≤4 星视为不喜欢）</option>
-                                            <option value="5">5（所有已评分歌曲视为不喜欢）</option>
-                                        </select>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label">合唱匹配 <button type="button" class="help-icon"
-                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="歌曲与专辑维度多歌手时，dislike 规则命中的判定方式（合唱歌曲与专辑歌手集合统一按此处理）">?</button></label>
-                                        <select name="subsonic.dislikeDuetMode" class="form-input config-input">
-                                            <option value="any">任一歌手命中</option>
-                                            <option value="all">全部歌手命中</option>
-                                            <option value="primary">仅匹配主唱</option>
-                                        </select>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">隐藏不喜欢歌曲 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="在 Subsonic 搜索、普通歌单和专辑列表中隐藏命中项。关闭后重新显示，不删除规则，也不修改评分；评分歌单不受此过滤影响。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.hideDisliked" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">跨来源匹配 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="新规则关闭时仅匹配相同来源，开启时跨来源匹配同名规则；未指定来源的规则作用于全部来源。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.dislikeCrossSource" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">推荐排除不喜欢 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="每日推荐、随机和相似歌曲统一排除不喜欢命中项及阈值内低分。与普通列表隐藏、自动联动开关独立；关闭后不做此过滤。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.dislikeNoRecommend" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">匹配其他版本 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="匹配时忽略 Live、Remix 等版本后缀，让基础歌名规则命中其他版本。仅改变过滤结果，不合并原始歌曲、不重写评分。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.dislikeNormalizeName" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">同时匹配歌手 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="控制只有歌名、未记录歌手的通用规则：开启时不单独命中，关闭时按歌名命中。已有歌手的歌曲规则、专辑规则仍校验歌手。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.dislikeRequireSinger" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">低分补不喜欢 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="Web 对歌曲、Subsonic 对歌曲、歌手或专辑提交低分时，解析后补对应不喜欢规则。仅影响之后的评分请求；已有低分需手动补数据。提高、清除评分或关闭开关均不删除规则。客户端是否能给歌手或专辑评分取决于客户端支持。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.linkRatingToDislike" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">显示评分歌单 <button type="button"
-                                                    class="help-icon" aria-label="评分歌单说明" onclick="app.toggleHelp(this)"
-                                                    data-help="向 Subsonic 展示有内容的1至5星虚拟歌单，不创建实体歌单。1星合集额外包含不喜欢命中项，保留其真实评分；关闭只隐藏入口，不关闭联动、不删除数据。">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch"><input type="checkbox"
-                                                name="subsonic.ratingPlaylists" /><span class="toggle-track"><span
-                                                    class="toggle-thumb"></span></span></label>
-                                    </div>
-                                </div>
-                                <div class="config-hint subsonic-rating-note">
-                                    <strong>💡 Web / Subsonic 评分说明</strong>
-                                    <p>星级评分与爱心收藏独立，两端共用评分。Web 支持歌曲评分；Subsonic
-                                        还可为歌手、专辑评分（取决于客户端）。低分转不喜欢与不喜欢补评分分别由开关控制，不喜欢自动补分由各用户在 Web 设置 →
-                                        逻辑中单独开启，默认关闭；后台补分独立执行，不受用户开关和低分阈值影响。</p>
-                                    <p>本地歌曲未关联时使用本地评分；关联后以在线歌曲评分为准，与在线版及其他关联副本共用。在线版已有评分时保留在线评分并删除本地评分；仅本地有评分时迁移到在线
-                                        ID，同时保留评分来源与记录。
-                                    </p>
-                                    <p>联动只补数据，不撤销历史：调低阈值、提高或清除评分、关闭开关均不会删除已有规则。需要处理历史数据时，可预览补齐或按阈值重算。重算仅撤销可追溯的评分联动原因，手动与来源不明规则保留。
-                                    </p>
-                                    <span id="subsonic-link-saved-status" role="status"></span>
-                                </div>
-                                <div class="config-section-title" id="link-sync-field">历史数据补齐</div>
-                                <div class="config-grid-2">
-                                    <div class="config-field">
-                                        <label class="config-label" for="subsonic-sync-user">目标用户 <button type="button"
-                                                class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="导入 / 回滚不会自动联动另一侧数据；手动同步先预览候选歌曲与来源，扫描歌单、本地及在线缓存，只补缺失项。">?</button></label>
-                                        <select id="subsonic-sync-user" class="form-input config-input"></select>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label">操作（低分补规则需先保存开关；后台补分可独立执行）</label>
-                                        <div style="display: flex; gap: .5rem; flex-wrap: wrap;">
-                                            <button type="button" id="sync-rating-to-dislike-btn"
-                                                class="btn-secondary hidden"
-                                                onclick="app.syncLink('ratingToDislike')">低分补不喜欢</button>
-                                            <button type="button" id="sync-dislike-to-rating-btn"
-                                                class="btn-secondary hidden"
-                                                onclick="app.syncLink('dislikeToRating')">后台补分</button>
-                                            <button type="button" id="reconcile-rating-btn" class="btn-secondary"
-                                                onclick="app.syncLink('ratingToDislike', true)">按阈值重算</button>
-                                        </div>
-                                    </div>
-                                </div>
-                                <div id="link-sync-result" class="tone-secondary hidden text-sm"
-                                    style="margin-top: .75rem"></div>
-                                <div class="config-section-title">音质 / 源优选 (Subsonic)</div>
-                                <div class="config-grid-2">
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">音质优选总开关 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="按优先级主动选最优可用音质；关闭则 stream 仅单次解析">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.quality.enabled" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
-                                    </div>
-                                    <div class="config-field">
-                                        <label class="config-label">歌手信息源优先级 <button type="button" class="help-icon"
-                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                data-help="设置歌手详情、头像及简介的获取来源优先级">?</button></label>
-                                        <select name="singer.sourcePriority" class="form-input config-input">
-                                            <option value="tx,wy">TX 优先</option>
-                                            <option value="wy,tx">WY 优先</option>
-                                            <option value="tx">仅 TX</option>
-                                            <option value="wy">仅 WY</option>
-                                        </select>
-                                    </div>
-                                </div>
-                                <div class="config-field">
-                                    <label class="config-label">音质优先级（高→低） <button type="button" class="help-icon"
-                                            aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                            data-help="拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（再次点击即可重新启用）">?</button></label>
-                                    <input type="hidden" name="subsonic.quality.priority" value="flac,320k,128k" />
-                                    <div class="tag-sortable-group" id="tag-group-quality-priority"></div>
-                                </div>
 
-                                <div class="config-field">
-                                    <label class="config-label">跨平台源优选顺序 <button type="button" class="help-icon"
-                                            aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                            data-help="拖拽可调整优先顺序；点击 ✕ 可停用/置底变灰（客户端所选源始终最优先）">?</button></label>
-                                    <input type="hidden" name="subsonic.source.priority" value="kw,tx,wy,mg,kg" />
-                                    <div class="tag-sortable-group" id="tag-group-source-priority"></div>
+                                    <div class="config-field subsonic-item-card">
+                                        <label class="config-label">默认在线搜索平台（多选） <button type="button" class="help-icon"
+                                                aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                data-help="点击下方平台标签可快速启用或停用对应平台的在线搜索能力。至少保留一个平台以确保在线搜索可用。">?</button></label>
+                                        <span class="config-field-desc">点击标签快速勾选允许参与搜索的在线平台</span>
+                                        <input type="hidden" name="subsonic.onlineSearchSources" value="wy,tx,kw,kg,mg" />
+                                        <div class="tag-select-group" id="tag-group-search-sources">
+                                            <span class="tag-select-item active" data-value="wy">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                网易云 (wy)
+                                            </span>
+                                            <span class="tag-select-item active" data-value="tx">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                QQ 音乐 (tx)
+                                            </span>
+                                            <span class="tag-select-item active" data-value="kw">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                酷我音乐 (kw)
+                                            </span>
+                                            <span class="tag-select-item active" data-value="kg">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                酷狗音乐 (kg)
+                                            </span>
+                                            <span class="tag-select-item active" data-value="mg">
+                                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                                    <polyline points="20 6 9 17 4 12"></polyline>
+                                                </svg>
+                                                咪咕音乐 (mg)
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    <details class="subsonic-details-note">
+                                        <summary>💡 客户端搜索前缀快捷指令说明（点击展开）</summary>
+                                        <div class="subsonic-details-body">
+                                            <p>直接输入歌曲名时使用上方「默认在线搜索模式」，也可在客户端搜索框中使用以下前缀精确指定范围：</p>
+                                            <ul>
+                                                <li><code>all:歌名</code> / <code>online:歌名</code>：搜索全部已启用在线平台</li>
+                                                <li><code>local:歌名</code>：仅搜索本地歌单与本地曲库</li>
+                                                <li><code>wy:</code> / <code>tx:</code> / <code>kw:</code> / <code>kg:</code> / <code>mg:</code> + 歌名：指定单个平台搜索</li>
+                                            </ul>
+                                            <p>客户端支持音乐目录时，也可直接选择「全部在线平台」或单个平台目录后再搜索。</p>
+                                        </div>
+                                    </details>
                                 </div>
-                                <div class="config-toggle-grid">
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">允许跨平台优选 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="按歌名+歌手在其它平台搜索替身">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.source.crossPlatform" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
+                            </div>
+
+                            <!-- 6. 评分与不喜欢联动 -->
+                            <div class="config-card glass subsonic-section-card" data-subsonic-section="rating">
+                                <div class="config-card-header">
+                                    <div class="tone-fill-danger config-card-icon">
+                                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                                        </svg>
                                     </div>
-                                    <div class="config-toggle-row">
-                                        <div class="config-toggle-info">
-                                            <span class="config-toggle-label">同源切换其它自定义源 <button type="button"
-                                                    class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
-                                                    data-help="callUserApiGetMusicUrl 内部循环同平台候选脚本">?</button></span>
-                                        </div>
-                                        <label class="toggle-switch">
-                                            <input type="checkbox" name="subsonic.source.autoSwitchCustom" />
-                                            <span class="toggle-track"><span class="toggle-thumb"></span></span>
-                                        </label>
+                                    <div>
+                                        <h3 class="config-card-title">评分与不喜欢联动</h3>
+                                        <p class="config-card-desc">配置星级评分阈值、不喜欢过滤匹配规则与历史数据补齐</p>
                                     </div>
+                                </div>
+                                <div class="config-card-body">
+                                    <div class="config-section-title" style="margin-top: 0;">过滤与联动规则</div>
+                                    <div class="config-grid-2">
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">低分阈值 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="评分大于 0 且不超过此值时，正向联动才补不喜欢。设为 0 暂停联动，不删除评分或已有规则。更改阈值不会重算历史；调高后可手动补数据，调低后原规则仍保留。">?</button></label>
+                                            <span class="config-field-desc">设定触发不喜欢规则的最高星级阈值</span>
+                                            <select name="subsonic.dislikeRating" class="form-input config-input">
+                                                <option value="0">0（暂停评分与不喜欢联动）</option>
+                                                <option value="1">1（≤1 星视为不喜欢）</option>
+                                                <option value="2">2（≤2 星视为不喜欢）</option>
+                                                <option value="3">3（≤3 星视为不喜欢）</option>
+                                                <option value="4">4（≤4 星视为不喜欢）</option>
+                                                <option value="5">5（所有已评分歌曲视为不喜欢）</option>
+                                            </select>
+                                        </div>
+                                        <div class="config-field subsonic-item-card">
+                                            <label class="config-label">合唱匹配 <button type="button" class="help-icon"
+                                                    aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                    data-help="歌曲与专辑存在多歌手时，dislike 规则命中的判定方式（合唱歌曲与专辑歌手集合统一按此规则处理）。">?</button></label>
+                                            <span class="config-field-desc">多歌手合作曲目命中不喜欢规则的判定方式</span>
+                                            <select name="subsonic.dislikeDuetMode" class="form-input config-input">
+                                                <option value="any">任一歌手命中</option>
+                                                <option value="all">全部歌手命中</option>
+                                                <option value="primary">仅匹配主唱</option>
+                                            </select>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">隐藏不喜欢歌曲 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="在 Subsonic 搜索、普通歌单和专辑列表中隐藏命中项。关闭后重新显示，不删除规则也不修改评分；评分歌单不受此过滤影响。">?</button></span>
+                                                <span class="config-toggle-desc">在搜索、歌单和专辑中屏蔽命中曲目</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.hideDisliked" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">推荐排除不喜欢 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="每日推荐、随机播放和相似歌曲统一排除不喜欢命中项及阈值内低分。与普通列表隐藏、自动联动开关独立；关闭后不做此过滤。">?</button></span>
+                                                <span class="config-toggle-desc">每日推荐、随机与相似歌曲跳过低分与不喜欢</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.dislikeNoRecommend" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">跨来源匹配 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="关闭时新规则仅匹配相同来源；开启时跨平台匹配同名规则。未指定来源的规则始终作用于全部来源。">?</button></span>
+                                                <span class="config-toggle-desc">让不喜欢规则跨平台匹配同名歌曲</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.dislikeCrossSource" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">匹配其他版本 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="匹配时忽略 Live、Remix 等版本后缀，让基础歌名规则同时命中其他版本。仅改变过滤结果，不合并原始歌曲、不重写评分。">?</button></span>
+                                                <span class="config-toggle-desc">忽略 Live/Remix 后缀一并命中过滤</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.dislikeNormalizeName" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">同时匹配歌手 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="控制只有歌名、未记录歌手的通用规则：开启时不单独命中，关闭时按歌名命中。已有歌手的歌曲规则、专辑规则仍校验歌手。">?</button></span>
+                                                <span class="config-toggle-desc">无歌手信息的通用规则不单独按歌名命中</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.dislikeRequireSinger" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">低分补不喜欢 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="Web 对歌曲、Subsonic 对歌曲/歌手/专辑提交低分时，解析后自动补对应不喜欢规则。仅影响之后的评分请求；已有低分需使用下方「历史数据补齐」。提高、清除评分或关闭开关均不删除规则。">?</button></span>
+                                                <span class="config-toggle-desc">提交低分评价时自动写入不喜欢规则</span>
+                                            </div>
+                                            <label class="toggle-switch">
+                                                <input type="checkbox" name="subsonic.linkRatingToDislike" />
+                                                <span class="toggle-track"><span class="toggle-thumb"></span></span>
+                                            </label>
+                                        </div>
+                                        <div class="config-toggle-row subsonic-item-card">
+                                            <div class="config-toggle-info">
+                                                <span class="config-toggle-label">显示评分歌单 <button type="button"
+                                                        class="help-icon" aria-label="评分歌单说明" onclick="app.toggleHelp(this)"
+                                                        data-help="向 Subsonic 展示有内容的 1 至 5 星虚拟歌单，不创建实体歌单。1 星合集额外包含不喜欢命中项且保留其真实评分；关闭只隐藏入口，不关闭联动、不删除数据。">?</button></span>
+                                                <span class="config-toggle-desc">在客户端展示 1–5 星评分虚拟歌单</span>
+                                            </div>
+                                            <label class="toggle-switch"><input type="checkbox"
+                                                    name="subsonic.ratingPlaylists" /><span class="toggle-track"><span
+                                                        class="toggle-thumb"></span></span></label>
+                                        </div>
+                                    </div>
+
+                                    <div class="config-section-title" id="link-sync-field">历史数据补齐</div>
+                                    <div class="subsonic-sync-panel">
+                                        <div class="config-grid-2">
+                                            <div class="config-field">
+                                                <label class="config-label" for="subsonic-sync-user">目标用户 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="导入/回滚不会自动联动另一侧数据；手动同步会先预览候选歌曲与来源，扫描歌单、本地及在线缓存，只补缺失项。">?</button></label>
+                                                <span class="config-field-desc">选择需要预览并执行联动补齐的账号</span>
+                                                <select id="subsonic-sync-user" class="form-input config-input"></select>
+                                            </div>
+                                            <div class="config-field">
+                                                <label class="config-label">同步与重算操作 <button type="button"
+                                                        class="help-icon" aria-label="查看帮助说明" onclick="app.toggleHelp(this)"
+                                                        data-help="「低分补不喜欢」与「按阈值重算」需先开启并保存低分联动开关；「后台补分」可独立执行。所有操作均先弹窗预览再确认执行。">?</button></label>
+                                                <span class="config-field-desc">低分补规则需先保存开关；后台补分可独立执行</span>
+                                                <div class="subsonic-sync-actions">
+                                                    <button type="button" id="sync-rating-to-dislike-btn"
+                                                        class="btn-secondary hidden"
+                                                        onclick="app.syncLink('ratingToDislike')">低分补不喜欢</button>
+                                                    <button type="button" id="sync-dislike-to-rating-btn"
+                                                        class="btn-secondary hidden"
+                                                        onclick="app.syncLink('dislikeToRating')">后台补分</button>
+                                                    <button type="button" id="reconcile-rating-btn" class="btn-secondary"
+                                                        onclick="app.syncLink('ratingToDislike', true)">按阈值重算</button>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        <div id="link-sync-result" class="tone-secondary hidden text-sm"
+                                            style="margin-top: .75rem"></div>
+                                        <div class="subsonic-status-line">
+                                            <span id="subsonic-link-saved-status" role="status"></span>
+                                        </div>
+                                    </div>
+
+                                    <details class="subsonic-details-note">
+                                        <summary>💡 Web / Subsonic 评分与联动机制详细说明（点击展开）</summary>
+                                        <div class="subsonic-details-body">
+                                            <p>星级评分与爱心收藏独立，两端共用评分。Web 支持歌曲评分；Subsonic 还可为歌手、专辑评分（取决于客户端）。低分转不喜欢与不喜欢补评分分别由开关控制，不喜欢自动补分由各用户在 Web 设置 → 逻辑中单独开启，默认关闭；后台补分独立执行，不受用户开关和低分阈值影响。</p>
+                                            <p>本地歌曲未关联时使用本地评分；关联后以在线歌曲评分为准，与在线版及其他关联副本共用。在线版已有评分时保留在线评分并删除本地评分；仅本地有评分时迁移到在线 ID，同时保留评分来源与记录。</p>
+                                            <p>联动只补数据，不撤销历史：调低阈值、提高或清除评分、关闭开关均不会删除已有规则。需要处理历史数据时，可预览补齐或按阈值重算。重算仅撤销可追溯的评分联动原因，手动与来源不明规则保留。</p>
+                                        </div>
+                                    </details>
                                 </div>
                             </div>
                         </div>
