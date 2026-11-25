@@ -29,6 +29,9 @@ let currentSearch = { name: '', source: 'kw' };
 let currentPlaylist = [];
 let currentIndex = -1;
 let preSelectedNextIndex = null; // 预先选定的下一首索引 (用于确保随机模式下的预读一致性)
+let queuedNextSongs = []; // 通过「下一首播放」显式插队的歌曲引用队列 (按播放先后顺序)
+let randomPlayedSongs = new Set(); // 当前随机轮次中已播放过的歌曲引用集合
+let randomPlayHistory = []; // 随机模式下已播放过的歌曲引用栈 (用于上一首回溯)
 window.viewingPlaylist = []; // Currently displayed list in UI
 let currentPlayingScope = 'network'; // Scope for active playback
 window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' - Scope for UI view
@@ -2290,6 +2293,9 @@ function renderQueue() {
                 </div>
 
                 <div class="flex items-center gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                    ${!isActive ? `<button onclick="event.stopPropagation(); enqueueSong(currentPlaylist[${index}], true)" class="p-2 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg transition-colors" title="下一首播放">
+                        <i class="fas fa-step-forward text-xs"></i>
+                    </button>` : ''}
                     <button onclick="event.stopPropagation(); openPlaylistAddModalForSongObject(currentPlaylist[${index}])" class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>
@@ -2392,6 +2398,8 @@ function removeFromQueue(index) {
         currentIndex--;
     }
 
+    syncPlaybackQueueTrackers();
+    preSelectedNextIndex = null;
     renderQueue();
     savePlaybackState(); // Save state after removal
     showSuccess('已从队列移除');
@@ -2403,6 +2411,9 @@ async function clearQueue() {
     if (await showSelect('清空队列', '确定要清空当前播放队列吗？', { danger: true })) {
         currentPlaylist = [];
         currentIndex = -1;
+        queuedNextSongs = [];
+        preSelectedNextIndex = null;
+        resetRandomPlayState();
         shouldAutoRecoverPlayback = false;
         try { audio.pause(); } catch (e) { }
         renderQueue();
@@ -4161,7 +4172,7 @@ function renderArtistSongsUI(list, page) {
         if (isSelected) rowClass += 'row-selected ring-1 ring-emerald-500/30 ';
 
         return `
-                <div class="${rowClass}" data-song-id="${item.id}" onclick="window.batchMode ? handleBatchSelect('${item.id}', !window.selectedItems.has('${item.id}')) : playFromView(${index})">
+                <div class="${rowClass}" data-song-id="${item.id}" data-artist-song-index="${index}" onclick="window.batchMode ? handleBatchSelect('${item.id}', !window.selectedItems.has('${item.id}')) : playFromView(${index})">
                     <!-- Index -->
                     <div class="col-span-1 sm:col-span-1 text-center flex items-center justify-center font-mono text-xs t-text-muted group-hover:t-text-main">
                         ${window.batchMode ? `
@@ -4209,8 +4220,7 @@ function renderArtistSongsUI(list, page) {
                     </div>
 
                     <!-- Actions -->
-                    <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button type="button" data-rating-index="${index}" class="p-1 text-amber-500">☆ 评分</button>
+                    <div class="artist-song-actions song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                         <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center" title="播放" onclick="event.stopPropagation(); playFromView(${index})">
                             <i class="fas fa-play w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                         </button>
@@ -4257,7 +4267,13 @@ function renderArtistSongsUI(list, page) {
     // Init Marquee if needed (though we use truncate here)
     if (window.applyMarqueeChecks) applyMarqueeChecks();
     if (typeof initArtistScrollListener === 'function') initArtistScrollListener();
-    content.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, list[Number(button.dataset.ratingIndex)]));
+    content.querySelectorAll('[data-artist-song-index]').forEach(row => {
+        const songItem = list[Number(row.dataset.artistSongIndex)];
+        const actions = row.querySelector('.artist-song-actions');
+        if (songItem && actions) {
+            actions.appendChild(createSongQueueActionsMenu(songItem, { actionsContainer: actions, includeRating: true }));
+        }
+    });
     window.ServerFileState?.paintBadges(content);
 }
 window.renderArtistSongsUI = renderArtistSongsUI;
@@ -5451,6 +5467,58 @@ async function saveGlobalSortOrder() {
 }
 window.saveGlobalSortOrder = saveGlobalSortOrder;
 
+function createSongQueueActionsMenu(item, { mergedCount = 0, onMergedSources = null, actionsContainer = null, includeRating = true } = {}) {
+    const menu = document.createElement('details');
+    menu.className = 'queue-actions';
+    const mergedMenuBtn = mergedCount
+        ? `<button type="button" data-merged-sources>查看全部平台 (${mergedCount})</button>`
+        : '';
+    menu.innerHTML = `<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main">${mergedMenuBtn}<button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>`;
+    menu.addEventListener('click', event => event.stopPropagation());
+    const mergedBtn = menu.querySelector('[data-merged-sources]');
+    if (mergedBtn && typeof onMergedSources === 'function') {
+        mergedBtn.onclick = () => { menu.open = false; onMergedSources(); };
+    }
+    menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
+    menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
+
+    const popup = menu.querySelector('.queue-actions-menu');
+    if (includeRating) {
+        const rateButton = document.createElement('button');
+        rateButton.type = 'button';
+        rateButton.className = 'rating-menu-item';
+        popup.appendChild(rateButton);
+        window.RatingManager?.attach(rateButton, item);
+    }
+
+    if (typeof popup.showPopover === 'function') {
+        popup.setAttribute('popover', 'auto');
+        menu.addEventListener('toggle', () => {
+            if (!menu.open) { if (popup.matches(':popover-open')) popup.hidePopover(); return; }
+            popup.showPopover();
+            const anchor = menu.querySelector('summary').getBoundingClientRect();
+            const bounds = popup.getBoundingClientRect();
+            const footerTop = document.getElementById('player-footer').getBoundingClientRect().top;
+            const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
+            popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
+            popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
+        });
+        popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
+    }
+
+    if (actionsContainer) {
+        for (const button of [...actionsContainer.querySelectorAll('button')]) {
+            if (!['下载', '不喜欢', '取消不喜欢', '删除'].includes(button.title)) continue;
+            const label = document.createElement('span');
+            label.textContent = ' ' + button.title;
+            button.appendChild(label);
+            popup.appendChild(button);
+        }
+    }
+    return menu;
+}
+window.createSongQueueActionsMenu = createSongQueueActionsMenu;
+
 // List search logic is now handled by ListSearch service in list_search.js
 function renderResults(list) {
     const container = document.getElementById('search-results');
@@ -5661,46 +5729,14 @@ function renderResults(list) {
 
         const actions = row.querySelector('.song-row-actions');
         if (actions) {
-            const menu = document.createElement('details');
-            menu.className = 'queue-actions';
             const mergedCount = Array.isArray(item._alternates) && item._alternates.length ? item._alternates.length + 1 : 0;
-            const mergedMenuBtn = mergedCount
-                ? `<button type="button" data-merged-sources>查看全部平台 (${mergedCount})</button>`
-                : '';
-            menu.innerHTML = `<summary aria-label="更多歌曲操作" title="更多歌曲操作"><i class="fas fa-ellipsis-v" aria-hidden="true"></i></summary><div class="queue-actions-menu t-bg-panel border t-border-main">${mergedMenuBtn}<button type="button" data-queue-next>下一首播放</button><button type="button" data-queue-add>加入播放队列</button></div>`;
-            menu.addEventListener('click', event => event.stopPropagation());
-            const mergedBtn = menu.querySelector('[data-merged-sources]');
-            if (mergedBtn) mergedBtn.onclick = () => { menu.open = false; openMergedSourcesModal(item, actualIndexInOriginal); };
-            menu.querySelector('[data-queue-next]').onclick = () => { enqueueSong(item, true); menu.open = false; };
-            menu.querySelector('[data-queue-add]').onclick = () => { enqueueSong(item); menu.open = false; };
-            const rateButton = document.createElement('button');
-            rateButton.type = 'button';
-            rateButton.className = 'rating-menu-item';
-            menu.querySelector('.queue-actions-menu').appendChild(rateButton);
-            window.RatingManager?.attach(rateButton, item);
+            const menu = createSongQueueActionsMenu(item, {
+                mergedCount,
+                onMergedSources: () => openMergedSourcesModal(item, actualIndexInOriginal),
+                actionsContainer: actions,
+                includeRating: true
+            });
             window.RatingManager?.attachTag(row.querySelector('[data-rating-badges]'), item);
-            const popup = menu.querySelector('.queue-actions-menu');
-            if (typeof popup.showPopover === 'function') {
-                popup.setAttribute('popover', 'auto');
-                menu.addEventListener('toggle', () => {
-                    if (!menu.open) { if (popup.matches(':popover-open')) popup.hidePopover(); return; }
-                    popup.showPopover();
-                    const anchor = menu.querySelector('summary').getBoundingClientRect();
-                    const bounds = popup.getBoundingClientRect();
-                    const footerTop = document.getElementById('player-footer').getBoundingClientRect().top;
-                    const bottom = Math.min(window.innerHeight - 8, footerTop - 8);
-                    popup.style.left = Math.max(8, Math.min(anchor.right - bounds.width, window.innerWidth - bounds.width - 8)) + 'px';
-                    popup.style.top = Math.max(8, Math.min(anchor.bottom + 4, bottom - bounds.height)) + 'px';
-                });
-                popup.addEventListener('toggle', () => { if (!popup.matches(':popover-open')) menu.open = false; });
-            }
-            for (const button of [...actions.querySelectorAll('button')]) {
-                if (!['下载', '不喜欢', '取消不喜欢', '删除'].includes(button.title)) continue;
-                const label = document.createElement('span');
-                label.textContent = ' ' + button.title;
-                button.appendChild(label);
-                popup.appendChild(button);
-            }
             actions.appendChild(menu);
         }
         const addToPlaylistBtn = row.querySelector('.add-to-playlist-btn');
@@ -6869,13 +6905,77 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     }
 }
 
+function syncPlaybackQueueTrackers() {
+    if (!Array.isArray(currentPlaylist) || currentPlaylist.length === 0) {
+        queuedNextSongs = [];
+        randomPlayedSongs.clear();
+        randomPlayHistory = [];
+        return;
+    }
+    const activeSet = new Set(currentPlaylist);
+    queuedNextSongs = queuedNextSongs.filter(item => activeSet.has(item));
+    for (const item of [...randomPlayedSongs]) {
+        if (!activeSet.has(item)) randomPlayedSongs.delete(item);
+    }
+    randomPlayHistory = randomPlayHistory.filter(item => activeSet.has(item));
+}
+
+function resetRandomPlayState() {
+    randomPlayedSongs.clear();
+    randomPlayHistory = [];
+    if (Array.isArray(currentPlaylist) && currentIndex >= 0 && currentIndex < currentPlaylist.length) {
+        const currentSong = currentPlaylist[currentIndex];
+        if (currentSong) randomPlayedSongs.add(currentSong);
+    }
+}
+
+function recordSongPlayed(song) {
+    if (!song) return;
+    const queuedIdx = queuedNextSongs.indexOf(song);
+    if (queuedIdx !== -1) {
+        queuedNextSongs.splice(queuedIdx, 1);
+    }
+    if (playMode === 'random' && Array.isArray(currentPlaylist) && currentPlaylist.includes(song)) {
+        if (randomPlayHistory[randomPlayHistory.length - 1] !== song) {
+            randomPlayHistory.push(song);
+        }
+        randomPlayedSongs.add(song);
+    }
+}
+
+function getQueuedNextIndex() {
+    if (!Array.isArray(currentPlaylist) || currentPlaylist.length === 0 || queuedNextSongs.length === 0) {
+        return -1;
+    }
+    const currentSong = currentIndex >= 0 ? currentPlaylist[currentIndex] : null;
+    while (queuedNextSongs.length > 0) {
+        const target = queuedNextSongs[0];
+        const idx = currentPlaylist.indexOf(target);
+        if (idx === -1 || (currentPlaylist.length > 1 && idx === currentIndex && target === currentSong)) {
+            queuedNextSongs.shift();
+            continue;
+        }
+        return idx;
+    }
+    return -1;
+}
+
 function getNextIndex() {
     if (!currentPlaylist || currentPlaylist.length === 0) return -1;
+
+    // 显式「下一首播放」插队在所有播放模式下都优先于常规切歌逻辑
+    const queuedNextIdx = getQueuedNextIndex();
+    if (queuedNextIdx !== -1) {
+        return queuedNextIdx;
+    }
 
     // [Random Prefetch Fix] 如果处于随机播放模式，且已有预选内容，优先返回预选
     if (playMode === 'random' && preSelectedNextIndex !== null) {
         if (preSelectedNextIndex >= 0 && preSelectedNextIndex < currentPlaylist.length) {
-            return preSelectedNextIndex;
+            const candidate = currentPlaylist[preSelectedNextIndex];
+            if (currentPlaylist.length === 1 || (preSelectedNextIndex !== currentIndex && !randomPlayedSongs.has(candidate))) {
+                return preSelectedNextIndex;
+            }
         }
         preSelectedNextIndex = null; // 重置失效索引
     }
@@ -6889,9 +6989,22 @@ function getNextIndex() {
             if (currentPlaylist.length === 1) {
                 nextIndex = 0;
             } else {
-                do {
-                    nextIndex = Math.floor(Math.random() * currentPlaylist.length);
-                } while (nextIndex === currentIndex);
+                let candidates = [];
+                for (let i = 0; i < currentPlaylist.length; i++) {
+                    if (i !== currentIndex && !randomPlayedSongs.has(currentPlaylist[i])) {
+                        candidates.push(i);
+                    }
+                }
+                if (candidates.length === 0) {
+                    randomPlayedSongs.clear();
+                    if (currentIndex >= 0 && currentIndex < currentPlaylist.length && currentPlaylist[currentIndex]) {
+                        randomPlayedSongs.add(currentPlaylist[currentIndex]);
+                    }
+                    for (let i = 0; i < currentPlaylist.length; i++) {
+                        if (i !== currentIndex) candidates.push(i);
+                    }
+                }
+                nextIndex = candidates[Math.floor(Math.random() * candidates.length)];
             }
             break;
         case 'order':
@@ -7769,8 +7882,14 @@ function enqueueSong(song, next = false) {
             currentPlaylist.splice(i, 1);
             if (i < currentIndex) currentIndex--;
         }
-        currentPlaylist.splice(Math.max(0, currentIndex + 1), 0, queuedSong);
-        preSelectedNextIndex = null;
+        const insertPosition = Math.max(0, currentIndex + 1);
+        currentPlaylist.splice(insertPosition, 0, queuedSong);
+        queuedNextSongs = queuedNextSongs.filter(item => item !== queuedSong);
+        queuedNextSongs.unshift(queuedSong);
+        preSelectedNextIndex = insertPosition;
+        if (typeof prefetchNextSong === 'function' && settings?.enablePreloader !== false && currentIndex >= 0) {
+            prefetchNextSong(insertPosition);
+        }
         renderQueue();
         savePlaybackState();
         showSuccess('已移至下一首播放');
@@ -7779,7 +7898,14 @@ function enqueueSong(song, next = false) {
     if (currentPlaylist.length >= 1000) { showInfo('播放队列最多 1000 首歌曲'); return; }
     const position = next ? Math.max(0, currentIndex + 1) : currentPlaylist.length;
     currentPlaylist.splice(position, 0, song);
-    preSelectedNextIndex = null;
+    if (next) {
+        queuedNextSongs = queuedNextSongs.filter(item => item !== song);
+        queuedNextSongs.unshift(song);
+        preSelectedNextIndex = position;
+        if (typeof prefetchNextSong === 'function' && settings?.enablePreloader !== false && currentIndex >= 0) {
+            prefetchNextSong(position);
+        }
+    }
     renderQueue();
     savePlaybackState();
     showSuccess(next ? '已加入下一首播放' : '已加入播放队列');
@@ -8259,6 +8385,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
     currentIndex = index;
     // [Random Prefetch Fix] 一旦开始正式播放一首歌曲，清除之前的预选索引，以便下一轮重新生成
     preSelectedNextIndex = null;
+    recordSongPlayed(song);
 
     currentPlayingSong = song;
     window.currentPlayingSong = song; // expose for lyric-card.js
@@ -8877,10 +9004,15 @@ function updatePlaylist(list, startIndex = 0, scope = 'local_list', shouldAddToD
 
     // [New] Use a shallow copy to prevent mutations from affecting the source list
     currentPlaylist = [...list];
+    queuedNextSongs = [];
+    preSelectedNextIndex = null;
     currentPlayingScope = scope;
 
     // 如果是从网络搜索或歌单来源，确保 playSong 能识别并更新 UI/历史
     playSong(currentPlaylist[startIndex], startIndex, null, false, false, shouldAddToDefault);
+    if (playMode === 'random') {
+        resetRandomPlayState();
+    }
 
     console.log(`[Queue] 播放列表已更新 (${currentPlaylist.length} 首), 来源: ${scope}, 加入默认列表: ${shouldAddToDefault}`);
 
@@ -9201,13 +9333,37 @@ function playPrev() {
             break;
 
         case 'random':
-            // 随机播放：随机选择一首（避免重复播放当前歌曲）
+            // 随机播放：优先从历史播放栈回溯上一首，否则从本轮未播歌曲中随机选择
             if (currentPlaylist.length === 1) {
                 prevIndex = 0;
             } else {
-                do {
-                    prevIndex = Math.floor(Math.random() * currentPlaylist.length);
-                } while (prevIndex === currentIndex);
+                const currentSong = currentIndex >= 0 ? currentPlaylist[currentIndex] : null;
+                while (randomPlayHistory.length > 0 && randomPlayHistory[randomPlayHistory.length - 1] === currentSong) {
+                    randomPlayHistory.pop();
+                }
+                prevIndex = -1;
+                while (randomPlayHistory.length > 0) {
+                    const prevSong = randomPlayHistory.pop();
+                    const idx = currentPlaylist.indexOf(prevSong);
+                    if (idx !== -1 && idx !== currentIndex) {
+                        prevIndex = idx;
+                        break;
+                    }
+                }
+                if (prevIndex === -1) {
+                    let candidates = [];
+                    for (let i = 0; i < currentPlaylist.length; i++) {
+                        if (i !== currentIndex && !randomPlayedSongs.has(currentPlaylist[i])) {
+                            candidates.push(i);
+                        }
+                    }
+                    if (candidates.length === 0) {
+                        for (let i = 0; i < currentPlaylist.length; i++) {
+                            if (i !== currentIndex) candidates.push(i);
+                        }
+                    }
+                    prevIndex = candidates[Math.floor(Math.random() * candidates.length)];
+                }
             }
             break;
 
@@ -9449,6 +9605,9 @@ async function restorePlaybackState() {
         }
 
         currentIndex = state.index >= 0 ? state.index : 0;
+        if (playMode === 'random') {
+            resetRandomPlayState();
+        }
         currentPlayingSong = state.song;
         window.currentPlayingSong = state.song;
         currentQuality = state.quality || null;
@@ -9938,6 +10097,9 @@ function setPlayMode(mode) {
     playMode = mode;
     // [Random Prefetch Fix] 切换模式时清空预读预选索引
     preSelectedNextIndex = null;
+    if (mode === 'random') {
+        resetRandomPlayState();
+    }
     updatePlayModeUI();
 
     // 保存到本地存储
@@ -11320,6 +11482,10 @@ function renderCacheList() {
                                 class="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg transition-colors" title="播放">
                             <i class="fas fa-play text-xs"></i>
                         </button>
+                        <button onclick="event.stopPropagation(); enqueueCacheItem(${idx}, true)"
+                                class="p-2 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg transition-colors" title="下一首播放">
+                            <i class="fas fa-step-forward text-xs"></i>
+                        </button>
                         <button onclick="event.stopPropagation(); openCacheItemPlaylist(${idx})"
                                 class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                             <i class="fas fa-plus text-xs"></i>
@@ -11374,6 +11540,13 @@ function openCacheItemPlaylist(index) {
     openPlaylistAddModalForSongObject(song);
 }
 window.openCacheItemPlaylist = openCacheItemPlaylist;
+
+function enqueueCacheItem(index, next = true) {
+    const song = buildCacheSongObject(currentCacheList[index]);
+    if (!song) return;
+    enqueueSong(song, next);
+}
+window.enqueueCacheItem = enqueueCacheItem;
 
 /**
  * 缓存列表专用的歌词重试逻辑

@@ -261,7 +261,7 @@ window.LeaderboardManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- 操作 -->
-                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity" data-lb-actions-index="${index}">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                             title="播放"
                             onclick="event.stopPropagation(); window.LeaderboardManager.playSong(${index})">
@@ -277,7 +277,6 @@ window.LeaderboardManager = (function () {
                             onclick="event.stopPropagation(); window.LeaderboardManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
-                    <button type="button" class="p-1 text-amber-500" data-rating-index="${index}" title="评分" onclick="event.stopPropagation(); window.LeaderboardManager.rateSong(${index})">☆</button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.LeaderboardManager.dislikeSong(${index})">
@@ -290,7 +289,12 @@ window.LeaderboardManager = (function () {
 
         if (typeof window.lazyLoadImages === 'function') window.lazyLoadImages();
         if (typeof window.applyMarqueeChecks === 'function') window.applyMarqueeChecks();
-        container.querySelectorAll('[data-rating-index]').forEach(button => window.RatingManager?.attach(button, state.songs[Number(button.dataset.ratingIndex)]));
+        container.querySelectorAll('[data-lb-actions-index]').forEach(actions => {
+            const song = state.songs[Number(actions.dataset.lbActionsIndex)];
+            if (song && typeof window.createSongQueueActionsMenu === 'function') {
+                actions.appendChild(window.createSongQueueActionsMenu(song, { actionsContainer: actions, includeRating: true }));
+            }
+        });
         window.ServerFileState?.paintBadges(container);
     }
 

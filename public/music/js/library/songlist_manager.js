@@ -764,7 +764,7 @@ window.SongListManager = (function () {
                     ${song.interval || '--:--'}
                 </div>
                 <!-- Actions -->
-                <div class="col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
+                <div class="song-row-actions col-span-4 sm:col-span-3 md:col-span-2 lg:col-span-2 flex items-center justify-end gap-0.5 sm:gap-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity" data-songlist-actions="${index}">
                     <button class="p-0.5 sm:p-1.5 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 rounded-lg text-emerald-600 dark:text-emerald-400 transition-colors inline-flex items-center justify-center"
                             title="播放"
                             onclick="event.stopPropagation(); window.SongListManager.playSong(${index})">
@@ -780,7 +780,6 @@ window.SongListManager = (function () {
                             onclick="event.stopPropagation(); window.SongListManager.addSongToPlaylist(${index})">
                         <i class="fas fa-plus w-3.5 h-3.5 text-center leading-[0.875rem]"></i>
                     </button>
-                    <button type="button" data-songlist-rating="${index}" class="p-1 text-amber-500" title="评分" aria-label="歌曲评分">☆</button>
                     <button class="p-0.5 sm:p-1.5 hover:bg-red-50 dark:hover:bg-red-500/15 rounded-lg ${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? 'text-red-500' : 'text-gray-400'} transition-colors inline-flex items-center justify-center"
                             title="${(window.DislikeManager && window.DislikeManager.isDisliked(song)) ? '取消不喜欢' : '不喜欢'}"
                             onclick="event.stopPropagation(); window.SongListManager.dislikeSong(${index})">
@@ -805,8 +804,10 @@ window.SongListManager = (function () {
         for (const entry of displayList) {
             const host = listContainer.querySelector(`#sl-row-${entry.originalIndex} [data-rating-badges]`);
             window.RatingManager?.attachTag(host, entry.item);
-            const button = listContainer.querySelector(`[data-songlist-rating="${entry.originalIndex}"]`);
-            window.RatingManager?.attach(button, entry.item);
+            const actions = listContainer.querySelector(`[data-songlist-actions="${entry.originalIndex}"]`);
+            if (actions && typeof window.createSongQueueActionsMenu === 'function') {
+                actions.appendChild(window.createSongQueueActionsMenu(entry.item, { actionsContainer: actions, includeRating: true }));
+            }
         }
         window.ServerFileState?.paintBadges(listContainer);
     }
