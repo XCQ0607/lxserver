@@ -9567,6 +9567,22 @@ function handlePlaybackStallOrWait(event) {
 }
 
 audio.addEventListener('timeupdate', advancePlaybackCacheUpgrade);
+audio.addEventListener('timeupdate', () => {
+    // 锁屏或后台标签页下 requestAnimationFrame 会被暂停，通过 timeupdate 兜底同步 SMTC 歌词
+    if (!document.hidden || audio.paused || !lyricPlayer || !lyricPlayer.lines || !lyricPlayer.lines.length) return;
+    if (!settings || !settings.enableSmtcLyric) return;
+    const curTimeMs = (audio.currentTime || 0) * 1000;
+    const lineNum = lyricPlayer._findCurLineNum(curTimeMs);
+    if (lineNum !== undefined && lineNum >= 0 && lineNum !== currentLyricIndex) {
+        syncLyricByLineNum(lineNum);
+    }
+});
+document.addEventListener('visibilitychange', () => {
+    if (!lyricPlayer || audio.paused || !lyricPlayer.lines || !lyricPlayer.lines.length) return;
+    // 切换前后台/锁屏解锁时重新同步 LinePlayer，确保定时器在 rAF 与 setTimeout 间切换并对齐当前进度
+    lyricPlayer.pause();
+    lyricPlayer.play((audio.currentTime || 0) * 1000);
+});
 audio.addEventListener('seeking', () => { cacheUpgradePlayhead = null; });
 for (const event of ['waiting', 'stalled']) {
     audio.addEventListener(event, () => {

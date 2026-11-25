@@ -17,11 +17,16 @@ class TimeoutTools {
     }
 
     run() {
-        this.animationFrameId = this.nextTick(() => {
-            this.animationFrameId = null
+        const tick = () => {
             let diff = this.invokeTime - getNow()
 
             if (diff > 0) {
+                if (typeof document !== 'undefined' && document.hidden) {
+                    return this.timeoutId = window.setTimeout(() => {
+                        this.timeoutId = null
+                        this.run()
+                    }, Math.max(0, diff))
+                }
                 if (diff < this.thresholdTime) return this.run()
                 return this.timeoutId = window.setTimeout(() => {
                     this.timeoutId = null
@@ -30,6 +35,21 @@ class TimeoutTools {
             }
 
             this.callback(diff)
+        }
+
+        // 锁屏或后台标签页下 requestAnimationFrame 会被浏览器暂停，改用 setTimeout 保持歌词定时器推进
+        if (typeof document !== 'undefined' && document.hidden) {
+            const remaining = Math.max(0, this.invokeTime - getNow())
+            this.timeoutId = window.setTimeout(() => {
+                this.timeoutId = null
+                tick()
+            }, remaining)
+            return
+        }
+
+        this.animationFrameId = this.nextTick(() => {
+            this.animationFrameId = null
+            tick()
         })
     }
 
