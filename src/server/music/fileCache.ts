@@ -1931,7 +1931,7 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
         return acc
     }
 
-    const cleanId = (sid: string) => String(sid || '')
+    const cleanId = (sid: string) => String(sid || '').replace(/^(tx|mg|wy|kg|kw|bd)_/, '')
     const targetCleanId = cleanId(id)
 
     for (const dirPath of basePaths) {
@@ -1941,7 +1941,7 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
             const fileNameWithoutExt = file.substring(0, file.lastIndexOf('.'))
             const segments = fileNameWithoutExt.split('_-_')
             if (segments.length >= 2) {
-                if (songInfo.strictIdentity && segments[segments.length - 3] !== songInfo.source) continue
+                if ((songInfo.strictIdentity || (segments.length >= 3 && songInfo.source)) && segments[segments.length - 3] !== songInfo.source) continue
                 const fileId = segments[segments.length - 2]
                 const fileCleanId = cleanId(fileId)
                 if (fileId === id || fileCleanId === id || fileId === targetCleanId || fileCleanId === targetCleanId) {
