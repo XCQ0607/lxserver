@@ -12,6 +12,8 @@ export { createSyncDownloadTask, syncDownloadForAllUsers }
 // 调度器内部状态
 const registeredTasks = new Map<string, ScheduledTask>()
 const taskTimers = new Map<string, NodeJS.Timeout>()
+const startupTimers = new Set<NodeJS.Timeout>()
+const MAX_TIMEOUT_MS = 2147483647
 let isSchedulerRunning = false
 
 const getRuntimeDir = () => {
@@ -72,7 +74,7 @@ const scheduleNextRun = (task: ScheduledTask) => {
     if (task.enabled && isSchedulerRunning) {
       scheduleNextRun(task)
     }
-  }, task.intervalMs)
+  }, Math.min(task.intervalMs, MAX_TIMEOUT_MS))
 
   taskTimers.set(task.id, timer)
 }
@@ -136,7 +138,9 @@ export const executeTask = async (taskId: string): Promise<TaskExecutionResult> 
     return errorResult
   } finally {
     task.isRunning = false
-    task.nextRunTime = task.enabled && task.intervalMs > 0 ? Date.now() + task.intervalMs : undefined
+    if (!taskTimers.has(task.id)) {
+      task.nextRunTime = task.enabled && task.intervalMs > 0 ? Date.now() + task.intervalMs : undefined
+    }
     saveTaskRecords()
   }
 }
@@ -210,12 +214,14 @@ export const startScheduler = () => {
       scheduleNextRun(task)
 
       // 服务端刚开机/刚启动时立即执行一次（延迟3秒等待网络/musicSdk初始化）
-      setTimeout(() => {
+      const startupTimer = setTimeout(() => {
+        startupTimers.delete(startupTimer)
         if (isSchedulerRunning && task.enabled) {
           syncLog.info(`[任务调度] 服务端启动，触发任务首次执行: ${task.name}`)
           void executeTask(task.id)
         }
       }, 3000)
+      startupTimers.add(startupTimer)
     }
   }
 }
@@ -225,6 +231,10 @@ export const startScheduler = () => {
  */
 export const stopScheduler = () => {
   isSchedulerRunning = false
+  for (const timer of startupTimers) {
+    clearTimeout(timer)
+  }
+  startupTimers.clear()
   for (const [id, timer] of taskTimers.entries()) {
     clearTimeout(timer)
   }

@@ -58,6 +58,7 @@ export class OpenListClient {
   private directToken?: string
   private root: string
   private token: string | null = null
+  private tokenPromise: Promise<string> | null = null
 
   constructor(cfg: OpenListClientConfig) {
     this.endpoint = (cfg.endpoint || '').replace(/\/+$/, '')
@@ -70,18 +71,34 @@ export class OpenListClient {
   private async ensureToken(signal?: AbortSignal): Promise<string> {
     if (this.directToken) return this.directToken
     if (this.token) return this.token
-    const resp = await fetch(`${this.endpoint}/api/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: this.username, password: this.password }),
-      signal: signal ?? AbortSignal.timeout(META_TIMEOUT_MS),
-    })
-    const data: any = await resp.json().catch(() => ({}))
-    if (data?.code !== 200 || !data?.data?.token) {
-      throw new Error('OpenList 登录失败（' + (data?.code || resp.status) + '）：' + (data?.message || resp.status))
+    signal?.throwIfAborted()
+    if (!this.tokenPromise) {
+      this.tokenPromise = (async () => {
+        const resp = await fetch(`${this.endpoint}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: this.username, password: this.password }),
+          signal: AbortSignal.timeout(META_TIMEOUT_MS),
+        })
+        const data: any = await resp.json().catch(() => ({}))
+        if (data?.code !== 200 || !data?.data?.token) {
+          throw new Error('OpenList 登录失败（' + (data?.code || resp.status) + '）：' + (data?.message || resp.status))
+        }
+        this.token = data.data.token
+        return this.token!
+      })().finally(() => {
+        this.tokenPromise = null
+      })
     }
-    this.token = data.data.token
-    return this.token!
+    if (!signal) return this.tokenPromise
+    return new Promise<string>((resolve, reject) => {
+      const onAbort = () => reject(signal.reason || new Error('Aborted'))
+      signal.addEventListener('abort', onAbort, { once: true })
+      this.tokenPromise!.then(
+        tok => { signal.removeEventListener('abort', onAbort); resolve(tok) },
+        err => { signal.removeEventListener('abort', onAbort); reject(err) },
+      )
+    })
   }
 
   private authHeader(): Record<string, string> {
@@ -89,15 +106,24 @@ export class OpenListClient {
   }
 
   private async request(route: string, init: RequestInit, bodyFactory?: () => any): Promise<Response> {
-    await this.ensureToken(init.signal || undefined)
-    const send = () => fetch(`${this.endpoint}${route}`, { ...init, ...(bodyFactory ? { body: bodyFactory() } : {}), headers: { ...init.headers, ...this.authHeader() } })
-    const response = await send()
-    const data: any = await response.clone().json().catch(() => ({}))
-    if (!this.directToken && (response.status === 401 || data.code === 401)) {
+    const usedToken = await this.ensureToken(init.signal || undefined)
+    const send = (tok: string) => fetch(`${this.endpoint}${route}`, { ...init, ...(bodyFactory ? { body: bodyFactory() } : {}), headers: { ...init.headers, Authorization: tok } })
+    const response = await send(usedToken)
+    if (!this.directToken && response.status === 401) {
       await response.body?.cancel()
-      this.token = null
-      await this.ensureToken(init.signal || undefined)
-      return send()
+      if (this.token === usedToken) this.token = null
+      const freshToken = await this.ensureToken(init.signal || undefined)
+      return send(freshToken)
+    }
+    const contentType = response.headers.get('content-type') || ''
+    if (!this.directToken && contentType.includes('application/json')) {
+      const data: any = await response.clone().json().catch(() => ({}))
+      if (data?.code === 401) {
+        await response.body?.cancel()
+        if (this.token === usedToken) this.token = null
+        const freshToken = await this.ensureToken(init.signal || undefined)
+        return send(freshToken)
+      }
     }
     return response
   }
@@ -334,8 +360,8 @@ export class OpenListClient {
    * 下载远端文件到本地路径（经由 getInfo 拿到的直链 raw_url 流式写入）。
    */
   async download(remotePath: string, localPath: string, signal?: AbortSignal, beforeReplace?: () => void, expectedHash?: string): Promise<void> {
-    await this.ensureToken()
-    const info = await this.getFileInfo(remotePath)
+    await this.ensureToken(signal)
+    const info = await this.getFileInfo(remotePath, signal)
     const url = info.rawUrl
     if (!url) throw new Error('OpenList 无法获取下载直链：' + remotePath)
     // 先写入临时文件，全部落盘成功后再 rename，避免半截文件覆盖/残留

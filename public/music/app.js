@@ -231,6 +231,7 @@ let lastLyricSongId = null; // 追踪上次加载歌词的歌曲ID
 
 let currentRecoveryState = null; // 播放失败自动恢复状态管理
 let currentPlaybackErrorHandler = null; // 当前音频地址的错误恢复监听器
+let currentPlaybackAbortController = null; // 当前播放请求的 URL 解析取消控制器
 let shouldAutoRecoverPlayback = false;
 let playbackRecoveryTriggeredForRequestId = 0;
 
@@ -312,19 +313,24 @@ let playbackStallDetectionTimer = null;
 let lastKnownPlaybackTime = 0;
 
 async function checkServerOnline() {
-    try {
-        const controller = new AbortController();
-        const tid = setTimeout(() => controller.abort(), 2500);
-        const res = await fetch('/api/music/auth/verify?t=' + Date.now(), {
-            method: 'GET',
-            cache: 'no-store',
-            signal: controller.signal
-        });
-        clearTimeout(tid);
-        return res.ok || res.status === 401 || res.status === 403;
-    } catch (e) {
-        return false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+        let tid;
+        try {
+            const controller = new AbortController();
+            tid = setTimeout(() => controller.abort(), 5000);
+            const res = await fetch('/api/music/auth/verify?t=' + Date.now(), {
+                method: 'GET',
+                cache: 'no-store',
+                signal: controller.signal
+            });
+            return res.ok || res.status === 401 || res.status === 403;
+        } catch (e) {
+            if (attempt === 0) await new Promise(r => setTimeout(r, 300));
+        } finally {
+            clearTimeout(tid);
+        }
     }
+    return false;
 }
 
 async function reconnectServerAndResume(targetSong, resumeTime, targetQuality, targetIndex) {
@@ -803,8 +809,6 @@ async function syncServerNetworkListUpdates() {
     } catch (e) {
         console.warn('[Scheduler] 获取网络歌单更新状态失败:', e);
     }
-    // 同步拉取后台任务执行状态并刷新北京时间展示
-    await refreshTaskScheduleStatus();
 }
 
 /**
@@ -970,6 +974,7 @@ setTimeout(() => {
     syncServerNetworkListUpdates();
 }, 500);
 setInterval(() => {
+    if (typeof document !== 'undefined' && document.hidden) return;
     refreshTaskScheduleStatus();
     syncServerNetworkListUpdates();
 }, 30 * 1000);
@@ -5990,7 +5995,7 @@ let hintTimeout = null;
 // 获取来源类型的中文描述
 function getSourceTypeText(sourceType, folder) {
     const map = {
-        'server_cache': folder === 'music' ? '已下载文件' : '服务器缓存',
+        'server_cache': folder === 'custom' ? '自定义目录文件' : (folder === 'music' ? '已下载文件' : '服务器缓存'),
         'cache': '浏览器链接缓存',
         'normal': '在线解析',
         'openlist': 'OpenList 已备份文件'
@@ -6020,6 +6025,7 @@ async function probeUrl(url) {
             signal: controller.signal
         });
         clearTimeout(timeoutId);
+        response.body?.cancel()?.catch(() => {});
 
         // 返回 200 或 206 表示链接依然可用
         return response.ok;
@@ -6047,8 +6053,13 @@ const prefetchManager = {
     set(song, quality, data) {
         this.cache.set(this.key(song, quality), { ...data, timestamp: Date.now() });
 
-        // 核心升级：触发数据流预加载
-        if (data.url) {
+        const isExplicitLocalUrl = url => typeof url === 'string' && (url.startsWith('/api/music/cache/file/') || url.startsWith('/api/music/custom/file'));
+        const activeSong = typeof currentPlayingSong !== 'undefined' ? currentPlayingSong : null;
+        const activeIsLocal = !!(activeSong && (activeSong.isLocal || isExplicitLocalUrl(activeSong.url)));
+        const nextIsLocal = !!(song && (song.isLocal || isExplicitLocalUrl(song.url))) || isExplicitLocalUrl(data?.url);
+
+        // 核心升级：触发数据流预加载（已在缓冲同一地址时不重置，避免重复拉取；本地/自定义目录流跳过双路并发预缓冲）
+        if (data.url && !activeIsLocal && !nextIsLocal && this.bufferer.src !== data.url) {
             console.log(`[Prefetch] Pre-loading data stream for ID: ${song.id}`);
             this.bufferer.src = data.url;
             this.bufferer.load(); // 诱导浏览器开始填充缓冲区
@@ -6063,7 +6074,7 @@ const prefetchManager = {
         const key = this.key(song, quality);
         const data = this.cache.get(key);
         if (data && (Date.now() - data.timestamp < 30 * 60 * 1000)) {
-            const explicitLocal = song.isLocal || song.url?.startsWith('/api/music/cache/file/');
+            const explicitLocal = song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/music/custom/file');
             if (settings.preferServerCache === false && !explicitLocal &&
                 (data.sourceType === 'server_cache' || data.sourceType === 'openlist')) {
                 this.cache.delete(key);
@@ -6263,7 +6274,7 @@ async function resolvePlaybackCache(song, quality, options = {}) {
 
 async function refreshPrefetchedCache(song, result, quality = result.quality, options = {}) {
     // Explicit library files do not need a lookup.
-    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url) return result;
+    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || song.url?.startsWith('/api/music/custom/file')) && song.url) return result;
     // A prefetched local result is a hint, not proof the same file still exists.
     const cached = await resolvePlaybackCache(song, quality, { ...options, resolvedSong: result.songInfo });
     if (cached) return { ...result, ...cached, sourceName: undefined, sourceId: undefined, hasMoreSources: false, triedPlatforms: undefined };
@@ -6688,17 +6699,16 @@ async function applyAutoProxy(url, song) {
 
         console.log(`[Proxy] Auto-proxy evaluating (CORS/Safety probe): ${song.name}`);
 
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 2000); // 2秒探测超时
         try {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 2000); // 2秒探测超时
-
             // 如果此处 fetch 报错（如 CORS policy block），则会进入 catch
             const response = await fetch(probeUrl, {
                 method: 'GET',
                 headers: { 'Range': 'bytes=0-1' }, // 轻量探测
                 signal: controller.signal
             });
-            clearTimeout(timeoutId);
+            response.body?.cancel()?.catch(() => {});
 
             if (response.ok) {
                 console.log(`[Proxy] Probe Success (Direct Play): ${song.name} via ${probeUrl}`);
@@ -6707,6 +6717,8 @@ async function applyAutoProxy(url, song) {
         } catch (e) {
             // 探测失败：可能是跨域拦截、证书错误、或者源不支持 HTTPS
             console.warn(`[Proxy] Probe failed (CORS risk or unreachable), falling back to server proxy: ${song.name}`, e.message);
+        } finally {
+            clearTimeout(timeoutId);
         }
 
         // 回退逻辑：探测失败后根据设置启用自定义代理或服务器代理
@@ -6738,10 +6750,16 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
     const cacheKey = `lx_url_${cleanedSong.id}_${quality}`;
 
     // 0. 本地文件/带有本地播放 URL 的歌曲：直接播放本地文件，无需走在线 API 解析
-    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/')) && song.url && !isRetry) {
+    const isCustomUrl = !!song.url?.startsWith('/api/music/custom/file');
+    const isLocalOnly = song.source === 'local' || song.source === 'custom' || song._isCustomDir || song.folder === 'custom' || isCustomUrl ||
+        (song.isLocal && !['wy', 'tx', 'kw', 'kg', 'mg', 'bd'].includes(song.source));
+    if ((song.isLocal || song.url?.startsWith('/api/music/cache/file/') || isCustomUrl) && song.url && (!isRetry || isLocalOnly)) {
         console.log(`[Cache] Direct Local File Hit: ${song.name}`);
         let localUrl = await applyAutoProxy(song.url, song);
-        const localFolder = /folder=music/.test(song.url) ? 'music' : 'cache';
+        checkPlaybackStillCurrent(options);
+        const localFolder = (song._isCustomDir || song.folder === 'custom' || isCustomUrl || /folder=custom/.test(song.url))
+            ? 'custom'
+            : ((/folder=music/.test(song.url) || song.folder === 'music') ? 'music' : 'cache');
         const actualQuality = song.quality || quality;
         return { url: localUrl, sourceType: 'server_cache', quality: actualQuality, folder: localFolder };
     }
@@ -6757,10 +6775,12 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
 
     // OpenList remains an optional remote fallback, never part of local selection.
     if (settings.preferServerCache !== false && !isRetry) {
-        const cached = await checkServerCache(cleanedSong, quality, !!options.exactQuality, true);
+        const cached = await checkServerCache(cleanedSong, quality, !!options.exactQuality, true, options.signal);
         checkPlaybackStillCurrent(options);
         if (cached.exists && !cached.isCollision && cached.origin === 'openlist' && cached.url) {
-            return { url: await applyAutoProxy(cached.url, song), sourceType: 'openlist',
+            const openlistUrl = await applyAutoProxy(cached.url, song);
+            checkPlaybackStillCurrent(options);
+            return { url: openlistUrl, sourceType: 'openlist',
                 quality: cached.quality || quality, folder: cached.folder };
         }
     }
@@ -6772,6 +6792,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
             console.log(`[Cache] Link Hit: ${cleanedSong.name} (${quality})`);
             // 核心修复：命中本地缓存时也必须应用代理逻辑，否则 HTTPS 下无法播放 HTTP 缓存链接
             cachedUrl = await applyAutoProxy(cachedUrl, song);
+            checkPlaybackStillCurrent(options);
             return { url: cachedUrl, sourceType: 'cache', quality };
         }
     }
@@ -6832,6 +6853,7 @@ async function fetchSongUrl(song, quality, isRetry = false, isSilent = false, op
         const request = {
             method: 'POST',
             headers,
+            ...(options.signal && { signal: options.signal }),
             body: JSON.stringify({
                 songInfo: song,
                 quality,
@@ -7122,7 +7144,11 @@ async function checkServerCache(song, quality, exactQuality = false, includeOpen
             const data = await res.json();
             return data; // 返回完整数据对象，包含 exists, isCollision, url 等
         }
-    } catch (e) { console.error('[ServerCache] Check failed:', e); }
+    } catch (e) {
+        if (e?.name !== 'AbortError' && !signal?.aborted) {
+            console.error('[ServerCache] Check failed:', e);
+        }
+    }
     return { exists: false };
 }
 
@@ -8010,9 +8036,18 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
             }
         }
     }
+    // 本地/自定义目录歌曲仅存在于本站，不走外部换源、缓存替换与自动跳歌，失败时按当前请求作用域原地重试。
+    const isLocalOnlySong = !!(state.currentSong && (
+        state.currentSong.source === 'custom' ||
+        state.currentSong._isCustomDir ||
+        state.currentSong.folder === 'custom' ||
+        state.currentSong.url?.startsWith('/api/music/custom/file') ||
+        state.currentSong.source === 'local' ||
+        (state.currentSong.isLocal && !['wy', 'tx', 'kw', 'kg', 'mg', 'bd'].includes(state.currentSong.source))
+    ));
     const wanted = state.cacheTargetQuality || state.originalQuality || state.currentQuality;
     const original = state.originalSong || state.currentSong;
-    if (original && wanted && settings.preferServerCache !== false &&
+    if (!isLocalOnlySong && original && wanted && settings.preferServerCache !== false &&
         state.cacheCheckedRequestId !== requestId && (!state.failedCacheFiles || state.failedCacheFiles.size < 8)) {
         state.cacheCheckedRequestId = requestId;
         let cached;
@@ -8053,17 +8088,12 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
         return;
     }
 
-    // custom 目录歌曲仅存在于本站，不走外部换源与自动跳歌，失败时按当前请求作用域原地重试。
-    const isCustomSourceSong = !!(state.currentSong && (
-        state.currentSong.source === 'custom' ||
-        state.currentSong._isCustomDir ||
-        state.currentSong.folder === 'custom'
-    ));
-    if (isCustomSourceSong) {
+    // 本地/自定义目录歌曲仅存在于本站，不走外部换源与自动跳歌，失败时按当前请求作用域原地重试。
+    if (isLocalOnlySong) {
         const retryCount = state.customRetryCount || 0;
         if (retryCount < 2) {
             state.customRetryCount = retryCount + 1;
-            console.warn(`[Player] custom 目录源播放失败，原地重试 ${state.customRetryCount}/2（不换源不切歌）`);
+            console.warn(`[Player] 本地/自定义目录源播放失败，原地重试 ${state.customRetryCount}/2（不换源不切歌）`);
             setPlayerStatus(`本地音频重试中 (${state.customRetryCount}/2)`, null, true);
             if (effectiveResumeTime > 0) window._resumeInfo = { time: effectiveResumeTime, song: state.currentSong };
             await new Promise(resolve => setTimeout(resolve, 800));
@@ -8076,8 +8106,8 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
             clearTimeout(window._autoSkipTimer);
             window._autoSkipTimer = null;
         }
-        setPlayerStatus('自定义目录音频播放失败');
-        RecoveryToast.error('自定义目录音频加载失败，请检查文件或网络后重试');
+        setPlayerStatus('本地音频播放失败');
+        RecoveryToast.error('本地/自定义目录音频加载失败，请检查文件或网络后重试');
         updatePlayButton(false);
         return;
     }
@@ -8307,14 +8337,14 @@ async function runRecoveryFlow(error, savedResumeTime, state = currentRecoverySt
 
 async function playSong(song, index, forceQuality = null, noPlay = false, isRetry = false, shouldAddToDefault = null, preparedResult = null) {
     // 1. Debounce / Lock: If already loading this song, ignore click
-    // [Fix] Allow retry to bypass this check
-    if (currentLoadingSongId === song.id && !isRetry) {
+    // [Fix] Allow retry to bypass this check; avoid false match when song.id is undefined
+    const thisRequestSongId = song.id ?? song._localFilename ?? song.url ?? null;
+    if (thisRequestSongId != null && currentLoadingSongId === thisRequestSongId && !isRetry) {
         console.log(`[Player] Already loading ${song.name}, ignoring request.`);
         return;
     }
 
     // 2. New Song Request: Update target
-    const thisRequestSongId = song.id;
     // Clear any pending auto-skip timer
     if (window._autoSkipTimer) {
         clearTimeout(window._autoSkipTimer);
@@ -8332,6 +8362,16 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
 
     playbackCacheUpgrade = null;
     cacheUpgradePlayhead = null;
+    if (playbackStallDetectionTimer) {
+        clearTimeout(playbackStallDetectionTimer);
+        playbackStallDetectionTimer = null;
+    }
+    if (currentPlaybackAbortController) {
+        try { currentPlaybackAbortController.abort(); } catch (_) { }
+        currentPlaybackAbortController = null;
+    }
+    const playbackAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    currentPlaybackAbortController = playbackAbortController;
     const thisRequestId = ++loadingRequestCounter;
     prefetchManager.stop();
     currentLoadingSongId = thisRequestSongId;
@@ -8495,6 +8535,7 @@ async function playSong(song, index, forceQuality = null, noPlay = false, isRetr
         const exactQuality = currentRecoveryState?.explicitQuality || settings.enableAutoDegradeQuality === false;
         const playbackOptions = {
             isCurrent: () => currentLoadingRequestId === thisRequestId,
+            signal: playbackAbortController?.signal,
             exactQuality,
             cacheQuality: currentRecoveryState?.cacheTargetQuality,
             excludedFiles: currentRecoveryState?.failedCacheFiles,
@@ -9291,6 +9332,10 @@ async function togglePlay() {
             await fadeVolume(0, 600);
         }
         shouldAutoRecoverPlayback = false;
+        if (playbackStallDetectionTimer) {
+            clearTimeout(playbackStallDetectionTimer);
+            playbackStallDetectionTimer = null;
+        }
         audio.pause();
         if (window._autoSkipTimer) {
             clearTimeout(window._autoSkipTimer);
@@ -9750,9 +9795,17 @@ function handlePlaybackStallOrWait(event) {
         const stallSongId = cleanSongData(currentPlayingSong)?.id;
         const stallWasRemote = !!audio.isRemote;
         const stallSong = currentPlayingSong || null;
-        const stallIsLocalStream = !!(stallSong && (stallSong.isLocal || stallSong.source === 'local' ||
-            stallSong.source === 'custom' || stallSong._isCustomDir || stallSong.folder === 'custom'));
-        const stallTimeoutMs = stallIsLocalStream ? 15000 : 4000;
+        const activeSourceType = typeof currentSourceType !== 'undefined' ? currentSourceType : '';
+        const activeSrc = audio.src || audio.currentSrc || '';
+        const stallIsLocalStream = !!(
+            (stallSong && (stallSong.isLocal || stallSong.source === 'local' ||
+                stallSong.source === 'custom' || stallSong._isCustomDir || stallSong.folder === 'custom')) ||
+            activeSourceType === 'server_cache' ||
+            activeSourceType === 'openlist' ||
+            activeSrc.includes('/api/music/cache/file/') ||
+            activeSrc.includes('/api/music/custom/file')
+        );
+        const stallTimeoutMs = stallIsLocalStream ? 30000 : 4000;
         const playhead = audio.currentTime || 0;
         audio._lxStallPosition = playhead;
         playbackStallDetectionTimer = setTimeout(() => {
@@ -12511,6 +12564,16 @@ function startWordProgressUpdate(lineIndex, lineEl, lineData) {
         totalWordsDuration += parseInt(span.dataset.duration) || 0;
     });
 
+    // 提前缓存扩展歌词元素与每字状态，避免在 rAF 循环中重复查询 DOM 或重复写入已结束/未开始节点的样式
+    const extGroups = Array.from(lineEl.querySelectorAll('.extended')).map(ext => Array.from(ext.querySelectorAll('.ext-item')));
+    const wordMeta = Array.from(wordSpans).map(span => ({
+        span,
+        start: parseInt(span.dataset.start, 10) || 0,
+        duration: parseInt(span.dataset.duration, 10) || 0,
+        state: ''
+    }));
+    const extState = new WeakMap();
+
     function update() {
         // 如果当前播放行已改变，或音频暂停，停止动画
         if (currentLyricIndex !== lineIndex || audio.paused) {
@@ -12523,29 +12586,33 @@ function startWordProgressUpdate(lineIndex, lineEl, lineData) {
         let sungDuration = 0;
 
         // 2. 更新逐字进度
-        wordSpans.forEach(span => {
-            const start = parseInt(span.dataset.start);
-            const duration = parseInt(span.dataset.duration);
+        for (let i = 0; i < wordMeta.length; i++) {
+            const entry = wordMeta[i];
+            const { span, start, duration } = entry;
 
             if (relativeTime >= start + duration) {
-                // 已播放完
                 sungDuration += duration;
-                span.style.setProperty('--word-progress', '100%');
-                span.classList.add('passed');
-                span.classList.remove('playing');
+                if (entry.state !== 'passed') {
+                    entry.state = 'passed';
+                    span.style.setProperty('--word-progress', '100%');
+                    span.classList.add('passed');
+                    span.classList.remove('playing');
+                }
             } else if (relativeTime >= start) {
-                // 正在播放中
                 sungDuration += (relativeTime - start);
-                const progress = Math.min(100, Math.max(0, ((relativeTime - start) / duration) * 100));
+                const progress = duration > 0 ? Math.min(100, Math.max(0, ((relativeTime - start) / duration) * 100)) : 100;
                 span.style.setProperty('--word-progress', `${progress}%`);
-                span.classList.add('playing');
-                span.classList.remove('passed');
-            } else {
-                // 尚未播放
+                if (entry.state !== 'playing') {
+                    entry.state = 'playing';
+                    span.classList.add('playing');
+                    span.classList.remove('passed');
+                }
+            } else if (entry.state !== 'pending') {
+                entry.state = 'pending';
                 span.style.setProperty('--word-progress', '0%');
                 span.classList.remove('passed', 'playing');
             }
-        });
+        }
 
         // 1. 更新整行进度 (用于带有逐字数据的翻译/罗马音平滑扫过)
         // 通过 实际已唱时长 / 总发声时长，实现翻译和原词进度严丝合缝对齐，消除"晚来早走"现象
@@ -12553,33 +12620,40 @@ function startWordProgressUpdate(lineIndex, lineEl, lineData) {
         lineEl.style.setProperty('--line-progress', `${lineProgress}%`);
 
         // 2. 更新扩展歌词逐字类 (翻译/罗马音) - 实现与主词同步的平滑“染色”
-        const extSpans = lineEl.querySelectorAll('.extended');
-        extSpans.forEach(ext => {
-            const items = ext.querySelectorAll('.ext-item');
+        for (let g = 0; g < extGroups.length; g++) {
+            const items = extGroups[g];
             const itemCount = items.length;
             if (itemCount > 0) {
                 const perItemWeight = 100 / itemCount;
-                items.forEach((item, idx) => {
+                for (let idx = 0; idx < itemCount; idx++) {
+                    const item = items[idx];
                     const itemStart = idx * perItemWeight;
                     const itemEnd = (idx + 1) * perItemWeight;
+                    const prevState = extState.get(item);
 
                     if (lineProgress >= itemEnd) {
-                        item.style.setProperty('--word-progress', '100%');
-                        item.classList.add('passed');
-                        item.classList.remove('playing');
+                        if (prevState !== 'passed') {
+                            extState.set(item, 'passed');
+                            item.style.setProperty('--word-progress', '100%');
+                            item.classList.add('passed');
+                            item.classList.remove('playing');
+                        }
                     } else if (lineProgress >= itemStart) {
-                        // 正在该字符/单词内平滑填充
                         const progress = ((lineProgress - itemStart) / perItemWeight) * 100;
                         item.style.setProperty('--word-progress', `${progress}%`);
-                        item.classList.add('playing');
-                        item.classList.remove('passed');
-                    } else {
+                        if (prevState !== 'playing') {
+                            extState.set(item, 'playing');
+                            item.classList.add('playing');
+                            item.classList.remove('passed');
+                        }
+                    } else if (prevState !== 'pending') {
+                        extState.set(item, 'pending');
                         item.style.setProperty('--word-progress', '0%');
                         item.classList.remove('passed', 'playing');
                     }
-                });
+                }
             }
-        });
+        }
 
         wordAnimationId = requestAnimationFrame(update);
     }
@@ -18938,6 +19012,10 @@ function finishSleepTimer() {
     // Use audio.pause directly or togglePlay if music is active
     if (audio && !audio.paused) {
         shouldAutoRecoverPlayback = false;
+        if (playbackStallDetectionTimer) {
+            clearTimeout(playbackStallDetectionTimer);
+            playbackStallDetectionTimer = null;
+        }
         audio.pause();
         updatePlayButton(false);
         showInfo('睡眠时间到，音乐已停止播放 🌙');

@@ -13,7 +13,7 @@ export const sync = async(socket: LX.Socket) => {
   for (const moduleName of FeaturesList) {
     if (enabledFeatures[moduleName]) {
       socket.feature[moduleName] = enabledFeatures[moduleName]
-      await modules[moduleName].sync(socket).catch(_ => _)
+      await modules[moduleName].sync(socket)
     }
     if (disconnected) throw new Error('disconnected')
   }

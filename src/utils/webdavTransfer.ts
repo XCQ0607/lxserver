@@ -33,15 +33,19 @@ export async function uploadWebdavFile(client: any, local: string, remote: strin
   const stream = new Transform({ transform(chunk, _encoding, next) { hash.update(chunk); uploaded += chunk.length; onBytes?.(uploaded); next(null, chunk) } })
   input.on('error', error => stream.destroy(error))
   input.pipe(stream)
+  let moved = false
   try {
     if (await client.putFileContents(temporary, stream, { overwrite: true, signal }) === false) throw new Error('WebDAV 上传被拒绝')
     if (uploaded !== size || hash.digest('hex') !== expectedHash) throw new Error('上传期间文件变化，未替换云端原副本')
     const info = await client.stat(temporary, { signal })
     if (Number(info.size) !== size) throw new Error('WebDAV 上传后大小不一致')
     await client.moveFile(temporary, remote, { overwrite: true, signal })
+    moved = true
   } finally {
     stream.destroy()
     input.destroy()
-    try { await client.deleteFile(temporary, { signal: AbortSignal.timeout(10_000) }) } catch { /* MOVE already removed it, or cleanup will be retried later. */ }
+    if (!moved) {
+      try { await client.deleteFile(temporary, { signal: AbortSignal.timeout(10_000) }) } catch { /* Cleanup will be retried later. */ }
+    }
   }
 }

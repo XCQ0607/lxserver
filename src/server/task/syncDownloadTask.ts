@@ -940,6 +940,8 @@ const sanitizeDirName = (name: string): string => {
 // ─────────────────────────────────────────────
 let globalIsRunning = false
 let globalLockTime = 0
+let activeGlobalRunToken: symbol | null = null
+const activeUserRunTokens = new Map<string, symbol>()
 const GLOBAL_LOCK_TIMEOUT_MS = 10 * 60 * 1000 // 10 分钟锁租约超时
 
 /**
@@ -961,6 +963,10 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
     return
   }
 
+  const runToken = Symbol('syncUserPlaylists')
+  activeUserRunTokens.set(username, runToken)
+  progress.isRunning = true
+
   // 为每个用户的同步任务创建并注册独立的 AbortController，确保无论定时还是手动触发都能被立即暂停
   let userController = activeAbortControllers.get(username)
   if (!userController) {
@@ -980,84 +986,84 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
     }
   }
 
-  const syncData = getSyncDownloadData(username)
-  if (!syncData.enabled && !targetPlaylistId) return
-
-  const userSpace = getUserSpace(username)
-  let listData: any
+  let syncData = getSyncDownloadData(username)
   try {
-    listData = await userSpace.listManage.getListData()
-  } catch (e: any) {
-    syncLog.warn(`[同步下载] 用户 ${username} 获取歌单失败: ${e.message}`)
-    return
-  }
+    if (!syncData.enabled && !targetPlaylistId) return
 
-  if (!listData?.userList?.length) return
+    const userSpace = getUserSpace(username)
+    let listData: any
+    try {
+      listData = await userSpace.listManage.getListData()
+    } catch (e: any) {
+      syncLog.warn(`[同步下载] 用户 ${username} 获取歌单失败: ${e.message}`)
+      return
+    }
 
-  const quality = getPreferredQuality(username)
-  const cacheLocation = getEffectiveCacheLocation(username)
-  const validListIds = new Set<string>(listData.userList.map((l: any) => l.id))
+    if (!listData?.userList?.length) return
 
-  // 清理已删除的歌单
-  const cleaned = cleanupStalePlaylists(syncData, validListIds)
-  if (cleaned) saveSyncDownloadData(username, syncData)
+    const quality = getPreferredQuality(username)
+    const cacheLocation = getEffectiveCacheLocation(username)
+    const validListIds = new Set<string>(listData.userList.map((l: any) => l.id))
 
-  // 只同步开启了同步的歌单（如果指定了 targetPlaylistId，则仅同步该歌单）
-  const targetLists = listData.userList.filter((l: any) => {
-    if (targetPlaylistId) return l.id === targetPlaylistId
-    const cfg = syncData.playlists[l.id]
-    return cfg?.enabled === true
-  })
+    // 清理已删除的歌单
+    const cleaned = cleanupStalePlaylists(syncData, validListIds)
+    if (cleaned) saveSyncDownloadData(username, syncData)
 
-  if (targetLists.length === 0) return
-
-  // 预扫描所有需下载和需删除的歌曲
-  let overallTotal = 0
-  const plans: Array<{
-    list: any
-    subPath: string
-    remoteSongs: any[]
-    toDownload: any[]   // 真正需要下载（本地没有或音质需升级）的歌曲子集
-    toDelete: string[]
-    localSongsMap: Map<string, fileCache.CacheItem>
-  }> = []
-
-  for (const list of targetLists) {
-    const subPath = sanitizeDirName(list.name || list.id)
-    const remoteSongs: any[] = Array.isArray(list.list) ? list.list : []
-    const remoteSongIds = new Set<string>(remoteSongs.map((s: any) => {
-      const id = String(s.songmid || s.id || '')
-      const src = s.source || 'unknown'
-      return id.includes('_') ? id : `${src}_${id}`
-    }))
-    const localSongsMap = getLocalSongsMap(username, subPath, cacheLocation)
-    const localSongIds = new Set<string>(localSongsMap.keys())
-    const toDelete = Array.from(localSongIds).filter(id => !remoteSongIds.has(id))
-
-    // 预计算真正需要下载的歌曲（本地无缓存 或 音质需升级）
-    const toDownload = remoteSongs.filter((s: any) => {
-      const songId = fileCache.normalizeSongId(s)
-      const existing = localSongsMap.get(songId)
-      return !existing || existing.quality !== quality
+    // 只同步开启了同步的歌单（如果指定了 targetPlaylistId，则仅同步该歌单）
+    const targetLists = listData.userList.filter((l: any) => {
+      if (targetPlaylistId) return l.id === targetPlaylistId
+      const cfg = syncData.playlists[l.id]
+      return cfg?.enabled === true
     })
 
-    overallTotal += toDownload.length  // 进度总数只统计实际需要下载的
-    plans.push({ list, subPath, remoteSongs, toDownload, toDelete, localSongsMap })
-  }
+    if (targetLists.length === 0) return
 
-  progress.isRunning = true
-  progress.isPaused = false
-  progress.startTime = Date.now()
-  progress.successCount = 0
-  progress.addCount = 0
-  progress.deleteCount = 0
-  progress.failCount = 0
-  progress.totalSongs = overallTotal
-  progress.overallCurrent = 0
-  progress.currentListId = ''
-  progress.currentListName = ''
-  progress.currentSongName = ''
-  progress.currentSongIndex = 0
+    // 预扫描所有需下载和需删除的歌曲
+    let overallTotal = 0
+    const plans: Array<{
+      list: any
+      subPath: string
+      remoteSongs: any[]
+      toDownload: any[]   // 真正需要下载（本地没有或音质需升级）的歌曲子集
+      toDelete: string[]
+      localSongsMap: Map<string, fileCache.CacheItem>
+    }> = []
+
+    for (const list of targetLists) {
+      const subPath = sanitizeDirName(list.name || list.id)
+      const remoteSongs: any[] = Array.isArray(list.list) ? list.list : []
+      const remoteSongIds = new Set<string>(remoteSongs.map((s: any) => {
+        const id = String(s.songmid || s.id || '')
+        const src = s.source || 'unknown'
+        return id.includes('_') ? id : `${src}_${id}`
+      }))
+      const localSongsMap = getLocalSongsMap(username, subPath, cacheLocation)
+      const localSongIds = new Set<string>(localSongsMap.keys())
+      const toDelete = Array.from(localSongIds).filter(id => !remoteSongIds.has(id))
+
+      // 预计算真正需要下载的歌曲（本地无缓存 或 音质需升级）
+      const toDownload = remoteSongs.filter((s: any) => {
+        const songId = fileCache.normalizeSongId(s)
+        const existing = localSongsMap.get(songId)
+        return !existing || existing.quality !== quality
+      })
+
+      overallTotal += toDownload.length  // 进度总数只统计实际需要下载的
+      plans.push({ list, subPath, remoteSongs, toDownload, toDelete, localSongsMap })
+    }
+
+    progress.isPaused = false
+    progress.startTime = Date.now()
+    progress.successCount = 0
+    progress.addCount = 0
+    progress.deleteCount = 0
+    progress.failCount = 0
+    progress.totalSongs = overallTotal
+    progress.overallCurrent = 0
+    progress.currentListId = ''
+    progress.currentListName = ''
+    progress.currentSongName = ''
+    progress.currentSongIndex = 0
   progress.currentListTotalSongs = 0
   progress.log = []
   const totalCheck = plans.reduce((s, p) => s + p.remoteSongs.length, 0)
@@ -1067,7 +1073,6 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
   let totalDeleted = 0
   let totalFailed = 0
 
-  try {
     for (const plan of plans) {
       if (currentSignal.aborted) break
       const { list, subPath, remoteSongs, toDownload, toDelete, localSongsMap } = plan
@@ -1208,9 +1213,12 @@ const syncUserPlaylists = async (username: string, signal?: AbortSignal, targetP
     if (activeAbortControllers.get(username) === userController) {
       activeAbortControllers.delete(username)
     }
-    progress.isRunning = false
-    progress.startTime = null
-    progress.currentSongName = ''
+    if (activeUserRunTokens.get(username) === runToken) {
+      activeUserRunTokens.delete(username)
+      progress.isRunning = false
+      progress.startTime = null
+      progress.currentSongName = ''
+    }
     syncLog.info(`[同步下载] 用户 ${username} ${syncData.lastSyncResult}`)
   }
 }
@@ -1236,6 +1244,8 @@ export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
     }
   }
 
+  const globalRunToken = Symbol('syncDownloadForAllUsers')
+  activeGlobalRunToken = globalRunToken
   globalIsRunning = true
   globalLockTime = Date.now()
 
@@ -1280,8 +1290,11 @@ export const syncDownloadForAllUsers = async (signal?: AbortSignal): Promise<{
       }
     }
   } finally {
-    globalIsRunning = false
-    globalLockTime = 0
+    if (activeGlobalRunToken === globalRunToken) {
+      activeGlobalRunToken = null
+      globalIsRunning = false
+      globalLockTime = 0
+    }
   }
 
   return { processedUsers, totalSuccess, totalAdded, totalDeleted, totalFail }

@@ -7,6 +7,9 @@ import {
     probeReturnedMusicUrl,
     requestMusicUrlHead,
     selectCandidateMusicUrl,
+    loadUserApi,
+    getLoadedApis,
+    unloadSingleUserApi,
     type CandidateApiLike,
 } from '../src/server/sources/userApi'
 
@@ -304,4 +307,56 @@ test('HEAD deadline also bounds a stuck proxy-agent lookup', async () => {
     ])
     assert.equal(result, 'timeout')
     assert.equal(requested, false)
+})
+
+test('ephemeral loadUserApi does not leak into loadedApis and dispose clears VM timers', async () => {
+    const prevLx = (global as any).lx
+    ;(global as any).lx = { config: {} }
+    try {
+        const script = `
+            let ticks = 0
+            setInterval(() => { ticks++ }, 10)
+            setTimeout(() => { ticks++ }, 25)
+            lx.on('request', () => ticks)
+            lx.send('inited', { sources: { wy: { type: 'music', actions: ['musicUrl'], qualitys: ['128k'] } } })
+        `
+        const eph = await loadUserApi({
+            id: 'ephemeral_test',
+            name: 'Eph',
+            description: '',
+            version: '1',
+            author: '',
+            homepage: '',
+            script,
+            sources: {},
+            enabled: false,
+            owner: 'temp',
+            ephemeral: true,
+        })
+        assert.equal(eph.success, true)
+        assert.equal(getLoadedApis().some(a => a.id === 'ephemeral_test'), false)
+        eph.apiInstance.dispose()
+        await assert.rejects(eph.apiInstance.callRequest('musicUrl', 'wy', {}), /未注册 request 处理器/)
+
+        // Registered instance: unloadSingleUserApi disposes timers and removes from loadedApis
+        const reg = await loadUserApi({
+            id: 'timer_test',
+            name: 'Timer',
+            description: '',
+            version: '1',
+            author: '',
+            homepage: '',
+            script,
+            sources: {},
+            enabled: true,
+            owner: 'alice',
+        })
+        assert.equal(reg.success, true)
+        assert.equal(getLoadedApis().some(a => a.id === 'timer_test' && a.owner === 'alice'), true)
+        unloadSingleUserApi('alice', 'timer_test')
+        assert.equal(getLoadedApis().some(a => a.id === 'timer_test' && a.owner === 'alice'), false)
+        await assert.rejects(reg.apiInstance.callRequest('musicUrl', 'wy', {}), /未注册 request 处理器/)
+    } finally {
+        ;(global as any).lx = prevLx
+    }
 })

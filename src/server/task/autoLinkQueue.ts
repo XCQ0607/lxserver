@@ -46,13 +46,25 @@ export class AutoLinkQueue {
   private save(user: string, task: Task) {
     task.updatedAt = Date.now()
     const file = this.file(user)
+    const tmp = `${file}.${crypto.randomUUID()}.tmp`
     fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file + '.tmp', JSON.stringify(task), 'utf8')
-    fs.renameSync(file + '.tmp', file)
+    try {
+      fs.writeFileSync(tmp, JSON.stringify(task), 'utf8')
+      fs.renameSync(tmp, file)
+    } catch (error) {
+      try { fs.unlinkSync(tmp) } catch { /* ignore */ }
+      throw error
+    }
   }
   private get(user: string) {
     if (!this.tasks.has(user) && fs.existsSync(this.file(user))) {
-      const task: Task = JSON.parse(fs.readFileSync(this.file(user), 'utf8'))
+      let task: Task
+      try {
+        task = JSON.parse(fs.readFileSync(this.file(user), 'utf8'))
+      } catch (e) {
+        console.warn('[AutoLink] 读取任务状态失败，已忽略损坏文件:', e)
+        return undefined
+      }
       task.concurrency ||= DEFAULT_CONCURRENCY
       task.results.forEach(row => { row.key ||= itemKey(row) })
       if (['running', 'cancelling'].includes(task.status)) {

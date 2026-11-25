@@ -11,6 +11,8 @@ import { buildLyrics, parseLyrics } from '@/utils/lrcTool'
 import { getLyricFetcher, embedLyricsIntoFile, getAudioMetadataUnsupportedStatus } from './fileCache'
 import * as fileCache from './fileCache'
 import { remasterStaging } from '../task/remasterStaging'
+import { serveFile } from '../http/serveFile'
+import { resolveContainedPath } from '../auth/security'
 
 export interface CustomCacheItem {
     id: string
@@ -106,6 +108,7 @@ const detectQualityFromBitrate = (bitrate: number | undefined, ext: string, tagg
 class CustomIndexManager {
     private indexes: Map<string, Map<string, CustomCacheItem>> = new Map() // username -> (compositeKey -> CustomCacheItem)
     private loadedVersions = new Map<string, string>()
+    private versionCache = new Map<string, { file: string | null; stamp: string; version: string }>()
 
     getVersion(username: string): string {
         const file = this.getIndexFilePath(username)
@@ -116,7 +119,11 @@ class CustomIndexManager {
                 stamp = `${stat.mtimeNs}:${stat.ctimeNs}:${stat.size}:${stat.ino}`
             } catch (error: any) { if (error.code !== 'ENOENT') throw error }
         }
-        return crypto.createHash('sha256').update(JSON.stringify([file, stamp])).digest('hex')
+        const cached = this.versionCache.get(username)
+        if (cached && cached.file === file && cached.stamp === stamp) return cached.version
+        const version = crypto.createHash('sha256').update(JSON.stringify([file, stamp])).digest('hex')
+        this.versionCache.set(username, { file, stamp, version })
+        return version
     }
 
     private getIndexFilePath(username: string): string | null {
@@ -301,8 +308,12 @@ const scanCustomIndex = async (username: string) => {
 
     const foundRelPaths = new Set<string>()
     let updated = false
+    let scannedCount = 0
 
     for (const fileObj of scannedFiles) {
+        if (++scannedCount % 20 === 0) {
+            await new Promise<void>(resolve => setImmediate(resolve))
+        }
         const relPath = fileObj.relativePath
         const filePath = fileObj.fullPath
         foundRelPaths.add(relPath)
@@ -510,46 +521,33 @@ export const serveCustomFile = (req: http.IncomingMessage, res: http.ServerRespo
         return
     }
 
-    const filePath = resolveSafePath(customDir, filename)
-    if (!filePath || !fs.existsSync(filePath)) {
+    let filePath: string
+    try {
+        filePath = resolveContainedPath(customDir, filename)
+    } catch {
+        res.writeHead(403)
+        res.end('Forbidden')
+        return
+    }
+    if (!fs.existsSync(filePath)) {
         res.writeHead(404)
         res.end('File Not Found')
         return
     }
 
-    const stat = fs.statSync(filePath)
     const ext = path.extname(filePath).toLowerCase()
     const mimeTypes: Record<string, string> = {
         '.mp3': 'audio/mpeg',
         '.flac': 'audio/flac',
         '.m4a': 'audio/mp4',
         '.ogg': 'audio/ogg',
+        '.opus': 'audio/ogg',
+        '.aac': 'audio/aac',
         '.wav': 'audio/wav',
         '.ape': 'audio/x-ape'
     }
     const contentType = mimeTypes[ext] || 'application/octet-stream'
-    const range = req.headers.range
-
-    if (range) {
-        const parts = range.replace(/bytes=/, '').split('-')
-        const start = parseInt(parts[0], 10)
-        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1
-        const chunksize = end - start + 1
-        res.writeHead(206, {
-            'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-            'Accept-Ranges': 'bytes',
-            'Content-Length': chunksize,
-            'Content-Type': contentType
-        })
-        fs.createReadStream(filePath, { start, end }).pipe(res)
-    } else {
-        res.writeHead(200, {
-            'Content-Length': stat.size,
-            'Content-Type': contentType,
-            'Accept-Ranges': 'bytes'
-        })
-        fs.createReadStream(filePath).pipe(res)
-    }
+    serveFile(req, res, filePath, contentType)
 }
 
 // 删除自定义目录下的文件

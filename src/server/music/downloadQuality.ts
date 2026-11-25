@@ -19,10 +19,12 @@ export const getDownloadQualityCandidates = (requestedQuality: string) => {
 export const resolveWithQualityFallback = async <T extends { url?: string, type?: string }>(
   requestedQuality: string,
   resolve: (quality: string) => Promise<T>,
+  signal?: AbortSignal,
 ) => {
   const errors: string[] = []
 
   for (const quality of getDownloadQualityCandidates(requestedQuality)) {
+    if (signal?.aborted) throw signal.reason || new Error('Aborted')
     try {
       const result = await resolve(quality)
       if (!result?.url) throw new Error('cannot resolve download URL')
@@ -31,6 +33,7 @@ export const resolveWithQualityFallback = async <T extends { url?: string, type?
         quality: result.type || quality,
       }
     } catch (err: any) {
+      if (signal?.aborted || err?.name === 'AbortError') throw err
       errors.push(`${quality}: ${err?.message || 'resolve failed'}`)
     }
   }

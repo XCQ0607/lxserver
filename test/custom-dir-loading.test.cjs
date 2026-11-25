@@ -7,7 +7,7 @@ const { stripTypeScriptTypes } = require('node:module');
 function setup(fetch) {
     const window = { currentListData: { username: 'alice' } };
     const context = vm.createContext({ window, fetch, console,
-        localStorage: { getItem: () => null }, document: { getElementById: () => null } });
+        localStorage: { getItem: () => null, removeItem() {} }, document: { getElementById: () => null } });
     vm.runInContext(fs.readFileSync('public/music/js/local/customDir.js', 'utf8'), context);
     const manager = window.CustomDirManager;
     manager.isActive = true;
@@ -134,4 +134,20 @@ test('unchanged version does not reload; changed version reloads once and preser
     assert.equal(lists, 2);
     assert.equal(manager.currentPage, 3);
     assert.equal(manager.loadedVersion, 'v2');
+});
+
+test('resetFilters clears filterSource and filterStatus without shadowed override; unindexed matches consistently', () => {
+    const { manager } = setup(async () => response([]));
+    manager.filterSource = new Set(['wy']);
+    manager.filterStatus = new Set(['unindexed']);
+    let applied = 0;
+    manager.applyFilters = () => { applied++; };
+    manager.resetFilters();
+    assert.equal(manager.filterSource.size, 0);
+    assert.equal(manager.filterStatus.size, 0);
+    assert.equal(applied, 1);
+
+    assert.equal(manager.isItemUnindexed({ source: 'custom', songmid: 'custom_1' }), true);
+    assert.equal(manager.isItemUnindexed({ source: 'local', songmid: 'a - b' }), true);
+    assert.equal(manager.isItemUnindexed({ source: 'wy', songmid: '12345' }), false);
 });

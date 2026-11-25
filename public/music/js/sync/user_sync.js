@@ -215,6 +215,7 @@ class LocalClient {
 
     async getList() {
         const res = await fetch(`${this.baseUrl}/list`, { headers: getUserAuthHeaders() });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
     }
 
@@ -224,6 +225,7 @@ class LocalClient {
             headers: { 'Content-Type': 'application/json', ...getUserAuthHeaders() },
             body: JSON.stringify(data)
         });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
     }
 }
@@ -370,6 +372,7 @@ class RemoteClient {
         this.onDisconnect = null;
 
         this.pendingRequests = {};
+        this.listSyncQueue = Promise.resolve();
 
         // Handlers for List Data Access (to be passed from App)
         this.listHandlers = {
@@ -484,6 +487,15 @@ class RemoteClient {
         console.log('Connecting WS:', wsUrl);
 
         try {
+            if (this.ws) {
+                const prevWs = this.ws;
+                this.ws = null;
+                prevWs.onopen = null;
+                prevWs.onmessage = null;
+                prevWs.onclose = null;
+                prevWs.onerror = null;
+                try { prevWs.close(); } catch (_) { }
+            }
             this.ws = new WebSocket(wsUrl);
             this.ws.onopen = () => this.handleOpen();
             this.ws.onmessage = (e) => this.handleMessage(e);
@@ -646,23 +658,28 @@ class RemoteClient {
             },
 
             // --- Real-time Updates Handlers ---
-            onListSyncAction: async (actionData) => {
-                console.log('[RPC] onListSyncAction, 远程操作:', actionData);
-                const { action, data } = actionData;
+            onListSyncAction: (actionData) => {
+                const run = async () => {
+                    console.log('[RPC] onListSyncAction, 远程操作:', actionData);
+                    const { action, data } = actionData;
 
-                // Fetch current data
-                let currentData = await this.listHandlers.getData();
-                if (!currentData) currentData = { defaultList: [], loveList: [], userList: [] };
+                    // Fetch current data
+                    let currentData = await this.listHandlers.getData();
+                    if (!currentData) currentData = { defaultList: [], loveList: [], userList: [] };
 
-                // Apply Helper Logic
-                if (ListHelper[action]) {
-                    currentData = ListHelper[action](currentData, data);
-                    // Save data
-                    await this.listHandlers.setData(currentData);
-                    console.log('[RPC] 操作应用成功:', action);
-                } else {
-                    console.warn('[RPC] 未知操作:', action);
-                }
+                    // Apply Helper Logic
+                    if (ListHelper[action]) {
+                        currentData = ListHelper[action](currentData, data);
+                        // Save data
+                        await this.listHandlers.setData(currentData);
+                        console.log('[RPC] 操作应用成功:', action);
+                    } else {
+                        console.warn('[RPC] 未知操作:', action);
+                    }
+                };
+                const next = this.listSyncQueue.then(run, run);
+                this.listSyncQueue = next.catch(() => {});
+                return next;
             }
         };
 
@@ -748,12 +765,22 @@ class RemoteClient {
             this.ws.close();
             this.ws = null;
         }
-        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
     }
 
     handleClose(e) {
-        console.log('WS Close', e.code);
+        console.log('WS Close', e?.code);
         this.isConnected = false;
+        if (this.heartbeatTimer) {
+            clearInterval(this.heartbeatTimer);
+            this.heartbeatTimer = null;
+        }
+        if (e?.code === 4100) {
+            this.authInfo = null;
+        }
         if (this.onDisconnect) this.onDisconnect();
     }
 

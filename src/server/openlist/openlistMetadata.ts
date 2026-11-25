@@ -23,8 +23,15 @@ function read(): Store {
   if (cachedFile === file && cachedStore) return cachedStore
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = undefined }
   cachedFile = file; cachedStore = undefined; lastWrite = 0; dirty = false
-  try { cachedStore = JSON.parse(fs.readFileSync(file, 'utf8')) }
-  catch (error: any) { if (error.code === 'ENOENT') cachedStore = { observations: {} }; else throw error }
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
+    cachedStore = parsed && typeof parsed === 'object' && parsed.observations && typeof parsed.observations === 'object'
+      ? parsed
+      : { observations: {} }
+  } catch (error: any) {
+    if (error.code === 'ENOENT' || error instanceof SyntaxError) cachedStore = { observations: {} }
+    else throw error
+  }
   return cachedStore!
 }
 function write(store: Store, force = false) {

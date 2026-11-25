@@ -863,6 +863,7 @@ function findOpenlistBackupRow(user: string, folderType: 'cache' | 'music', base
   const rows = listBackupsByUserFolder(user, folderType)
   for (const row of rows) {
     if (row.status !== 'verified' && row.status !== 'completed') continue
+    if (row.cloud_missing_count > 0) continue
     if (!row.remote_path) continue
     const rowBase = path.basename(row.local_path, path.extname(row.local_path))
     if (rowBase !== baseName) continue
@@ -940,7 +941,7 @@ export async function resolveOpenlistCacheEntry(
   if (!folderEnabled(user, folderType, cfg)) return null
   if (!isOpenlistCacheFirstEnabled()) return null
   const row = song ? listBackupsByUserFolder(user, folderType).find(r =>
-    ['verified', 'completed'].includes(r.status) && r.songmid === song.id && r.source === song.source && r.quality === song.quality,
+    ['verified', 'completed'].includes(r.status) && !(r.cloud_missing_count > 0) && r.songmid === song.id && r.source === song.source && r.quality === song.quality,
   ) || findOpenlistBackupRow(user, folderType, baseName) : findOpenlistBackupRow(user, folderType, baseName)
   if (!row) return null
   try {
@@ -950,10 +951,11 @@ export async function resolveOpenlistCacheEntry(
     const key = crypto.createHash('sha256').update(JSON.stringify([cfg.endpoint, cfg.token, cfg.root, user, row.remote_path, row.local_hash, row.updated_at])).digest('hex')
     const old = playbackLinks.get(key)
     if (old && old.until > Date.now()) return await waitPlaybackLink(old.pending, signal)
-    for (const [key, item] of playbackLinks) if (item.until < Date.now()) playbackLinks.delete(key)
+    for (const [k, item] of playbackLinks) if (item.until < Date.now()) playbackLinks.delete(k)
     if (playbackLinks.size > 1000) playbackLinks.delete(playbackLinks.keys().next().value!)
+    const reqSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(4000)]) : AbortSignal.timeout(4000)
     const pending = (async () => {
-      const info = await cl.getFileInfo(row.remote_path, AbortSignal.timeout(4000))
+      const info = await cl.getFileInfo(row.remote_path, reqSignal)
       if (info.size != null && row.size != null && info.size !== row.size) return null
       const filename = path.basename(row.remote_path)
       if (info?.rawUrl) return { url: info.rawUrl, filename, quality: row.quality || song?.quality || 'unknown' }
@@ -962,7 +964,11 @@ export async function resolveOpenlistCacheEntry(
       const signed = buildSignedOpenlistDownUrl(cfg.externalUrl || cfg.endpoint || '', row.remote_path, cfg.token, cfg.signExpireHours)
       if (!signed) return null
       return { url: signed, filename, quality: row.quality || song?.quality || 'unknown' }
-    })().catch(() => null)
+    })().catch(() => {
+      // Do not cache transient failures/timeouts for 30s.
+      if (playbackLinks.get(key)?.pending === pending) playbackLinks.delete(key)
+      return null
+    })
     playbackLinks.set(key, { until: Date.now() + 30000, pending })
     return await waitPlaybackLink(pending, signal)
   } catch {
@@ -1451,7 +1457,7 @@ export async function verifyPending(): Promise<void> {
           const localExists = !!row.local_path && fs.existsSync(row.local_path)
           const missingCount = row.cloud_missing_count || 0
           if (!localExists) {
-            // 本地已删：不标 failed（传不了），但要写入缺失计数与文案，让下次落盘钩子能接管。
+            // 本地已删：标记为 missing（不标 failed 也不再当作 verified 命中），并写入缺失计数与文案，让下次落盘钩子能接管。
             // 达到上限后只写文案，不再累积，避免轮询反复 +1。
             const next = Math.min(missingCount + 1, MAX_CLOUD_MISSING_RETRIES)
             setBackupStatus(row.id, row.status, { cloudMissingCount: next, error: cloudMissingError(next) })

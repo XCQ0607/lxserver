@@ -1,5 +1,5 @@
 import { hashBackupFile, backupFileVersion } from './backupFiles'
-import { downloadWebdavFile, uploadWebdavFile } from './webdavTransfer'
+import { downloadWebdavFile, missingWebdavFile, uploadWebdavFile } from './webdavTransfer'
 import { webdavStatePath, readWebdavState, saveWebdavState, webdavManifestName, parseWebdavManifest, type WebdavFileVersion } from './webdavState'
 import { WebdavRecovery, checkedBackupPath, type WebdavRestoreOptions, type RecoveryContext } from './webdavRecovery'
 import fs from 'fs'
@@ -110,9 +110,14 @@ class WebDAVSync extends EventEmitter {
     async initClient(force = false): Promise<boolean> {
         if (!this.isConfigured()) return false
         if (this.client && !force) return true
-        if (this.initPromise) return this.initPromise
+        if (this.initPromise) {
+            if (!force) return this.initPromise
+            await this.initPromise.catch(() => false)
+            if (this.client && !force) return true
+        }
 
-        this.initPromise = (async () => {
+        let promise!: Promise<boolean>
+        promise = (async () => {
             try {
                 // 动态导入 webdav ESM 模块
                 const { createClient } = await import('webdav')
@@ -135,11 +140,12 @@ class WebDAVSync extends EventEmitter {
                 this.client = null
                 return false
             } finally {
-                this.initPromise = null
+                if (this.initPromise === promise) this.initPromise = null
             }
         })()
+        this.initPromise = promise
 
-        return this.initPromise
+        return promise
     }
 
     isConfigured(): boolean {
@@ -218,6 +224,8 @@ class WebDAVSync extends EventEmitter {
         this.restoring = true
         this.lastRestoreResult = undefined
         let release: (() => void) | undefined
+        const previousMaintenance = global.lx.restoreMaintenance
+        let succeeded = false
         try {
             release = beginCloudRestore()
             if (global.lx.pauseForRestore) global.lx.pauseForRestore()
@@ -233,13 +241,18 @@ class WebDAVSync extends EventEmitter {
             this.filesHash.clear(); this.backupHash.clear(); this.publishedManifest = ''; this.saveState()
             this.emit('progress', { type: 'restore', status: 'finish', message: '恢复完成，已保留恢复前副本；请重启服务完整加载数据' })
             this.addLog({ timestamp: Date.now(), type: 'restore', file: options.targetFilename || 'selected data', status: 'success' })
+            succeeded = true
             return true
         } catch (error: any) {
             this.lastRestoreResult = { ...(this.lastRestoreResult || {}), errors: [error.message] }
             this.emit('progress', { type: 'restore', status: 'error', message: error.message })
             this.addLog({ timestamp: Date.now(), type: 'restore', file: 'selected data', status: 'error', message: error.message })
             return false
-        } finally { this.restoring = false; release?.() }
+        } finally {
+            this.restoring = false
+            release?.()
+            if (!succeeded && !startup) global.lx.restoreMaintenance = previousMaintenance
+        }
     }
 
     private context() {
@@ -293,13 +306,12 @@ class WebDAVSync extends EventEmitter {
         // 且 WebDAV 返回的也是该路径，保持原字符才能与本地文件列表精确对应！
         const normSync = this.syncPath.replace(/\\/g, '/').replace(/\/+$/, '')
         const normRemote = remoteFilename.replace(/\\/g, '/')
+        if (!normSync) return normRemote.replace(/^\/+/, '')
         const prefix = normSync + '/'
 
+        if (normRemote === normSync) return ''
         if (normRemote.startsWith(prefix)) {
-            return normRemote.slice(prefix.length).replace(/\\/g, '/')
-        }
-        if (normRemote.startsWith(normSync)) {
-            return normRemote.slice(normSync.length).replace(/^\/+/, '').replace(/\\/g, '/')
+            return normRemote.slice(prefix.length)
         }
         throw new Error('云端文件不在配置的同步目录内')
     }
@@ -379,7 +391,7 @@ class WebDAVSync extends EventEmitter {
             return true
         } catch (err: any) {
             // 如果远程文件已经不存在，也认为成功
-            if (err.status === 404) return true
+            if (missingWebdavFile(err)) return true
             console.error(`Failed to delete remote file ${relativePath}:`, err.message)
             return false
         }
@@ -919,8 +931,10 @@ class WebDAVSync extends EventEmitter {
             this.ensuredDirs.clear()
             this.stopAutoSync()
             if (this.isConfigured()) {
-                void this.initClient(true).then(() => {
-                    this.startAutoSync()
+                void this.initClient(true).then(ok => {
+                    if (ok) this.startAutoSync()
+                }).catch(err => {
+                    console.error('[WebDAV] 重新初始化客户端失败:', err)
                 })
             }
         }

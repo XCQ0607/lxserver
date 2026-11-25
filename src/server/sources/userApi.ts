@@ -75,6 +75,7 @@ interface UserApiInfo {
     enabled: boolean
     owner: string // 'open' or username
     allowUnsafeVM?: boolean
+    ephemeral?: boolean
 }
 
 export interface ApiStatusInfo {
@@ -240,6 +241,47 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     const eventHandlers = new Map<string, Function>()
     let registeredSources: any = {}
 
+    // 追踪该脚本实例创建的所有定时器，卸载/重载/销毁时统一清理，防止旧 VM 上下文及定时器泄漏
+    const activeTimeouts = new Set<ReturnType<typeof setTimeout>>()
+    const activeIntervals = new Set<ReturnType<typeof setInterval>>()
+    let disposed = false
+    const dispose = () => {
+        if (disposed) return
+        disposed = true
+        for (const t of activeTimeouts) clearTimeout(t)
+        activeTimeouts.clear()
+        for (const i of activeIntervals) clearInterval(i)
+        activeIntervals.clear()
+        eventHandlers.clear()
+    }
+    const sandboxSetTimeout = (fn: Function, delay?: number, ...args: any[]) => {
+        if (disposed || typeof fn !== 'function') return undefined as any
+        const handle = setTimeout((...cbArgs: any[]) => {
+            activeTimeouts.delete(handle)
+            if (!disposed) fn(...cbArgs)
+        }, delay, ...args)
+        activeTimeouts.add(handle)
+        return handle
+    }
+    const sandboxClearTimeout = (handle: any) => {
+        if (handle == null) return
+        activeTimeouts.delete(handle)
+        clearTimeout(handle)
+    }
+    const sandboxSetInterval = (fn: Function, delay?: number, ...args: any[]) => {
+        if (disposed || typeof fn !== 'function') return undefined as any
+        const handle = setInterval((...cbArgs: any[]) => {
+            if (!disposed) fn(...cbArgs)
+        }, delay, ...args)
+        activeIntervals.add(handle)
+        return handle
+    }
+    const sandboxClearInterval = (handle: any) => {
+        if (handle == null) return
+        activeIntervals.delete(handle)
+        clearInterval(handle)
+    }
+
     // ========== 关键修改：提前创建 initPromise ==========
     let initResolve: (() => void) | null = null
     let initReject: ((err: Error) => void) | null = null
@@ -392,17 +434,17 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
     // 完整沙箱环境
     const sandbox: any = {
         console: sandboxConsole,
-        setTimeout,
-        clearTimeout,
-        setInterval,
-        clearInterval,
+        setTimeout: sandboxSetTimeout,
+        clearTimeout: sandboxClearTimeout,
+        setInterval: sandboxSetInterval,
+        clearInterval: sandboxClearInterval,
         Buffer,
         URL,
         URLSearchParams,
         TextEncoder,
         TextDecoder,
         process: {
-            nextTick: (fn: Function, ...args: any[]) => setTimeout(() => fn(...args), 0),
+            nextTick: (fn: Function, ...args: any[]) => sandboxSetTimeout(fn, 0, ...args),
             env: { NODE_ENV: process.env.NODE_ENV || 'production' }
         },
         lx: lxObject,
@@ -458,6 +500,7 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
         const apiInstance = {
             info: { ...fullApiInfo, sources: registeredSources },
             handlers: eventHandlers,
+            dispose,
             callRequest: async (action: string, source: string, info: any) => {
                 try {
                     const handler = eventHandlers.get('request')
@@ -469,7 +512,17 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
                         inputData = JSON.parse(JSON.stringify(inputData))
                     }
 
-                    const result = await handler(inputData)
+                    let timeoutHandle: ReturnType<typeof setTimeout> | undefined
+                    const result = await Promise.race([
+                        Promise.resolve(handler(inputData)),
+                        new Promise<never>((_, reject) => {
+                            timeoutHandle = setTimeout(() => {
+                                reject(new Error(`自定义源 ${fullApiInfo.name} 请求超时`))
+                            }, 20000)
+                        }),
+                    ]).finally(() => {
+                        if (timeoutHandle) clearTimeout(timeoutHandle)
+                    })
                     return decontextify(result)
                 } catch (e: any) {
                     console.error(`[自定义源-${fullApiInfo.name}] 调用请求异常:`, e.message)
@@ -478,11 +531,16 @@ export async function loadUserApi(apiInfo: UserApiInfo): Promise<any> {
             }
         }
 
-        loadedApis.set(`${fullApiInfo.owner}_${apiInfo.id}`, apiInstance)
-        console.log(`[自定义源] ✓ 成功加载: ${fullApiInfo.name} v${fullApiInfo.version} (所属: ${fullApiInfo.owner})`)
-        console.log(`[自定义源]   支持平台: ${Object.keys(registeredSources).join(', ')}`)
+        if (!apiInfo.ephemeral) {
+            const key = `${fullApiInfo.owner}_${apiInfo.id}`
+            loadedApis.get(key)?.dispose?.()
+            loadedApis.set(key, apiInstance)
+            console.log(`[自定义源] ✓ 成功加载: ${fullApiInfo.name} v${fullApiInfo.version} (所属: ${fullApiInfo.owner})`)
+            console.log(`[自定义源]   支持平台: ${Object.keys(registeredSources).join(', ')}`)
+        }
         return { success: true, apiInstance, error: null }
     } catch (error: any) {
+        dispose()
         console.error(`[自定义源] ✗ 加载失败 ${fullApiInfo.name}:`, error.message)
         if (error.stack && error.message !== 'REQUIRE_UNSAFE_VM') {
             console.error(`[自定义源] [错误堆栈] ${fullApiInfo.name}:`, error.stack)
@@ -587,6 +645,8 @@ export interface MusicUrlProbeResult {
     ok: boolean
     reason?: string
     isLossyDowngrade?: boolean
+    finalUrl?: string
+    redirectResolved?: boolean
 }
 
 // Use the same network category/headers as audio playback; recompute agents across redirects.
@@ -662,9 +722,11 @@ export const probeReturnedMusicUrl = async (
         const ct = (res.headers.get('content-type') || '').toLowerCase()
         const cd = (res.headers.get('content-disposition') || '').toLowerCase()
 
+        const finalUrl = res.url || url
+
         // Unsupported HEAD is not evidence about the GET response's content type.
         if (status === 405 || status === 501) {
-            return { ok: true, isLossyDowngrade: isLossless && isLikelyLossyAudio(res.url || url) }
+            return { ok: true, isLossyDowngrade: isLossless && isLikelyLossyAudio(finalUrl), finalUrl, redirectResolved: true }
         }
         if (status < 200 || status >= 300) {
             return {
@@ -685,15 +747,17 @@ export const probeReturnedMusicUrl = async (
             }
         }
 
-        if (isLossless && isLikelyLossyAudio(res.url || url, ct, cd)) {
+        if (isLossless && isLikelyLossyAudio(finalUrl, ct, cd)) {
             return {
                 ok: true,
                 isLossyDowngrade: true,
                 reason: `音源 [${sourceName || '未知'}] 请求 ${requestedQuality} 但返回了有损音频`,
+                finalUrl,
+                redirectResolved: true,
             }
         }
 
-        return { ok: true, isLossyDowngrade: false }
+        return { ok: true, isLossyDowngrade: false, finalUrl, redirectResolved: true }
     } catch {
         // HEAD 超时或网络抖动时不误杀可用链接，回退到 URL 特征检查
         if (isLossless && isLikelyLossyAudio(url)) {
@@ -938,6 +1002,7 @@ export async function callUserApiGetMusicUrl(
         if (onProgress) await onProgress({ name: '系统', status: 'fail', message: errMsg })
         const err: any = new Error(errMsg)
         err.allSourcesExhausted = true
+        if (hasExcluded) err.errorCode = 'PLATFORM_SOURCE_UNAVAILABLE'
         throw err
     }
 
@@ -959,10 +1024,15 @@ export async function selectCandidateMusicUrl(
     quality: string,
     onProgress?: (attempt: any) => Promise<void> | void,
     probeFn: typeof probeReturnedMusicUrl = probeReturnedMusicUrl
-): Promise<{ url: string, type: string, requestedQuality?: string, isLossyDowngrade?: boolean, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean }> {
+): Promise<{ url: string, type: string, requestedQuality?: string, isLossyDowngrade?: boolean, sourceName?: string, sourceId?: string, attempts?: any[], hasMoreSources?: boolean, redirectResolved?: boolean }> {
     const supportedCount = candidates.length
     const attempts: any[] = []
     let lastError: any = null
+    const isDeterministicError = (msg: string) =>
+        msg.includes('未返回有效的链接字符串') ||
+        msg.includes('返回了非音频内容') ||
+        msg.includes('返回的链接不可用 (HTTP 4') ||
+        msg.includes('未注册 request 处理器')
 
     if (supportedCount === 1) {
         const api = candidates[0]
@@ -987,13 +1057,14 @@ export async function selectCandidateMusicUrl(
                 const att = { name: api.info.name, status: 'success', message: `第 ${i + 1} 次尝试成功` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
-                return { url, type: probe.isLossyDowngrade ? 'lossy' : quality, requestedQuality: quality, isLossyDowngrade: !!probe.isLossyDowngrade, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false }
+                return { url: probe.finalUrl || url, type: probe.isLossyDowngrade ? 'lossy' : quality, requestedQuality: quality, isLossyDowngrade: !!probe.isLossyDowngrade, sourceName: api.info.name, sourceId: api.info.id, attempts, hasMoreSources: false, redirectResolved: !!probe.redirectResolved }
             } catch (error: any) {
                 console.error(`[自定义源] ${api.info.name} 失败 (第 ${i + 1}/${maxRetries} 次):`, `音源日志：${error.message}`)
                 lastError = error
                 const att = { name: api.info.name, status: 'fail', message: `第 ${i + 1} 次尝试失败,音源日志：${error.message}` }
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
+                if (isDeterministicError(String(error?.message || ''))) break
                 // 如果不是最后一次尝试，等待一小会儿
                 if (i < maxRetries - 1) {
                     await new Promise(r => setTimeout(r, 1000))
@@ -1002,7 +1073,7 @@ export async function selectCandidateMusicUrl(
         }
     } else {
         // 多个源，轮流尝试；若遇静默有损降级，暂存为备选并继续尝试后续音源
-        let downgradedFallback: { url: string, sourceName: string, sourceId: string, reason?: string } | null = null
+        let downgradedFallback: { url: string, sourceName: string, sourceId: string, reason?: string, redirectResolved?: boolean } | null = null
 
         for (let candidateIndex = 0; candidateIndex < candidates.length; candidateIndex++) {
             const api = candidates[candidateIndex]
@@ -1020,13 +1091,15 @@ export async function selectCandidateMusicUrl(
                     throw new Error(probe.reason || '音源返回的链接不可用')
                 }
 
+                const resolvedUrl = probe.finalUrl || url
                 if (probe.isLossyDowngrade) {
                     if (!downgradedFallback) {
                         downgradedFallback = {
-                            url,
+                            url: resolvedUrl,
                             sourceName: api.info.name,
                             sourceId: api.info.id,
                             reason: probe.reason,
+                            redirectResolved: !!probe.redirectResolved,
                         }
                     }
                     const downgradeMsg = probe.reason || `请求 ${quality} 但返回有损音频，继续尝试下一个音源`
@@ -1042,12 +1115,13 @@ export async function selectCandidateMusicUrl(
                 attempts.push(att)
                 if (onProgress) await onProgress(att)
                 return {
-                    url,
+                    url: resolvedUrl,
                     type: quality,
                     sourceName: api.info.name,
                     sourceId: api.info.id,
                     attempts,
-                    hasMoreSources: candidateIndex < candidates.length - 1
+                    hasMoreSources: candidateIndex < candidates.length - 1,
+                    redirectResolved: !!probe.redirectResolved,
                 }
             } catch (error: any) {
                 console.error(`[自定义源] ${api.info.name} 失败:`, `音源日志：${error.message}`)
@@ -1199,10 +1273,110 @@ export function unloadUserApis(username: string): void {
     if (username === 'open' || username === '_open') return
     for (const [key, api] of loadedApis) {
         if (api.info.owner !== username) continue
+        api.dispose?.()
         loadedApis.delete(key)
         apiStatus.delete(key)
     }
     lastReloadMap.set(username, Date.now())
+}
+
+function getSourceDirForOwner(owner: string): string {
+    const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
+    const dirName = owner === 'open' ? '_open' : owner
+    return path.join(dataPath, 'users', 'source', dirName)
+}
+
+export function reorderUserApis(owner: string): void {
+    const dirPath = getSourceDirForOwner(owner)
+    const orderPath = path.join(dirPath, 'order.json')
+    const metaPath = path.join(dirPath, 'sources.json')
+    let order: string[] = []
+    if (fs.existsSync(orderPath)) {
+        try { order = JSON.parse(fs.readFileSync(orderPath, 'utf-8')) } catch { /* ignore */ }
+    } else if (fs.existsSync(metaPath)) {
+        try {
+            const sources = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+            if (Array.isArray(sources)) order = sources.map((s: any) => s.id)
+        } catch { /* ignore */ }
+    }
+    if (!Array.isArray(order) || order.length === 0) return
+
+    const idToIndex = new Map(order.map((id, i) => [id, i]))
+    const ownerEntries: Array<[string, any]> = []
+    for (const [key, api] of loadedApis.entries()) {
+        if (api.info?.owner === owner) {
+            ownerEntries.push([key, api])
+            loadedApis.delete(key)
+        }
+    }
+    ownerEntries.sort((a, b) => {
+        const ia = idToIndex.has(a[1].info.id) ? idToIndex.get(a[1].info.id)! : 999999
+        const ib = idToIndex.has(b[1].info.id) ? idToIndex.get(b[1].info.id)! : 999999
+        return ia - ib
+    })
+    for (const [key, api] of ownerEntries) {
+        loadedApis.set(key, api)
+    }
+}
+
+export function unloadSingleUserApi(owner: string, sourceId: string): void {
+    const key = `${owner}_${sourceId}`
+    loadedApis.get(key)?.dispose?.()
+    loadedApis.delete(key)
+    apiStatus.delete(key)
+    lastReloadMap.set(owner, Date.now())
+}
+
+export async function reloadSingleUserApi(owner: string, sourceId: string): Promise<void> {
+    const dirPath = getSourceDirForOwner(owner)
+    const metaPath = path.join(dirPath, 'sources.json')
+    lastReloadMap.set(owner, Date.now())
+    if (!fs.existsSync(metaPath)) {
+        unloadSingleUserApi(owner, sourceId)
+        return
+    }
+    let sources: any[] = []
+    try {
+        sources = JSON.parse(fs.readFileSync(metaPath, 'utf-8'))
+    } catch {
+        return
+    }
+    const source = Array.isArray(sources) ? sources.find((s: any) => s.id === sourceId) : null
+    if (!source || (!source.enabled && owner !== 'open')) {
+        unloadSingleUserApi(owner, sourceId)
+        return
+    }
+    const scriptPath = path.join(dirPath, sourceId)
+    if (!fs.existsSync(scriptPath)) {
+        unloadSingleUserApi(owner, sourceId)
+        return
+    }
+    const script = fs.readFileSync(scriptPath, 'utf-8')
+    const metadata = extractMetadata(script)
+    const result = await loadUserApi({
+        id: source.id,
+        name: metadata.name || source.name,
+        description: metadata.description || '',
+        version: metadata.version || 1,
+        author: metadata.author || '',
+        homepage: metadata.homepage || '',
+        script,
+        sources: {},
+        enabled: source.enabled,
+        allowUnsafeVM: source.allowUnsafeVM,
+        owner,
+    })
+    const key = `${owner}_${source.id}`
+    if (result.success) {
+        const prevStatus = apiStatus.get(key)
+        apiStatus.set(key, {
+            status: 'success',
+            updateAlert: result.updateAlert || prevStatus?.updateAlert
+        })
+        reorderUserApis(owner)
+    } else {
+        apiStatus.set(key, { status: 'failed', error: result.error, updateAlert: result.updateAlert })
+    }
 }
 
 // 启动文件监控
@@ -1262,9 +1436,22 @@ function startWatcher(sourceRoot: string) {
     }
 }
 
+const pendingInitUserApis = new Map<string, Promise<void>>()
+
 // 从文件系统加载所有已启用的自定义源
 // 路径变更：DATA_PATH/users/source/{username} 和 DATA_PATH/users/source/_open
 export async function initUserApis(targetUser?: string) {
+    const lockKey = targetUser || '__all__'
+    const existing = pendingInitUserApis.get(lockKey)
+    if (existing) return existing
+    const task = initUserApisInternal(targetUser).finally(() => {
+        if (pendingInitUserApis.get(lockKey) === task) pendingInitUserApis.delete(lockKey)
+    })
+    pendingInitUserApis.set(lockKey, task)
+    return task
+}
+
+async function initUserApisInternal(targetUser?: string) {
     const dataPath = process.env.DATA_PATH || path.join(process.cwd(), 'data')
     const sourceRoot = path.join(dataPath, 'users', 'source')
     const stats = { loadedCount: 0 }
@@ -1295,6 +1482,7 @@ export async function initUserApis(targetUser?: string) {
         // 清理该用户的旧源和状态
         for (const [key, api] of loadedApis.entries()) {
             if (api.info.owner === targetUser) {
+                api.dispose?.()
                 loadedApis.delete(key)
             }
         }
@@ -1319,6 +1507,9 @@ export async function initUserApis(targetUser?: string) {
 
     } else {
         console.log(`[自定义源] 初始化所有自定义源...`)
+        for (const api of loadedApis.values()) {
+            api.dispose?.()
+        }
         loadedApis.clear()
 
         // 扫描 sourceRoot 下的所有子目录

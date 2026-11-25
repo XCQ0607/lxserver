@@ -9,11 +9,27 @@ const MIN_SIZE = 8 * 1024 * 1024
 // Across all browser downloads, not four unbounded connections per task.
 let active = 0
 const waiting: Array<() => void> = []
-async function slot() {
-  if (active >= 8) await new Promise<void>(resolve => waiting.push(resolve))
-  else active++
+async function slot(signal?: AbortSignal) {
+  signal?.throwIfAborted()
+  if (active >= 8) {
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        const idx = waiting.indexOf(wake)
+        if (idx >= 0) waiting.splice(idx, 1)
+        reject(signal?.reason || new Error('Aborted'))
+      }
+      const wake = () => {
+        signal?.removeEventListener('abort', onAbort)
+        resolve()
+      }
+      signal?.addEventListener('abort', onAbort, { once: true })
+      waiting.push(wake)
+    })
+  } else active++
   return () => { const next = waiting.shift(); if (next) next(); else active-- }
 }
+
+class DeterministicRangeError extends Error {}
 
 type Options = {
   signal: AbortSignal
@@ -52,7 +68,7 @@ export async function downloadInRanges(input: string, options: Options): Promise
     })
   }
   try {
-    const releaseProbe = await slot()
+    const releaseProbe = await slot(controller.signal)
     let head: http.IncomingMessage
     try { head = await request(input, 'HEAD') } finally { releaseProbe() }
     const total = Number(head.headers['content-length'])
@@ -71,7 +87,7 @@ export async function downloadInRanges(input: string, options: Options): Promise
     const received = [0, 0, 0, 0]
     const chunkSize = Math.ceil(total / 4)
     const jobs = Array.from({ length: 4 }, async (_, index) => {
-      const release = await slot()
+      const release = await slot(controller.signal)
       try {
         const start = index * chunkSize, end = Math.min(total - 1, start + chunkSize - 1)
         for (let attempt = 0; attempt < 3; attempt++) {
@@ -81,12 +97,12 @@ export async function downloadInRanges(input: string, options: Options): Promise
             response = await request(input, 'GET', `bytes=${start}-${end}`)
             if (response.statusCode !== 206 || response.headers['content-range'] !== `bytes ${start}-${end}/${total}` ||
                 (etag && response.headers.etag !== etag) || response.headers['content-encoding']) {
-              throw new Error('Invalid upstream range response')
+              throw new DeterministicRangeError('Invalid upstream range response')
             }
             let offset = start
             for await (const value of response) {
               const chunk = Buffer.from(value)
-              if (offset + chunk.length > end + 1) throw new Error('Oversized upstream range')
+              if (offset + chunk.length > end + 1) throw new DeterministicRangeError('Oversized upstream range')
               let written = 0
               while (written < chunk.length) {
                 const result = await file!.write(chunk, written, chunk.length - written, offset + written)
@@ -102,7 +118,7 @@ export async function downloadInRanges(input: string, options: Options): Promise
           } catch (error) {
             response?.destroy()
             controller.signal.throwIfAborted()
-            if (attempt === 2) throw error
+            if (error instanceof DeterministicRangeError || attempt === 2) throw error
           }
         }
       } finally { release() }
@@ -117,8 +133,7 @@ export async function downloadInRanges(input: string, options: Options): Promise
     return { filePath, total, cleanup }
   } catch (error) {
     controller.abort(error)
-    if (file) await file.close()
-    cleanup()
+    try { if (file) await file.close() } finally { cleanup() }
     if (options.signal.aborted) throw error
     // Range ignored, mismatched or unstable: retry using the existing single stream.
     return null

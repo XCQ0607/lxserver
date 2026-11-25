@@ -4,17 +4,28 @@ import { FeaturesList } from '@/constants'
 import { modules } from '@/modules'
 
 
+const pendingFeatureChanges = new WeakMap<LX.Socket, Promise<void>>()
+
 const handler: LX.Sync.ServerSyncHandlerActions<LX.Socket> = {
   async onFeatureChanged(socket, feature) {
-    // const userSpace = getUserSpace(socket.userInfo.name)
-    const beforeFeature = socket.feature
+    const previous = pendingFeatureChanges.get(socket) || Promise.resolve()
+    const current = previous.catch(() => {}).then(async () => {
+      // const userSpace = getUserSpace(socket.userInfo.name)
+      const beforeFeature = socket.feature
 
-    for (const name of FeaturesList) {
-      const newStatus = feature[name]
-      if (newStatus == null) continue
-      beforeFeature[name] = feature[name]
-      socket.moduleReadys[name] = false
-      if (feature[name]) await modules[name].sync(socket).catch(_ => _)
+      for (const name of FeaturesList) {
+        const newStatus = feature[name]
+        if (newStatus == null) continue
+        beforeFeature[name] = feature[name]
+        socket.moduleReadys[name] = false
+        if (feature[name]) await modules[name].sync(socket)
+      }
+    })
+    pendingFeatureChanges.set(socket, current)
+    try {
+      await current
+    } finally {
+      if (pendingFeatureChanges.get(socket) === current) pendingFeatureChanges.delete(socket)
     }
   },
 }

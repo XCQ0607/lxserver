@@ -96,7 +96,8 @@
                 const position = output.currentTime;
                 const resume = !(output.loaded === false ? output.desiredPaused : output.paused) && !output.ended;
                 remote = null;
-                if (output.src && element.src !== output.src) element.src = window.authorizeMediaUrl?.(output.src) || output.src;
+                const nextSrc = output.src ? (window.authorizeMediaUrl?.(output.src) || output.src) : '';
+                if (nextSrc && new URL(nextSrc, window.location.href).href !== element.src) element.src = nextSrc;
                 if (localVolumeState) {
                     element.volume = localVolumeState.volume;
                     element.muted = localVolumeState.muted;

@@ -470,7 +470,7 @@ window.soundEffects = (function () {
                     pannerInfo.interval = null;
                     return;
                 }
-                if (!pannerNode) return;
+                if (!pannerNode || document.hidden || document.getElementById('audio-player')?.paused) return;
                 move();
             }, 25);
         } else {

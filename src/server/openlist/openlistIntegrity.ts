@@ -16,10 +16,11 @@ const plans = new Map<string, { expires: number; signature: string; files: Integ
 const storePath = () => path.join(global.lx.dataPath, 'runtime', 'openlist-integrity.json')
 function load(): Store {
   try {
-    const store = JSON.parse(fs.readFileSync(storePath(), 'utf8')) as Store
+    const parsed = JSON.parse(fs.readFileSync(storePath(), 'utf8')) as Store
+    const store: Store = parsed && typeof parsed === 'object' && parsed.results && typeof parsed.results === 'object' ? parsed : { results: {} }
     if (store.job?.state === 'running' && (!controller || activePath !== storePath())) store.job.state = 'interrupted'
     return store
-  } catch (e: any) { if (e.code === 'ENOENT') return { results: {} }; throw e }
+  } catch (e: any) { if (e.code === 'ENOENT' || e instanceof SyntaxError) return { results: {} }; throw e }
 }
 function save(store: Store) {
   const file = storePath(); fs.mkdirSync(path.dirname(file), { recursive: true })

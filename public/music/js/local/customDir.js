@@ -678,6 +678,11 @@ window.CustomDirManager = {
         else this.needsFilter = true;
     },
 
+    isItemUnindexed(item) {
+        return !item?.source || item.source === 'custom' || item.source === 'unknown' || item.source === 'local' ||
+            Boolean(item.songmid && (String(item.songmid).includes('custom_') || String(item.songmid).includes(' - ')));
+    },
+
     applyFilters(resetPage = true) {
         let current = this.originalData;
         if (resetPage) this.currentPage = 1;
@@ -740,7 +745,7 @@ window.CustomDirManager = {
         // 状态过滤（多选：命中任一状态条件即保留）
         if (this.filterStatus && this.filterStatus.size > 0) {
             current = current.filter(item => {
-                const isUnindexed = item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes(' - '));
+                const isUnindexed = this.isItemUnindexed(item);
                 const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
                 const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
                 const missingCover = !item.hasCover;
@@ -933,8 +938,8 @@ window.CustomDirManager = {
             const safeSubPath = this.escapeHtml(item.subPath || '');
             const isSelected = this.selectedItems.has(item.filename);
 
-            // 未索引判断：source 为 custom/unknown 或包含未解析 mid
-            const isUnindexed = !item.source || item.source === 'custom' || item.source === 'unknown' || item.source === 'local' || (item.songmid && String(item.songmid).includes('custom_'));
+            // 未索引判断：与筛选状态一致
+            const isUnindexed = this.isItemUnindexed(item);
             const isNoTag = (n) => !n || n === '未知歌曲' || n === '未知歌手' || n.toLowerCase() === 'unknown';
             const missingID3 = isNoTag(item.name) || isNoTag(item.singer) || isUnindexed;
             const missingCover = !item.hasCover;
@@ -1159,12 +1164,6 @@ window.CustomDirManager = {
         placeholder.className = 'w-10 h-10 md:w-12 md:h-12 rounded-lg bg-gray-100/50 flex-shrink-0 flex items-center justify-center border t-border-main mr-2.5 md:mr-4 ml-0.5 md:ml-3';
         placeholder.innerHTML = '<i class="fas fa-music t-text-muted text-xs"></i>';
         if (img && img.isConnected) img.replaceWith(placeholder);
-
-        clearTimeout(this.coverRenderTimer);
-        this.coverRenderTimer = setTimeout(() => {
-            this.coverRenderTimer = null;
-            this.render();
-        }, 80);
     },
 
     openManualIndexModal(index) {
@@ -1193,14 +1192,6 @@ window.CustomDirManager = {
             }
         }
         this.updateBatchUI();
-    },
-
-    getSelectedEntries() {
-        return this.originalData.filter(item => this.selectedItems.has(item.filename));
-    },
-
-    getSelectedFilenames() {
-        return Array.from(this.selectedItems);
     },
 
     toggleBatchMode() {
@@ -2051,48 +2042,6 @@ window.CustomDirManager = {
 
         // 重新过滤列表
         this.applyFilters();
-    },
-
-    // 重置所有筛选（供通用重置按钮调用）
-    resetFilters(apply = true) {
-        this.searchKeyword = '';
-        this.quickSearchKeyword = '';
-        this.filterQuality = new Set();
-        this.sortBy = 'mtime';
-        this.sortOrder = 'desc';
-        this.dirFilterAll = true;
-        this.selectedDirPaths.clear();
-        this.pendingDirFilterAll = true;
-        this.pendingDirPaths.clear();
-
-        const si = document.getElementById('lm-search-input');
-        if (si) {
-            if (window.LocalMusicManager && typeof window.LocalMusicManager.setRichInputValue === 'function') {
-                window.LocalMusicManager.setRichInputValue(si, '');
-                window.LocalMusicManager.updateSearchInputErrorState(si, '');
-            } else {
-                si.value = '';
-                si.innerText = '';
-            }
-        }
-        const qs = document.getElementById('lm-quick-search');
-        if (qs) {
-            if (window.LocalMusicManager && typeof window.LocalMusicManager.setRichInputValue === 'function') {
-                window.LocalMusicManager.setRichInputValue(qs, '');
-                window.LocalMusicManager.updateSearchInputErrorState(qs, '');
-            } else {
-                qs.value = '';
-                qs.innerText = '';
-            }
-        }
-        const sortBy = document.getElementById('lm-sort-by');
-        if (sortBy) sortBy.value = 'mtime';
-        const sortOrder = document.getElementById('lm-sort-order');
-        if (sortOrder) sortOrder.value = 'desc';
-
-        this.updateDirFilterButtonText();
-
-        if (apply) this.applyFilters();
     }
 };
 

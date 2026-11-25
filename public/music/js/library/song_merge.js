@@ -55,22 +55,23 @@
         for (const song of incoming) {
             const key = compact(song.name);
             const bucket = byName.get(key) || [];
-            const host = bucket.find(entry =>
-                sources(entry).every(member => member.source !== song.source && sameSong(member, song)));
+            const host = song.source ? bucket.find(entry =>
+                entry.source && sources(entry).every(member => member.source !== song.source && sameSong(member, song))) : null;
             if (host) {
+                const candidate = song._alternates ? (() => { const s = { ...song }; delete s._alternates; return s; })() : song;
                 if (preferred && rankOf(song.source) < rankOf(host.source)) {
                     const oldAlternates = host._alternates || [];
                     const demotedHost = { ...host };
                     delete demotedHost._alternates;
                     const mergedAlternates = [demotedHost, ...oldAlternates]
                         .sort((a, b) => rankOf(a.source) - rankOf(b.source));
-                    const promoted = { ...song, _alternates: mergedAlternates };
+                    const promoted = { ...candidate, _alternates: mergedAlternates };
                     const resultIdx = result.indexOf(host);
                     if (resultIdx >= 0) result[resultIdx] = promoted;
                     const bucketIdx = bucket.indexOf(host);
                     if (bucketIdx >= 0) bucket[bucketIdx] = promoted;
                 } else {
-                    const nextAlternates = [...(host._alternates || []), song];
+                    const nextAlternates = [...(host._alternates || []), candidate];
                     if (preferred) nextAlternates.sort((a, b) => rankOf(a.source) - rankOf(b.source));
                     host._alternates = nextAlternates;
                 }
@@ -85,7 +86,7 @@
     // 这个平台条目上与所选音质同档的音质名：自身有就原样返回，否则找同档的别名；都没有返回 null
     function qualityFor(member, quality, ownQualities) {
         const own = ownQualities ? ownQualities(member) : null;
-        if (!own || own.includes(quality)) return quality;
+        if (!own || !own.length || own.includes(quality)) return quality;
         const group = QUALITY_ALIASES.find(names => names.includes(quality));
         return (group && group.find(name => own.includes(name))) || null;
     }

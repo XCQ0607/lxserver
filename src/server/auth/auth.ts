@@ -72,11 +72,15 @@ const verifyByCode = (encryptMsg: string, users: LX.Config['users'], targetUserN
       const userSpace = getUserSpace(userInfo.name)
       userSpace.dataManage.saveClientKeyInfo(keyInfo)
       setUserName(keyInfo.clientId, userInfo.name)
-      return rsaEncrypt(Buffer.from(JSON.stringify({
-        clientId: keyInfo.clientId,
-        key: keyInfo.key,
-        serverName: global.lx.config.serverName,
-      })), publicKey)
+      try {
+        return rsaEncrypt(Buffer.from(JSON.stringify({
+          clientId: keyInfo.clientId,
+          key: keyInfo.key,
+          serverName: global.lx.config.serverName,
+        })), publicKey)
+      } catch {
+        return null
+      }
     }
   }
   return null
@@ -147,7 +151,12 @@ export const authConnect = async (req: http.IncomingMessage) => {
         const pathParts = path.split('/').filter(p => p)
         // 假设路径格式为 /<username>
         // 解码 URL 编码的用户名
-        const urlUserName = pathParts[0] ? decodeURIComponent(pathParts[0]) : null
+        let urlUserName: string | null = null
+        try {
+          urlUserName = pathParts[0] ? decodeURIComponent(pathParts[0]) : null
+        } catch {
+          throw new Error('Invalid path encoding')
+        }
         const clientUserName = getUserName(i)
 
         // console.log('Auth check path:', urlUserName, clientUserName)

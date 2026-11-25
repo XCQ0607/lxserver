@@ -174,3 +174,16 @@ test('preferredSources promotes the highest-priority platform to host without mo
     assert.deepEqual(ids(second[1]._alternates), ['tx_3', 'kw_2', 'kg_5']);
     assert.equal(second[1]._alternates.every(m => m._alternates === undefined), true);
 });
+
+test('entries without source stay separate and untyped members are not dropped by candidates()', async () => {
+    const { merge } = load();
+    const online = song('tx', 1, '晴天', '周杰伦', '04:29', ['flac']);
+    const untyped = { id: 'local_1', name: '晴天', singer: '周杰伦', interval: '04:29' };
+    const merged = merge.mergeInto([online], [untyped]);
+    assert.equal(merged.length, 2);
+
+    const localTyped = { source: 'local', id: 'local_2', name: '晴天', singer: '周杰伦', interval: '04:29' };
+    const combined = merge.mergeInto([localTyped], [online]);
+    const list = await merge.candidates(combined[0], 'flac');
+    assert.deepEqual(ids(list), ['local_2', 'tx_1']);
+});

@@ -144,6 +144,7 @@ class DownloadManager {
     async enqueueServerTasks(tasks) {
         if (!tasks.length) return;
         this.serverQueuePending = true;
+        this.serverQueueSyncGeneration = (this.serverQueueSyncGeneration || 0) + 1;
         try {
             const headers = this.getServerQueueHeaders();
             const payload = {
@@ -185,6 +186,7 @@ class DownloadManager {
     async syncServerQueue(render = false) {
         if (this.serverQueueSyncInFlight) return;
         this.serverQueueSyncInFlight = true;
+        const syncGeneration = ++this.serverQueueSyncGeneration || (this.serverQueueSyncGeneration = 1);
         try {
             const items = await this.requestServerQueue('/api/music/cache/queue');
             if (!Array.isArray(items)) return;
@@ -244,7 +246,7 @@ class DownloadManager {
                 }
                 updatedTasks.push(task);
             });
-            if (!this.serverQueuePending) {
+            if (!this.serverQueuePending && syncGeneration === this.serverQueueSyncGeneration) {
                 const droppedActive = this.tasks.some(t => t.serverManaged && !remoteIds.has(t.serverQueueId || t.id)
                     && ['waiting', 'starting', 'downloading', 'tagging'].includes(t.status));
                 this.tasks = this.tasks.filter(task => !task.serverManaged || remoteIds.has(task.serverQueueId || task.id));
@@ -450,9 +452,9 @@ class DownloadManager {
 
                     const progressInfo = data[rawId];
                     if (progressInfo) {
-                        // [Fix] 如果本地任务已处于暂停状态，则忽略轮询结果中的 downloading 状态覆盖，
+                        // [Fix] 如果本地任务已处于暂停状态，则忽略轮询结果中的 downloading/waiting/tagging 状态覆盖，
                         // 但仍然更新收到的字节数等元数据。
-                        if (task.status === 'paused' && (progressInfo.status === 'downloading' || progressInfo.status === 'waiting')) {
+                        if (task.status === 'paused' && (progressInfo.status === 'downloading' || progressInfo.status === 'waiting' || progressInfo.status === 'tagging')) {
                             task.downloadedBytes = progressInfo.received || 0;
                             task.totalBytes = progressInfo.total || 0;
                             return;
@@ -824,9 +826,15 @@ class DownloadManager {
             if (!nextTask) break;
             if (nextTask.useNativeDownload && this.activeCount > 0) break;
             if (typeof this.getDownloadResolver() !== 'function') {
-                setTimeout(() => this.processQueue(), 100);
+                if ((this.resolverWaitCount || 0) < 50) {
+                    this.resolverWaitCount = (this.resolverWaitCount || 0) + 1;
+                    setTimeout(() => this.processQueue(), 100);
+                } else {
+                    console.warn('[DownloadManager] getDownloadResolver unavailable after 50 retries.');
+                }
                 break;
             }
+            this.resolverWaitCount = 0;
             nextTask.status = 'starting';
             this.activeCount++;
             if (nextTask.isServer) {
@@ -1136,15 +1144,19 @@ class DownloadManager {
                     this.renderTask(task);
 
                     // Add to end of queue after 2 seconds
-                    setTimeout(() => {
-                        // [Critical Fix] 检查任务是否在这 2 秒内被用户手动取消或暂停
-                        if (task.controller?.signal?.aborted || task.status === 'paused' || task.status === 'finished') {
+                    if (task.retryTimer) clearTimeout(task.retryTimer);
+                    task.retryTimer = setTimeout(() => {
+                        task.retryTimer = null;
+                        // [Critical Fix] 检查任务是否仍在队列中且未被用户取消/暂停/完成/重启
+                        const liveTask = this.tasks.find(t => t.id === task.id);
+                        if (!liveTask || task.controller?.signal?.aborted ||
+                            ['paused', 'finished', 'downloading', 'waiting', 'starting', 'tagging', 'exists'].includes(liveTask.status)) {
                             console.log('[DownloadManager] Abort retry for task:', task.id);
                             return;
                         }
 
                         // Create a new task effectively at the end but keeping retry count
-                        const newTask = { ...task, status: 'waiting', errorMsg: '', downloadedBytes: 0, progress: 0, controller: null };
+                        const newTask = { ...task, status: 'waiting', errorMsg: '', downloadedBytes: 0, progress: 0, controller: null, retryTimer: null };
                         this.tasks = this.tasks.filter(t => t.id !== task.id);
                         this.tasks.push(newTask);
                         this.renderList();
@@ -1202,6 +1214,7 @@ class DownloadManager {
     resumeTask(taskId) {
         const task = this.tasks.find(t => t.id === taskId);
         if (!task || (task.status !== 'paused' && task.status !== 'error')) return;
+        if (task.retryTimer) { clearTimeout(task.retryTimer); task.retryTimer = null; }
 
         task.status = 'waiting';
         task.quality = task.requestedQuality || task.quality;
@@ -1233,6 +1246,7 @@ class DownloadManager {
     deleteTask(taskId) {
         const task = this.tasks.find(t => t.id === taskId);
         if (task) {
+            if (task.retryTimer) { clearTimeout(task.retryTimer); task.retryTimer = null; }
             if (task.serverManaged) {
                 this.requestServerQueue('/api/music/cache/queue/remove', { id: task.serverQueueId || task.id })
                     .catch(e => console.warn('[DownloadManager] Failed to remove server queue task:', e));
@@ -1321,6 +1335,7 @@ class DownloadManager {
         const unregisteredServerTasks = failedTasks.filter(t => t.serverManaged && t.serverQueueRegistered === false);
 
         failedTasks.forEach(t => {
+            if (t.retryTimer) { clearTimeout(t.retryTimer); t.retryTimer = null; }
             if (t.serverManaged) {
                 if (t.serverQueueRegistered !== false) this.requestServerQueue('/api/music/cache/queue/resume', { id: t.serverQueueId || t.id })
                     .catch(e => console.warn('[DownloadManager] Failed to retry server queue task:', e));
@@ -1372,6 +1387,7 @@ class DownloadManager {
             }).then(confirmed => {
                 if (!confirmed) return;
                 this.tasks.forEach(t => {
+                    if (t.retryTimer) { clearTimeout(t.retryTimer); t.retryTimer = null; }
                     // 本地任务调用 abort
                     if ((t.status === 'downloading' || t.status === 'waiting' || t.status === 'tagging') && t.controller) {
                         try { t.controller.abort(); } catch (e) { }
@@ -1400,6 +1416,7 @@ class DownloadManager {
         } else {
             // fallback：直接清空
             this.tasks.forEach(t => {
+                if (t.retryTimer) { clearTimeout(t.retryTimer); t.retryTimer = null; }
                 if (t.status === 'downloading' && t.controller) t.controller.abort();
             });
             this.requestServerQueue('/api/music/cache/queue/remove', { all: true })
@@ -1494,7 +1511,16 @@ class DownloadManager {
     }
 
     // Update the UI Global Speed Counter
-    updateGlobalSpeed() {
+    updateGlobalSpeed(force = false) {
+        if (!force && typeof document !== 'undefined' && document.hidden) return;
+        const hasActive = this.tasks.some(t => ['downloading', 'starting', 'waiting', 'tagging'].includes(t.status));
+        if (!force && !hasActive) {
+            if (this._idleSpeedSyncedCount === this.tasks.length) return;
+            this._idleSpeedSyncedCount = this.tasks.length;
+        } else {
+            this._idleSpeedSyncedCount = -1;
+        }
+
         let totalSpeed = 0;
         let active = 0;
         let pctTotal = 0;
@@ -1526,7 +1552,7 @@ class DownloadManager {
     }
 
     updateGlobalProgress() {
-        this.updateGlobalSpeed(); // Calculates and updates
+        this.updateGlobalSpeed(true); // Calculates and updates
     }
 
     // Render a single task row item to HTML

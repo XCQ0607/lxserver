@@ -176,7 +176,7 @@ export function attachReadThroughCapture(upstream: IncomingMessage, options: Rea
     stopReading()
     pendingFinalizations++
     void (async () => {
-      let publicationFinished = true, removed = !ownsTemp, reservationReleased = false
+      let publicationFinished = true, removed = false, reservationReleased = false
       const releasePending = () => {
         if (!reservationReleased && publicationFinished && removed) {
           reservationReleased = true
@@ -210,9 +210,9 @@ export function attachReadThroughCapture(upstream: IncomingMessage, options: Rea
         // Do not accumulate unlimited spools if filesystem cleanup itself stalls.
         // Retain a reservation until publication has settled AND unlink has
         // succeeded, even if the active capture slot was released on deadline.
-        const cleanup = (ownsTemp ? unlink(tempPath).then(() => { removed = true }).catch((error: NodeJS.ErrnoException) => {
+        const cleanup = unlink(tempPath).then(() => { removed = true }).catch((error: NodeJS.ErrnoException) => {
           if (error.code === 'ENOENT') removed = true
-        }) : Promise.resolve()).finally(releasePending)
+        }).finally(releasePending)
         // lifetime is now aborted, so use the independent wall-clock deadline
         // for cleanup rather than the already-resolved publication stop signal.
         const cleanupDeadline = new Promise<void>(resolve => {

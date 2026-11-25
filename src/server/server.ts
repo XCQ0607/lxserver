@@ -4512,12 +4512,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
 
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -4778,12 +4778,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [New] Stop Cache Task
       if (pathname === '/api/music/cache/stop' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -4817,12 +4817,21 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 4. Serve Cached File
       if (pathname.startsWith('/api/music/cache/file/')) {
         const parts = pathname.replace('/api/music/cache/file/', '').split('/')
-        const reqUsername = parts.length > 1 ? decodeURIComponent(parts[0]) : '_open'
-        const filename = parts.length > 1 ? parts[1] : parts[0]
+        let reqUsername = '_open'
+        let decodedFilename = ''
+        try {
+          reqUsername = parts.length > 1 ? decodeURIComponent(parts[0]) : '_open'
+          const rawFilename = parts.length > 1 ? parts.slice(1).join('/') : parts[0]
+          decodedFilename = rawFilename ? decodeURIComponent(rawFilename) : ''
+        } catch {
+          res.writeHead(400)
+          res.end('Invalid path encoding')
+          return
+        }
 
-        if (filename) {
+        if (decodedFilename) {
           let username = '_open'
-          const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default'
+          const isPublic = !reqUsername || reqUsername === '_open' || reqUsername === 'default' || reqUsername === 'open'
 
           if (!isPublic) {
             const urlToken = urlObj.searchParams.get('token')
@@ -4833,7 +4842,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               (req.headers as any)['x-user-name'] = reqUsername
             }
             const verified = verifyMediaUserAuth(req)
-            if (!verified) {
+            if (!verified || verified !== reqUsername) {
               res.writeHead(401)
               res.end('Unauthorized')
               return
@@ -4842,7 +4851,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           }
           const folderParam = urlObj.searchParams.get('folder')
           const requestedFolder = folderParam === 'cache' || folderParam === 'music' ? folderParam as fileCache.CacheFolder : undefined
-          fileCache.serveCacheFile(req, res, decodeURIComponent(filename), username, requestedFolder)
+          fileCache.serveCacheFile(req, res, decodedFilename, username, requestedFolder)
           return
         }
       }
@@ -4850,12 +4859,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 5. Get Cache Statistics
       if (pathname === '/api/music/cache/stats' && req.method === 'GET') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -4875,12 +4884,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/music/cache/clear' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -4900,12 +4909,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/music/cache/lyric/clear' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -4926,12 +4935,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 6.5 未引用歌词（孤儿 .lrc）扫描与删除
       if (pathname === '/api/music/cache/lyric/orphans' && req.method === 'GET') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -4951,12 +4960,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
 
       if (pathname === '/api/music/cache/lyric/orphans/delete' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -5248,7 +5257,8 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             (req.headers as any)['x-user-name'] = reqUsername
           }
           const verified = verifyMediaUserAuth(req)
-          if (!verified) {
+          const namedUser = reqUsername && !['open', '_open', 'default'].includes(reqUsername)
+          if (!verified || (namedUser && verified !== reqUsername)) {
             res.writeHead(401)
             res.end('Unauthorized')
             return
@@ -5256,6 +5266,9 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
           customMusicManager.serveCustomFile(req, res, rawFilename, verified)
           return
         }
+        res.writeHead(400)
+        res.end('Missing filename')
+        return
       }
 
       // D. 获取自定义目录封面
@@ -5549,12 +5562,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // 10. Update Metadata (Batch)
       if (pathname === '/api/music/cache/updateMetadata' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -5625,12 +5638,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
       // [新增] Embed Lyric into Audio File Tags (USLT)
       if (pathname === '/api/music/cache/embedLyric' && req.method === 'POST') {
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -5875,12 +5888,12 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         const songId = urlObj.searchParams.get('songId') || urlObj.searchParams.get('id')
 
         const reqUsername = (req.headers['x-user-name'] as string) || ''
-        const isPublic = !reqUsername || reqUsername === 'default'
+        const isPublic = !reqUsername || reqUsername === 'default' || reqUsername === 'open' || reqUsername === '_open'
         let username = '_open'
 
         if (!isPublic) {
           const verified = verifyUserAuth(req)
-          if (!verified) {
+          if (!verified || verified !== reqUsername) {
             res.writeHead(401, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ success: false, message: 'Unauthorized' }))
             return
@@ -7016,41 +7029,46 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             }
 
             let customSourceError: string | null = null
+            let customSourceErrorCode: string | undefined
             let attempts: any[] = []
-            if (!result && isSourceSupported(source, verifiedUsername)) {
-              try {
-                console.log(`[歌曲播放] 使用自定义源解析: ${source} (请求ID: ${reqId || '无'}, 用户: ${verifiedUsername})`)
+            if (!result) {
+              if (isSourceSupported(source, verifiedUsername)) {
+                try {
+                  console.log(`[歌曲播放] 使用自定义源解析: ${source} (请求ID: ${reqId || '无'}, 用户: ${verifiedUsername})`)
 
-                const userApiResult = await callUserApiGetMusicUrl(
-                  source, songInfo, quality || '128k', verifiedUsername,
-                  (attempt) => { void pushProgress(attempt) },
-                  enableAutoSwitchApiSource !== false,
-                  excludeApiSources
-                )
-                result = userApiResult
-                attempts = userApiResult.attempts || []
-              } catch (userApiError: any) {
-                console.error(`[歌曲播放] 自定义源解析失败:`, userApiError.message)
-                customSourceError = userApiError.message
-                attempts = userApiError.attempts || []
-                // 不抛出错误，继续尝试内置源
+                  const userApiResult = await callUserApiGetMusicUrl(
+                    source, songInfo, quality || '128k', verifiedUsername,
+                    (attempt) => { void pushProgress(attempt) },
+                    enableAutoSwitchApiSource !== false,
+                    excludeApiSources
+                  )
+                  result = userApiResult
+                  attempts = userApiResult.attempts || []
+                } catch (userApiError: any) {
+                  console.error(`[歌曲播放] 自定义源解析失败:`, userApiError.message)
+                  customSourceError = userApiError.message
+                  customSourceErrorCode = userApiError.errorCode
+                  attempts = userApiError.attempts || []
+                  // 不抛出错误，继续尝试内置源
+                }
+              } else {
+                // isSourceSupported = false: 无任何自定义源支持此平台，立即通知前端
+                const hasAvailableSource = getLoadedApis().some(api =>
+                  Object.keys(api.sources || {}).some(platform => isSourceSupported(platform, verifiedUsername)))
+                const err: any = new Error(hasAvailableSource
+                  ? `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
+                  : '暂无可用音源，请在设置中添加或启用自定义源')
+                err.errorCode = hasAvailableSource ? 'PLATFORM_SOURCE_UNAVAILABLE' : 'NO_AVAILABLE_SOURCE'
+                // 配置问题由请求响应统一提示，不再额外推送一条 SSE 错误。
+                throw err
               }
-            } else {
-              // isSourceSupported = false: 无任何自定义源支持此平台，立即通知前端
-              const hasAvailableSource = getLoadedApis().some(api =>
-                Object.keys(api.sources || {}).some(platform => isSourceSupported(platform, verifiedUsername)))
-              const err: any = new Error(hasAvailableSource
-                ? `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
-                : '暂无可用音源，请在设置中添加或启用自定义源')
-              err.errorCode = hasAvailableSource ? 'PLATFORM_SOURCE_UNAVAILABLE' : 'NO_AVAILABLE_SOURCE'
-              // 配置问题由请求响应统一提示，不再额外推送一条 SSE 错误。
-              throw err
             }
 
             // 自定义源失败则直接报错（内置 SDK 无独立解析能力，回退无意义）
             if (!result) {
               const errMsg = customSourceError || `未找到支持 ${source} 平台的自定义源，请在设置中添加或启用相关源`
               const err: any = new Error(errMsg)
+              if (customSourceErrorCode) err.errorCode = customSourceErrorCode
               err.attempts = attempts
               throw err
             }
@@ -7064,7 +7082,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               // 1. Resolve Redirects (301, 302, 307, etc.) to get direct link
               try {
                 // Only try to resolve if it looks like a remote URL and is not already resolved
-                if (result.url.startsWith('http')) {
+                if (!result.redirectResolved && result.url.startsWith('http')) {
                   // console.log(`[歌曲播放] 正在解析重定向: ${songInfo.name} (${quality})`);
 
                   const checkRedirect = async (u: string, depth: number = 0): Promise<string> => {

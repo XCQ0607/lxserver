@@ -157,7 +157,8 @@ export class FileManager {
       await noClobber(dst)
       await fs.promises.rename(src.absolute, dst)
     } else if (action === 'delete') {
-      const selected = this.items(p.items?.map((item: any) => item.path))
+      if (!Array.isArray(p.items) || p.items.some((item: any) => !item || typeof item.path !== 'string')) fail('参数无效')
+      const selected = this.items(p.items.map((item: any) => item.path))
       const targets = selected.map(v => this.resolve(v))
       for (const item of targets) { this.mutable(item.absolute); await fs.promises.lstat(item.absolute) }
       for (const item of targets) await fs.promises.rm(item.absolute, { recursive: true })
@@ -309,7 +310,11 @@ export async function handleFileManager(req: IncomingMessage, res: ServerRespons
     const url = new URL(req.url || '/', 'http://localhost')
     const action = url.pathname.slice('/api/files'.length).replace(/^\//, '')
     const media = ['preview', 'download', 'thumbnail'].includes(action)
-    const authenticated = typeof req.headers['x-frontend-auth'] === 'string' && req.headers['x-frontend-auth'] === password
+    const headerAuth = typeof req.headers['x-frontend-auth'] === 'string' ? req.headers['x-frontend-auth'] : ''
+    const authenticated = headerAuth.length > 0 && crypto.timingSafeEqual(
+      crypto.createHash('sha256').update(headerAuth).digest(),
+      crypto.createHash('sha256').update(password).digest(),
+    )
     if (!authenticated && !(media && ['GET', 'HEAD'].includes(req.method || '') && hasMediaSession(req, password))) return json(res, 401, { message: '登录已失效，请返回管理后台重新登录' })
     const get = ['GET', 'HEAD'].includes(req.method || '')
     if ((['', 'search', 'preview', 'download', 'thumbnail'].includes(action) && !get) || (!['', 'search', 'preview', 'download', 'thumbnail'].includes(action) && req.method !== 'POST')) return json(res, 405, { message: '不支持的请求方法' })

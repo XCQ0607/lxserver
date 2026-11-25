@@ -22,6 +22,16 @@
 
 ### 🐛 缺陷修复与体验优化
 
+- **本地/NAS/挂载音乐防误判断流与全网找源修复 (#541)**：Web 播放器将本地/缓存/OpenList/`custom` 目录流的缓冲卡顿超时放宽至 30 秒，修复本地曲目重试时跳过直链命中与 `runRecoveryFlow` 误走全网换源的问题；服务端修复 `/api/music/url` 中 `customLocalUrl` 兜底分支恒抛异常的逻辑缺陷，自定义目录音频传输复用 `serveFile` 补全 `Range`/416/`HEAD` 与断连销毁流支持；`playSong` 切歌时支持 `AbortController` 取消过期在线解析请求，并清理 `probeUrl`/`applyAutoProxy`/`prefetchManager` 的响应体与重复缓冲。
+- **高 CPU 占用、$O(n^2)$ 音源重载放大与 Web 播放假断连修复 (#536)**：
+  - **自定义音源沙箱与增量重载**：为 `userApi.ts` 每个 VM2 实例代理跟踪定时器与事件并在覆盖/卸载/重载时通过 `dispose()` 彻底清理，校验用 `temp_*` 改为 `ephemeral` 模式用完即毁；单源增删改/开关/排序改为增量加载与卸载，消除 $O(n^2)$ 全量重跑并合并并发初始化请求。
+  - **本地歌词与热路径 I/O 优化**：`downloadLyrics.ts` 去除无在线 SDK 时的重复本地扫描，`fileCache.ts` 去除 `checkLyricCache` 热路径同步递归全盘 `readdirSync`，`CacheIndexManager` 改为原子写盘与紧凑序列化，`checkCache()` 与 `syncCacheIndex()` 消除全表拷贝与重复 `MusicTagger` 解析，`customMusicManager.ts` 按文件状态缓存 `getVersion()` 并在大曲库扫描时定期让出事件循环。
+  - **前端抗抖动与空转治理**：`checkServerOnline()` 超时放宽至 5000ms 并增加重试避免服务端高负载误报断连；本地曲目跳过 `prefetchManager.bufferer` 并发预加载；`visualizer.js` 缓存主题色与缓冲区并在暂停时停止 rAF；`sound-effects.js` 3D 环绕、`app.js` 逐字歌词与 30 秒后台轮询及 `download_manager.js` 速度刷新在暂停/后台/空闲态大幅降低无效开销。
+- **OpenList、Subsonic、下载与 WebDAV/同步稳定性加固**：
+  - 修复 `openlistClient.ts` 并发登录与 401/探测清空 Token 竞态、元数据/完整性 JSON 损坏崩溃、`resolveOpenlistCacheEntry()` 瞬时错误 30 秒负缓存及取消信号未透传；`subsonic.ts` 统一代理 `User-Agent` 并修复转码排队断连泄漏。
+  - 修复 `parallelDownload.ts` 确定性 Range 不匹配无效重试与临时目录清理、`readThroughCapture.ts` 早关闭临时文件泄漏、`downloadQuality.ts` 取消信号、`autoLinkQueue.ts` 唯一临时文件与 `userApi.ts` 音源耗尽错误码 `PLATFORM_SOURCE_UNAVAILABLE`。
+  - 修复 `webdavSync.ts` 恢复失败永久锁死维护状态与路径前缀边界、`webdavTransfer.ts` 多余 `DELETE` 404、`src/server/sync/` 异常吞噬与并发同步，以及 `user_sync.js` 歌单并发读写覆盖与 `4100` 重连死循环。
+  - 修复 `download_manager.js` 删除/重试后的 2 秒定时器复活竞态、`sync_download.js` 弹窗关闭后轮询泄漏、`coverProxy.ts` SSRF 与缓存内存上限、`syncDownloadTask.ts` / `remasterQueue.ts` / `scheduler.ts` 并发锁与定时器清理，以及 `fileManager.ts` / `auth.ts` 入参校验与常量时间比较。
 - **随机播放一轮去重、「下一首播放」全模式生效与列表操作菜单统一 (#547 @JEY016)**：为 Web 播放器随机播放模式增加本轮已播集合（`randomPlayedSongs`）与历史回溯栈（`randomPlayHistory`），确保列表内全部歌曲完整播放一轮后才开启下一轮且支持上一首回溯；新增优先待播队列（`queuedNextSongs`），使「下一首播放」在随机、单曲循环、列表循环与顺序播放等所有模式下均按预期插队优先播放；将歌手详情、排行榜、歌单详情歌曲列表的操作栏统一收口为「播放 / 添加到歌单 / 更多（⋮）」三按钮布局（将下一首播放、加入播放队列、评分、下载、不喜欢统一收入弹出菜单），并在播放队列抽屉与缓存管理列表补充「下一首播放」快捷入口。
 - **锁屏及后台标签页 SMTC 歌词不刷新修复 (#532)**：修复 Windows 10 锁屏或标签页切到后台时 `requestAnimationFrame` 被浏览器暂停导致 SMTC 歌词停留在锁屏前那一行的缺陷；在 `TimeoutTools` 中针对 `document.hidden` 改用 `setTimeout` 推进歌词定时器，并在 `audio` 的 `timeupdate` 中补充后台 SMTC 歌词兜底同步，同时在 `visibilitychange` 切换前后台时重新对齐 `LinePlayer` 进度。
 - **下载/缓存音质列表按真实可用音质过滤与重复档位去重 (#523)**：Web 播放器单曲下载与缓存弹窗在生成音质选项时，优先读取歌曲自身（及聚合多平台）实际返回的音质列表，仅在早期歌单完全缺失音质元数据时回退平台全量列表；同时按音质从低到高比对探测字节数与已缓存文件大小（兼容 `MB`/`Mb` 格式差异），自动过滤掉大小完全一致的高阶静默回退/别名档位。

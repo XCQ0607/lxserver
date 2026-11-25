@@ -41,8 +41,18 @@ export class RemasterStagingStore {
   }
 
   initialize() {
-    this.load()
+    const records = this.load()
     if (!fs.existsSync(this.file)) this.save()
+    if (fs.existsSync(this.tempRoot)) {
+      for (const entry of fs.readdirSync(this.tempRoot)) {
+        if (!records[entry]) {
+          fs.rmSync(path.join(this.tempRoot, entry), { recursive: true, force: true })
+        }
+      }
+      if (fs.readdirSync(this.tempRoot).length === 0) {
+        try { fs.rmdirSync(this.tempRoot) } catch { /* ignore */ }
+      }
+    }
   }
 
   private id(username: string) {

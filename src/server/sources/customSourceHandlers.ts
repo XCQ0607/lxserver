@@ -1,6 +1,6 @@
 import * as fs from 'fs'
 import * as path from 'path'
-import { extractMetadata, loadUserApi, initUserApis, getApiStatus, clearApiStatus } from './userApi'
+import { extractMetadata, loadUserApi, initUserApis, reloadSingleUserApi, unloadSingleUserApi, reorderUserApis, getApiStatus, clearApiStatus } from './userApi'
 import type { IncomingMessage, ServerResponse } from 'http'
 import needle from 'needle'
 import { verifyUserAuth } from '../server'
@@ -70,36 +70,40 @@ export async function handleValidate(req: IncomingMessage, res: ServerResponse) 
             script,
             enabled: false,
             allowUnsafeVM: !!allowUnsafeVM,
+            ephemeral: true,
             ...metadata,
             owner: 'temp' // 临时验证 owner
         } as any)
+        try {
+            if (result.success) {
+                // 检查是否注册了任何源
+                const api = result.apiInstance
+                const sources = api?.info?.sources || {}
+                const sourcesCount = Object.keys(sources).length
 
-        if (result.success) {
-            // 检查是否注册了任何源
-            const api = result.apiInstance
-            const sources = api?.info?.sources || {}
-            const sourcesCount = Object.keys(sources).length
+                if (sourcesCount === 0) {
+                    throw new Error('脚本没有注册任何音源。请确保脚本正确调用了 lx.send("inited", { sources: {...} })')
+                }
 
-            if (sourcesCount === 0) {
-                throw new Error('脚本没有注册任何音源。请确保脚本正确调用了 lx.send("inited", { sources: {...} })')
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({
+                    valid: true,
+                    metadata,
+                    sources: Object.keys(sources),
+                    sourcesCount
+                }))
+            } else {
+                res.writeHead(200, { 'Content-Type': 'application/json' })
+                res.end(JSON.stringify({
+                    valid: false,
+                    error: result.error,
+                    requireUnsafe: result.requireUnsafe,
+                    disabledVM: result.requireUnsafe && !global.lx.config['system.allowUnsafeVM'],
+                    metadata // 即使验证失败也返回元数据，方便前端展示
+                }))
             }
-
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({
-                valid: true,
-                metadata,
-                sources: Object.keys(sources),
-                sourcesCount
-            }))
-        } else {
-            res.writeHead(200, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({
-                valid: false,
-                error: result.error,
-                requireUnsafe: result.requireUnsafe,
-                disabledVM: result.requireUnsafe && !global.lx.config['system.allowUnsafeVM'],
-                metadata // 即使验证失败也返回元数据，方便前端展示
-            }))
+        } finally {
+            result?.apiInstance?.dispose?.()
         }
     } catch (err: any) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
@@ -120,14 +124,18 @@ async function getScriptInfo(scriptContent: string, allowUnsafeVM: boolean = fal
             script: scriptContent,
             enabled: false,
             allowUnsafeVM,
+            ephemeral: true,
             ...metadata,
             owner: 'temp'
         } as any)
-
-        if (result.success && result.apiInstance?.info?.sources) {
-            supportedSources = Object.keys(result.apiInstance.info.sources)
-        } else {
-            requireUnsafe = !!result.requireUnsafe
+        try {
+            if (result.success && result.apiInstance?.info?.sources) {
+                supportedSources = Object.keys(result.apiInstance.info.sources)
+            } else {
+                requireUnsafe = !!result.requireUnsafe
+            }
+        } finally {
+            result?.apiInstance?.dispose?.()
         }
     } catch (e: any) {
         console.warn('[自定义源] 分析脚本支持源失败:', e.message)
@@ -266,8 +274,8 @@ export async function handleUpload(req: IncomingMessage, res: ServerResponse) {
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
 
-        // 重新加载该用户的API
-        await initUserApis(targetOwner)
+        // 增量加载/卸载该源
+        await reloadSingleUserApi(targetOwner, id)
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
@@ -441,8 +449,8 @@ export async function handleImport(req: IncomingMessage, res: ServerResponse) {
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
 
-        // 重新加载
-        await initUserApis(targetOwner)
+        // 增量加载/卸载该源
+        await reloadSingleUserApi(targetOwner, id)
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true, filename: displayName, id, metadata, supportedSources, owner: targetOwner, allowUnsafeVM: !!requireUnsafe || !!allowUnsafeVM }))
@@ -559,6 +567,7 @@ export async function handleUpdate(req: IncomingMessage, res: ServerResponse) {
                 script: content,
                 enabled: false,
                 allowUnsafeVM: !!allowUnsafeVM,
+                ephemeral: true,
                 ...metadata,
                 owner: 'temp'
             } as any)
@@ -570,6 +579,8 @@ export async function handleUpdate(req: IncomingMessage, res: ServerResponse) {
                 error: `初始化失败: ${valErr.message || '脚本加载异常'}`
             }))
             return
+        } finally {
+            validationResult?.apiInstance?.dispose?.()
         }
 
         // 核心安全校验：若脚本需要或者指定了 unsafe VM 模式
@@ -646,8 +657,8 @@ export async function handleUpdate(req: IncomingMessage, res: ServerResponse) {
         // 清除旧的运行时状态缓存，以便重新加载时更新状态与清除旧 alert
         clearApiStatus(targetOwner, foundSource.id)
 
-        // 重新初始化该用户的API
-        await initUserApis(targetOwner)
+        // 增量重新加载该用户的目标 API
+        await reloadSingleUserApi(targetOwner, foundSource.id)
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({
@@ -901,9 +912,9 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
 
-        // 重新加载
+        // 增量重新加载
         try {
-            await initUserApis(targetOwner)
+            await reloadSingleUserApi(targetOwner, targetId)
 
             // 如果是尝试启用，检查启用后的实时状态
             if (target.enabled) {
@@ -919,7 +930,7 @@ export async function handleToggle(req: IncomingMessage, res: ServerResponse) {
                     target.enabled = oldEnabled
                     target.allowUnsafeVM = oldAllowUnsafeVM
                     fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
-                    await initUserApis(targetOwner)
+                    await reloadSingleUserApi(targetOwner, targetId)
 
                     // 如果系统已禁用 VM 模式，直接提示已禁用
                     if (!global.lx.config['system.allowUnsafeVM']) {
@@ -1035,11 +1046,11 @@ export async function handleReorder(req: IncomingMessage, res: ServerResponse) {
             }
         }
 
-        // 重新加载 API，使新顺序立即生效于解析优先级
-        await initUserApis(targetOwner)
-        // 若修改了 open 的源顺序，也必须重载 open，否则 loadedApis 里顺序不变
+        // 按新顺序重排内存中的 API，无需重建 VM
+        reorderUserApis(targetOwner)
+        // 若修改了 open 的源顺序，也重排 open
         if (openSourcesModified) {
-            await initUserApis('open')
+            reorderUserApis('open')
         }
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
@@ -1126,8 +1137,8 @@ export async function handleDelete(req: IncomingMessage, res: ServerResponse) {
 
         fs.writeFileSync(metaPath, JSON.stringify(sources, null, 2))
 
-        // 重新初始化
-        await initUserApis(targetOwner)
+        // 增量卸载
+        unloadSingleUserApi(targetOwner, targetId)
 
         res.writeHead(200, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ success: true }))

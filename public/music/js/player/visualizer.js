@@ -1198,12 +1198,16 @@ const musicVisualizer = (function () {
 
         if (standaloneRafId) return;
 
+        let cachedThemeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
+        let cachedFreqBuf = null;
+        let frameCount = 0;
+
         function renderLoop() {
             const currentSettings = window.settings || {};
             const needFooter = currentSettings.showFooterVisualizer && !isVisualizerSuppressedByIOS() && footerCanvas;
             const needDetail = currentSettings.showDetailVisualizer && !isVisualizerSuppressedByIOS() && detailCanvas && isDetailVisible();
 
-            if (isInitialized || (!needFooter && !needDetail)) {
+            if (isInitialized || (!needFooter && !needDetail) || (audio && audio.paused)) {
                 standaloneRafId = null;
                 return;
             }
@@ -1222,10 +1226,16 @@ const musicVisualizer = (function () {
                 return;
             }
 
-            const themeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
+            if ((frameCount++ % 60) === 0) {
+                cachedThemeColor = getComputedStyle(document.documentElement).getPropertyValue('--c-500').trim() || '#10b981';
+            }
+            const themeColor = cachedThemeColor;
             const globalStyle = currentSettings.visualizerGlobalStyle || 'blocks';
 
-            const realData = new Uint8Array(audioAnalyser.frequencyBinCount);
+            if (!cachedFreqBuf || cachedFreqBuf.length !== audioAnalyser.frequencyBinCount) {
+                cachedFreqBuf = new Uint8Array(audioAnalyser.frequencyBinCount);
+            }
+            const realData = cachedFreqBuf;
             audioAnalyser.getByteFrequencyData(realData);
 
             if (needFooter) {
@@ -1672,12 +1682,14 @@ const musicVisualizer = (function () {
             } else {
                 resumeAudioContext();
             }
+            if (window.soundEffects?.isNativePlaybackPreferred?.()) triggerStandaloneLoop();
         });
         audio.addEventListener('playing', () => {
             if (!isInitialized) {
                 init();
             }
             resumeAudioContext();
+            if (window.soundEffects?.isNativePlaybackPreferred?.()) triggerStandaloneLoop();
         });
         audio.addEventListener('timeupdate', () => {
             if (!isInitialized && audio && !audio.paused) {

@@ -317,10 +317,13 @@ class CacheIndexManager {
         }
 
         const file = this.getIndexFile(username, folder, loc)
+        const temp = `${file}.${crypto.randomBytes(8).toString('hex')}.tmp`
         try {
             const data = Object.fromEntries(index)
-            fs.writeFileSync(file, JSON.stringify(data, null, 2))
+            fs.writeFileSync(temp, JSON.stringify(data))
+            fs.renameSync(temp, file)
         } catch (e) {
+            try { fs.unlinkSync(temp) } catch { /* ignore */ }
             console.error(`[缓存索引] 保存索引文件失败 (${key}):`, e)
         }
     }
@@ -377,9 +380,11 @@ class CacheIndexManager {
                 // load() accepts an empty map on corruption. Do not silently
                 // persist that fallback over the old on-disk index.
                 if (!stat.isFile()) return false
-                const disk = JSON.parse(fs.readFileSync(file, 'utf8'))
-                if (!disk || typeof disk !== 'object' || Array.isArray(disk) ||
-                    Object.keys(disk).some(key => !index.has(key) || !disk[key] || typeof disk[key] !== 'object' || Array.isArray(disk[key]))) return false
+                if (index.size === 0 && stat.size > 0) {
+                    const disk = JSON.parse(fs.readFileSync(file, 'utf8'))
+                    if (!disk || typeof disk !== 'object' || Array.isArray(disk) ||
+                        Object.keys(disk).some(key => !index.has(key) || !disk[key] || typeof disk[key] !== 'object' || Array.isArray(disk[key]))) return false
+                }
             }
 
             const snapshot = Object.fromEntries(index)
@@ -388,7 +393,7 @@ class CacheIndexManager {
             const fd = fs.openSync(name, 'wx', stat ? stat.mode & 0o777 : 0o600)
             temp = name
             try {
-                fs.writeFileSync(fd, JSON.stringify(snapshot, null, 2))
+                fs.writeFileSync(fd, JSON.stringify(snapshot))
                 fs.fsyncSync(fd)
             } finally {
                 fs.closeSync(fd)
@@ -910,7 +915,7 @@ const sanitize = (str: any) => String(str || '').replace(/[\\/:*?"<>|]/g, '_')
 export const syncCacheIndex = async (username?: string, roots: Array<'cache' | 'music'> = ['cache', 'music']) => {
     const normalizedUsername = (username && username !== '_open' && username !== 'default') ? username : '_open'
     void cleanupStaleTempFiles(normalizedUsername)
-    const extensions = ['.mp3', '.flac', '.m4a', '.ogg', '.wav']
+    const extensions = ['.mp3', '.flac', '.m4a', '.ogg', '.opus', '.aac', '.wav', '.ape']
 
     for (const folder of roots) {
         const index = indexManager.load(normalizedUsername, folder)
@@ -1033,63 +1038,85 @@ export const syncCacheIndex = async (username?: string, roots: Array<'cache' | '
                         updated = true
                     }
 
-                    if (needsCoverCheck) {
-                        const hasEmbeddedCover = readEmbeddedCoverState(filePath)
-                        const hasExternalCover = !hasEmbeddedCover && hasCachedCover(file, normalizedUsername, stats)
-                        const coverType: CacheItem['coverType'] = hasEmbeddedCover
-                            ? 'embedded'
-                            : hasExternalCover
-                                ? 'cached'
-                                : hasUsableRemoteCover(existing.img)
-                                    ? 'remote'
-                                    : 'none'
-                        const actualHasCover = coverType !== 'none'
-                        if (existing.hasCover !== actualHasCover) updated = true
-                        existing.hasCover = actualHasCover
-                        existing.coverType = coverType
-                        existing.coverCheckedVersion = COVER_CHECK_VERSION
-                        existing.coverCheckedMtime = stats.mtimeMs
-                        existing.coverCheckedSize = stats.size
+                    const needsMetaInspection = !existing.interval || existing.quality === 'unknown' || !existing.bitrate || existing.hasEmbedLyric === undefined || existing.metadataWritable === undefined || qualityCorrectionNeeded
+                    let sharedTagger: any = null
+                    let sharedTaggerFailed = false
+                    if (needsCoverCheck || needsMetaInspection) {
+                        try {
+                            sharedTagger = new MusicTagger()
+                            sharedTagger.loadPath(filePath)
+                        } catch {
+                            sharedTaggerFailed = true
+                            try { sharedTagger?.dispose() } catch { }
+                            sharedTagger = null
+                        }
                     }
 
-                    // If interval or quality/bitrate is missing/unknown, or hasEmbedLyric not yet detected, try to extract it
-                    if (!existing.interval || existing.quality === 'unknown' || !existing.bitrate || existing.hasEmbedLyric === undefined || existing.metadataWritable === undefined || qualityCorrectionNeeded) {
-                        let tagger: any
-                        try {
-                            tagger = new MusicTagger()
-                            tagger.loadPath(filePath)
-                            // 若为 local 未关联文件，元数据优先校准歌名歌手
-                            if (existing.source === 'local' || !existing.source) {
-                                if (tagger.title) existing.name = tagger.title
-                                if (tagger.artist) existing.singer = tagger.artist
-                                if (tagger.album) existing.album = tagger.album
-                            }
-                            const dur = tagger.duration
-                            if (dur && !existing.interval) existing.interval = formatPlayTime(dur / 1000)
-                            existing.bitrate = tagger.bitRate
-                            existing.sampleRate = tagger.sampleRate
-                            existing.bitDepth = tagger.bitDepth
-                            if (!existing.quality || existing.quality === 'unknown' || qualityCorrectionNeeded) {
-                                const detectedQuality = detectQualityFromBitrate(tagger.bitRate, ext, tagger)
-                                existing.quality = resolveInspectedQuality(existing.quality, detectedQuality, currentAudioContainer, tagger)
-                            }
-                            // [新增] 检测是否已嵌入歌词 USLT 标签
-                            if (existing.hasEmbedLyric === undefined) {
-                                const lyricsInTag = tagger.lyrics
-                                existing.hasEmbedLyric = !!(lyricsInTag && lyricsInTag.trim().length > 10)
-                            }
-                            existing.audioContainer = currentAudioContainer
-                            existing.metadataWritable = true
-                            existing.metadataError = undefined
-                        } catch (e: any) {
-                            existing.audioContainer = currentAudioContainer
-                            existing.metadataWritable = false
-                            existing.metadataError = getMetadataUnsupportedMessage(existing.audioContainer)
-                            existing.hasEmbedLyric = false
-                        } finally {
-                            try { if (tagger) tagger.dispose() } catch (e) { }
+                    try {
+                        if (needsCoverCheck) {
+                            const hasEmbeddedCover = !sharedTaggerFailed && sharedTagger
+                                ? hasValidEmbeddedCover(sharedTagger.pictures)
+                                : false
+                            const hasExternalCover = !hasEmbeddedCover && hasCachedCover(file, normalizedUsername, stats)
+                            const coverType: CacheItem['coverType'] = hasEmbeddedCover
+                                ? 'embedded'
+                                : hasExternalCover
+                                    ? 'cached'
+                                    : hasUsableRemoteCover(existing.img)
+                                        ? 'remote'
+                                        : 'none'
+                            const actualHasCover = coverType !== 'none'
+                            if (existing.hasCover !== actualHasCover) updated = true
+                            existing.hasCover = actualHasCover
+                            existing.coverType = coverType
+                            existing.coverCheckedVersion = COVER_CHECK_VERSION
+                            existing.coverCheckedMtime = stats.mtimeMs
+                            existing.coverCheckedSize = stats.size
                         }
-                        updated = true
+
+                        // If interval or quality/bitrate is missing/unknown, or hasEmbedLyric not yet detected, try to extract it
+                        if (needsMetaInspection) {
+                            if (!sharedTaggerFailed && sharedTagger) {
+                                try {
+                                    // 若为 local 未关联文件，元数据优先校准歌名歌手
+                                    if (existing.source === 'local' || !existing.source) {
+                                        if (sharedTagger.title) existing.name = sharedTagger.title
+                                        if (sharedTagger.artist) existing.singer = sharedTagger.artist
+                                        if (sharedTagger.album) existing.album = sharedTagger.album
+                                    }
+                                    const dur = sharedTagger.duration
+                                    if (dur && !existing.interval) existing.interval = formatPlayTime(dur / 1000)
+                                    existing.bitrate = sharedTagger.bitRate
+                                    existing.sampleRate = sharedTagger.sampleRate
+                                    existing.bitDepth = sharedTagger.bitDepth
+                                    if (!existing.quality || existing.quality === 'unknown' || qualityCorrectionNeeded) {
+                                        const detectedQuality = detectQualityFromBitrate(sharedTagger.bitRate, ext, sharedTagger)
+                                        existing.quality = resolveInspectedQuality(existing.quality, detectedQuality, currentAudioContainer, sharedTagger)
+                                    }
+                                    // [新增] 检测是否已嵌入歌词 USLT 标签
+                                    if (existing.hasEmbedLyric === undefined) {
+                                        const lyricsInTag = sharedTagger.lyrics
+                                        existing.hasEmbedLyric = !!(lyricsInTag && lyricsInTag.trim().length > 10)
+                                    }
+                                    existing.audioContainer = currentAudioContainer
+                                    existing.metadataWritable = true
+                                    existing.metadataError = undefined
+                                } catch (e: any) {
+                                    existing.audioContainer = currentAudioContainer
+                                    existing.metadataWritable = false
+                                    existing.metadataError = getMetadataUnsupportedMessage(existing.audioContainer)
+                                    existing.hasEmbedLyric = false
+                                }
+                            } else {
+                                existing.audioContainer = currentAudioContainer
+                                existing.metadataWritable = false
+                                existing.metadataError = getMetadataUnsupportedMessage(existing.audioContainer)
+                                existing.hasEmbedLyric = false
+                            }
+                            updated = true
+                        }
+                    } finally {
+                        try { if (sharedTagger) sharedTagger.dispose() } catch (e) { }
                     }
                     if (existing.size !== stats.size || existing.hasLyric !== hasLyricOnDisk) updated = true
                     finalQuality = existing.quality
@@ -1872,19 +1899,21 @@ export const checkCache = (songInfo: any, username?: string, isLyricCheck: boole
         }
 
         // 2. Search for Naming Collisions (Same Name + Singer + Quality, but different ID)
-        const allItems = [
-            ...indexManager.getAll(normalizedUsername, 'cache'),
-            ...indexManager.getAll(normalizedUsername, 'music')
-        ]
-
-        const collisions = allItems.filter(item =>
-            item.id !== id && // 排除当前正在查询的 ID 本身
-            !item.readThrough && // 播放回填只证明当前平台 ID，不证明跨平台录音一致
-            item.name.toLowerCase() === String(songInfo.name || '').toLowerCase() &&
-            item.singer.toLowerCase() === String(songInfo.singer || '').toLowerCase() &&
-            isSameQualityTier(item.quality, quality) &&
-            (!isLyricCheck || item.hasLyric)
-        )
+        const targetName = String(songInfo.name || '').toLowerCase()
+        const targetSinger = String(songInfo.singer || '').toLowerCase()
+        const collisions: CacheItem[] = []
+        for (const folder of ['cache', 'music'] as const) {
+            for (const item of indexManager.load(normalizedUsername, folder).values()) {
+                if (item.id !== id &&
+                    !item.readThrough &&
+                    item.name.toLowerCase() === targetName &&
+                    item.singer.toLowerCase() === targetSinger &&
+                    isSameQualityTier(item.quality, quality) &&
+                    (!isLyricCheck || item.hasLyric)) {
+                    collisions.push(item)
+                }
+            }
+        }
         const collisionFileExists = (item: any) => !isLyricCheck && !!item.filename &&
             fs.existsSync(path.join(getCacheDir(normalizedUsername, item.folder === 'music'), item.filename))
         // 同名记录可能不止一条：优先选文件还在、且时长与请求一致的那条，其次是文件还在的
@@ -2028,32 +2057,21 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
     }
 
     // Physical scan fallback (for standard naming pattern: Name_-_Singer_-_Source_-_ID_-_Quality)
+    // Skip for local/custom tracks and avoid recursive subdirectory walks on the hot path.
+    if (songInfo.source === 'local' || songInfo.source === 'custom') return { exists: false }
+
     const roots = ['cache', 'music']
     const basePaths = roots.map(folder => getCacheDir(normalizedUsername, folder === 'music'))
-
-    // [Fix] Recursively search for lyrics if not in index
-    const getAllLrcFiles = (dirPath: string, acc: string[] = []) => {
-        if (!fs.existsSync(dirPath)) return acc
-        const entries = fs.readdirSync(dirPath, { withFileTypes: true })
-        for (const entry of entries) {
-            const fullPath = path.join(dirPath, entry.name)
-            if (entry.isDirectory()) {
-                getAllLrcFiles(fullPath, acc)
-            } else if (entry.name.endsWith('.lrc')) {
-                acc.push(fullPath)
-            }
-        }
-        return acc
-    }
-
     const cleanId = (sid: string) => String(sid || '').replace(/^(tx|mg|wy|kg|kw|bd)_/, '')
     const targetCleanId = cleanId(id)
 
     for (const dirPath of basePaths) {
-        const lrcFiles = getAllLrcFiles(dirPath)
-        for (const filePath of lrcFiles) {
-            const file = path.basename(filePath)
-            const fileNameWithoutExt = file.substring(0, file.lastIndexOf('.'))
+        if (!fs.existsSync(dirPath)) continue
+        const entries = fs.readdirSync(dirPath, { withFileTypes: true })
+        for (const entry of entries) {
+            if (!entry.isFile() || !entry.name.endsWith('.lrc')) continue
+            const filePath = path.join(dirPath, entry.name)
+            const fileNameWithoutExt = entry.name.substring(0, entry.name.lastIndexOf('.'))
             const segments = fileNameWithoutExt.split('_-_')
             if (segments.length >= 2) {
                 if ((songInfo.strictIdentity || (segments.length >= 3 && songInfo.source)) && segments[segments.length - 3] !== songInfo.source) continue
@@ -2064,7 +2082,7 @@ export const checkLyricCache = (songInfo: any, username?: string) => {
                         exists: true,
                         path: filePath,
                         content: parseLyrics(fs.readFileSync(filePath, 'utf-8')),
-                        filename: path.relative(dirPath, filePath).replace(/\\/g, '/')
+                        filename: entry.name
                     }
                 }
             }
@@ -3172,13 +3190,22 @@ export const serveCacheFile = (req: http.IncomingMessage, res: http.ServerRespon
     const location = getUserCacheLocation(owner)
     for (const loc of [location, location === CACHE_ROOTS.DATA ? CACHE_ROOTS.ROOT : CACHE_ROOTS.DATA]) {
         for (const target of folder ? [folder] : ['cache', 'music'] as CacheFolder[]) {
-            const dir = getCacheDir(owner, target === 'music', loc)
+            const dir = getCacheDir(owner, target === 'music', loc, false)
             let filenamePath: string
             try { filenamePath = resolveContainedPath(dir, filename) } catch {
                 res.writeHead(403); res.end('Forbidden'); return
             }
             if (!fs.existsSync(filenamePath)) continue
-            const mime: Record<string, string> = { '.mp3': 'audio/mpeg', '.flac': 'audio/flac', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.wav': 'audio/wav' }
+            const mime: Record<string, string> = {
+                '.mp3': 'audio/mpeg',
+                '.flac': 'audio/flac',
+                '.m4a': 'audio/mp4',
+                '.ogg': 'audio/ogg',
+                '.opus': 'audio/ogg',
+                '.aac': 'audio/aac',
+                '.wav': 'audio/wav',
+                '.ape': 'audio/x-ape',
+            }
             serveFile(req, res, filenamePath, mime[path.extname(filenamePath).toLowerCase()] || 'application/octet-stream')
             return
         }

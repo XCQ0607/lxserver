@@ -1820,6 +1820,7 @@ window.LocalMusicManager = {
             url: localMusicBrowseUrl(`/api/music/cache/file/${encodeURIComponent(username)}/${encodeURIComponent(d.filename)}?folder=${d.folder}`),
             pic: localMusicBrowseUrl(`/api/music/cache/cover?filename=${encodeURIComponent(d.filename)}&user=${encodeURIComponent(username)}`),
             isLocal: true,
+            folder: d.folder,
             // 附加本地文件定位信息，供 fetchLyric 读取内嵌歌词（未关联歌曲时优先使用）
             _localFilename: d.filename,
             _localFolder: d.folder || 'cache',

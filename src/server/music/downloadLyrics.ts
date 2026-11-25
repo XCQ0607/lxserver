@@ -23,10 +23,14 @@ export async function resolveSongLyricData(song: any, owner: string, lookup: (so
       return found.exists && (found.content?.lyric || found.content?.lrc)?.trim() ? { ...found.content, _fromLocalCache: true } : null
     } catch { return null }
   }
+  if (!sdk[normalized.source]?.getLyric) {
+    const fallback = local(true)
+    if (fallback) return fallback
+    throw new Error('音源不支持歌词')
+  }
   const cached = local()
   if (cached) return cached
   try {
-    if (!sdk[normalized.source]?.getLyric) throw new Error('音源不支持歌词')
     const request = sdk[normalized.source].getLyric(normalized)
     const result = await (request.promise || request)
     if (!(result?.lyric || result?.lrc)?.trim()) throw new Error('音源未返回歌词')

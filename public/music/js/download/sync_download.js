@@ -37,7 +37,9 @@
       headers: authHeaders(),
       ...options,
     })
-    return res.json()
+    const data = await res.json().catch(() => null)
+    if (!res.ok) throw new Error(data?.message || `HTTP ${res.status}`)
+    return data
   }
 
   const _esc = str => {
@@ -68,6 +70,8 @@
   // 状态
   // ─────────────────────────────────────────────
   let _pollTimer = null
+  let _pollInFlight = false
+  let _isOpen = false
   let _wasRunning = false
   let _currentData = null   // 上一次 status 响应
 
@@ -77,14 +81,16 @@
   const open = async () => {
     const modal = $('sync-download-modal')
     if (!modal) return
+    _isOpen = true
     modal.classList.remove('hidden')
     document.body.style.overflow = 'hidden'
     $('sd-playlist-loading')?.classList.remove('hidden')
     await loadStatus()
-    startPolling()
+    if (_isOpen) startPolling()
   }
 
   const close = () => {
+    _isOpen = false
     const modal = $('sync-download-modal')
     if (!modal) return
     modal.classList.add('hidden')
@@ -462,11 +468,15 @@
   }
 
   const pollProgress = async () => {
+    if (_pollInFlight) return
+    _pollInFlight = true
     try {
       const resp = await apiFetch('/api/user/sync-download/progress')
-      if (!resp.success) return
+      if (!resp?.success) return
       updateProgressUI(resp.data)
-    } catch { }
+    } catch { } finally {
+      _pollInFlight = false
+    }
   }
 
   // ─────────────────────────────────────────────
@@ -614,10 +624,11 @@
   // ─────────────────────────────────────────────
   const onMasterSwitch = async (enabled) => {
     try {
-      await apiFetch('/api/user/sync-download/settings', {
+      const resp = await apiFetch('/api/user/sync-download/settings', {
         method: 'PUT',
         body: JSON.stringify({ enabled }),
       })
+      if (resp?.success === false) throw new Error(resp.message || '保存总开关失败')
       if (_currentData?.syncDownload) _currentData.syncDownload.enabled = enabled
     } catch (e) {
       console.warn('[SyncDownload] 保存总开关失败:', e)
@@ -628,10 +639,11 @@
 
   const onQualityChange = async (quality) => {
     try {
-      await apiFetch('/api/user/sync-download/settings', {
+      const resp = await apiFetch('/api/user/sync-download/settings', {
         method: 'PUT',
         body: JSON.stringify({ preferredQuality: quality }),
       })
+      if (resp?.success === false) throw new Error(resp.message || '保存目标音质失败')
       if (_currentData?.syncDownload) _currentData.syncDownload.preferredQuality = quality
     } catch (e) {
       console.warn('[SyncDownload] 保存目标音质失败:', e)
@@ -640,10 +652,11 @@
 
   const onDownloadLyricChange = async (enabled) => {
     try {
-      await apiFetch('/api/user/sync-download/settings', {
+      const resp = await apiFetch('/api/user/sync-download/settings', {
         method: 'PUT',
         body: JSON.stringify({ downloadLyric: enabled }),
       })
+      if (resp?.success === false) throw new Error(resp.message || '保存下载歌词开关失败')
       if (_currentData?.syncDownload) _currentData.syncDownload.downloadLyric = enabled
     } catch (e) {
       console.warn('[SyncDownload] 保存下载歌词开关失败:', e)
@@ -654,10 +667,11 @@
 
   const onEmbedLyricChange = async (enabled) => {
     try {
-      await apiFetch('/api/user/sync-download/settings', {
+      const resp = await apiFetch('/api/user/sync-download/settings', {
         method: 'PUT',
         body: JSON.stringify({ embedLyric: enabled }),
       })
+      if (resp?.success === false) throw new Error(resp.message || '保存嵌入 USLT 开关失败')
       if (_currentData?.syncDownload) _currentData.syncDownload.embedLyric = enabled
     } catch (e) {
       console.warn('[SyncDownload] 保存嵌入 USLT 开关失败:', e)
@@ -668,10 +682,11 @@
 
   const onPlaylistToggle = async (listId, enabled) => {
     try {
-      await apiFetch('/api/user/sync-download/settings', {
+      const resp = await apiFetch('/api/user/sync-download/settings', {
         method: 'PUT',
         body: JSON.stringify({ playlists: { [listId]: { enabled } } }),
       })
+      if (resp?.success === false) throw new Error(resp.message || '保存歌单开关失败')
       // 更新统计药丸与卡片自身状态 Tag
       if (_currentData?.playlists) {
         const item = _currentData.playlists.find(p => p.id === listId)

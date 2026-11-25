@@ -50,6 +50,7 @@ interface RemasterTask {
 }
 
 const tasks = new Map<string, RemasterTask>()
+const startingUsers = new Set<string>()
 let resolver: RemasterResolver | null = null
 
 export const initialize = (downloadResolver: RemasterResolver) => {
@@ -159,7 +160,20 @@ const runTask = async (task: RemasterTask, items: RemasterableItem[], allItems: 
     for (let attempt = 1; attempt <= MAX_REMASTER_ATTEMPTS; attempt++) {
       attemptsMade = attempt
       try {
-        const resolved = await resolver(songInfo, task.targetQuality, task.username)
+        const signal = task.controller.signal
+        let timer: ReturnType<typeof setTimeout> | undefined
+        const resolved = await Promise.race([
+          resolver(songInfo, task.targetQuality, task.username),
+          new Promise<never>((_resolve, reject) => {
+            const onAbort = () => reject(new Error('Aborted'))
+            if (signal.aborted) return onAbort()
+            signal.addEventListener('abort', onAbort, { once: true })
+            timer = setTimeout(() => {
+              signal.removeEventListener('abort', onAbort)
+              reject(new Error('洗版解析超时'))
+            }, 30000)
+          }),
+        ]).finally(() => { if (timer) clearTimeout(timer) })
         if (task.controller.signal.aborted) break itemLoop
         const actualQuality = resolved.quality || task.targetQuality
         lastActualQuality = actualQuality
@@ -252,7 +266,9 @@ export const start = async (username: string, targetQuality: string, filenames: 
   if (!resolver) throw new Error('洗版服务尚未就绪')
   if (!QUALITY_SET.has(targetQuality)) throw new Error('不支持该目标音质')
   const current = tasks.get(username)
-  if (current?.status === 'running') throw new Error('已有洗版任务正在运行')
+  if (startingUsers.has(username) || current?.status === 'running') throw new Error('已有洗版任务正在运行')
+  startingUsers.add(username)
+  try {
 
   if (!Array.isArray(filenames)) throw new Error('请选择需要洗版的歌曲')
   const selectedFilenames = [...new Set(filenames.filter((filename): filename is string => (
@@ -322,11 +338,15 @@ export const start = async (username: string, targetQuality: string, filenames: 
     task.updatedAt = Date.now()
   })
   return getStatus(username, 0, 0)
+  } finally {
+    startingUsers.delete(username)
+  }
 }
 
 export const cancel = (username: string) => {
   const task = tasks.get(username)
   if (!task || task.status !== 'running') return false
+  task.status = 'cancelled'
   task.controller.abort()
   task.updatedAt = Date.now()
   return true

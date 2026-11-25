@@ -6612,7 +6612,9 @@ class SubsonicHandler {
                 }
                 if (deliveryProxy) {
                   try {
-                    const fwd: Record<string, string> = {}
+                    const fwd: Record<string, string> = {
+                      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                    }
                     if (req.headers.range) fwd['Range'] = String(req.headers.range)
                     // 超时只限制建立响应，不能在播放 30 秒后截断整首音频。
                     const controller = new AbortController()
@@ -6988,8 +6990,14 @@ class SubsonicHandler {
             return
         }
 
+        if (req.destroyed || res.destroyed || res.writableEnded) return
+
         const sem = getTranscodeSemaphore(maxConcurrent)
         await sem.acquire()
+        if (req.destroyed || res.destroyed || res.writableEnded) {
+            sem.release()
+            return
+        }
         subsonicLog.info(`[Subsonic] transcode start: target=${maxBitrate}k format=${targetFormat} url=${String(url).slice(0, 60)}`)
 
         // [transcodeOffset] 从指定秒数开始转码（-ss 放在 -i 前做快速定位），用于客户端在转码流里跳转

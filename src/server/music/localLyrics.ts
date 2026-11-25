@@ -4,6 +4,7 @@ import { resolveContainedPath } from '../auth/security'
 import { parseLyrics } from '@/utils/lrcTool'
 import { checkLyricCache, getCacheDir, readCachedEmbeddedLyrics } from './fileCache'
 import { getCustomMusicDir, checkCustomLyricCache } from './customMusicManager'
+const { MusicTagger } = require('music-tag-native')
 
 /** All roots are resolved from the authenticated user, never from a supplied absolute path. */
 export function lookupLocalLyrics(song: any, user: string): { exists: boolean; content?: any } {
@@ -18,6 +19,15 @@ export function lookupLocalLyrics(song: any, user: string): { exists: boolean; c
     if (fs.existsSync(lyric)) {
       const content = parseLyrics(fs.readFileSync(lyric, 'utf8').replace(/^\uFEFF/, ''))
       if (content.lyric?.trim()) return { exists: true, content }
+    }
+    if (song.includeEmbedded) {
+      let tagger: any
+      try {
+        tagger = new MusicTagger()
+        tagger.loadPath(audio)
+        if (tagger.lyrics?.trim()) return { exists: true, content: parseLyrics(tagger.lyrics) }
+      } catch { /* ignore unreadable tags */ }
+      finally { try { tagger?.dispose() } catch { /* ignore */ } }
     }
     return { exists: false }
   }
