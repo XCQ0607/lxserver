@@ -1181,7 +1181,8 @@ body {
 .action-btn-icon svg {
     width: 22px;
     height: 22px;
-    color: var(--text);stroke:currentColor;
+    color: var(--text);
+    stroke: currentcolor;
 }
 
 .action-btn-text {
@@ -1940,7 +1941,7 @@ body {
     width: 20px;
     height: 20px;
     color: inherit;
-    stroke: currentColor;
+    stroke: currentcolor;
 }
 
 .config-card-title {
@@ -3799,7 +3800,7 @@ select.form-input option:checked {
     display: block;
     width: 18px;
     height: 18px;
-    stroke: currentColor;
+    stroke: currentcolor;
 }
 
 .theme-toggle .i-sun {
@@ -6645,15 +6646,17 @@ input:-webkit-autofill:active {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 16px;
-    height: 16px;
-    margin-left: 0.4rem;
+    width: 15px;
+    height: 15px;
+    margin-left: .35rem;
     border-radius: 50%;
     cursor: pointer;
     user-select: none;
-    background: var(--info-soft);
-    border: 1px solid color-mix(in srgb, var(--info) 35%, var(--border));
-    color: var(--info-text);
+    background: var(--accent);
+    border: none;
+    padding: 0;
+    color: var(--text-on-accent);
+    font-family: inherit;
     font-size: 10px;
     font-weight: 700;
     line-height: 1;
@@ -6664,9 +6667,7 @@ input:-webkit-autofill:active {
 }
 
 .help-icon:hover {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: var(--text-on-accent);
+    opacity: .85;
     transform: scale(1.12);
     box-shadow: var(--shadow-sm);
 }
@@ -6682,8 +6683,8 @@ input:-webkit-autofill:active {
     color: var(--text);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    padding: 0.65rem 0.85rem;
-    font-size: 0.8rem;
+    padding: .55rem .7rem;
+    font-size: .8rem;
     line-height: 1.55;
     box-shadow: var(--shadow-sm);
     white-space: normal;
@@ -9557,8 +9558,10 @@ button.olb-stat-card:focus-visible, .olb-filter-chip:focus-visible, .olb-active-
 .bm-ov-details[open] summary { border-bottom: 1px solid var(--border); color: var(--text); }
 .bm-ov-details[open] summary > span { transform: rotate(180deg); }
 .bm-ov-extra-list { padding: 0 12px; }
-.bm-ov-card .bm-ov-actions { gap: 8px; padding-top: 4px; }
-.bm-ov-card .bm-ov-actions button { padding: 9px 12px; font-size: .77rem; border-radius: var(--radius-md); }
+.bm-ov-card .bm-ov-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; padding-top: 4px; }
+.bm-ov-card .bm-ov-actions button { width: 100%; min-width: 0; justify-content: center; padding: 9px 10px; font-size: .77rem; border-radius: var(--radius-md); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bm-ov-card .bm-ov-actions > button:only-child { grid-column: 1 / -1; }
+.bm-ov-card .bm-ov-actions > .btn-primary:first-child:nth-last-child(3) { grid-column: 1 / -1; }
 
 @media (max-width: 640px) { .bm-ov-card .bm-ov-tags { justify-content: flex-start; } }
 
@@ -9634,7 +9637,6 @@ button.olb-stat-card:focus-visible, .olb-filter-chip:focus-visible, .olb-active-
     #view-backups .bm-ov-card { padding: 14px; }
     #view-backups .bm-ov-head { align-items: flex-start; }
     #view-backups .bm-ov-card .bm-ov-metric { padding: 8px 0; }
-    #view-backups .bm-ov-card .bm-ov-actions > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
     #view-backups .bm-filter-row .ol-integrity-field { flex: 1 1 100%; min-width: 0; }
     #view-backups .ol-integrity-controls { grid-template-columns: minmax(0, 1fr); gap: 12px; }
     #view-backups .config-backup-info-card { padding: 14px; gap: 14px; border-radius: var(--radius-lg); }
@@ -9883,7 +9885,7 @@ button.olb-stat-card:focus-visible, .olb-filter-chip:focus-visible, .olb-active-
 .admin-dislike-card.kind-artist .admin-dislike-cover { border-radius: 50%; }
 .admin-dislike-cover a, .admin-dislike-cover img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .admin-dislike-main { flex: 1; min-width: 0; overflow-wrap: anywhere; }
-.admin-dislike-main h4 { font-size: .95rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; margin: 0 0 5px; }
+.admin-dislike-main h4 { font-size: .95rem; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; margin: 0 0 5px; }
 .admin-dislike-main p { color: var(--text-2); margin: 0 0 4px; font-size: .78rem; }
 .admin-dislike-badges { display: flex; flex-wrap: wrap; gap: 5px; }
 .admin-dislike-badges span { font-size: .7rem; padding: 1px 6px; border-radius: var(--radius-sm); border: 1px solid var(--border); color: var(--text-2); }
@@ -10096,47 +10098,6 @@ button.admin-dist-row.on { border-color: color-mix(in srgb, var(--accent) 35%, t
     .olb-connection { flex-wrap: wrap; padding: 16px; gap: 12px; }
     .olb-connection-copy { flex-basis: calc(100% - 60px); }
     .olb-probe-button { width: 100%; }
-}
-
-.help-icon {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 15px;
-    height: 15px;
-    margin-left: .35rem;
-    border-radius: 50%;
-    cursor: pointer;
-    user-select: none;
-    background: var(--accent);
-    color: var(--text-on-accent);
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1;
-    vertical-align: middle;
-    border: none;
-    padding: 0;
-    font-family: inherit;
-}
-
-.help-icon:hover {
-    opacity: .85;
-}
-
-.help-pop {
-    position: absolute;
-    z-index: 9999;
-    max-width: 320px;
-    width: max-content;
-    background: var(--surface);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-md);
-    padding: .55rem .7rem;
-    font-size: .8rem;
-    line-height: 1.55;
-    box-shadow: var(--shadow-sm);
-    white-space: normal;
 }
 
 .config-toggle-grid {
@@ -10422,7 +10383,7 @@ button.admin-dist-row.on { border-color: color-mix(in srgb, var(--accent) 35%, t
 /* Premium Solid Style for Toasts (Better Legibility) */
 
 .lx-toast-card {
-    font-family: 'Outfit', sans-serif;
+    font-family: Outfit, sans-serif;
     background: var(--surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow-sm);
@@ -10432,7 +10393,7 @@ button.admin-dist-row.on { border-color: color-mix(in srgb, var(--accent) 35%, t
 /* Premium Glassmorphism Overrides */
 
 .lx-glass {
-    font-family: 'Outfit', sans-serif;
+    font-family: Outfit, sans-serif;
     background: var(--surface);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
@@ -10442,7 +10403,7 @@ button.admin-dist-row.on { border-color: color-mix(in srgb, var(--accent) 35%, t
 }
 
 .lx-btn {
-    font-family: 'Outfit', sans-serif;
+    font-family: Outfit, sans-serif;
     transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
     position: relative;
     overflow: hidden;
@@ -10602,4 +10563,595 @@ button:disabled, button:disabled:hover, input:disabled, select:disabled, textare
     align-items: center;
     justify-content: center;
     background: var(--surface-2);
+}
+
+/* 存量文件名同步（预览与执行结果列表） */
+.ol-rename-result {
+    margin-top: 14px;
+    padding: 14px;
+    border-radius: var(--radius-lg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.ol-rename-stats {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+    gap: 8px;
+}
+
+.ol-rename-stat {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.ol-rename-stat-num {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+}
+
+.ol-rename-stat-label {
+    font-size: 0.72rem;
+    color: var(--text-2);
+}
+
+.ol-rename-stat.is-accent {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.ol-rename-stat.is-accent .ol-rename-stat-num { color: var(--accent-text); }
+
+.ol-rename-stat.is-good {
+    background: var(--success-soft);
+    border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+}
+.ol-rename-stat.is-good .ol-rename-stat-num { color: var(--success-text); }
+
+.ol-rename-stat.is-info {
+    background: var(--info-soft);
+    border-color: color-mix(in srgb, var(--info) 35%, var(--border));
+}
+.ol-rename-stat.is-info .ol-rename-stat-num { color: var(--info-text); }
+
+.ol-rename-stat.is-warn {
+    background: var(--warning-soft);
+    border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+.ol-rename-stat.is-warn .ol-rename-stat-num { color: var(--warning-text); }
+
+.ol-rename-stat.is-danger {
+    background: var(--danger-soft);
+    border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+.ol-rename-stat.is-danger .ol-rename-stat-num { color: var(--danger-text); }
+
+.ol-rename-meta-box {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.ol-rename-meta-label {
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-2);
+}
+
+.ol-rename-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ol-rename-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
+}
+
+.ol-rename-user-select {
+    width: auto;
+    min-width: 140px;
+    min-height: 30px;
+    padding: 4px 10px;
+    font-size: 0.75rem;
+}
+
+.ol-rename-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+    font-size: 0.72rem;
+    font-weight: 500;
+    line-height: 1.5;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+}
+
+.ol-rename-tag.is-accent {
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.ol-rename-tag.is-good {
+    color: var(--success-text);
+    background: var(--success-soft);
+    border-color: color-mix(in srgb, var(--success) 35%, var(--border));
+}
+
+.ol-rename-tag.is-info {
+    color: var(--info-text);
+    background: var(--info-soft);
+    border-color: color-mix(in srgb, var(--info) 35%, var(--border));
+}
+
+.ol-rename-tag.is-warn {
+    color: var(--warning-text);
+    background: var(--warning-soft);
+    border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.ol-rename-tag.is-danger {
+    color: var(--danger-text);
+    background: var(--danger-soft);
+    border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.ol-rename-tag.is-muted {
+    color: var(--text-2);
+    background: color-mix(in srgb, var(--text) 4%, var(--surface));
+}
+
+.ol-rename-tag.is-user {
+    color: var(--text);
+    background: color-mix(in srgb, var(--accent) 12%, var(--surface));
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+    font-weight: 600;
+}
+
+.ol-confirm-body {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.ol-confirm-message {
+    font-size: 0.9rem;
+    line-height: 1.65;
+    color: var(--text);
+}
+
+.ol-confirm-sub {
+    font-size: 0.8rem;
+    line-height: 1.55;
+    color: var(--text-2);
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    background: var(--bg);
+    border: 1px solid var(--border);
+}
+
+.ol-confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 4px;
+}
+
+.ol-rename-notice {
+    padding: 8px 12px;
+    border-radius: var(--radius-md);
+    font-size: 0.76rem;
+    line-height: 1.55;
+    color: var(--text-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.ol-rename-notice.is-warn {
+    color: var(--warning-text);
+    background: var(--warning-soft);
+    border-color: color-mix(in srgb, var(--warning) 35%, var(--border));
+}
+
+.ol-rename-notice.is-danger {
+    color: var(--danger-text);
+    background: var(--danger-soft);
+    border-color: color-mix(in srgb, var(--danger) 35%, var(--border));
+}
+
+.ol-rename-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ol-rename-chip {
+    appearance: none;
+    padding: 4px 11px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-2);
+    font-size: 0.74rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.ol-rename-chip:hover {
+    color: var(--text);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.ol-rename-chip.is-active {
+    color: var(--accent-text);
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+
+.ol-rename-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 360px;
+    overflow-y: auto;
+    padding-right: 4px;
+}
+
+.ol-rename-item {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+    border-radius: var(--radius-md);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.ol-rename-item-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.ol-rename-item-tags {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.ol-rename-paths {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.ol-rename-paths.is-same {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.ol-rename-path-box {
+    display: flex;
+    align-items: flex-start;
+    gap: 7px;
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    min-width: 0;
+}
+
+.ol-rename-path-box.is-new {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border));
+}
+
+.ol-rename-path-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    padding: 1px 5px;
+    margin-top: 1px;
+    border-radius: var(--radius-sm);
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+}
+
+.ol-rename-path-badge.is-new {
+    color: var(--accent-text);
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border));
+}
+
+.ol-rename-path-old {
+    color: var(--text-2);
+}
+
+.ol-rename-arrow {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    color: var(--text-2);
+    font-size: 0.75rem;
+    font-weight: 600;
+    flex-shrink: 0;
+}
+
+.ol-rename-path-new {
+    color: var(--accent-text);
+    font-weight: 500;
+}
+
+.ol-rename-empty {
+    padding: 16px;
+    text-align: center;
+    font-size: 0.78rem;
+    color: var(--text-2);
+}
+
+@media (max-width: 700px) {
+    .ol-rename-paths {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 3px;
+    }
+    .ol-rename-arrow {
+        display: none;
+    }
+}
+
+/* 备份管理统一视觉规范：卡片、开关、图标、按钮与手机端适配 */
+#view-backups .config-card-header {
+    padding: 16px 20px;
+    gap: 12px;
+    align-items: center;
+}
+
+#view-backups .config-card-icon {
+    width: 38px;
+    height: 38px;
+    flex: 0 0 38px;
+    border-radius: var(--radius-md);
+}
+
+#view-backups .config-card-icon svg {
+    width: 19px;
+    height: 19px;
+}
+
+#view-backups .config-card-title {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.96rem;
+    font-weight: 650;
+    line-height: 1.45;
+}
+
+#view-backups .config-card-desc {
+    margin-top: 2px;
+    font-size: 0.78rem;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+#view-backups .config-card-body {
+    padding: 18px 20px;
+}
+
+#view-backups .bm-group-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 12px;
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text);
+}
+
+#view-backups .config-toggle-row {
+    min-height: 52px;
+    padding: 10px 0;
+    gap: 16px;
+    align-items: center;
+}
+
+#view-backups .config-toggle-label {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.85rem;
+    font-weight: 550;
+    line-height: 1.45;
+}
+
+#view-backups .config-toggle-desc {
+    margin-top: 2px;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    color: var(--text-2);
+}
+
+#view-backups .config-field-row {
+    gap: 14px 16px;
+}
+
+#view-backups .config-field {
+    margin-bottom: 14px;
+}
+
+#view-backups .config-label {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    font-size: 0.8rem;
+    font-weight: 550;
+    margin-bottom: 6px;
+}
+
+#view-backups .config-input {
+    min-height: 40px;
+    font-size: 0.85rem;
+}
+
+#view-backups .config-divider {
+    margin: 18px 0;
+}
+
+#view-backups .bm-save-row {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+#view-backups .backup-policy-actions {
+    gap: 10px;
+    align-items: center;
+}
+
+#view-backups .backup-policy-actions > button {
+    min-height: 38px;
+    padding: 8px 16px;
+    font-size: 0.82rem;
+    font-weight: 550;
+    border-radius: var(--radius-md);
+}
+
+#view-backups .bm-op-block {
+    margin-top: 20px;
+    padding-top: 18px;
+    border-top: 1px solid var(--border);
+}
+
+#view-backups .sync-actions-grid {
+    gap: 12px;
+    margin-top: 12px;
+}
+
+#view-backups .action-card {
+    padding: 16px;
+    border-radius: var(--radius-lg);
+}
+
+#view-backups .action-card-icon {
+    width: 50px;
+    height: 50px;
+    border-radius: var(--radius-lg);
+    margin-bottom: 10px;
+}
+
+#view-backups .action-card-icon svg {
+    width: 24px;
+    height: 24px;
+}
+
+#view-backups .action-card h4 {
+    font-size: 0.9rem;
+    margin-bottom: 4px;
+}
+
+#view-backups .action-card p {
+    font-size: 0.75rem;
+    line-height: 1.5;
+}
+
+#view-backups .bm-ov-card .config-card-title {
+    display: block;
+}
+
+.bm-ov-modal-list {
+    margin: 0;
+}
+
+.bm-ov-modal-list .bm-ov-metric {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 14px;
+    font-size: 0.84rem;
+    line-height: 1.6;
+}
+
+.bm-ov-modal-list .bm-ov-metric:last-child {
+    border-bottom: 0;
+}
+
+.bm-ov-modal-list dt {
+    color: var(--text-2);
+    flex-shrink: 0;
+}
+
+.bm-ov-modal-list dd {
+    text-align: right;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+    #view-backups .config-card-header {
+        padding: 14px;
+        align-items: flex-start;
+    }
+
+    #view-backups .config-card-body {
+        padding: 14px;
+    }
+
+    #view-backups .config-field-row {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 0;
+    }
+
+    #view-backups .config-toggle-row {
+        padding: 12px 0;
+        gap: 12px;
+    }
+
+    #view-backups .backup-policy-actions > button {
+        min-height: 44px;
+    }
+
+    .help-pop {
+        max-width: calc(100vw - 24px);
+    }
 }

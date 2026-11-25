@@ -36,8 +36,9 @@ export class OpenListNotFoundError extends Error {}
 const encodePath = (p: string) => p.split('/').map((s) => encodeURIComponent(s)).join('/')
 
 // 请求超时：防止连接挂起导致上传/下载永久卡死（曾出现大量 uploading/pending 孤儿记录）
+// 传输上限 10 分钟：上行约 260KB/s 时 70MB 的 flac 需要约 5 分钟，原 5 分钟上限会误判超时
 const META_TIMEOUT_MS = 30_000
-const TRANSFER_TIMEOUT_MS = 300_000
+const TRANSFER_TIMEOUT_MS = 600_000
 
 // OpenList 的 last-modified 期望 Go 参考布局 "Jan 2, 2006 15:04:05 PM -07"，否则部分构建 PUT 返回 500
 function goTime(d = new Date()): string {
@@ -223,6 +224,29 @@ export class OpenListClient {
       name: d.name,
       modified: d.modified || undefined,
       sha256: /^[a-f0-9]{64}$/i.test(d.hash_info?.sha256 || d.hash_info?.SHA256 || '') ? String(d.hash_info.sha256 || d.hash_info.SHA256).toLowerCase() : undefined,
+    }
+  }
+
+  /**
+   * 云端重命名（元数据操作，不重传字节）。
+   * 走 OpenList/AList v3 的 /api/fs/rename：只把同一路径下的文件改成新名字，
+   * 文件内容与 hash 均不变，避免为改名重新上传整个音频库。
+   * 目标名已存在时会直接失败（overwrite=false），由调用方按冲突处理。
+   */
+  async rename(remotePath: string, newName: string): Promise<void> {
+    await this.ensureToken()
+    const resp = await this.request('/api/fs/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...this.authHeader() },
+      body: JSON.stringify({ path: remotePath, name: newName, overwrite: false }),
+      signal: AbortSignal.timeout(META_TIMEOUT_MS),
+    })
+    const data: any = await resp.json().catch(() => ({}))
+    if (resp.status === 404 || data?.code === 404 || (data?.code !== 200 && /object not found|no such file/i.test(data?.message || ''))) {
+      throw new OpenListNotFoundError('OpenList 文件不存在：' + remotePath)
+    }
+    if (!resp.ok || data?.code !== 200) {
+      throw new Error('OpenList 重命名失败：' + (data?.message || data?.code || resp.status))
     }
   }
 
