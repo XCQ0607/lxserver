@@ -33,6 +33,7 @@ window.viewingPlaylist = []; // Currently displayed list in UI
 let currentPlayingScope = 'network'; // Scope for active playback
 window.currentSearchScope = 'network'; // 'network', 'local_list', 'local_all' - Scope for UI view
 let currentPlayingSong = null; // Track currently playing song independently of view
+const DEFAULT_DOCUMENT_TITLE = document.title || 'LX Music Web';
 window.batchCollectSongs = null; // Store songs for batch collection modal
 window.playlistAddTargetSong = null; // Explicit single-song target from any song list
 const audio = window.LXPlayback || document.getElementById('audio-player');
@@ -138,6 +139,8 @@ const DEFAULT_SETTINGS = {
     autoFilterDislikedSongs: true, // 播放列表自动剔除不喜欢歌曲 (默认开启)
     autoResume: true, // 自动恢复进度 (默认开启)
     showSidebarSongInfo: false, // 展示侧边栏封面
+    showTitleSongInfo: true, // 播放器有歌曲时标题栏显示歌曲与歌手 (默认开启)
+    showTitleLyric: false, // 播放时标题栏显示当前歌词 (默认关闭)
     enableCrossfade: false, // 音频淡入淡出 (默认关闭，保持原声动态范围与稳定音量)
     keepScreenAwake: true, // 保持屏幕唤醒设置
     enableKeyboardShortcuts: true, // 按键快捷方式 (默认开启)
@@ -8913,7 +8916,37 @@ window.setImg = (id, src) => {
     }
 };
 
+function updateDocumentTitle() {
+    const song = currentPlayingSong;
+    let nextTitle = DEFAULT_DOCUMENT_TITLE;
+
+    if (song) {
+        const lyricText = (
+            settings?.showTitleLyric &&
+            typeof audio !== 'undefined' &&
+            !audio.paused &&
+            currentLyricIndex >= 0 &&
+            Array.isArray(currentLyricLines) &&
+            currentLyricLines[currentLyricIndex] &&
+            currentLyricLines[currentLyricIndex].text
+        ) ? currentLyricLines[currentLyricIndex].text.trim() : '';
+
+        if (lyricText) {
+            nextTitle = lyricText;
+        } else if (settings?.showTitleSongInfo) {
+            const name = (song.name || '').trim();
+            const singer = (song.singer || '').trim();
+            nextTitle = (name && singer) ? `${name} - ${singer}` : (name || singer || DEFAULT_DOCUMENT_TITLE);
+        }
+    }
+
+    if (document.title !== nextTitle) {
+        document.title = nextTitle;
+    }
+}
+
 function updatePlayerInfo(song, actualQuality) {
+    updateDocumentTitle();
     window.RatingManager?.current(song);
     // Bottom Player - 更新标题
     const titleEl = document.getElementById('player-title');
@@ -9274,6 +9307,7 @@ audio.addEventListener('play', () => {
     // [Fix] 这里的状态更新确保 UI 与实际播放状态同步 (e.g. 键盘媒体键控制)
     setPlayerStatus('', true); // 使用智能状态显示
     updatePlayButton(true);
+    updateDocumentTitle();
 
     // [Notice] 我们不再在这里调用 lyricPlayer.play，而是等待 'playing' 事件
     // 这样可以避免在网络缓冲时歌词就开始跑
@@ -9292,6 +9326,7 @@ audio.addEventListener('play', () => {
 audio.addEventListener('playing', () => {
     // [Fix] 'playing' 事件表示音频真正开始震动输出，此时同步最准确
     setPlayerStatus('', true); // 恢复正常播放状态
+    updateDocumentTitle();
     if ('mediaSession' in navigator) {
         updatePositionState(); // 立即同步
         if (currentPlayingSong) {
@@ -9324,6 +9359,7 @@ audio.addEventListener('pause', () => {
     // [Fix] 这里的状态更新确保 UI 与实际播放状态同步
     setPlayerStatus('', false); // 使用智能状态显示
     updatePlayButton(false);
+    updateDocumentTitle();
     handleUnexpectedPlaybackPause();
     shouldAutoRecoverPlayback = false;
 
@@ -9498,6 +9534,7 @@ window.updatePositionState = updatePositionState; // 暴露给保活模块调用
 // 歌曲播放结束时根据播放模式处理
 audio.addEventListener('ended', () => {
     shouldAutoRecoverPlayback = false;
+    updateDocumentTitle();
     playNext();
 });
 
@@ -9568,9 +9605,9 @@ function handlePlaybackStallOrWait(event) {
 
 audio.addEventListener('timeupdate', advancePlaybackCacheUpgrade);
 audio.addEventListener('timeupdate', () => {
-    // 锁屏或后台标签页下 requestAnimationFrame 会被暂停，通过 timeupdate 兜底同步 SMTC 歌词
+    // 锁屏或后台标签页下 requestAnimationFrame 会被暂停，通过 timeupdate 兜底同步 SMTC 与标题栏歌词
     if (!document.hidden || audio.paused || !lyricPlayer || !lyricPlayer.lines || !lyricPlayer.lines.length) return;
-    if (!settings || !settings.enableSmtcLyric) return;
+    if (!settings || (!settings.enableSmtcLyric && !settings.showTitleLyric)) return;
     const curTimeMs = (audio.currentTime || 0) * 1000;
     const lineNum = lyricPlayer._findCurLineNum(curTimeMs);
     if (lineNum !== undefined && lineNum >= 0 && lineNum !== currentLyricIndex) {
@@ -10415,6 +10452,16 @@ const SETTINGS_UI_MAP = {
             const sidebarInfo = document.querySelector('.sidebar-song-info-wrapper');
             if (sidebarInfo) v ? sidebarInfo.classList.add('md:block') : sidebarInfo.classList.remove('md:block');
         }
+    },
+    showTitleSongInfo: {
+        id: 'setting-show-title-song-info',
+        type: 'checkbox',
+        action: () => updateDocumentTitle()
+    },
+    showTitleLyric: {
+        id: 'setting-show-title-lyric',
+        type: 'checkbox',
+        action: () => updateDocumentTitle()
     },
     showLyricTranslation: {
         id: 'setting-show-lyric-translation',
@@ -11718,6 +11765,8 @@ async function fetchLyric(song, quality = null) {
 
     document.getElementById('lyric-content').innerHTML = '<p class="t-text-muted text-lg animate-pulse">正在加载歌词...</p>';
     currentLyricLines = [];
+    currentLyricIndex = -1;
+    updateDocumentTitle();
     currentRawLrc = '';
     currentRawTlrc = '';
     currentRawRlrc = '';
@@ -12061,6 +12110,7 @@ function syncLyricByLineNum(lineNum) {
                 // ignore
             }
         }
+        updateDocumentTitle();
     }
 
     // 仅在正在播放且有逐字歌词时，才启动动画循环

@@ -11,6 +11,8 @@
 - **OpenList 备份按播放过滤、存量改名与签名直链 (#527 @pyss56)**：新增 `openlist.onlyPlayed` 与 `openlist.onlyPlayedCompleted`，仅上传收到 Subsonic 播放上报（及完整播完）的缓存，显式下载不受限制；新增 `POST /api/openlist/cache/rename` 支持只读预览与同步重命名本地音频、歌词、封面缓存、缓存索引、备份库及云端文件名（与同步/校验互斥，Web 播放器改名在开启 OpenList 时同步联动）；新增 `subsonic.openlistDelivery = 'sign'`（`/d/` HMAC 签名直链，交付前做 `Range: bytes=0-0` 预检并在不可读时降级代理）与 `openlist.signExpireHours`；新增 `subsonic.saveDownload`（默认关闭）与 `cache.unplayedMaxAgeDays`（默认 7 天）优先淘汰未播放缓存。
   - ![切换命名格式后同步存量文件名](md/log/2.2.1-3.png)
 - **备份管理界面重构与概览连接探测**：精简系统配置与备份管理冗余文本并收纳至 `?` 帮助气泡，统一桌面与手机端卡片、图标、开关与按钮网格布局；为概览面板 WebDAV 与 OpenList 卡片新增「探测连接」按钮及实时在线状态展示，详情改为弹窗查看；新增系统默认缓存命名方式设置（`cache.namingPattern`），离线时自动禁用并拦截 OpenList 存量同步改名。
+- **浏览器标签页标题显示歌曲信息与歌词 (#533)**：在「设置 → 显示 → 界面与布局」中新增「标题栏显示歌曲信息」（默认开启）与「播放时标题显示歌词」（默认关闭）两个设置项；有当前歌曲时在浏览器标签页标题展示 `歌曲名 - 歌手名`，开启歌词显示且正在播放时实时同步当前歌词行（兼容后台标签页 `timeupdate` 兜底刷新），暂停、无歌词或关闭设置时自动回退。
+  - ![浏览器标签页标题显示歌曲信息与歌词](md/log/2.2.1-4.png)
 
 ### 🐛 缺陷修复与体验优化
 

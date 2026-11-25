@@ -3007,6 +3007,58 @@
                                         </div>
                                     </div>
 
+                                    <!-- Title Song Info Toggle -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
+                                        <div class="flex items-center justify-between">
+                                            <div>
+                                                <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                    标题栏显示歌曲信息
+                                                    <span class="setting-tooltip-trigger ml-1">
+                                                        <i class="fas fa-question-circle"></i>
+                                                        <span class="setting-tooltip-content">
+                                                            当播放器有歌曲时，在浏览器标签页标题显示当前歌曲名和歌手。
+                                                        </span>
+                                                    </span>
+                                                </h4>
+                                            </div>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" id="setting-show-title-song-info"
+                                                    class="sr-only peer"
+                                                    onchange="updateSetting('showTitleSongInfo', this.checked)">
+                                                <div
+                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <!-- Title Lyric Toggle -->
+                                    <div
+                                        class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow">
+                                        <div class="flex items-center justify-between">
+                                            <div>
+                                                <h4 class="text-sm font-bold t-text-main flex items-center">
+                                                    播放时标题显示歌词
+                                                    <span class="setting-tooltip-trigger ml-1">
+                                                        <i class="fas fa-question-circle"></i>
+                                                        <span class="setting-tooltip-content">
+                                                            歌曲播放时，在浏览器标签页标题实时显示当前播放的歌词；暂停或无歌词时自动回退。
+                                                        </span>
+                                                    </span>
+                                                </h4>
+                                            </div>
+                                            <label class="relative inline-flex items-center cursor-pointer">
+                                                <input type="checkbox" id="setting-show-title-lyric"
+                                                    class="sr-only peer"
+                                                    onchange="updateSetting('showTitleLyric', this.checked)">
+                                                <div
+                                                    class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-emerald-500 transition-all">
+                                                </div>
+                                            </label>
+                                        </div>
+                                    </div>
+
                                     <!-- Hot Search Limit -->
                                     <div
                                         class="t-bg-panel rounded-xl border t-border-main p-4 hover:shadow-sm transition-shadow col-span-full">
