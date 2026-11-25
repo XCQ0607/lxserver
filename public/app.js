@@ -3022,6 +3022,9 @@ class App {
             if (form.elements['cache.unplayedMaxAgeDays']) {
                 form.elements['cache.unplayedMaxAgeDays'].value = config['cache.unplayedMaxAgeDays'] ?? 7;
             }
+            if (form.elements['cache.namingPattern']) {
+                form.elements['cache.namingPattern'].value = config['cache.namingPattern'] || 'simple';
+            }
             if (form.elements['system.allowUnsafeVM']) {
                 form.elements['system.allowUnsafeVM'].checked = config['system.allowUnsafeVM'] === true;
             }
@@ -3515,6 +3518,7 @@ class App {
             'user.cacheSizeLimit': parseInt(formData.get('user.cacheSizeLimit')) || 2000,
             ...(Number.isFinite(parsedMaxAge) ? { 'cache.maxAgeDays': Math.max(0, parsedMaxAge) } : {}),
             ...(Number.isFinite(parsedUnplayedMaxAge) ? { 'cache.unplayedMaxAgeDays': Math.max(0, parsedUnplayedMaxAge) } : {}),
+            ...(formData.get('cache.namingPattern') ? { 'cache.namingPattern': formData.get('cache.namingPattern') } : {}),
             'admin.password': formData.get('admin.password'),
             'player.name': (formData.get('player.name') || '').trim() || 'LX Music Web',
             'player.enableAuth': formData.get('player.enableAuth') === 'on',
@@ -4521,7 +4525,8 @@ class App {
         const advice = document.getElementById('openlist-naming-advice')
         if (advice) {
             const pattern = this.loadedConfig?.['cache.namingPattern'] || 'simple'
-            advice.textContent = '当前生效的命名格式为「' + pattern + '」（用户级设置可覆盖全局）。在「设置 → 歌曲命名方式」切换格式后，已有文件不会自动改名；请在此先只读预览，确认无误再执行，把本地文件名、缓存索引、备份库记录与云端文件名一起改成新格式。'
+            const label = this._namingPatternLabel(pattern)
+            advice.textContent = '系统默认命名格式为「' + label + '」（仅作为用户未单独设定时的默认值；若用户在 Web 播放器「设置 → 歌曲命名方式」单独设定过，则以用户个人为准）。切换格式后已有文件不会自动改名，请先只读预览确认，再按各用户各自生效的格式同步改名。'
         }
         for (const id of ['openlist-operation-panel', 'openlist-rename-panel', 'openlist-cache-form', 'openlist-cache-shortcut']) {
             const element = document.getElementById(id)
@@ -4676,55 +4681,250 @@ class App {
         }
     }
 
+    _namingPatternLabel(pattern) {
+        const map = {
+            simple: '歌名 - 歌手 - 音质 - 专辑',
+            standard: '歌名_-_歌手_-_音源_-_ID_-_音质（标准）',
+            singer_name_quality_album: '歌手 - 歌名 - 音质 - 专辑',
+            singer_name: '歌手 - 歌名',
+            name_singer: '歌名 - 歌手',
+        }
+        return map[pattern] || String(pattern || '未知格式')
+    }
+
+    _formatRenameUser(user) {
+        return (!user || user === '_open' || user === 'default') ? '公开用户 (_open)' : String(user)
+    }
+
+    _formatRenameFolder(folder) {
+        if (folder === 'cache') return '播放缓存'
+        if (folder === 'music') return '下载音乐'
+        return String(folder || '')
+    }
+
+    _confirmDialog({ title, message, subtext = '', confirmText = '确认', cancelText = '取消' }) {
+        return new Promise((resolve) => {
+            const modal = document.getElementById('modal')
+            const titleEl = document.getElementById('modal-title')
+            const bodyEl = document.getElementById('modal-body')
+            if (!modal || !titleEl || !bodyEl) {
+                resolve(window.confirm(message))
+                return
+            }
+            const esc = (s) => this.escapeHtml(String(s ?? ''))
+            titleEl.textContent = title || '确认操作'
+            bodyEl.innerHTML =
+                '<div class="ol-confirm-body">' +
+                '<div class="ol-confirm-message">' + esc(message) + '</div>' +
+                (subtext ? '<div class="ol-confirm-sub">' + esc(subtext) + '</div>' : '') +
+                '<div class="ol-confirm-actions">' +
+                '<button type="button" class="btn-secondary" data-ol-confirm="cancel">' + esc(cancelText) + '</button>' +
+                '<button type="button" class="btn-primary" data-ol-confirm="ok">' + esc(confirmText) + '</button>' +
+                '</div>' +
+                '</div>'
+            modal.classList.remove('hidden')
+
+            let settled = false
+            const closeBtn = modal.querySelector('.modal-close')
+            const finish = (ok) => {
+                if (settled) return
+                settled = true
+                modal.classList.add('hidden')
+                modal.removeEventListener('click', onBackdrop)
+                document.removeEventListener('keydown', onKeydown)
+                closeBtn?.removeEventListener('click', onCancel)
+                resolve(ok)
+            }
+            const onCancel = () => finish(false)
+            const onBackdrop = (e) => { if (e.target === modal) finish(false) }
+            const onKeydown = (e) => { if (e.key === 'Escape') finish(false) }
+
+            bodyEl.querySelector('[data-ol-confirm="ok"]')?.addEventListener('click', () => finish(true))
+            bodyEl.querySelector('[data-ol-confirm="cancel"]')?.addEventListener('click', onCancel)
+            closeBtn?.addEventListener('click', onCancel)
+            modal.addEventListener('click', onBackdrop)
+            document.addEventListener('keydown', onKeydown)
+        })
+    }
+
+    _renderCacheRenameResult(mode, r) {
+        const out = document.getElementById('openlist-rename-result')
+        if (!out) return
+        const esc = (s) => this.escapeHtml(String(s ?? ''))
+        const isPreview = mode === 'preview'
+
+        const stats = isPreview ? [
+            { label: '已扫描', value: r.scanned || 0, cls: '' },
+            { label: '待改名', value: r.ready || 0, cls: (r.ready || 0) > 0 ? 'is-accent' : '' },
+            { label: '已一致', value: r.unchanged || 0, cls: 'is-good' },
+            { label: '冲突', value: r.conflicts || 0, cls: (r.conflicts || 0) > 0 ? 'is-warn' : '' },
+            { label: '缺失', value: r.missing || 0, cls: (r.missing || 0) > 0 ? 'is-danger' : '' },
+        ] : [
+            { label: '成功改名', value: r.renamed || 0, cls: 'is-good' },
+            { label: '云端改名', value: r.cloudRenamed || 0, cls: 'is-info' },
+            { label: '备份库更新', value: r.dbUpdated || 0, cls: 'is-info' },
+            { label: '已跳过', value: r.skipped || 0, cls: '' },
+            { label: '冲突', value: r.conflicts || 0, cls: (r.conflicts || 0) > 0 ? 'is-warn' : '' },
+            { label: '失败', value: r.failed || 0, cls: (r.failed || 0) > 0 ? 'is-danger' : '' },
+        ]
+
+        const statsHtml = '<div class="ol-rename-stats">' + stats.map(st =>
+            '<div class="ol-rename-stat ' + st.cls + '"><span class="ol-rename-stat-num">' + esc(st.value) + '</span><span class="ol-rename-stat-label">' + esc(st.label) + '</span></div>'
+        ).join('') + '</div>'
+
+        const metaTags = []
+        if (isPreview) {
+            metaTags.push('<span class="ol-rename-tag ' + (r.cloudEnabled ? 'is-good' : 'is-muted') + '">' +
+                (r.cloudEnabled ? '云端同步：已启用（仅改文件名，不重传音频）' : '云端同步：未启用（仅改本地与备份库）') + '</span>')
+            for (const [u, p] of Object.entries(r.namingPatterns || {})) {
+                metaTags.push('<span class="ol-rename-tag is-info" title="' + esc(p) + '">' + esc(this._formatRenameUser(u)) + '：' + esc(this._namingPatternLabel(p)) + '</span>')
+            }
+        }
+        const metaHtml = metaTags.length
+            ? '<div class="ol-rename-meta-box"><div class="ol-rename-meta-label">生效规则</div><div class="ol-rename-meta">' + metaTags.join('') + '</div></div>'
+            : ''
+
+        const notices = []
+        if (r.warning) notices.push('<div class="ol-rename-notice is-warn">' + esc(r.warning) + '</div>')
+        if (r.truncated) notices.push('<div class="ol-rename-notice">当前列表仅展示前 ' + esc((r.items || []).length) + ' 条，执行重命名时将处理全部待改项。</div>')
+
+        const items = Array.isArray(r.items) ? r.items : []
+        const statusMeta = {
+            ready: { label: '待改名', cls: 'is-accent', group: 'actionable' },
+            unchanged: { label: '已一致', cls: 'is-good', group: 'unchanged' },
+            conflict: { label: '冲突', cls: 'is-warn', group: 'issue' },
+            'missing-local': { label: '本地缺失', cls: 'is-danger', group: 'issue' },
+            ok: { label: '已完成', cls: 'is-good', group: 'done' },
+            failed: { label: '失败', cls: 'is-danger', group: 'issue' },
+        }
+
+        const countActionable = items.filter(i => i.status === 'ready').length
+        const countIssue = items.filter(i => ['conflict', 'missing-local', 'failed'].includes(i.status)).length
+        const countUnchanged = items.filter(i => i.status === 'unchanged').length
+        const defaultFilter = isPreview
+            ? (countActionable > 0 ? 'actionable' : (countIssue > 0 ? 'issue' : 'all'))
+            : (countIssue > 0 ? 'issue' : 'all')
+
+        const filters = isPreview ? [
+            { key: 'all', label: '全部 (' + items.length + ')' },
+            { key: 'actionable', label: '待改名 (' + countActionable + ')' },
+            { key: 'issue', label: '冲突/缺失 (' + countIssue + ')' },
+            { key: 'unchanged', label: '已一致 (' + countUnchanged + ')' },
+        ] : [
+            { key: 'all', label: '全部 (' + items.length + ')' },
+            { key: 'issue', label: '冲突/失败 (' + countIssue + ')' },
+        ]
+
+        const distinctUsers = Array.from(new Set(items.map(i => i.user).filter(Boolean)))
+        const userSelectHtml = distinctUsers.length > 1
+            ? '<select class="form-input ol-rename-user-select" data-rename-user-filter aria-label="按用户筛选"><option value="">全部用户</option>' +
+              distinctUsers.map(u => '<option value="' + esc(u) + '">' + esc(this._formatRenameUser(u)) + '</option>').join('') +
+              '</select>'
+            : ''
+
+        const filterHtml = items.length ? '<div class="ol-rename-toolbar"><div class="ol-rename-filters">' + filters.map(f =>
+            '<button type="button" class="ol-rename-chip' + (f.key === defaultFilter ? ' is-active' : '') + '" data-rename-filter="' + f.key + '">' + esc(f.label) + '</button>'
+        ).join('') + '</div>' + userSelectHtml + '</div>' : ''
+
+        const listHtml = items.length ? '<div class="ol-rename-list">' + items.map(item => {
+            const st = statusMeta[item.status] || { label: item.status || '未知', cls: '', group: 'all' }
+            const visible = defaultFilter === 'all' || st.group === defaultFilter
+            const sameName = item.oldFilename === item.newFilename
+            const userLabel = this._formatRenameUser(item.user)
+            const folderLabel = this._formatRenameFolder(item.folder)
+            const hasLrc = !!(item.oldLyricFilename && item.newLyricFilename && item.oldLyricFilename !== item.newLyricFilename)
+            return '<div class="ol-rename-item" data-rename-group="' + st.group + '" data-rename-user="' + esc(item.user || '') + '"' + (visible ? '' : ' style="display:none;"') + '>' +
+                '<div class="ol-rename-item-head">' +
+                '<div class="ol-rename-item-tags">' +
+                '<span class="ol-rename-tag is-user">' + esc(userLabel) + '</span>' +
+                '<span class="ol-rename-tag is-muted">' + esc(folderLabel) + '</span>' +
+                '<span class="ol-rename-tag ' + st.cls + '">' + esc(st.label) + '</span>' +
+                (hasLrc ? '<span class="ol-rename-tag is-info">含歌词</span>' : '') +
+                (item.reason ? '<span class="ol-rename-tag is-warn">' + esc(item.reason) + '</span>' : '') +
+                '</div>' +
+                '</div>' +
+                '<div class="ol-rename-paths' + (sameName ? ' is-same' : '') + '">' +
+                '<div class="ol-rename-path-box is-old"><span class="ol-rename-path-badge">旧</span><span class="ol-rename-path-old" title="' + esc(item.oldFilename) + '">' + esc(item.oldFilename) + '</span></div>' +
+                (sameName ? '' : '<span class="ol-rename-arrow" aria-hidden="true">→</span><div class="ol-rename-path-box is-new"><span class="ol-rename-path-badge is-new">新</span><span class="ol-rename-path-new" title="' + esc(item.newFilename) + '">' + esc(item.newFilename) + '</span></div>') +
+                '</div>' +
+                '</div>'
+        }).join('') + '</div>' : '<div class="ol-rename-empty">没有需要展示的条目</div>'
+
+        out.style.display = 'block'
+        out.innerHTML = statsHtml + metaHtml + notices.join('') + filterHtml + listHtml
+
+        const applyFilters = () => {
+            const activeBtn = out.querySelector('[data-rename-filter].is-active')
+            const groupKey = activeBtn ? activeBtn.getAttribute('data-rename-filter') : 'all'
+            const userKey = out.querySelector('[data-rename-user-filter]')?.value || ''
+            out.querySelectorAll('[data-rename-group]').forEach(el => {
+                const matchGroup = groupKey === 'all' || el.getAttribute('data-rename-group') === groupKey
+                const matchUser = !userKey || el.getAttribute('data-rename-user') === userKey
+                el.style.display = (matchGroup && matchUser) ? '' : 'none'
+            })
+        }
+
+        out.querySelectorAll('[data-rename-filter]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                out.querySelectorAll('[data-rename-filter]').forEach(b => b.classList.toggle('is-active', b === btn))
+                applyFilters()
+            })
+        })
+        out.querySelector('[data-rename-user-filter]')?.addEventListener('change', applyFilters)
+    }
+
     async previewCacheRename() {
         const out = document.getElementById('openlist-rename-result')
+        const btn = document.getElementById('openlist-rename-preview-btn')
+        if (btn) btn.disabled = true
         try {
             if (window.showInfo) window.showInfo('正在只读生成改名清单…')
             const r = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'preview', limit: 200 }) })
             if (!r || !r.success) throw new Error((r && r.error) || '预览失败')
-            const lines = [
-                '扫描 ' + r.scanned + ' 首；待改名 ' + r.ready + '，已是目标格式 ' + r.unchanged + '，冲突 ' + r.conflicts + '，本地文件缺失 ' + r.missing,
-                '云端同步：' + (r.cloudEnabled ? '已启用（执行时会同步改云端文件名，不重传音频）' : '未启用（只改本地与备份库）'),
-                '各用户生效格式：' + Object.entries(r.namingPatterns || {}).map(([u, p]) => u + '=' + p).join('，'),
-            ]
-            if (r.warning) lines.push('提示：' + r.warning)
-            if (r.truncated) lines.push('（仅列出前 ' + r.items.length + ' 条）')
-            for (const item of (r.items || [])) {
-                lines.push('[' + item.status + (item.reason ? '/' + item.reason : '') + '] ' + item.user + '/' + item.folder + '/' + item.oldFilename + '  →  ' + item.newFilename)
-            }
-            if (out) { out.style.display = 'block'; out.textContent = lines.join('\n') }
+            this._renderCacheRenameResult('preview', r)
             if (window.showSuccess) window.showSuccess('预览完成（只读，未改动任何内容）')
         } catch (e) {
-            if (out) { out.style.display = 'block'; out.textContent = '预览失败：' + (e && e.message || e) }
+            if (out) {
+                out.style.display = 'block'
+                out.innerHTML = '<div class="ol-rename-notice is-danger">预览失败：' + this.escapeHtml((e && e.message) || e) + '</div>'
+            }
             if (window.showError) window.showError('预览失败: ' + (e && e.message || e))
+        } finally {
+            if (btn) btn.disabled = false
         }
     }
 
     async applyCacheRename() {
         const out = document.getElementById('openlist-rename-result')
-        const ready = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'preview', limit: 1 }) })
-        if (!ready || !ready.success) {
-            if (window.showError) window.showError('无法预览：' + ((ready && ready.error) || '未知错误'))
-            return
-        }
-        if (!window.confirm('将按当前命名格式重命名 ' + ready.ready + ' 个文件（本地 + 备份库记录 + 云端文件名），冲突 ' + ready.conflicts + ' 项会跳过。确认执行？')) return
+        const btn = document.getElementById('openlist-rename-apply-btn')
+        if (btn) btn.disabled = true
         try {
+            const ready = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'preview', limit: 1 }) })
+            if (!ready || !ready.success) {
+                if (window.showError) window.showError('无法预览：' + ((ready && ready.error) || '未知错误'))
+                return
+            }
+            const confirmed = await this._confirmDialog({
+                title: '确认同步重命名',
+                message: '将按各用户当前生效的命名格式重命名 ' + ready.ready + ' 个文件（同步更新本地文件、缓存索引、备份库记录与云端文件名）。',
+                subtext: '检测到 ' + ready.conflicts + ' 项冲突将被自动跳过（不会覆盖已有文件）；云端仅修改文件名元数据，不会重新上传音频。',
+                confirmText: '确认执行',
+                cancelText: '取消',
+            })
+            if (!confirmed) return
             if (window.showInfo) window.showInfo('正在同步重命名…')
             const r = await this.request('/api/openlist/cache/rename', { method: 'POST', body: JSON.stringify({ mode: 'apply', limit: 2000 }) })
             if (!r || !r.success) throw new Error((r && r.error) || '执行失败')
-            const lines = [
-                '成功 ' + r.renamed + '，跳过 ' + r.skipped + '，冲突 ' + r.conflicts + '，失败 ' + r.failed,
-                '云端重命名 ' + r.cloudRenamed + '，备份库更新 ' + r.dbUpdated,
-            ]
-            for (const item of (r.items || [])) {
-                if (item.status === 'ok') continue
-                lines.push('[' + item.status + (item.reason ? '/' + item.reason : '') + '] ' + item.oldFilename + '  →  ' + item.newFilename)
-            }
-            if (out) { out.style.display = 'block'; out.textContent = lines.join('\n') }
+            this._renderCacheRenameResult('apply', r)
             if (window.showSuccess) window.showSuccess('重命名完成：成功 ' + r.renamed + '，失败 ' + r.failed)
-            if (r.failed || r.conflicts) this.previewCacheRename()
         } catch (e) {
+            if (out) {
+                out.style.display = 'block'
+                out.innerHTML = '<div class="ol-rename-notice is-danger">重命名失败：' + this.escapeHtml((e && e.message) || e) + '</div>'
+            }
             if (window.showError) window.showError('重命名失败: ' + (e && e.message || e))
+        } finally {
+            if (btn) btn.disabled = false
         }
     }
 
@@ -4892,6 +5092,12 @@ class App {
             (c.nextProbeAt ? ' · 下次自动探测：' + esc(time(c.nextProbeAt)) : '') +
             '</div></div><button type="button" class="btn-secondary olb-probe-button" onclick="app.probeOpenlistConnection()" ' +
             (busy || !c.enabled ? 'disabled' : '') + '>' + (busy ? '正在探测…' : '探测连接') + '</button>';
+        const applyBtn = document.getElementById('openlist-rename-apply-btn');
+        if (applyBtn) {
+            const offline = c.enabled && ['unavailable', 'auth_error'].includes(c.state);
+            applyBtn.disabled = offline;
+            applyBtn.title = offline ? 'OpenList 当前不可达，请等待连接恢复后再执行云端同步重命名' : '';
+        }
         if (!this._olbConnectionTimer) this._olbConnectionTimer = setInterval(async () => {
             const el = document.getElementById('olb-connection');
             if (!el || !el.getClientRects().length) return;
@@ -4902,6 +5108,47 @@ class App {
                 if (changed) await this.loadOpenlistBackups(true);
             } catch { /* Keep the last observation; a failed admin request is not OpenList health. */ }
         }, 15000);
+    }
+
+    async probeOverviewWebdav() {
+        const btn = document.getElementById('bm-ov-webdav-probe');
+        if (btn) { btn.disabled = true; btn.textContent = '探测中…'; }
+        try {
+            const result = await this.request('/api/webdav/test', { method: 'POST' });
+            this._webdavLastConn = { online: !!result.success, message: result.message || '' };
+            await this.loadBackupOverview();
+            if (result.success) {
+                if (window.showSuccess) window.showSuccess('WebDAV 连接正常');
+            } else {
+                if (window.showError) window.showError('WebDAV 连接异常：' + (result.message || '请检查配置'));
+            }
+        } catch (error) {
+            this._webdavLastConn = { online: false, message: error.message || '探测失败' };
+            await this.loadBackupOverview();
+            if (window.showError) window.showError('WebDAV 探测失败：' + error.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '探测连接'; }
+        }
+    }
+
+    async probeOverviewOpenlist() {
+        const btn = document.getElementById('bm-ov-openlist-probe');
+        if (btn) { btn.disabled = true; btn.textContent = '探测中…'; }
+        try {
+            const r = await this.request('/api/openlist/connection', { method: 'POST' });
+            if (r.connection) this.renderOpenlistConnection(r.connection);
+            await this.loadBackupOverview();
+            const state = r.connection?.state;
+            if (state === 'online') {
+                if (window.showSuccess) window.showSuccess('OpenList 连接正常');
+            } else {
+                if (window.showError) window.showError('OpenList 当前不可达：' + (r.connection?.message || state || '未知错误'));
+            }
+        } catch (error) {
+            if (window.showError) window.showError('OpenList 探测失败：' + error.message);
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = '探测连接'; }
+        }
     }
 
     async probeOpenlistConnection() {
@@ -7758,6 +8005,22 @@ class App {
         }
     }
 
+    openOverviewDetailsModal(key) {
+        const titles = { local: '本地配置备份 · 配置与运行详情', webdav: 'WebDAV 云端备份 · 配置与运行详情', openlist: 'OpenList 云端备份 · 配置与运行详情' };
+        const card = document.getElementById(`bm-ov-${key}`);
+        const extraList = card?.querySelector('.bm-ov-extra-list');
+        const modal = document.getElementById('modal');
+        const titleEl = document.getElementById('modal-title');
+        const bodyEl = document.getElementById('modal-body');
+        if (!modal || !titleEl || !bodyEl) return;
+        titleEl.textContent = titles[key] || '配置与运行详情';
+        const content = extraList && extraList.children.length
+            ? '<dl class="bm-ov-list bm-ov-modal-list">' + extraList.innerHTML + '</dl>'
+            : '<p class="config-hint">暂无更多运行详情</p>';
+        bodyEl.innerHTML = content + '<div class="ol-confirm-actions"><button type="button" class="btn-secondary" onclick="app.closeModal()">关闭</button></div>';
+        modal.classList.remove('hidden');
+    }
+
     async loadBackupOverview() {
         const cfg = this.loadedConfig || {};
         const isEnabled = key => key === 'local' ? cfg['configBackup.enable'] !== false : cfg[key + '.enable'] === true;
@@ -7766,7 +8029,18 @@ class App {
             const list = card?.querySelector('.bm-ov-list');
             if (list) list.hidden = !enabled;
             const extra = card?.querySelector('.bm-ov-details');
-            if (extra) extra.hidden = !enabled;
+            if (extra) {
+                extra.hidden = !enabled;
+                extra.open = false;
+                const summary = extra.querySelector('summary');
+                if (summary && !summary.dataset.modalBound) {
+                    summary.dataset.modalBound = '1';
+                    summary.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.openOverviewDetailsModal(key);
+                    });
+                }
+            }
             card?.querySelectorAll('.bm-ov-actions button').forEach((button, index) => { if (index !== 1) button.hidden = !enabled; });
         };
         ['local', 'webdav', 'openlist'].forEach(key => showDetails(key, isEnabled(key)));
@@ -7866,13 +8140,16 @@ class App {
                 const logs = logsRes.logs || [];
                 const latest = logs[0];
                 const latestErr = logs.find(l => l.status && l.status !== 'success');
+                const wdConn = this._webdavLastConn;
+                const wdBadge = !wdEnabled ? '未启用' : !wdHasUrl ? '未填地址' : wdConn ? (wdConn.online ? '在线' : '无法访问') : '已启用';
+                const wdBadgeCls = !wdEnabled ? '' : !wdHasUrl ? 'is-warn' : wdConn ? (wdConn.online ? 'is-on' : 'is-error') : 'is-on';
                 setCard('webdav', {
-                    badge: wdEnabled ? (wdHasUrl ? '已启用' : '未填地址') : '未启用',
-                    badgeCls: wdEnabled ? (wdHasUrl ? 'is-on' : 'is-warn') : '',
+                    badge: wdBadge,
+                    badgeCls: wdBadgeCls,
                     last: latest ? `${this.formatTime(latest.timestamp)} · ${this.getLogTypeText(latest.type)}（${latest.status === 'success' ? '成功' : '失败'}）` : '暂无记录',
                     next: nextTime(runtime.webdav?.nextSyncAt),
                     scope: `增量 ${cfg['sync.interval'] || 60} 分钟 / ZIP ${cfg['sync.backupInterval'] || 24} 小时 · 已选 ${wdTypesCount} 类数据`,
-                    error: latestErr ? `${this.formatTime(latestErr.timestamp)}：${latestErr.message || latestErr.file || '执行失败'}` : '本次启动尚无失败记录',
+                    error: (wdConn && !wdConn.online) ? (wdConn.message || 'WebDAV 当前无法访问') : (latestErr ? `${this.formatTime(latestErr.timestamp)}：${latestErr.message || latestErr.file || '执行失败'}` : '本次启动尚无失败记录'),
                 });
             } catch (err) {
                 setCard('webdav', {
@@ -7886,6 +8163,7 @@ class App {
             }
 
             addDetails('webdav', [
+                ['连接状态', this._webdavLastConn ? (this._webdavLastConn.online ? '在线' : '无法访问') : '未探测（点击下方探测连接）'],
                 ['当前任务', runtime.maintenance ? '恢复维护中' : runtime.webdav?.restoring ? '恢复中' : runtime.webdav?.running ? '备份中' : runtimeError ? '读取失败' : '空闲'],
                 ['下次 ZIP 检查', nextTime(runtime.webdav?.nextZipAt)],
                 ['备份范围', scopeNames('webdav')],
@@ -7903,18 +8181,24 @@ class App {
         if (olEnabled) {
             try {
                 const olRes = await this.request('/api/openlist/backups');
+                if (olRes.connection) this.renderOpenlistConnection(olRes.connection);
+                const connState = olRes.connection?.state || 'unknown';
+                const connOnline = connState === 'online';
+                const connOffline = ['unavailable', 'auth_error'].includes(connState);
+                const connLabel = { online: '连接正常', unavailable: '暂时无法访问', auth_error: '认证异常', unknown: '待探测', disabled: '未启用' }[connState] || '待探测';
                 const rows = olRes.list || [];
                 const completed = rows.filter(r => ['completed', 'verified'].includes(r.status)).length;
                 const failedRows = rows.filter(r => r.status === 'failed');
                 const latestTs = rows.reduce((max, r) => Math.max(max, Number(r.updated_at) || 0), 0);
                 setCard('openlist', {
-                    badge: olEnabled ? (olHasUrl ? (failedRows.length ? '有失败项' : '已启用') : '未填地址') : '未启用',
-                    badgeCls: olEnabled ? (failedRows.length ? 'is-error' : (olHasUrl ? 'is-on' : 'is-warn')) : '',
+                    badge: olEnabled ? (olHasUrl ? (connOffline ? connLabel : (failedRows.length ? '有失败项' : (connOnline ? '在线' : '已启用'))) : '未填地址') : '未启用',
+                    badgeCls: olEnabled ? (connOffline || failedRows.length ? 'is-error' : (olHasUrl ? 'is-on' : 'is-warn')) : '',
                     last: runtime.openlist?.lastRun ? `${time(runtime.openlist.lastRun.at)} · 上传 ${runtime.openlist.lastRun.uploaded} / 下载 ${runtime.openlist.lastRun.downloaded} / 删除 ${runtime.openlist.lastRun.deleted} / 错误 ${runtime.openlist.lastRun.errors.length}` : latestTs ? `${time(latestTs)} · 文件记录更新（上传完成 ${completed} 项，非整轮执行结果）` : '暂无记录',
                     next: nextTime(runtime.openlist?.nextSyncAt),
                     scope: `备份 ${cfg['openlist.syncInterval'] || 60} 分钟 / 检查 ${cfg['openlist.verifyInterval'] || 5} 分钟 · 事件同步最小间隔 5 分钟 · 已选 ${olTypesCount} 类数据`,
-                    error: failedRows.length ? `${failedRows.length} 个文件上传或校验失败（${failedRows[0].error || failedRows[0].name}）` : runtime.openlist?.lastRun?.errors?.join('；') || '当前无失败文件记录',
+                    error: connOffline ? (olRes.connection?.message || 'OpenList 当前不可达') : (failedRows.length ? `${failedRows.length} 个文件上传或校验失败（${failedRows[0].error || failedRows[0].name}）` : runtime.openlist?.lastRun?.errors?.join('；') || '当前无失败文件记录'),
                 });
+                this._olbLastOverviewConn = connLabel;
             } catch (err) {
                 setCard('openlist', {
                     badge: olEnabled ? '已启用' : '未启用',
@@ -7929,6 +8213,7 @@ class App {
             try { rules = JSON.parse(cfg['openlist.userBackups'] || '[]').filter(rule => rule.enabled !== false && rule.backupCache === true); } catch { }
             const counts = runtime.openlist?.counts;
             addDetails('openlist', [
+                ['连接状态', this._olbLastOverviewConn || '待探测'],
                 ['当前任务', runtime.maintenance ? '恢复维护中' : runtime.openlist?.running ? '同步中' : runtime.openlist?.checking ? '后台检查中' : runtimeError ? '读取失败' : '空闲'],
                 ['下次后台检查', nextTime(runtime.openlist?.nextCheckAt)],
                 ['文件记录', counts ? `待上传 ${counts.pending} / 进行中 ${counts.uploading} / 上传完成 ${counts.completed} / 失败 ${counts.failed}` : '状态读取失败'],

@@ -206,6 +206,7 @@ These are configuration keys, **not automatically supported uppercase environmen
 | `openlist.username`, `openlist.password` | `''` | Login credentials when not using a token |
 | `openlist.root` | `'/lx_music'` | Path within an existing OpenList mount, not a physical disk path |
 | `openlist.externalUrl` | `''` | External address; empty uses endpoint |
+| `openlist.signExpireHours` | `6` | Signed OpenList `/d/` link expiration in hours; 0 disables expiration, max 720 (requires `openlist.token`) |
 | `openlist.syncInterval` | `60` | Backup/cache-rule check interval, minutes. Event-driven sync additionally has a 5-minute minimum interval |
 | `openlist.verifyInterval` | `5` | Background status check interval, minutes; not scheduled full-body SHA-256 verification. Verified rows are not probed individually on every round |
 | `openlist.historyRetentionDays` | `7` | Cloud history retention, days |

@@ -107,6 +107,7 @@ async function harness(t, opts = {}) {
             }
         }
         export function isOpenlistBusy() { return !!s.busy }
+        export async function probeOpenlistConnection() { return s.offline ? { state: 'unavailable', message: 'offline' } : { state: 'online', message: 'ok' } }
     `
 
     await build({
@@ -274,4 +275,41 @@ test('rename refuses to start while a sync, verify or upload is still running', 
     state.busy = false
     const result = await api.applyCacheRename({})
     assert.equal(result.renamed, 1)
+})
+
+test('子目录下的音频与同 stem .lrc 歌词文件一起改名，不重复拼接 subPath', async t => {
+    const { state, api, indexManager } = await harness(t)
+    const dir = state.dirs.data.cache
+    const subDir = path.join(dir, 'Rock')
+    fs.mkdirSync(subDir, { recursive: true })
+    const oldRel = 'Rock/旧歌名.mp3'
+    const oldLrcRel = 'Rock/旧歌名.lrc'
+    const newRel = 'Rock/' + EXPECTED
+    const newLrcRel = 'Rock/' + EXPECTED_LRC
+    fs.writeFileSync(path.join(dir, oldRel), 'audio-bytes')
+    fs.writeFileSync(path.join(dir, oldLrcRel), '[00:00.00]lyric')
+    indexManager.getAll('user1', 'cache', 'data').push({
+        id: 'tx_001', songmid: '001', name: '夜曲', singer: '周杰伦',
+        source: 'tx', quality: '128k', album: '专辑', ext: 'mp3', subPath: 'Rock',
+        filename: oldRel, lyricFilename: oldLrcRel,
+    })
+    const result = await api.applyCacheRename({ cloud: false })
+    assert.equal(result.renamed, 1)
+    assert.equal(result.failed, 0)
+    assert.ok(!fs.existsSync(path.join(dir, oldRel)))
+    assert.ok(fs.existsSync(path.join(dir, newRel)))
+    assert.ok(!fs.existsSync(path.join(dir, oldLrcRel)))
+    assert.ok(fs.existsSync(path.join(dir, newLrcRel)))
+    const saved = indexManager.getAll('user1', 'cache', 'data')[0]
+    assert.equal(saved.filename, newRel)
+    assert.equal(saved.lyricFilename, newLrcRel)
+})
+
+test('OpenList 离线时拒绝执行云端同步改名', async t => {
+    const { state, api, indexManager } = await harness(t)
+    const s = seed(state, indexManager)
+    state.offline = true
+    await assert.rejects(() => api.applyCacheRename({}), /离线|不可达/)
+    assert.ok(fs.existsSync(s.oldLocal))
+    assert.equal(state.renames.length, 0)
 })

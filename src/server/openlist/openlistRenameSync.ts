@@ -20,7 +20,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { getBackupDb, getBackupByLocalPath, listAttachments } from './openlistBackupDb'
-import { getClient, isOpenlistBusy } from './openlistBackup'
+import { getClient, isOpenlistBusy, probeOpenlistConnection } from './openlistBackup'
 import { isTaskRunning, runExclusive } from './openlistTaskLock'
 import type { OpenListClient } from './openlistClient'
 import { OpenListNotFoundError } from './openlistClient'
@@ -33,6 +33,7 @@ export interface RenamePlanItem {
   user: string
   folder: 'cache' | 'music'
   location: string
+  dir?: string
   songId: string
   quality: string
   namingPattern: string
@@ -156,11 +157,12 @@ export async function planCacheRename(options: {
     if (options.folder && scope.folder !== options.folder) continue
     const dbUser = scope.dbUser
     const pattern = getUserNamingPattern(scope.user)
-    result.namingPatterns[scope.user] = pattern
     // 显式传 location 读取该位置的索引，不依赖 getUserCacheLocation 的当前值
     const items = indexManager.getAll(scope.user, scope.folder, scope.location)
+    let scopeScanned = 0
     for (const item of items) {
       if (!AUDIO_EXTENSIONS.has('.' + String(item.ext || '').toLowerCase())) continue
+      scopeScanned++
       result.scanned++
       const songInfo = {
         id: item.id, songmid: item.songmid || item.id, name: item.name, singer: item.singer,
@@ -213,7 +215,7 @@ export async function planCacheRename(options: {
       })
 
       const entry: RenamePlanItem = {
-        user: scope.user, folder: scope.folder, location: scope.location,
+        user: scope.user, folder: scope.folder, location: scope.location, dir,
         songId: item.id, quality: item.quality || 'unknown', namingPattern: pattern,
         oldFilename, newFilename, oldLocalPath, newLocalPath, oldRemotePath, newRemotePath,
         oldLyricFilename, newLyricFilename,
@@ -247,6 +249,7 @@ export async function planCacheRename(options: {
       }
       candidates.push(entry)
     }
+    if (scopeScanned > 0) result.namingPatterns[scope.user] = pattern
   }
 
   // 同一目录下多个索引项映射到同一目标名 → 全部标冲突，避免互相覆盖
@@ -287,6 +290,12 @@ export async function applyCacheRename(options: {
   user?: string, folder?: 'cache' | 'music', limit?: number, cloud?: boolean
 } = {}): Promise<RenameResult> {
   if (isOpenlistBusy() || isTaskRunning()) throw new Error('OpenList 正在同步或校验，请等待完成后再执行改名')
+  if (options.cloud !== false && getClient() && typeof probeOpenlistConnection === 'function') {
+    const conn = await probeOpenlistConnection()
+    if (conn.state !== 'online') {
+      throw new Error(`OpenList 当前离线或不可达（${conn.message || conn.state}），请待连接恢复在线后再执行同步重命名`)
+    }
+  }
   return runExclusive(() => applyCacheRenameExclusive(options))
 }
 
@@ -351,8 +360,9 @@ async function applyCacheRenameExclusive(options: {
         const newStats = fs.statSync(item.newLocalPath)
         migrateCoverCacheOnRename(item.oldFilename, item.newFilename, item.user, oldStats, newStats)
         if (item.oldLyricFilename && item.newLyricFilename && item.oldLyricFilename !== item.newLyricFilename) {
-          const oldLrc = path.join(path.dirname(item.oldLocalPath), item.oldLyricFilename)
-          const newLrc = path.join(path.dirname(item.newLocalPath), item.newLyricFilename)
+          const baseDir = item.dir || path.dirname(item.oldLocalPath)
+          const oldLrc = path.join(baseDir, item.oldLyricFilename)
+          const newLrc = path.join(baseDir, item.newLyricFilename)
           if (fs.existsSync(oldLrc) && !fs.existsSync(newLrc)) {
             if (!fs.existsSync(path.dirname(newLrc))) fs.mkdirSync(path.dirname(newLrc), { recursive: true })
             fs.renameSync(oldLrc, newLrc)

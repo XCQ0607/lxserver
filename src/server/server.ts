@@ -4319,7 +4319,20 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
         }
 
         try {
-          const result = await fileCache.batchRenameCacheFiles(username)
+          let result: any
+          if (global.lx.config['openlist.enable']) {
+            const r = await applyCacheRename({ user: username })
+            result = {
+              success: true,
+              successCount: r.renamed,
+              skipCount: r.skipped,
+              failCount: r.failed + r.conflicts,
+              cloudRenamed: r.cloudRenamed,
+              dbUpdated: r.dbUpdated,
+            }
+          } else {
+            result = await fileCache.batchRenameCacheFiles(username)
+          }
           res.writeHead(200, { 'Content-Type': 'application/json' })
           res.end(JSON.stringify(result))
         } catch (e) {
@@ -7524,6 +7537,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
             'user.cacheSizeLimit': global.lx.config['user.cacheSizeLimit'],
             'cache.maxAgeDays': typeof global.lx.config['cache.maxAgeDays'] !== 'undefined' ? global.lx.config['cache.maxAgeDays'] : 14,
             'cache.unplayedMaxAgeDays': typeof global.lx.config['cache.unplayedMaxAgeDays'] !== 'undefined' ? global.lx.config['cache.unplayedMaxAgeDays'] : 7,
+            'cache.namingPattern': global.lx.config['cache.namingPattern'] || 'simple',
             'admin.password': global.lx.config['admin.password'],
             'player.name': global.lx.config['player.name'] || 'LX Music Web',
             'player.enableAuth': global.lx.config['player.enableAuth'] || false,
@@ -7667,6 +7681,7 @@ const handleStartServer = async (port = 9527, ip = '0.0.0.0') => await new Promi
               if (newConfig['user.cacheSizeLimit'] !== undefined) global.lx.config['user.cacheSizeLimit'] = parseInt(newConfig['user.cacheSizeLimit']) || 2000
               if (newConfig['cache.maxAgeDays'] !== undefined) global.lx.config['cache.maxAgeDays'] = Math.max(0, parseInt(newConfig['cache.maxAgeDays']) || 0)
               if (newConfig['cache.unplayedMaxAgeDays'] !== undefined) global.lx.config['cache.unplayedMaxAgeDays'] = Math.max(0, parseInt(newConfig['cache.unplayedMaxAgeDays']) || 0)
+              if (newConfig['cache.namingPattern'] !== undefined) global.lx.config['cache.namingPattern'] = fileCache.setNamingPattern(newConfig['cache.namingPattern'])
               if (newConfig['system.allowUnsafeVM'] !== undefined) global.lx.config['system.allowUnsafeVM'] = newConfig['system.allowUnsafeVM']
 
               let warning = ''

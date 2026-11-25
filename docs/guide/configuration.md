@@ -227,6 +227,7 @@ npm run dev
 | `openlist.username`、`openlist.password` | `''` | 未使用令牌时的登录凭据 |
 | `openlist.root` | `'/lx_music'` | 已存在的 OpenList 挂载内路径，不是主机磁盘路径 |
 | `openlist.externalUrl` | `''` | 外网地址，留空使用 endpoint |
+| `openlist.signExpireHours` | `6` | OpenList `/d/` 签名直链有效期，小时；0 表示不过期，上限 720（需配置 `openlist.token`） |
 | `openlist.syncInterval` | `60` | 备份与缓存规则的检查间隔，分钟。事件触发的同步另有 5 分钟最小间隔，不受此值影响 |
 | `openlist.verifyInterval` | `5` | 后台状态检查间隔，分钟；不是定时下载正文做 SHA-256 校验。已验证记录不会每轮逐行探测远端 |
 | `openlist.historyRetentionDays` | `7` | 云端历史版本保留天数 |

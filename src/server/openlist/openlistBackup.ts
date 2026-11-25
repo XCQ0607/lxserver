@@ -1269,16 +1269,17 @@ export function onExplicitDownload(user: string, songIds: string[]): void {
 function queueCachedUpload(user: string, songIds: string[], explicit: boolean): void {
   const cfg = getConfig()
   if (!cfg.enable || !cfg.onlyPlayed || isCloudRestoreRunning()) return
-  const entry = cfg.userBackups.find(u => u.user === user && u.enabled)
+  const dbUser = normalizeUser(user)
+  const entry = cfg.userBackups.find(u => u.user === dbUser && u.enabled)
   if (!entry || effectiveMode(entry, cfg) === 'download') return
-  if (!folderEnabled(user, 'cache', cfg)) return
+  if (!folderEnabled(dbUser, 'cache', cfg)) return
   for (const raw of songIds) {
     const id = String(raw || '').trim()
     if (!id) continue
-    for (const file of findCachedFilesBySongId(user, id)) {
+    for (const file of findCachedFilesBySongId(dbUser, id)) {
       if (file.folder !== 'cache') continue
       try {
-        onFileCached(user, file.folder, file.localPath, { songmid: id, explicit })
+        onFileCached(dbUser, file.folder, file.localPath, { songmid: id, explicit })
       } catch (e: any) {
         console.warn('[openlist-backup] 播放/下载后补传失败:', file.localPath, e?.message || e)
       }
