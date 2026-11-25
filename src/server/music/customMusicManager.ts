@@ -844,7 +844,7 @@ export const checkCustomLyricCache = (song: any, username: string): { exists: bo
         if (!root) return { exists: false }
         const items = Array.from(customIndexManager.load(username).values())
         const item = items.find(item => (song.id && item.id === song.id && (!song.strictIdentity || item.source === song.source)) || (song.source && item.source === song.source && song.songmid && String(item.songmid) === String(song.songmid)))
-            || (!song.strictIdentity && items.find(item => song.name && song.singer && item.name === song.name && item.singer === song.singer))
+            || (!song.strictIdentity && items.find(item => song.name && song.singer && item.name === song.name && item.singer === song.singer && (!song.source || item.source === song.source)))
         if (!item) return { exists: false }
         const file = resolveSafePath(root, item.filename.replace(/\.[^.]+$/, '.lrc'))
         if (!file || !fs.existsSync(file)) {

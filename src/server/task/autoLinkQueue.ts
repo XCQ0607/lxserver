@@ -168,9 +168,31 @@ export class AutoLinkQueue {
       const unknown = (s?: string) => !s || ['未知歌曲', '未知歌手', 'unknown'].includes(s.toLowerCase())
       const keyword = unknown(item.name) ? item.filename.replace(/\.[^/.]+$/, '').replace(/^[0-9\-_\s]+/, '')
         : `${item.name} ${unknown(item.singer) ? '' : item.singer}`.trim()
-      const queries = [...(identified ? [{ text: `${identified.singer} ${identified.name}`, tolerance: 3 }] : []), { text: keyword, tolerance: 2 }]
+      const queries = [
+        ...(identified ? [{ text: `${identified.singer} ${identified.name}`, tolerance: 3, targetName: identified.name, targetSinger: identified.singer }] : []),
+        { text: keyword, tolerance: 2, targetName: unknown(item.name) ? item.filename.replace(/\.[^/.]+$/, '').replace(/^[0-9\-_\s]+/, '') : item.name, targetSinger: unknown(item.singer) ? '' : item.singer }
+      ]
       const errors: string[] = []
       const names: Record<string, string> = { tx: 'QQ 音乐', wy: '网易云音乐', kg: '酷狗音乐', kw: '酷我音乐', mg: '咪咕音乐' }
+      const normalizeText = (s?: string) => String(s || '').replace(/[\s\p{P}\p{S}]/gu, '').toLowerCase()
+      const splitSingers = (s?: string) => String(s || '').split(/[、，,&；;|/+]/).map(normalizeText).filter(Boolean)
+      const isSingerMatch = (candidateSinger?: string, targetSinger?: string) => {
+        if (!targetSinger || unknown(targetSinger)) return true
+        const ts = normalizeText(targetSinger)
+        if (!ts) return true
+        const cs = normalizeText(candidateSinger)
+        if (!cs) return false
+        if (cs.includes(ts) || ts.includes(cs)) return true
+        const cParts = splitSingers(candidateSinger)
+        const tParts = splitSingers(targetSinger)
+        return cParts.some(cp => tParts.some(tp => cp.includes(tp) || tp.includes(cp)))
+      }
+      const isNameMatch = (candidateName?: string, targetName?: string) => {
+        const cn = normalizeText(candidateName)
+        const tn = normalizeText(targetName)
+        if (!cn || !tn) return false
+        return cn.includes(tn) || tn.includes(cn)
+      }
       let match: any
       for (const query of queries) {
         for (const source of task.sources) {
@@ -179,7 +201,12 @@ export class AutoLinkQueue {
           update('searching', `正在搜索 ${names[source]} · ${query.text}`)
           try {
             const results = await this.bounded(this.deps.search(query.text, source))
-            match = results.find(r => seconds(r.interval) > 0 && Math.abs(seconds(r.interval) - duration) <= query.tolerance)
+            match = results.find(r => {
+              if (!(seconds(r.interval) > 0 && Math.abs(seconds(r.interval) - duration) <= query.tolerance)) return false
+              if (!isNameMatch(r.name, query.targetName)) return false
+              if (!isSingerMatch(r.singer, query.targetSinger)) return false
+              return true
+            })
             if (match) { match = { ...match, source }; break }
           } catch (e: any) { errors.push(`${source}: ${e.message}`) }
         }
