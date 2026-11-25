@@ -129,6 +129,7 @@ const DEFAULT_SETTINGS = {
     customProxyUrl: '', // 自定义代理URL模板，使用 {url} 作为原始URL占位符
     enableOnlyDownloadMode: true, // 仅下载模式
     downloadConcurrency: 3, // 缓存并发量 (1-5)
+    localDownloadPlaybackMode: 'web', // 下载列表本地任务播放方式: 'web' | 'potplayer' | 'vlc' | 'iina'
     hotSearchLimit: 20, // 热搜显示数量
     lyricFontSize: 1.25, // 歌词字体大小 (rem)
     lyricFontFamily: '', // 词字体
@@ -10647,6 +10648,16 @@ const SETTINGS_UI_MAP = {
     embedLyricToFile: { id: 'setting-embed-lyric-to-file', type: 'checkbox' },
     preferServerCache: { id: 'setting-prefer-server-cache', type: 'checkbox' },
     enableOnlyDownloadMode: { id: 'setting-only-download-mode', type: 'checkbox' },
+    localDownloadPlaybackMode: {
+        id: 'setting-local-download-playback-mode',
+        type: 'value',
+        normalize: value => ['web', 'potplayer', 'vlc', 'iina'].includes(value) ? value : 'web',
+        action: () => {
+            if (window.SystemDownloadManager && typeof window.SystemDownloadManager.renderList === 'function') {
+                window.SystemDownloadManager.renderList();
+            }
+        }
+    },
     serverCacheLocation: { id: 'setting-server-cache-location', type: 'value' },
     serverCacheNamingPattern: {
         id: 'setting-server-cache-naming',
@@ -11113,18 +11124,67 @@ function getSelectedCacheItems() {
     return currentCacheList.filter(item => selectedCacheFiles.has(getCacheItemKey(item)));
 }
 
+function updateSideDrawerBackdrop() {
+    const backdrop = document.getElementById('side-drawer-backdrop');
+    const cacheDrawer = document.getElementById('cache-drawer');
+    const downloadDrawer = document.getElementById('download-drawer');
+    const isAnyOpen = Boolean(
+        (cacheDrawer && !cacheDrawer.classList.contains('translate-x-full')) ||
+        (downloadDrawer && !downloadDrawer.classList.contains('translate-x-full'))
+    );
+    if (backdrop) {
+        backdrop.classList.toggle('opacity-0', !isAnyOpen);
+        backdrop.classList.toggle('pointer-events-none', !isAnyOpen);
+        backdrop.classList.toggle('opacity-100', isAnyOpen);
+        backdrop.classList.toggle('pointer-events-auto', isAnyOpen);
+        backdrop.style.pointerEvents = isAnyOpen ? 'auto' : 'none';
+        backdrop.style.opacity = isAnyOpen ? '1' : '0';
+    }
+    document.body.style.overflow = isAnyOpen ? 'hidden' : '';
+}
+window.updateSideDrawerBackdrop = updateSideDrawerBackdrop;
+
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        const cacheDrawer = document.getElementById('cache-drawer');
+        const downloadDrawer = document.getElementById('download-drawer');
+        if ((cacheDrawer && !cacheDrawer.classList.contains('translate-x-full')) ||
+            (downloadDrawer && !downloadDrawer.classList.contains('translate-x-full'))) {
+            closeSideDrawers();
+        }
+    }
+});
+
+function closeSideDrawers() {
+    const cacheDrawer = document.getElementById('cache-drawer');
+    const downloadDrawer = document.getElementById('download-drawer');
+    if (cacheDrawer && !cacheDrawer.classList.contains('translate-x-full')) {
+        cacheDrawer.classList.add('translate-x-full');
+        exitCacheBatchMode();
+    }
+    if (downloadDrawer && !downloadDrawer.classList.contains('translate-x-full')) {
+        downloadDrawer.classList.add('translate-x-full');
+    }
+    updateSideDrawerBackdrop();
+}
+window.closeSideDrawers = closeSideDrawers;
+
 function toggleCacheDrawer() {
     const drawer = document.getElementById('cache-drawer');
     if (drawer) {
         const isHidden = drawer.classList.contains('translate-x-full');
         if (isHidden) {
+            const downloadDrawer = document.getElementById('download-drawer');
+            if (downloadDrawer && !downloadDrawer.classList.contains('translate-x-full')) {
+                downloadDrawer.classList.add('translate-x-full');
+            }
             drawer.classList.remove('translate-x-full');
-            document.body.style.overflow = 'hidden';
+            updateSideDrawerBackdrop();
             refreshCacheList();
         } else {
             drawer.classList.add('translate-x-full');
-            document.body.style.overflow = '';
             exitCacheBatchMode(); // 关闭时重置状态
+            updateSideDrawerBackdrop();
         }
     }
 }
@@ -11256,6 +11316,10 @@ function renderCacheList() {
 
                 <div class="flex items-center gap-2 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-opacity">
                     ${!cacheBatchMode ? `
+                        <button onclick="event.stopPropagation(); playCacheItem(${idx})"
+                                class="p-2 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/15 rounded-lg transition-colors" title="播放">
+                            <i class="fas fa-play text-xs"></i>
+                        </button>
                         <button onclick="event.stopPropagation(); openCacheItemPlaylist(${idx})"
                                 class="p-2 text-emerald-500 hover:bg-emerald-50 rounded-lg transition-colors" title="添加到歌单">
                             <i class="fas fa-plus text-xs"></i>
@@ -11271,14 +11335,43 @@ function renderCacheList() {
     }).join('');
 }
 
-function openCacheItemPlaylist(index) {
-    const item = currentCacheList[index];
-    if (!item) return;
-    openPlaylistAddModalForSongObject({
+function buildCacheSongObject(item) {
+    if (!item) return null;
+    const username = (window.currentListData && window.currentListData.username) || localStorage.getItem('lx_sync_user') || '';
+    const coverUrl = item.hasCover
+        ? `/api/music/cache/cover?filename=${encodeURIComponent(item.filename)}&user=${encodeURIComponent(username)}`
+        : '/music/assets/logo.svg';
+    return {
         ...item,
         songmid: item.songmid || item.songId || item.id,
-        albumName: item.albumName || item.album || ''
-    });
+        albumName: item.albumName || item.album || '',
+        img: item.img || coverUrl,
+        meta: {
+            ...(item.meta || {}),
+            picUrl: item.meta?.picUrl || coverUrl
+        }
+    };
+}
+
+function playCacheItem(index) {
+    const item = currentCacheList[index];
+    const song = buildCacheSongObject(item);
+    if (!song) return;
+
+    const songs = currentCacheList.map(buildCacheSongObject).filter(Boolean);
+    const targetIndex = Math.max(0, songs.findIndex((_, i) => i === index));
+    if (typeof window.updatePlaylist === 'function') {
+        window.updatePlaylist(songs, targetIndex, 'cache_manager', false);
+    } else if (typeof window.playSong === 'function') {
+        window.playSong(song, 0, item.quality || null);
+    }
+}
+window.playCacheItem = playCacheItem;
+
+function openCacheItemPlaylist(index) {
+    const song = buildCacheSongObject(currentCacheList[index]);
+    if (!song) return;
+    openPlaylistAddModalForSongObject(song);
 }
 window.openCacheItemPlaylist = openCacheItemPlaylist;
 

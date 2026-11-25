@@ -74,3 +74,40 @@ test('getSelectableQualities prefers song own qualities when present and falls b
         ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'master']
     );
 });
+
+test('buildInitialQualityOptions opens immediately from song metadata without remote probing', async () => {
+    let fetchCalls = 0;
+    const context = vm.createContext({
+        console: { warn() {} },
+        getUserAuthHeaders: () => ({}),
+        fetch: async () => {
+            fetchCalls++;
+            throw new Error('should not probe remotely on initial open');
+        },
+        window: {
+            QualityManager: { getQualityDisplayName: q => ({ '320k': '高音质', flac: '无损音质' }[q] || q) },
+            ServerFileState: {
+                ensure: async () => {},
+                foldersFor: () => ({ flac: 'cache' }),
+                stateText: folder => folder === 'cache' ? '服务器已缓存' : '服务器已下载'
+            }
+        }
+    });
+    vm.runInContext(fs.readFileSync('public/music/js/library/single_song_ops.js', 'utf8'), context);
+
+    const song = {
+        id: 'test',
+        source: 'tx',
+        types: [
+            { type: '320k', size: '8.5 MB' },
+            { type: 'flac', size: '32.1 MB' }
+        ]
+    };
+    const { options } = await context.buildInitialQualityOptions(song, ['320k', 'flac'], true);
+    assert.equal(fetchCalls, 0);
+    assert.deepEqual(Array.from(options, o => o.label), [
+        '高音质 [8.5 MB]',
+        '无损音质 [32.1 MB] · 服务器已缓存'
+    ]);
+    assert.deepEqual(Array.from(options, o => o.disabled), [false, false]);
+});

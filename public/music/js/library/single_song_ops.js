@@ -161,6 +161,39 @@ async function getServerFolders(song, qualities) {
     return folders || {};
 }
 
+function formatQualityProbeSource(source) {
+    return source ? (QUALITY_SOURCE_LABELS[source] || String(source).toUpperCase()) : '';
+}
+
+function buildQualityOptionEntry(song, quality, folder, forServer, overrides = {}) {
+    const label = overrides.label || getQualityOptionLabel(song, quality);
+    if (!folder) {
+        return {
+            label,
+            quality,
+            disabled: !!overrides.disabled,
+            hint: overrides.hint || ''
+        };
+    }
+    const stateText = window.ServerFileState.stateText(folder);
+    const isDownloaded = forServer && folder === 'music';
+    return {
+        label: `${label} · ${stateText}`,
+        quality,
+        disabled: !!overrides.disabled,
+        hint: overrides.hint || (isDownloaded ? '该音质已在服务器下载目录，再次下载将覆盖更新' : stateText)
+    };
+}
+
+// 秒开列表：仅读取 musicsdk 元数据与服务器本地已有状态，不预先解析远程音源
+async function buildInitialQualityOptions(song, qualities, forServer) {
+    const folders = await getServerFolders(song, qualities);
+    return {
+        folders,
+        options: qualities.map(quality => buildQualityOptionEntry(song, quality, folders?.[quality], forServer))
+    };
+}
+
 // 给音质选项加上"服务器已缓存/已下载"标注
 async function buildQualityOptions(song, qualities, forServer) {
     const folders = await getServerFolders(song, qualities);
@@ -186,16 +219,212 @@ async function buildQualityOptions(song, qualities, forServer) {
             const sizeKey = normalizeSizeKey(getSongQualitySize(song, quality));
             if (sizeKey) seenFolderSizes.add(sizeKey);
         }
-        const label = getQualityOptionLabel(song, quality);
-        if (!folder) return [{ label, quality, disabled: false }];
-        const stateText = window.ServerFileState.stateText(folder);
-        const isDownloaded = forServer && folder === 'music';
-        return [{
-            label: `${label} · ${stateText}`,
-            quality,
-            disabled: false,
-            hint: isDownloaded ? '该音质已在服务器下载目录，再次下载将覆盖更新' : stateText
-        }];
+        return [buildQualityOptionEntry(song, quality, folder, forServer)];
+    });
+}
+
+function showQualityPickerModal(song, qualities, forServer, title, message) {
+    return new Promise(async (resolve) => {
+        const { folders, options: initialOptions } = await buildInitialQualityOptions(song, qualities, forServer);
+        if (!initialOptions.length) {
+            resolve(null);
+            return;
+        }
+
+        const modal = document.createElement('div');
+        modal.dataset.playerDialog = '';
+        modal.className = 'fixed inset-0 z-[10010] flex items-center justify-center p-4 animate-fade-in';
+
+        const escapeAttr = (val) => String(val ?? '').replace(/"/g, '&quot;');
+        const normalizeSizeKey = value => String(value || '').replace(/\s+/g, '').toLowerCase();
+
+        const rowsHtml = initialOptions.map((entry, idx) => {
+            const hint = entry.hint ? ` title="${escapeAttr(entry.hint)}"` : '';
+            return `
+            <button${hint} data-quality-index="${idx}" class="w-full text-left px-4 py-3.5 t-text-main hover:bg-emerald-500 hover:text-white transition-all rounded-xl font-bold text-sm flex items-center justify-between group">
+                <span class="quality-opt-label">${entry.label}</span>
+                <span class="quality-opt-icon flex items-center ml-2 shrink-0">
+                    <i class="fas fa-chevron-right text-[10px] opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all"></i>
+                </span>
+            </button>`;
+        }).join('');
+
+        modal.innerHTML = `
+            <div class="absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity duration-300"></div>
+            <div class="t-bg-panel rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden transform transition-all animate-slide-up relative z-10 border t-border-main">
+                <div class="px-5 py-4 border-b border-emerald-100/50 dark:border-emerald-900/30 flex justify-between items-center bg-emerald-50/50 dark:bg-emerald-950/20">
+                    <h3 class="text-sm font-bold t-text-main">${title}</h3>
+                    <button id="opt-close-x" class="t-text-muted hover:text-emerald-500 transition-colors">
+                        <i class="fas fa-times text-lg"></i>
+                    </button>
+                </div>
+                <div class="p-3">
+                    <p class="px-3 py-2 text-xs t-text-muted mb-1 font-medium">${message}</p>
+                    <button id="quality-probe-btn" class="w-full text-left px-4 py-2.5 mb-2 rounded-xl text-xs font-bold flex items-center justify-between bg-emerald-50/80 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200/70 dark:border-emerald-800/50 hover:bg-emerald-500 hover:text-white transition-all">
+                        <span class="flex items-center gap-2">
+                            <i id="quality-probe-icon" class="fas fa-satellite-dish text-xs"></i>
+                            <span id="quality-probe-text">探测可用音质</span>
+                        </span>
+                        <span id="quality-probe-status" class="text-[11px] opacity-80">点击验证真实大小</span>
+                    </button>
+                    <div class="max-h-[55vh] overflow-y-auto custom-scrollbar space-y-1">
+                        ${rowsHtml}
+                    </div>
+                </div>
+            </div>
+        `;
+
+        let closed = false;
+        let isProbing = false;
+        const rowButtons = Array.from(modal.querySelectorAll('button[data-quality-index]'));
+        const probeBtn = modal.querySelector('#quality-probe-btn');
+        const probeIcon = modal.querySelector('#quality-probe-icon');
+        const probeText = modal.querySelector('#quality-probe-text');
+        const probeStatus = modal.querySelector('#quality-probe-status');
+
+        const setRowState = (idx, { label, disabled, loading, hint, muted }) => {
+            const btn = rowButtons[idx];
+            if (!btn) return;
+            const labelEl = btn.querySelector('.quality-opt-label');
+            const iconEl = btn.querySelector('.quality-opt-icon');
+            if (labelEl && label !== undefined) labelEl.textContent = label;
+            if (hint !== undefined) {
+                if (hint) btn.setAttribute('title', hint);
+                else btn.removeAttribute('title');
+            }
+            btn.disabled = !!disabled;
+            btn.setAttribute('aria-disabled', disabled ? 'true' : 'false');
+            btn.className = `w-full text-left px-4 py-3.5 t-text-main ${disabled || muted ? 'opacity-45 cursor-not-allowed' : 'hover:bg-emerald-500 hover:text-white transition-all'} rounded-xl font-bold text-sm flex items-center justify-between group`;
+            if (iconEl) {
+                if (loading) {
+                    iconEl.innerHTML = '<i class="fas fa-spinner fa-spin text-xs text-emerald-500"></i>';
+                } else if (disabled) {
+                    iconEl.innerHTML = '<i class="fas fa-ban text-[11px] opacity-60"></i>';
+                } else {
+                    iconEl.innerHTML = '<i class="fas fa-chevron-right text-[10px] opacity-0 group-hover:opacity-100 -translate-x-2 group-hover:translate-x-0 transition-all"></i>';
+                }
+            }
+        };
+
+        const close = (result) => {
+            if (closed) return;
+            closed = true;
+            const content = modal.querySelector('.max-w-sm');
+            if (content) content.classList.add('scale-95', 'opacity-0');
+            modal.classList.add('opacity-0');
+            setTimeout(() => {
+                modal.remove();
+                resolve(result);
+            }, 200);
+        };
+
+        rowButtons.forEach((btn, idx) => {
+            btn.onclick = () => {
+                if (btn.disabled) return;
+                close(qualities[idx]);
+            };
+        });
+
+        probeBtn.onclick = async () => {
+            if (isProbing || closed) return;
+            isProbing = true;
+            probeBtn.disabled = true;
+            probeBtn.classList.add('opacity-70', 'cursor-not-allowed');
+            probeIcon.className = 'fas fa-spinner fa-spin text-xs';
+            probeText.textContent = '正在探测可用音质...';
+            probeStatus.textContent = `0/${qualities.length}`;
+
+            const probeResults = new Array(qualities.length).fill(undefined);
+            const seenFolderSizes = new Set();
+            qualities.forEach((quality, idx) => {
+                if (folders?.[quality]) {
+                    const sizeKey = normalizeSizeKey(getSongQualitySize(song, quality));
+                    if (sizeKey) seenFolderSizes.add(sizeKey);
+                    probeResults[idx] = { local: true };
+                } else {
+                    setRowState(idx, {
+                        label: initialOptions[idx].label,
+                        disabled: true,
+                        loading: true,
+                        hint: '正在探测该音质是否可用...'
+                    });
+                }
+            });
+
+            let completedCount = qualities.filter((q) => !!folders?.[q]).length;
+            const refreshStates = () => {
+                if (closed) return;
+                const seenBytes = new Set();
+                for (let idx = 0; idx < qualities.length; idx++) {
+                    const quality = qualities[idx];
+                    const folder = folders?.[quality];
+                    if (folder) continue;
+
+                    const res = probeResults[idx];
+                    if (res === undefined) continue; // 仍在探测中
+
+                    const name = window.QualityManager ? window.QualityManager.getQualityDisplayName(quality) : quality;
+                    if (!res || res.resolvedQuality !== quality || res.bytes < 1024) {
+                        setRowState(idx, {
+                            label: `${name} [不可用]`,
+                            disabled: true,
+                            loading: false,
+                            muted: true,
+                            hint: '该音质暂不可用或音源未返回对应音质'
+                        });
+                        continue;
+                    }
+
+                    const sizeKey = normalizeSizeKey(res.size);
+                    const sourceLabel = formatQualityProbeSource(res.source);
+                    const baseLabel = `${name} [${res.size}${sourceLabel ? ` · ${sourceLabel}` : ''}]`;
+                    if (seenBytes.has(res.bytes) || (sizeKey && seenFolderSizes.has(sizeKey))) {
+                        setRowState(idx, {
+                            label: `${baseLabel} · 重复音质`,
+                            disabled: true,
+                            loading: false,
+                            muted: true,
+                            hint: '与已有低档位音质文件大小相同，已过滤'
+                        });
+                        continue;
+                    }
+
+                    seenBytes.add(res.bytes);
+                    setRowState(idx, {
+                        label: baseLabel,
+                        disabled: false,
+                        loading: false,
+                        muted: false,
+                        hint: ''
+                    });
+                }
+                probeStatus.textContent = `${completedCount}/${qualities.length}`;
+            };
+
+            refreshStates();
+
+            await Promise.all(qualities.map(async (quality, idx) => {
+                if (folders?.[quality]) return;
+                const probe = await fetchRemoteQualitySize(song, quality);
+                probeResults[idx] = probe;
+                completedCount++;
+                refreshStates();
+            }));
+
+            if (!closed) {
+                isProbing = false;
+                probeBtn.disabled = false;
+                probeBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+                probeIcon.className = 'fas fa-rotate-right text-xs';
+                probeText.textContent = '重新探测可用音质';
+                probeStatus.textContent = '探测完成';
+            }
+        };
+
+        modal.querySelector('#opt-close-x').onclick = () => close(null);
+        modal.querySelector('div:first-child').onclick = () => close(null);
+
+        document.body.appendChild(modal);
     });
 }
 
@@ -469,15 +698,13 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
 
         if (window.SystemDownloadManager) {
             const availableQualities = getSelectableQualityOrder(song);
-            const qualityOptions = await buildQualityOptions(song, availableQualities, false);
-            if (!qualityOptions.length) {
-                showInfo('暂未确认到可用音质，请稍后重试');
-                return false;
-            }
-            const selectedQualityDisplay = await showOptions('选择下载音质', `请选择对 [${song.name}] 的下载音质：`, qualityOptions);
-            if (!selectedQualityDisplay) return false;
-
-            const targetQuality = qualityOptions[qualityIndexOfLabel(qualityOptions, selectedQualityDisplay)]?.quality;
+            const targetQuality = await showQualityPickerModal(
+                song,
+                availableQualities,
+                false,
+                '选择下载音质',
+                `请选择对 [${song.name}] 的下载音质：`
+            );
             if (!targetQuality) return false;
 
             window.SystemDownloadManager.addTasks([{
@@ -507,17 +734,14 @@ async function downloadSong(songOrId, forceQuality = null, suppressAlerts = fals
         let targetQuality = forceQuality;
         if (!targetQuality) {
             const availableQualities = getSelectableQualityOrder(song);
-            const qualityOptions = await buildQualityOptions(song, availableQualities, true);
-            if (!qualityOptions.length) {
-                showInfo('暂未确认到可用音质，请稍后重试');
-                return false;
-            }
-            const selectedQualityDisplay = await showOptions('选择缓存音质', `请选择对 [${song.name}] 的缓存音质：`, qualityOptions);
-            if (!selectedQualityDisplay) return false;
-
-            const picked = qualityIndexOfLabel(qualityOptions, selectedQualityDisplay);
-            if (picked === -1) return false;
-            targetQuality = qualityOptions[picked].quality;
+            targetQuality = await showQualityPickerModal(
+                song,
+                availableQualities,
+                true,
+                '选择缓存音质',
+                `请选择对 [${song.name}] 的缓存音质：`
+            );
+            if (!targetQuality) return false;
         }
 
         // 该音质已在服务器缓存目录：直接移动过去，不联网解析音源

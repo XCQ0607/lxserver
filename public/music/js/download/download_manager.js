@@ -626,11 +626,24 @@ class DownloadManager {
     // Toggle drawer
     toggleDrawer() {
         if (this.drawer.classList.contains('translate-x-full')) {
+            const cacheDrawer = document.getElementById('cache-drawer');
+            if (cacheDrawer && !cacheDrawer.classList.contains('translate-x-full')) {
+                cacheDrawer.classList.add('translate-x-full');
+                if (typeof window.exitCacheBatchMode === 'function') {
+                    window.exitCacheBatchMode();
+                }
+            }
             this.drawer.classList.remove('translate-x-full');
+            if (typeof window.updateSideDrawerBackdrop === 'function') {
+                window.updateSideDrawerBackdrop();
+            }
             // Discover tasks started elsewhere without polling an idle queue.
             this.syncServerQueue(true);
         } else {
             this.drawer.classList.add('translate-x-full');
+            if (typeof window.updateSideDrawerBackdrop === 'function') {
+                window.updateSideDrawerBackdrop();
+            }
         }
     }
 
@@ -1517,6 +1530,64 @@ class DownloadManager {
     }
 
     // Render a single task row item to HTML
+    isPlayableTask(task) {
+        return Boolean(task?.song && ['finished', 'exists', 'handedoff'].includes(task.status));
+    }
+
+    launchExternalPlayer(mode, streamUrl) {
+        const absoluteUrl = new URL(streamUrl, window.location.origin).href;
+        const schemeMap = {
+            potplayer: `potplayer://${absoluteUrl}`,
+            vlc: `vlc://${absoluteUrl}`,
+            iina: `iina://weblink?url=${encodeURIComponent(absoluteUrl)}`
+        };
+        const targetUrl = schemeMap[mode];
+        if (!targetUrl) return false;
+
+        const link = document.createElement('a');
+        link.href = targetUrl;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        return true;
+    }
+
+    async playTask(taskId) {
+        const task = this.tasks.find(item => item.id === taskId);
+        if (!this.isPlayableTask(task)) return;
+
+        const externalMode = !task.isServer ? (window.settings?.localDownloadPlaybackMode || 'web') : 'web';
+        if (externalMode !== 'web') {
+            try {
+                const downloadResolver = await this.waitForDownloadResolver();
+                const quality = task.quality || window.settings?.preferredQuality || 'flac';
+                const resolveData = await downloadResolver(task.song, quality, true);
+                if (resolveData?.url && this.launchExternalPlayer(externalMode, resolveData.url)) {
+                    if (typeof window.showInfo === 'function') {
+                        window.showInfo(`已尝试唤起 ${externalMode.toUpperCase()} 播放`);
+                    }
+                    return;
+                }
+            } catch (error) {
+                console.warn('[DownloadManager] Failed to launch external player, falling back to Web player:', error);
+            }
+            if (typeof window.showWarning === 'function') {
+                window.showWarning('外部播放器唤起失败，已回退到 Web 播放器');
+            }
+        }
+
+        const playableTasks = this.tasks.filter(item => this.isPlayableTask(item));
+        const playableSongs = playableTasks.map(item => item.song);
+        const targetIndex = Math.max(0, playableTasks.findIndex(item => item.id === task.id));
+
+        if (typeof window.updatePlaylist === 'function') {
+            window.updatePlaylist(playableSongs, targetIndex, 'download_manager', false);
+        } else if (typeof window.playSong === 'function') {
+            window.playSong(task.song, 0, task.quality || null);
+        }
+    }
+
     addTaskToPlaylist(taskId) {
         const task = this.tasks.find(item => item.id === taskId);
         if (task?.song && typeof window.openPlaylistAddModalForSongObject === 'function') {
@@ -1670,6 +1741,11 @@ class DownloadManager {
 
                 <!-- Actions -->
                 <div class="flex items-center pl-1 opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all sm:translate-x-2 group-hover:translate-x-0">
+                    ${this.isPlayableTask(task) ? `
+                    <button onclick="event.stopPropagation(); window.SystemDownloadManager.playTask('${task.id}')" class="w-8 h-8 rounded-full border border-blue-100 dark:border-blue-500/30 text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/15 flex items-center justify-center transition-colors mr-1 shadow-sm" title="${!isServerTask && window.settings?.localDownloadPlaybackMode && window.settings.localDownloadPlaybackMode !== 'web' ? `唤起 ${window.settings.localDownloadPlaybackMode.toUpperCase()} 播放` : '播放'}">
+                        <i class="fas fa-play text-xs ml-0.5"></i>
+                    </button>
+                    ` : ''}
                     <button onclick="window.SystemDownloadManager.addTaskToPlaylist('${task.id}')" class="w-8 h-8 rounded-full border border-emerald-100 dark:border-emerald-500/30 text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/15 flex items-center justify-center transition-colors mr-1 shadow-sm" title="添加到歌单">
                         <i class="fas fa-plus text-xs"></i>
                     </button>

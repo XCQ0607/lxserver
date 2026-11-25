@@ -132,8 +132,9 @@
             while (branch.parentElement && branch.parentElement !== document.documentElement) {
                 for (const sibling of branch.parentElement.children) {
                     if (sibling === branch || ['SCRIPT', 'STYLE', 'LINK'].includes(sibling.tagName)) continue;
-                    // Keep the mobile sidebar backdrop clickable so tapping outside closes the drawer.
+                    // Keep drawer backdrops clickable so tapping outside closes the drawer.
                     if (top.id === 'main-sidebar' && sibling.id === 'mobile-sidebar-backdrop') continue;
+                    if ((top.id === 'cache-drawer' || top.id === 'download-drawer') && sibling.id === 'side-drawer-backdrop') continue;
                     background.set(sibling, sibling.inert);
                     sibling.inert = true;
                 }

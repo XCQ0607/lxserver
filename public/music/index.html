@@ -2150,6 +2150,24 @@
                                             <option value="5">5</option>
                                         </select>
                                     </div>
+                                    <div class="flex items-center justify-between gap-4">
+                                        <div>
+                                            <div class="text-sm font-bold t-text-main flex items-center">
+                                                下载列表本地任务播放
+                                                <span class="setting-tooltip-trigger ml-1">
+                                                    <i class="fas fa-question-circle"></i>
+                                                    <span class="setting-tooltip-content">控制点击下载管理中“本地（浏览器）”任务播放按钮的行为。外部播放器通过流地址协议唤起，仅适用于已安装对应桌面播放器并注册协议的电脑端。</span>
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <select id="setting-local-download-playback-mode" class="lm-select !w-44 !py-1.5"
+                                            onchange="updateSetting('localDownloadPlaybackMode', this.value)">
+                                            <option value="web">Web 播放器 (默认)</option>
+                                            <option value="potplayer">PotPlayer (桌面端)</option>
+                                            <option value="vlc">VLC (桌面端)</option>
+                                            <option value="iina">IINA (macOS)</option>
+                                        </select>
+                                    </div>
                                 </div>
                             </div>
 
@@ -2805,12 +2823,16 @@
                                             <i class="fas fa-link mr-1"></i> 清除链接缓存
                                         </button>
                                         <button onclick="updateServerCacheSize()"
-                                            class="py-2 px-3 t-bg-panel border t-border-main t-text-muted hover:text-blue-600 hover:border-blue-200 rounded-lg text-xs font-bold transition-colors">
+                                            class="col-span-2 py-2 px-3 t-bg-panel border t-border-main t-text-muted hover:text-blue-600 hover:border-blue-200 rounded-lg text-xs font-bold transition-colors">
                                             <i class="fas fa-sync-alt mr-1"></i> 刷新缓存统计
                                         </button>
                                         <button onclick="toggleCacheDrawer()"
                                             class="py-2 px-3 t-bg-panel border t-border-main t-text-muted hover:text-blue-600 hover:border-blue-200 rounded-lg text-xs font-bold transition-colors">
                                             <i class="fas fa-server mr-1"></i> 管理服务器缓存
+                                        </button>
+                                        <button onclick="openDownloadManager()"
+                                            class="py-2 px-3 t-bg-panel border t-border-main t-text-muted hover:text-emerald-600 hover:border-emerald-200 rounded-lg text-xs font-bold transition-colors">
+                                            <i class="fas fa-cloud-download-alt mr-1"></i> 下载管理
                                         </button>
                                     </div>
 
@@ -5502,9 +5524,14 @@
         </div>
     </div>
 
+    <!-- Side Drawer Backdrop (缓存管理 / 下载管理 公共遮罩) -->
+    <div id="side-drawer-backdrop" onclick="closeSideDrawers()"
+        class="fixed inset-0 bg-black/25 backdrop-blur-[1px] z-[55] opacity-0 pointer-events-none transition-opacity duration-300 ease-out">
+    </div>
+
     <!-- Cache Management Drawer (服务器缓存管理) -->
     <div id="cache-drawer" inert aria-hidden="true"
-        class="fixed inset-y-0 right-0 w-full md:w-96 t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
+        class="fixed inset-y-0 right-0 w-full md:w-96 t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out will-change-transform border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
             <div class="flex flex-col">
@@ -5591,7 +5618,7 @@
 
     <!-- Download Management Drawer (下载管理) -->
     <div id="download-drawer" inert aria-hidden="true"
-        class="fixed inset-y-0 right-0 w-full md:w-[450px] t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out border-l t-border-main flex flex-col">
+        class="fixed inset-y-0 right-0 w-full md:w-[450px] t-bg-panel/95 backdrop-blur-xl z-[60] shadow-[-10px_0_30px_rgba(0,0,0,0.1)] transform translate-x-full transition-transform duration-300 ease-out will-change-transform border-l t-border-main flex flex-col">
         <!-- Header -->
         <div class="p-6 border-b t-border-main flex items-center justify-between">
             <div class="flex flex-col">
