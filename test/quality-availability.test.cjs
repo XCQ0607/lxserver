@@ -45,3 +45,32 @@ test('locally available qualities remain selectable even when source probes fail
     assert.deepEqual(Array.from(options, o => o.quality), ['flac']);
     assert.equal((await setup({}).buildQualityOptions({}, ['128k', 'flac'], false)).length, 0);
 });
+
+test('buildQualityOptions deduplicates higher qualities with identical file size to lower tiers', async () => {
+    const value = setup({
+        '128k': { success: true, type: '128k', bytes: 3530000, size: '3.37 MB', source: 'wy' },
+        '320k': { success: true, type: '320k', bytes: 8820000, size: '8.41 MB', source: 'wy' },
+        flac24bit: { success: true, type: 'flac24bit', bytes: 47700000, size: '45.49 MB', source: 'wy' },
+        hires: { success: true, type: 'hires', bytes: 47700000, size: '45.49 MB', source: 'wy' },
+        atmos: { success: true, type: 'atmos', bytes: 26500000, size: '25.27 MB', source: 'wy' },
+        master: { success: true, type: 'master', bytes: 26500000, size: '25.27 MB', source: 'wy' }
+    }, { flac: 'music' });
+    const song = { id: 'test', source: 'wy', types: [{ type: 'flac', size: '25.27 MB' }] };
+    const options = await value.buildQualityOptions(song, ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'master'], false);
+    assert.deepEqual(Array.from(options, o => o.quality), ['128k', '320k', 'flac', 'flac24bit']);
+});
+
+test('getSelectableQualities prefers song own qualities when present and falls back to platform list when empty', () => {
+    const context = vm.createContext({ console: { log() {}, warn() {} }, window: {} });
+    vm.runInContext(fs.readFileSync('public/music/js/player/quality.js', 'utf8'), context);
+    const { getSelectableQualities } = context.window.QualityManager;
+
+    assert.deepEqual(
+        Array.from(getSelectableQualities({ source: 'tx', types: [{ type: '128k' }, { type: '320k' }, { type: 'flac' }] })),
+        ['128k', '320k', 'flac']
+    );
+    assert.deepEqual(
+        Array.from(getSelectableQualities({ source: 'wy', types: [] })),
+        ['128k', '320k', 'flac', 'flac24bit', 'hires', 'atmos', 'master']
+    );
+});

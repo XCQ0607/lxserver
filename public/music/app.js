@@ -2878,6 +2878,62 @@ function changePage(delta) {
 let hotSearchMultiCache = {};
 const HOT_SEARCH_SOURCES = ['wy', 'tx', 'kg', 'kw', 'mg'];
 const HOT_SEARCH_CACHE_DURATION = 5 * 60 * 1000; // 5分钟缓存
+const HOT_SEARCH_TABS = [
+    { id: 'all', name: '全网聚合' },
+    { id: 'wy', name: '网易云' },
+    { id: 'tx', name: 'QQ' },
+    { id: 'kg', name: '酷狗' },
+    { id: 'kw', name: '酷我' },
+    { id: 'mg', name: '咪咕' }
+];
+
+function normalizeHotSearchSource(source) {
+    return HOT_SEARCH_TABS.some(tab => tab.id === source) ? source : 'all';
+}
+
+function renderDefaultSearchEmptyState(container) {
+    if (!container) return;
+    container.innerHTML = `
+        <div class="dislike-empty-state">
+            <i class="fas fa-music text-6xl opacity-20"></i>
+            <p>输入关键词开始搜索音乐</p>
+        </div>
+    `;
+}
+
+function renderHotSearchShell(container, source, bodyHtml) {
+    if (!container) return;
+    const currentSource = normalizeHotSearchSource(source);
+    container.innerHTML = `
+        <div class="hot-search-container px-4 py-8 md:p-8">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-2 border-b t-border-main/50">
+                <div class="flex items-center">
+                    <i class="fas fa-fire text-orange-500 text-2xl mr-3"></i>
+                    <h3 class="text-xl font-bold t-text-main">热门搜索</h3>
+                </div>
+                <!-- Platform Tabs -->
+                <div class="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pb-1">
+                    ${HOT_SEARCH_TABS.map(tab => `
+                        <button onclick="switchHotSearchTab('${tab.id}')"
+                                class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${currentSource === tab.id ? 'bg-emerald-500 text-white shadow-sm' : 't-bg-panel hover:t-bg-main t-text-muted border t-border-main'}">
+                            ${tab.name}
+                        </button>
+                    `).join('')}
+                </div>
+            </div>
+            ${bodyHtml}
+        </div>
+    `;
+}
+
+function renderHotSearchLoading(container, source = 'all') {
+    renderHotSearchShell(container, source, `
+        <div class="dislike-empty-state py-12">
+            <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
+            <p>正在获取热门搜索...</p>
+        </div>
+    `);
+}
 
 async function fetchHotSearch(source = 'all', force = false) {
     if (!force && hotSearchMultiCache[source] && (Date.now() - hotSearchMultiCache[source].time < HOT_SEARCH_CACHE_DURATION)) {
@@ -2910,7 +2966,9 @@ async function fetchHotSearch(source = 'all', force = false) {
             }
 
             const allData = { source: 'all', list: combinedList };
-            hotSearchMultiCache['all'] = { time: Date.now(), data: allData };
+            if (combinedList.length > 0) {
+                hotSearchMultiCache['all'] = { time: Date.now(), data: allData };
+            }
             return allData;
         } else {
             const res = await fetch(`${API_BASE}/hotSearch?source=${source}`, { priority: 'low' });
@@ -2919,7 +2977,9 @@ async function fetchHotSearch(source = 'all', force = false) {
             }
             const data = await res.json();
             if (!data.source) data.source = source;
-            hotSearchMultiCache[source] = { time: Date.now(), data };
+            if (Array.isArray(data.list) && data.list.length > 0) {
+                hotSearchMultiCache[source] = { time: Date.now(), data };
+            }
             return data;
         }
     } catch (e) {
@@ -2928,7 +2988,7 @@ async function fetchHotSearch(source = 'all', force = false) {
     }
 }
 
-function renderHotSearch(data) {
+function renderHotSearch(data, source = 'all') {
     const container = document.getElementById('search-results');
     const header = document.getElementById('search-results-header');
 
@@ -2937,72 +2997,60 @@ function renderHotSearch(data) {
         header.classList.add('hidden');
     }
 
+    if (!container) return;
+
     // [Fix] If limit is 0, treat as disabled and show default state
-    if (!container || !data || !data.list || data.list.length === 0 || settings.hotSearchLimit === 0) {
-        // 显示默认空白状态
-        container.innerHTML = `
-            <div class="dislike-empty-state">
-                <i class="fas fa-music text-6xl opacity-20"></i>
-                <p>输入关键词开始搜索音乐</p>
-            </div>
-        `;
+    if (settings.hotSearchLimit === 0) {
+        renderDefaultSearchEmptyState(container);
         return;
     }
 
-    const currentSource = data.source || 'all';
+    const currentSource = normalizeHotSearchSource((data && data.source) || source);
+
+    if (!data || !Array.isArray(data.list) || data.list.length === 0) {
+        const isError = !data;
+        renderHotSearchShell(container, currentSource, `
+            <div class="dislike-empty-state py-12">
+                <i class="fas fa-exclamation-circle text-4xl text-amber-500/80 mb-2" aria-hidden="true"></i>
+                <p>${isError ? '获取热门搜索失败' : '暂无热门搜索内容'}</p>
+                <small class="t-text-muted">${isError ? '请检查网络连接或稍后重试' : '该平台暂未返回热搜数据，可点击重试或切换其他平台'}</small>
+                <button onclick="switchHotSearchTab('${currentSource}', true)"
+                        class="mt-4 inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm transition-all">
+                    <i class="fas fa-sync-alt"></i>
+                    <span>重试获取</span>
+                </button>
+            </div>
+        `);
+        return;
+    }
+
     const limit = (settings.hotSearchLimit !== undefined && settings.hotSearchLimit !== null) ? settings.hotSearchLimit : 20;
     const keywords = data.list.slice(0, limit); // 使用设置的数量
 
-    const tabs = [
-        { id: 'all', name: '全网聚合' },
-        { id: 'wy', name: '网易云' },
-        { id: 'tx', name: 'QQ' },
-        { id: 'kg', name: '酷狗' },
-        { id: 'kw', name: '酷我' },
-        { id: 'mg', name: '咪咕' }
-    ];
-
-    container.innerHTML = `
-        <div class="hot-search-container px-4 py-8 md:p-8">
-            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-6 pb-2 border-b t-border-main/50">
-                <div class="flex items-center">
-                    <i class="fas fa-fire text-orange-500 text-2xl mr-3"></i>
-                    <h3 class="text-xl font-bold t-text-main">热门搜索</h3>
-                </div>
-                <!-- Platform Tabs -->
-                <div class="flex items-center gap-1.5 overflow-x-auto hide-scrollbar pb-1">
-                    ${tabs.map(tab => `
-                        <button onclick="switchHotSearchTab('${tab.id}')"
-                                class="px-3 py-1.5 rounded-xl text-xs font-semibold transition-all whitespace-nowrap ${currentSource === tab.id ? 'bg-emerald-500 text-white shadow-sm' : 't-bg-panel hover:t-bg-main t-text-muted border t-border-main'}">
-                            ${tab.name}
-                        </button>
-                    `).join('')}
-                </div>
-            </div>
-            <div class="hot-search-list grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-3.5">
-                ${keywords.map((keyword, index) => `
-                    <button onclick="handleHotSearchClick('${keyword.replace(/'/g, "\\'")}')" 
-                            class="hot-search-item group flex items-center px-3 py-3 md:p-3.5 t-bg-panel hover:border-emerald-500/50 border t-border-main rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 overflow-hidden h-14">
-                        <span class="rank flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold mr-3 ${index < 3 ? 'bg-gradient-to-r from-orange-400 to-red-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+    renderHotSearchShell(container, currentSource, `
+        <div class="hot-search-list grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5 md:gap-3.5">
+            ${keywords.map((keyword, index) => `
+                <button onclick="handleHotSearchClick('${keyword.replace(/'/g, "\\'")}')" 
+                        class="hot-search-item group flex items-center px-3 py-3 md:p-3.5 t-bg-panel hover:border-emerald-500/50 border t-border-main rounded-xl transition-all shadow-sm hover:shadow-md hover:-translate-y-0.5 overflow-hidden h-14">
+                    <span class="rank flex-shrink-0 w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold mr-3 ${index < 3 ? 'bg-gradient-to-r from-orange-400 to-red-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
         }">
-                            ${index + 1}
-                        </span>
-                        <span class="keyword flex-1 text-left text-sm font-medium t-text-main group-hover:text-emerald-500 truncate">
-                            ${keyword}
-                        </span>
-                        <i class="fas fa-search text-xs text-gray-400 group-hover:text-emerald-500 transition-colors ml-2"></i>
-                    </button>
-                `).join('')}
-            </div>
-            <div class="mt-6 text-center">
-                <button onclick="fetchHotSearch('${currentSource}', true).then(renderHotSearch)" 
-                        class="text-sm t-text-muted hover:text-emerald-500 transition-colors">
-                    <i class="fas fa-sync-alt mr-1"></i>
-                    刷新热搜
+                        ${index + 1}
+                    </span>
+                    <span class="keyword flex-1 text-left text-sm font-medium t-text-main group-hover:text-emerald-500 truncate">
+                        ${keyword}
+                    </span>
+                    <i class="fas fa-search text-xs text-gray-400 group-hover:text-emerald-500 transition-colors ml-2"></i>
                 </button>
-            </div>
+            `).join('')}
         </div>
-    `;
+        <div class="mt-6 text-center">
+            <button onclick="switchHotSearchTab('${currentSource}', true)" 
+                    class="text-sm t-text-muted hover:text-emerald-500 transition-colors">
+                <i class="fas fa-sync-alt mr-1"></i>
+                刷新热搜
+            </button>
+        </div>
+    `);
 
     // 动态检测溢出并应用滚动效果
     setTimeout(() => {
@@ -3027,24 +3075,26 @@ function renderHotSearch(data) {
     }, 0);
 }
 
-function switchHotSearchTab(source) {
+function switchHotSearchTab(source = 'all', force = false) {
+    const targetSource = normalizeHotSearchSource(source);
     const request = window.SearchRequests?.begin();
     window.setSearchStatus?.();
     const container = document.getElementById('search-results');
-    if (container) {
-        container.innerHTML = `
-            <div class="dislike-empty-state">
-                <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
-                <p>正在加载热门搜索...</p>
-            </div>
-        `;
+    const header = document.getElementById('search-results-header');
+    if (header) {
+        header.classList.add('hidden');
     }
-    fetchHotSearch(source).then(data => {
+    if (settings.hotSearchLimit === 0) {
+        renderDefaultSearchEmptyState(container);
+        return;
+    }
+    renderHotSearchLoading(container, targetSource);
+    fetchHotSearch(targetSource, force).then(data => {
         if (request && !request.current()) return;
-        renderHotSearch(data);
+        renderHotSearch(data, targetSource);
     }).catch(() => {
         if (request && !request.current()) return;
-        if (container) container.innerHTML = '<div class="dislike-empty-state"><i class="fas fa-exclamation-circle" aria-hidden="true"></i><p>热门搜索加载失败</p><small>请检查网络连接后重试</small></div>';
+        renderHotSearch(null, targetSource);
     });
 }
 window.switchHotSearchTab = switchHotSearchTab;
@@ -3073,31 +3123,25 @@ function showInitialSearchState() {
         header.classList.add('hidden');
     }
 
-    // 显示加载状态
-    container.innerHTML = `
-        <div class="dislike-empty-state">
-            <i class="fas fa-spinner fa-spin text-4xl text-emerald-500"></i>
-            <p>正在加载热门搜索...</p>
-        </div>
-    `;
+    if (settings.hotSearchLimit === 0) {
+        renderDefaultSearchEmptyState(container);
+        return;
+    }
 
     // 异步获取并显示热搜
     const sourceSelect = document.getElementById('search-source');
-    const source = sourceSelect ? sourceSelect.value : 'all';
+    const source = normalizeHotSearchSource(sourceSelect ? sourceSelect.value : 'all');
+
+    // 显示加载状态（保留热搜头部与源切换栏）
+    renderHotSearchLoading(container, source);
 
     fetchHotSearch(source).then(data => {
         if (initialRequest && !initialRequest.current()) return;
-        renderHotSearch(data);
+        renderHotSearch(data, source);
     }).catch(err => {
         if (initialRequest && !initialRequest.current()) return;
         console.error('[HotSearch] 显示热搜失败:', err);
-        // 失败时显示默认状态
-        container.innerHTML = `
-            <div class="dislike-empty-state">
-                <i class="fas fa-music text-6xl opacity-20"></i>
-                <p>输入关键词开始搜索音乐</p>
-            </div>
-        `;
+        renderHotSearch(null, source);
     });
 }
 

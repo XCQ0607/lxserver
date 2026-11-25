@@ -171,10 +171,21 @@ async function buildQualityOptions(song, qualities, forServer) {
     } finally {
         window.hideLoading?.();
     }
+    const seenBytes = new Set();
+    const seenFolderSizes = new Set();
+    const normalizeSizeKey = value => String(value || '').replace(/\s+/g, '').toLowerCase();
     return qualities.flatMap((quality, idx) => {
         const folder = (folders || {})[quality];
         const probe = probes[idx];
         if (!folder && (!probe || probe.resolvedQuality !== quality || probe.bytes < 1024)) return [];
+        if (!folder) {
+            const sizeKey = normalizeSizeKey(probe.size);
+            if (seenBytes.has(probe.bytes) || (sizeKey && seenFolderSizes.has(sizeKey))) return [];
+            seenBytes.add(probe.bytes);
+        } else {
+            const sizeKey = normalizeSizeKey(getSongQualitySize(song, quality));
+            if (sizeKey) seenFolderSizes.add(sizeKey);
+        }
         const label = getQualityOptionLabel(song, quality);
         if (!folder) return [{ label, quality, disabled: false }];
         const stateText = window.ServerFileState.stateText(folder);

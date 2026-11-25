@@ -94,8 +94,10 @@ function getSelectableQualities(songInfo) {
     const members = [songInfo, ...((songInfo && songInfo._alternates) || [])].filter(Boolean);
     const all = new Set();
     for (const member of members) {
+        const own = getOwnQualities(member);
         const source = member.source || member.meta?.source;
-        (PLATFORM_SELECTABLE_QUALITIES[source] || getOwnQualities(member)).forEach(quality => all.add(quality));
+        const candidates = own.length > 0 ? own : (PLATFORM_SELECTABLE_QUALITIES[source] || []);
+        candidates.forEach(quality => all.add(quality));
     }
     return sortQualitiesLowToHigh([...all]);
 }
